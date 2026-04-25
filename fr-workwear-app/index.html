@@ -682,6 +682,8 @@ function App() {
   const [generating, setGenerating] = useState(false);
   const [apiError, setApiError] = useState("");
   const [editingQuote, setEditingQuote] = useState(false);
+  const [savedQuotes, setSavedQuotes] = useState(() => load("frw_quote_history", []));
+  const [viewingQuote, setViewingQuote] = useState(null);
   const initialized = useRef(false);
   const syncTimer = useRef(null);
   const prodNameRef = useRef(null);
@@ -696,6 +698,7 @@ function App() {
       setActiveProdId(migrated[0].id);
     }
     if (d.apiKey !== undefined) setApiKey(d.apiKey);
+    if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
   };
 
   useEffect(() => {
@@ -721,7 +724,7 @@ function App() {
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
   }, [materials, laborItems, products, apiKey]);
@@ -927,7 +930,33 @@ ${productList}
     return <div style={{ ...styles.wrap, background: "rgba(240,68,82,0.25)" }}><div style={{ ...styles.dot, background: "#F87171" }} /><span style={{ ...styles.text, color: "#FECACA" }}>연결 오류</span></div>;
   };
 
-  const TABS = [["pricedb", "단가표"], ["calc", "단가 계산기"], ["quote", "견적서"]];
+  const TABS = [["pricedb", "단가표"], ["calc", "단가 계산기"], ["quote", "견적서"], ["history", "견적 이력"]];
+
+  const saveQuoteToHistory = () => {
+    if (!quote) return;
+    const items = getQuotedProducts();
+    const title = items.length > 0
+      ? items.map(({ p }) => p.name).join(", ")
+      : "견적서";
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,"0")}.${String(now.getDate()).padStart(2,"0")}`;
+    const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const entry = { id: uid(), title, dateStr, timeStr, savedAt: now.getTime(), quote, products: items.map(({ p, c }) => ({ name: p.name, grade: p.selectedGrade || "A", price: Math.round(c.finalPrice) })) };
+    const next = [entry, ...savedQuotes];
+    setSavedQuotes(next);
+    save("frw_quote_history", next);
+    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: next }).catch(() => {});
+    alert(`💾 견적서가 저장됐습니다!\n${dateStr} ${timeStr}`);
+  };
+
+  const deleteQuote = (id) => {
+    if (!confirm("이 견적서를 삭제할까요?")) return;
+    const next = savedQuotes.filter(q => q.id !== id);
+    setSavedQuotes(next);
+    save("frw_quote_history", next);
+    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: next }).catch(() => {});
+    if (viewingQuote && viewingQuote.id === id) setViewingQuote(null);
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: "#F2F4F7" }}>
@@ -1455,6 +1484,13 @@ ${productList}
                       }}>
                       {editingQuote ? "✅ 완료" : "✏️ 수정"}
                     </button>
+                    {!editingQuote && (
+                      <button onClick={saveQuoteToHistory} style={{
+                        padding: "10px 18px", border: "1.5px solid #E5E8EB", borderRadius: 12,
+                        background: "#fff", color: "#4E5968", fontSize: 13, fontWeight: 700,
+                        cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+                      }}>💾 저장</button>
+                    )}
                     {!editingQuote && <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>}
                   </div>
                 </div>
@@ -1496,6 +1532,87 @@ ${productList}
                 <div style={{ fontSize: 14, color: "#B0B8C1", marginBottom: 24 }}>계산기에서 제품 원가를 입력하고 '견적 포함'을 체크한 뒤 견적서를 생성해주세요</div>
                 <button className="btn-orange" style={{ padding: "12px 24px", fontSize: 14 }} onClick={() => setTab("calc")}>계산기로 이동 →</button>
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ── 견적 이력 탭 ── */}
+        {tab === "history" && (
+          <div>
+            {viewingQuote ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12, flexWrap: "wrap" }} className="no-print">
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button onClick={() => setViewingQuote(null)} style={{ padding: "8px 14px", border: "1.5px solid #E5E8EB", borderRadius: 10, background: "#fff", color: "#4E5968", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>← 목록</button>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#191F28" }}>{viewingQuote.title}</div>
+                      <div style={{ fontSize: 12, color: "#8B95A1" }}>{viewingQuote.dateStr} {viewingQuote.timeStr}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => { setQuote(viewingQuote.quote); setTab("quote"); setViewingQuote(null); }} style={{ padding: "10px 18px", border: "1.5px solid #E5E8EB", borderRadius: 12, background: "#fff", color: "#4E5968", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✏️ 현재 견적서로 불러오기</button>
+                    <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>
+                  </div>
+                </div>
+                <div className="apple-doc">
+                  <AppleMarkdown text={viewingQuote.quote} />
+                  <div className="apple-doc-footer">본 문서는 참고용이며, 최종 계약 시 담당자 확인이 필요합니다.</div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#191F28", marginBottom: 20 }}>견적 이력</div>
+                {savedQuotes.length === 0 ? (
+                  <div className="card" style={{ padding: 64, textAlign: "center" }}>
+                    <div style={{ fontSize: 48, marginBottom: 16 }}>🗂️</div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: "#4E5968", marginBottom: 8 }}>저장된 견적서가 없습니다</div>
+                    <div style={{ fontSize: 13, color: "#B0B8C1", marginBottom: 24 }}>견적서 탭에서 💾 저장 버튼을 눌러 이력을 남겨보세요</div>
+                    <button className="btn-orange" style={{ padding: "12px 24px", fontSize: 14 }} onClick={() => setTab("quote")}>견적서 탭으로 →</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                    {(() => {
+                      // 날짜별 그룹핑
+                      const groups = {};
+                      savedQuotes.forEach(q => {
+                        if (!groups[q.dateStr]) groups[q.dateStr] = [];
+                        groups[q.dateStr].push(q);
+                      });
+                      return Object.entries(groups).map(([date, items]) => (
+                        <div key={date} style={{ marginBottom: 24 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#8B95A1", letterSpacing: 0.5, marginBottom: 10, padding: "0 4px", display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ display: "inline-block", width: 3, height: 12, background: NAVY, borderRadius: 2 }}/>
+                            {date}
+                            <span style={{ background: "#E5E8EB", color: "#8B95A1", fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 100 }}>{items.length}건</span>
+                          </div>
+                          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                            {items.map((q, i) => (
+                              <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: i < items.length - 1 ? "1px solid #F2F4F7" : "none", cursor: "pointer", transition: "background 0.12s" }}
+                                onMouseEnter={e => e.currentTarget.style.background = "#FAFBFC"}
+                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                onClick={() => setViewingQuote(q)}>
+                                <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F2F4F7", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 14, fontWeight: 700, color: "#191F28", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{q.title}</div>
+                                  <div style={{ display: "flex", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
+                                    {q.products && q.products.map((p, pi) => (
+                                      <span key={pi} style={{ fontSize: 11, color: "#8B95A1" }}>{p.name} ({p.grade}급 · {p.price.toLocaleString()}원)</span>
+                                    ))}
+                                  </div>
+                                </div>
+                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                                  <div style={{ fontSize: 12, color: "#B0B8C1" }}>{q.timeStr}</div>
+                                  <button onClick={e => { e.stopPropagation(); deleteQuote(q.id); }} style={{ fontSize: 11, color: "#F04452", background: "#FFF0F1", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>삭제</button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
