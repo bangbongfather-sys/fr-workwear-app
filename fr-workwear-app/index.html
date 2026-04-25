@@ -684,6 +684,7 @@ function App() {
   const [editingQuote, setEditingQuote] = useState(false);
   const [savedQuotes, setSavedQuotes] = useState(() => load("frw_quote_history", []));
   const [viewingQuote, setViewingQuote] = useState(null);
+  const [quoteTitle, setQuoteTitle] = useState("");
   const initialized = useRef(false);
   const syncTimer = useRef(null);
   const prodNameRef = useRef(null);
@@ -865,7 +866,7 @@ ${priceTable}
     if (items.length === 0) { setApiError("견적서에 포함된 제품이 없습니다. 원가를 입력하고 '견적 포함'을 체크해주세요."); return; }
     setGenerating(true); setApiError("");
     if (!apiKey.trim()) {
-      setQuote(generateTemplate()); setTab("quote"); setGenerating(false); return;
+      setQuote(generateTemplate()); setQuoteTitle(""); setTab("quote"); setGenerating(false); return;
     }
     const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
     const totalSum = items.reduce((s, x) => s + x.c.finalPrice, 0);
@@ -914,7 +915,7 @@ ${productList}
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
       const data = await res.json();
-      setQuote(data.content[0].text); setTab("quote");
+      setQuote(data.content[0].text); setQuoteTitle(""); setTab("quote");
     } catch (e) { setApiError(`오류: ${e.message}`); }
     finally { setGenerating(false); }
   }, [apiKey, products, materials, laborItems]);
@@ -935,9 +936,8 @@ ${productList}
   const saveQuoteToHistory = () => {
     if (!quote) return;
     const items = getQuotedProducts();
-    const title = items.length > 0
-      ? items.map(({ p }) => p.name).join(", ")
-      : "견적서";
+    const autoTitle = items.length > 0 ? items.map(({ p }) => p.name).join(", ") : "견적서";
+    const title = quoteTitle.trim() || autoTitle;
     const now = new Date();
     const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,"0")}.${String(now.getDate()).padStart(2,"0")}`;
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
@@ -1471,8 +1471,17 @@ ${productList}
           <div>
             {quote ? (
               <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12, flexWrap: "wrap" }} className="no-print">
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#191F28" }}>견적서 미리보기</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }} className="no-print">
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#191F28", whiteSpace: "nowrap" }}>견적서 이름</div>
+                    <input
+                      type="text"
+                      value={quoteTitle}
+                      onChange={e => setQuoteTitle(e.target.value)}
+                      placeholder={(() => { const items = getQuotedProducts(); return items.length > 0 ? items.map(({ p }) => p.name).join(", ") : "견적서 이름 입력"; })()}
+                      style={{ flex: 1, minWidth: 0, height: 40, fontSize: 14, borderRadius: 10, border: "1.5px solid #E5E8EB", padding: "0 12px", fontFamily: "inherit", color: "#191F28" }}
+                    />
+                  </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       onClick={() => setEditingQuote(v => !v)}
@@ -1550,7 +1559,7 @@ ${productList}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => { setQuote(viewingQuote.quote); setTab("quote"); setViewingQuote(null); }} style={{ padding: "10px 18px", border: "1.5px solid #E5E8EB", borderRadius: 12, background: "#fff", color: "#4E5968", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✏️ 현재 견적서로 불러오기</button>
+                    <button onClick={() => { setQuote(viewingQuote.quote); setQuoteTitle(viewingQuote.title); setTab("quote"); setViewingQuote(null); }} style={{ padding: "10px 18px", border: "1.5px solid #E5E8EB", borderRadius: 12, background: "#fff", color: "#4E5968", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✏️ 현재 견적서로 불러오기</button>
                     <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>
                   </div>
                 </div>
