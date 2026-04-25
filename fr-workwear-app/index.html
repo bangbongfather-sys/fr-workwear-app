@@ -1,0 +1,1509 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FR 워크웨어 단가 계산기</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', -apple-system, sans-serif;
+      background: #F2F4F7;
+      color: #191F28;
+      -webkit-font-smoothing: antialiased;
+    }
+    input[type=text], input[type=number], input[type=password], select {
+      border: 1.5px solid #E5E8EB;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      color: #191F28;
+      background: #fff;
+      height: 44px;
+      width: 100%;
+      font-family: inherit;
+      transition: border-color 0.18s, box-shadow 0.18s;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #1a2f5e;
+      box-shadow: 0 0 0 3px rgba(26,47,94,0.1);
+    }
+    input::placeholder { color: #B0B8C1; }
+
+    /* ─── 비율 설정 숫자 입력 ─── */
+    .rate-input {
+      width: 64px !important;
+      padding: 4px 6px !important;
+      text-align: center;
+      font-weight: 700;
+      font-size: 17px;
+      height: 42px !important;
+      flex-shrink: 0;
+    }
+
+    /* ─── 카드 ─── */
+    .card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 22px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.055);
+    }
+
+    /* ─── 버튼 ─── */
+    .btn-primary {
+      background: #1a2f5e; color: #fff; border: none; border-radius: 12px;
+      cursor: pointer; font-weight: 700; padding: 12px 22px;
+      font-family: inherit; font-size: 14px; transition: background 0.15s, transform 0.1s;
+    }
+    .btn-primary:hover { background: #152548; }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-orange {
+      background: #f97316; color: #fff; border: none; border-radius: 10px;
+      cursor: pointer; font-weight: 700; padding: 10px 18px;
+      font-family: inherit; font-size: 13px; transition: background 0.15s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .btn-orange:hover { background: #ea6c0a; }
+    .btn-orange:active { transform: scale(0.97); }
+
+    /* ─── 제품 칩 (가로 스크롤) ─── */
+    .chip-scroll {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      flex-wrap: nowrap;
+      padding-bottom: 6px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      scrollbar-color: #E5E8EB transparent;
+    }
+    .chip-scroll::-webkit-scrollbar { height: 3px; }
+    .chip-scroll::-webkit-scrollbar-track { background: transparent; }
+    .chip-scroll::-webkit-scrollbar-thumb { background: #CDD2D7; border-radius: 10px; }
+    .chip-scroll > * { flex-shrink: 0; }
+
+    .prod-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 9px 16px; border-radius: 100px; font-size: 13px; font-weight: 600;
+      cursor: pointer; border: 1.5px solid #E5E8EB; background: #fff; color: #8B95A1;
+      white-space: nowrap; transition: all 0.15s; font-family: inherit;
+    }
+    .prod-chip.active {
+      border-color: #1a2f5e; background: #1a2f5e; color: #fff;
+      box-shadow: 0 2px 8px rgba(26,47,94,0.25);
+    }
+    .prod-chip:hover:not(.active) { border-color: #B0B8C1; background: #F9FAFB; color: #4E5968; }
+
+    /* ─── 원단/공임비 행 ─── */
+    .fabric-row {
+      display: flex; gap: 8px; align-items: center;
+      padding: 12px 14px; background: #F8F9FB; border-radius: 14px; margin-bottom: 8px;
+      min-height: 64px; border: 1.5px solid transparent;
+      transition: border-color 0.15s;
+    }
+    .fabric-row:hover { border-color: #E5E8EB; }
+    .fabric-row select, .fabric-row input[type=number], .fabric-row input[type=text] {
+      height: 38px !important;
+      padding: 0 10px !important;
+      line-height: 38px;
+    }
+
+    /* ─── 테이블 ─── */
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      background: #F8F9FB; color: #8B95A1; padding: 11px 16px;
+      text-align: left; font-size: 12px; font-weight: 600; letter-spacing: 0.3px;
+    }
+    td { padding: 14px 16px; font-size: 14px; border-bottom: 1px solid #F2F4F7; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #FAFBFC; }
+
+    /* ─── 우측 패널 ─── */
+    .price-highlight {
+      background: linear-gradient(145deg, #1a2f5e 0%, #1e3a6e 60%, #243d7a 100%);
+      border-radius: 16px; padding: 22px; text-align: center;
+    }
+    .row-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+    .row-label { font-size: 13px; color: #8B95A1; }
+    .row-value { font-size: 13px; font-weight: 600; color: #191F28; }
+    .section-label {
+      font-size: 10px; font-weight: 700; color: #B0B8C1;
+      text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px;
+    }
+
+    /* ─── 견적서 ─── */
+    .quote-content { line-height: 2; font-size: 14px; color: #334155; white-space: pre-wrap; }
+
+    /* ─── 애플 내부 보고서 스타일 견적서 ─── */
+    .apple-doc {
+      background: #fff;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 80px 90px;
+      border-radius: 4px;
+      box-shadow: 0 2px 24px rgba(0,0,0,0.06);
+      font-family: -apple-system, "SF Pro Text", "Pretendard", sans-serif;
+      color: #1d1d1f;
+      line-height: 1.6;
+      letter-spacing: -0.01em;
+    }
+    .apple-doc h1 {
+      font-size: 32px; font-weight: 600;
+      letter-spacing: -0.022em; color: #1d1d1f;
+      margin: 0 0 8px; line-height: 1.15;
+    }
+    .apple-doc h2 {
+      font-size: 22px; font-weight: 600;
+      letter-spacing: -0.018em; color: #1d1d1f;
+      margin: 48px 0 18px; padding-bottom: 10px;
+      border-bottom: 1px solid #d2d2d7;
+    }
+    .apple-doc h3 {
+      font-size: 17px; font-weight: 600;
+      letter-spacing: -0.012em; color: #1d1d1f;
+      margin: 28px 0 12px;
+    }
+    .apple-doc h4 {
+      font-size: 14px; font-weight: 600;
+      color: #6e6e73;
+      margin: 20px 0 10px;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .apple-doc p {
+      font-size: 15px; color: #424245;
+      margin: 12px 0; line-height: 1.7;
+    }
+    .apple-doc strong { color: #1d1d1f; font-weight: 600; }
+    .apple-doc em { font-style: italic; color: #6e6e73; }
+    .apple-doc hr {
+      border: none; height: 1px;
+      background: #d2d2d7; margin: 36px 0;
+    }
+    .apple-doc table {
+      width: 100%; border-collapse: collapse;
+      margin: 16px 0; font-size: 14px;
+    }
+    .apple-doc thead th {
+      background: transparent; color: #6e6e73;
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 10px 12px;
+      border-top: 1px solid #1d1d1f;
+      border-bottom: 1px solid #d2d2d7;
+    }
+    .apple-doc tbody td {
+      padding: 13px 12px;
+      border-bottom: 1px solid #e8e8ed;
+      color: #1d1d1f;
+      font-variant-numeric: tabular-nums;
+    }
+    .apple-doc tbody td:not(:first-child) { text-align: right; }
+    .apple-doc tbody tr:hover td { background: #fafafa; }
+    .apple-doc tbody tr:last-child td { border-bottom: 2px solid #1d1d1f; }
+    .apple-doc ul, .apple-doc ol { padding-left: 22px; margin: 12px 0; }
+    .apple-doc li { font-size: 15px; color: #424245; margin: 6px 0; line-height: 1.7; }
+    .apple-doc-meta {
+      display: flex; gap: 32px; flex-wrap: wrap;
+      font-size: 13px; color: #6e6e73; margin: 12px 0 24px;
+    }
+    .apple-doc-meta strong {
+      color: #1d1d1f; font-weight: 600; margin-right: 6px;
+    }
+    .apple-doc-footer {
+      margin-top: 60px; padding-top: 24px;
+      border-top: 1px solid #d2d2d7;
+      font-size: 12px; color: #86868b; text-align: center;
+      font-style: italic;
+    }
+    @media (max-width: 768px) {
+      .apple-doc { padding: 36px 24px; max-width: 100%; }
+      .apple-doc h1 { font-size: 26px; }
+      .apple-doc h2 { font-size: 19px; margin: 36px 0 14px; }
+      .apple-doc h3 { font-size: 16px; }
+      .apple-doc p, .apple-doc li { font-size: 14px; }
+      .apple-doc table { font-size: 13px; }
+      .apple-doc thead th, .apple-doc tbody td { padding: 8px 8px; }
+    }
+
+    /* ─── 섹션 제목 ─── */
+    .section-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+    }
+    .section-header-title {
+      font-size: 15px; font-weight: 700; color: #191F28;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-header-title::before {
+      content: ''; display: inline-block;
+      width: 4px; height: 16px; background: #1a2f5e;
+      border-radius: 4px; flex-shrink: 0;
+    }
+    .section-sub {
+      font-size: 12px; color: #B0B8C1; font-weight: 400; margin-left: 4px;
+    }
+
+    /* ─── 범례/인포 ─── */
+    .info-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: #EEF2FF; color: #4F7FD4; font-size: 11px; font-weight: 600;
+      padding: 3px 10px; border-radius: 100px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ─── 태블릿 (1024px 이하) ─── */
+    @media (max-width: 1024px) {
+      .calc-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
+      .calc-grid > div:last-child { position: static !important; }
+      .price-highlight { padding: 18px !important; }
+    }
+
+    /* ─── 모바일 (768px 이하) ─── */
+    @media (max-width: 768px) {
+      body { font-size: 14px; }
+      .card { padding: 16px; border-radius: 16px; }
+      .section-header-title { font-size: 14px !important; }
+      .section-header-title::before { width: 3px; height: 14px; }
+      input[type=text], input[type=number], input[type=password], select {
+        height: 46px; font-size: 15px; padding: 10px 12px;
+      }
+      .fabric-row {
+        flex-wrap: wrap;
+        padding: 12px;
+        gap: 6px;
+        min-height: auto;
+      }
+      .fabric-row > span:first-child { flex: 0 0 auto; }
+      .fabric-row select { flex: 1 1 100% !important; min-width: 0; }
+      .fabric-row input[type=number] { flex: 1 1 auto; min-width: 70px; }
+      .prod-chip {
+        padding: 9px 14px; font-size: 13px;
+      }
+      .btn-orange { padding: 10px 14px; font-size: 13px; }
+      .btn-primary { padding: 12px 18px; font-size: 14px; }
+      table { font-size: 13px; }
+      th, td { padding: 10px 12px; }
+    }
+
+    /* ─── 작은 모바일 (480px 이하) ─── */
+    @media (max-width: 480px) {
+      .card { padding: 14px; border-radius: 14px; }
+      .section-header { flex-wrap: wrap; gap: 8px; }
+      .section-header-title { font-size: 14px !important; }
+      .section-sub { display: block; margin-left: 12px !important; margin-top: 2px; }
+      .price-highlight { padding: 16px !important; }
+      .quote-content { font-size: 13px; line-height: 1.8; }
+      .header-wrap { padding: 0 16px !important; }
+      .header-top { padding: 12px 0 10px !important; }
+      .header-icon { width: 34px !important; height: 34px !important; font-size: 17px !important; }
+      .header-title { font-size: 15px !important; }
+      .header-sub { display: none; }
+      .tab-btn { padding: 11px 14px !important; font-size: 13px !important; }
+      .main-content { padding: 16px !important; }
+    }
+
+    @media print {
+      .no-print { display: none !important; }
+      .card { box-shadow: none; border: 1px solid #E5E8EB; }
+      body { background: white; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const FB_URL = "https://njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app/frw.json";
+const NAVY = "#1a2f5e";
+const ORANGE = "#f97316";
+
+function load(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+}
+function save(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+async function cloudLoad() {
+  const r = await fetch(FB_URL);
+  if (!r.ok) throw new Error("load failed");
+  return await r.json();
+}
+async function cloudSave(data) {
+  const r = await fetch(FB_URL, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  if (!r.ok) throw new Error("save failed");
+}
+
+const INIT_MATERIALS = [
+  { id: 1, name: "아라미드 원단 (Nomex III A)", price: 48000, unit: "yard" },
+  { id: 2, name: "아라미드 원단 (하계용)", price: 42000, unit: "yard" },
+  { id: 3, name: "FR 코튼 (9oz)", price: 18000, unit: "yard" },
+  { id: 4, name: "FR 폴리/코튼 혼방 (65/35)", price: 22000, unit: "yard" },
+  { id: 5, name: "모다크릴 혼방 원단", price: 35000, unit: "yard" },
+  { id: 6, name: "FR 린넨 혼방", price: 28000, unit: "m" },
+];
+const INIT_LABOR = [
+  { id: 10, name: "재봉비 (기본)", price: 8000, unit: "벌" },
+  { id: 11, name: "재봉비 (고급)", price: 12000, unit: "벌" },
+  { id: 12, name: "재단비", price: 3000, unit: "벌" },
+  { id: 13, name: "부자재비 (지퍼/단추)", price: 4500, unit: "벌" },
+  { id: 14, name: "라벨·택 부착비", price: 800, unit: "벌" },
+  { id: 15, name: "검사·포장비", price: 1500, unit: "벌" },
+];
+
+let _uid = 200;
+const uid = () => ++_uid;
+const newFabric = () => ({ id: uid(), matId: "", qty: "" });
+const newExtra = () => ({ id: uid(), laborId: "", customName: "", price: "", qty: "1" });
+const DEFAULT_MARGINS = { A: 50, B: 40, C: 30, D: 20 };
+const GRADES = ["A", "B", "C", "D"];
+const newProduct = (name) => ({
+  id: uid(), name,
+  fabrics: [newFabric()],
+  extras: [newExtra()],
+  margins: { ...DEFAULT_MARGINS },
+  priceOverrides: { A: "", B: "", C: "", D: "" },
+  selectedGrade: "A",
+  include: true,
+  adminRate: 10,
+});
+const migrateProduct = (p) => {
+  let q = { ...p };
+  if (!q.margins) {
+    const m = typeof q.margin === "number" ? q.margin : 30;
+    q.margins = {
+      A: Math.min(99, Math.round(m + 20)),
+      B: Math.min(99, Math.round(m + 10)),
+      C: Math.round(m),
+      D: Math.max(0, Math.round(m - 10)),
+    };
+    delete q.margin;
+  }
+  if (!q.priceOverrides) q.priceOverrides = { A: "", B: "", C: "", D: "" };
+  if (!q.selectedGrade) q.selectedGrade = "A";
+  if (q.include === undefined) q.include = true;
+  return q;
+};
+const INIT_PRODUCTS = [newProduct("자켓"), newProduct("바지"), newProduct("조끼")];
+
+const LABOR_UNITS = ["벌", "장", "개", "m", "yard", "식"];
+
+// 모든 제품의 비용을 계산하는 helper
+function computeProduct(p, materials, laborItems) {
+  const fCost = p.fabrics.reduce((s, f) => {
+    const m = materials.find(x => x.id === Number(f.matId));
+    return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
+  }, 0);
+  const eCost = p.extras.reduce((s, e) => {
+    const u = e.laborId ? (laborItems.find(l => l.id === Number(e.laborId))?.price || 0) : parseFloat(e.price || 0);
+    const q = parseFloat(e.qty || 1);
+    return s + u * q;
+  }, 0);
+  const base = fCost + eCost;
+  const admin = base * ((p.adminRate || 0) / 100);
+  const beforeMargin = base + admin;
+  const margins = p.margins || DEFAULT_MARGINS;
+  const overrides = p.priceOverrides || {};
+  const grades = {};         // 적용 단가 (override 우선)
+  const calcGrades = {};     // 마진율 계산값 (참조용)
+  const overridden = {};     // 어느 등급이 수동 수정됐는지
+  for (const g of GRADES) {
+    const auto = beforeMargin * (1 + (margins[g] ?? DEFAULT_MARGINS[g]) / 100);
+    calcGrades[g] = auto;
+    const ov = parseFloat(overrides[g]);
+    if (!isNaN(ov) && ov > 0) {
+      grades[g] = ov;
+      overridden[g] = true;
+    } else {
+      grades[g] = auto;
+      overridden[g] = false;
+    }
+  }
+  const sel = p.selectedGrade || "A";
+  return {
+    fCost, eCost, base, admin, beforeMargin,
+    grades, calcGrades, overridden,
+    selectedGrade: sel,
+    finalPrice: grades[sel] || 0,
+    marginAmt: (grades[sel] || 0) - beforeMargin,
+  };
+}
+
+// 간이 마크다운 → JSX (애플 도큐먼트 스타일)
+function AppleMarkdown({ text }) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  const out = [];
+  let i = 0;
+  const inline = (s) => {
+    // **bold**, *italic*
+    const parts = [];
+    let last = 0;
+    const re = /\*\*(.+?)\*\*|\*(.+?)\*/g;
+    let m;
+    let key = 0;
+    while ((m = re.exec(s)) !== null) {
+      if (m.index > last) parts.push(s.slice(last, m.index));
+      if (m[1]) parts.push(<strong key={key++}>{m[1]}</strong>);
+      else if (m[2]) parts.push(<em key={key++}>{m[2]}</em>);
+      last = m.index + m[0].length;
+    }
+    if (last < s.length) parts.push(s.slice(last));
+    return parts;
+  };
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^# /.test(line)) { out.push(<h1 key={i}>{inline(line.replace(/^# /, ""))}</h1>); i++; continue; }
+    if (/^## /.test(line)) { out.push(<h2 key={i}>{inline(line.replace(/^## /, ""))}</h2>); i++; continue; }
+    if (/^### /.test(line)) { out.push(<h3 key={i}>{inline(line.replace(/^### /, ""))}</h3>); i++; continue; }
+    if (/^#### /.test(line)) { out.push(<h4 key={i}>{inline(line.replace(/^#### /, ""))}</h4>); i++; continue; }
+    if (/^---+\s*$/.test(line)) { out.push(<hr key={i} />); i++; continue; }
+    if (/^\s*$/.test(line)) { i++; continue; }
+
+    // 표
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[-:\s|]+\|\s*$/.test(lines[i+1])) {
+      const head = line.split("|").slice(1, -1).map(c => c.trim());
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        rows.push(lines[i].split("|").slice(1, -1).map(c => c.trim()));
+        i++;
+      }
+      out.push(
+        <table key={"t"+i}>
+          <thead><tr>{head.map((h, j) => <th key={j}>{inline(h)}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((r, ri) => (
+              <tr key={ri}>{r.map((c, j) => <td key={j}>{inline(c)}</td>)}</tr>
+            ))}
+          </tbody>
+        </table>
+      );
+      continue;
+    }
+
+    // 리스트
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*]\s+/, ""));
+        i++;
+      }
+      out.push(<ul key={"u"+i}>{items.map((it, j) => <li key={j}>{inline(it)}</li>)}</ul>);
+      continue;
+    }
+
+    // 일반 단락 (연속된 라인 묶기)
+    const para = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() && !/^(#|---|\s*\||\s*[-*]\s+)/.test(lines[i])) {
+      para.push(lines[i]); i++;
+    }
+    out.push(<p key={"p"+i}>{inline(para.join(" "))}</p>);
+  }
+  return <>{out}</>;
+}
+
+function SectionTitle({ children, action }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#191F28" }}>{children}</div>
+      {action}
+    </div>
+  );
+}
+
+function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
+  const [newMat, setNewMat] = useState({ name: "", price: "", unit: "yard" });
+  const [editMat, setEditMat] = useState(null);
+  const [newLab, setNewLab] = useState({ name: "", price: "", unit: "벌" });
+  const [editLab, setEditLab] = useState(null);
+
+  const addMaterial = () => {
+    if (!newMat.name.trim() || !newMat.price) return;
+    setMaterials(ms => [...ms, { id: uid(), name: newMat.name.trim(), price: parseFloat(newMat.price), unit: newMat.unit }]);
+    setNewMat({ name: "", price: "", unit: "yard" });
+  };
+  const saveMat = () => { setMaterials(ms => ms.map(m => m.id === editMat.id ? editMat : m)); setEditMat(null); };
+
+  const addLabor = () => {
+    if (!newLab.name.trim() || !newLab.price) return;
+    setLaborItems(ls => [...ls, { id: uid(), name: newLab.name.trim(), price: parseFloat(newLab.price), unit: newLab.unit }]);
+    setNewLab({ name: "", price: "", unit: "벌" });
+  };
+  const saveLab = () => { setLaborItems(ls => ls.map(l => l.id === editLab.id ? editLab : l)); setEditLab(null); };
+
+  const tblBtn = (label, color, onClick) => (
+    <button onClick={onClick} style={{ color, background: "none", border: "none", cursor: "pointer", fontWeight: 600, fontFamily: "inherit", fontSize: 13 }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+
+      {/* 원단 단가표 */}
+      <div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}>🧵 원단 단가표</div>
+        <div className="card" style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#8B95A1", marginBottom: 10 }}>새 원단 추가</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 90px auto", gap: 8 }}>
+            <input placeholder="원단명 (예: 아라미드 동복용)" value={newMat.name}
+              onChange={e => setNewMat({...newMat, name: e.target.value})}
+              onKeyDown={e => e.key === "Enter" && addMaterial()} />
+            <input type="number" placeholder="단가" value={newMat.price} style={{ textAlign: "right" }}
+              onChange={e => setNewMat({...newMat, price: e.target.value})} />
+            <select value={newMat.unit} onChange={e => setNewMat({...newMat, unit: e.target.value})}>
+              <option value="yard">yard</option><option value="m">m</option>
+            </select>
+            <button className="btn-orange" onClick={addMaterial} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 추가</button>
+          </div>
+        </div>
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <table>
+            <thead><tr>
+              <th>원단명</th><th style={{ textAlign: "right" }}>단가</th>
+              <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
+            </tr></thead>
+            <tbody>
+              {materials.map(m => (
+                <tr key={m.id}>
+                  {editMat?.id === m.id ? (
+                    <>
+                      <td><input value={editMat.name} onChange={e => setEditMat({...editMat, name: e.target.value})} /></td>
+                      <td><input type="number" value={editMat.price} style={{ textAlign: "right" }} onChange={e => setEditMat({...editMat, price: parseFloat(e.target.value)})} /></td>
+                      <td><select value={editMat.unit} onChange={e => setEditMat({...editMat, unit: e.target.value})}><option value="yard">yard</option><option value="m">m</option></select></td>
+                      <td style={{ textAlign: "center" }}>
+                        {tblBtn("저장", "#00B493", saveMat)}
+                        <span style={{ margin: "0 4px", color: "#E5E8EB" }}>|</span>
+                        {tblBtn("취소", "#8B95A1", () => setEditMat(null))}
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ fontWeight: 500 }}>{m.name}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>{m.price.toLocaleString()}<span style={{ color: "#8B95A1", fontWeight: 400, fontSize: 12 }}>원</span></td>
+                      <td style={{ textAlign: "center", color: "#8B95A1", fontSize: 13 }}>{m.unit}</td>
+                      <td style={{ textAlign: "center" }}>
+                        {tblBtn("수정", NAVY, () => setEditMat({...m}))}
+                        <span style={{ margin: "0 4px", color: "#E5E8EB" }}>|</span>
+                        {tblBtn("삭제", "#F04452", () => setMaterials(ms => ms.filter(x => x.id !== m.id)))}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {materials.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "#B0B8C1" }}>등록된 원단이 없습니다</div>}
+        </div>
+      </div>
+
+      {/* 공임비 단가표 */}
+      <div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}>🔧 공임비 단가표</div>
+        <div className="card" style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#8B95A1", marginBottom: 10 }}>새 공임비 추가</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 90px auto", gap: 8 }}>
+            <input placeholder="항목명 (예: 재봉비, 재단비)" value={newLab.name}
+              onChange={e => setNewLab({...newLab, name: e.target.value})}
+              onKeyDown={e => e.key === "Enter" && addLabor()} />
+            <input type="number" placeholder="단가" value={newLab.price} style={{ textAlign: "right" }}
+              onChange={e => setNewLab({...newLab, price: e.target.value})} />
+            <select value={newLab.unit} onChange={e => setNewLab({...newLab, unit: e.target.value})}>
+              {LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <button className="btn-orange" onClick={addLabor} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 추가</button>
+          </div>
+        </div>
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <table>
+            <thead><tr>
+              <th>항목명</th><th style={{ textAlign: "right" }}>단가</th>
+              <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
+            </tr></thead>
+            <tbody>
+              {laborItems.map(l => (
+                <tr key={l.id}>
+                  {editLab?.id === l.id ? (
+                    <>
+                      <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
+                      <td><input type="number" value={editLab.price} style={{ textAlign: "right" }} onChange={e => setEditLab({...editLab, price: parseFloat(e.target.value)})} /></td>
+                      <td><select value={editLab.unit} onChange={e => setEditLab({...editLab, unit: e.target.value})}>{LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></td>
+                      <td style={{ textAlign: "center" }}>
+                        {tblBtn("저장", "#00B493", saveLab)}
+                        <span style={{ margin: "0 4px", color: "#E5E8EB" }}>|</span>
+                        {tblBtn("취소", "#8B95A1", () => setEditLab(null))}
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ fontWeight: 500 }}>{l.name}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>{l.price.toLocaleString()}<span style={{ color: "#8B95A1", fontWeight: 400, fontSize: 12 }}>원</span></td>
+                      <td style={{ textAlign: "center", color: "#8B95A1", fontSize: 13 }}>{l.unit}</td>
+                      <td style={{ textAlign: "center" }}>
+                        {tblBtn("수정", NAVY, () => setEditLab({...l}))}
+                        <span style={{ margin: "0 4px", color: "#E5E8EB" }}>|</span>
+                        {tblBtn("삭제", "#F04452", () => setLaborItems(ls => ls.filter(x => x.id !== l.id)))}
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {laborItems.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "#B0B8C1" }}>등록된 공임비가 없습니다</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [tab, setTab] = useState("calc");
+  const [materials, setMaterials] = useState(() => load("frw_materials", INIT_MATERIALS));
+  const [laborItems, setLaborItems] = useState(() => load("frw_labor", INIT_LABOR));
+  const [products, setProducts] = useState(() => load("frw_products", null) || INIT_PRODUCTS);
+  const [activeProdId, setActiveProdId] = useState(() => {
+    const saved = load("frw_products", null);
+    return saved ? saved[0].id : INIT_PRODUCTS[0].id;
+  });
+  const [newProdName, setNewProdName] = useState("");
+  const [apiKey, setApiKey] = useState(() => load("frw_apikey", ""));
+  const [editingProdName, setEditingProdName] = useState(null);
+  const [syncStatus, setSyncStatus] = useState("syncing");
+  const [quote, setQuote] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [editingQuote, setEditingQuote] = useState(false);
+  const initialized = useRef(false);
+  const syncTimer = useRef(null);
+  const prodNameRef = useRef(null);
+
+  const applyCloudData = (d) => {
+    if (!d) return;
+    if (d.materials) setMaterials(d.materials);
+    if (d.laborItems) setLaborItems(d.laborItems);
+    if (d.products && d.products.length > 0) {
+      const migrated = d.products.map(migrateProduct);
+      setProducts(migrated);
+      setActiveProdId(migrated[0].id);
+    }
+    if (d.apiKey !== undefined) setApiKey(d.apiKey);
+  };
+
+  useEffect(() => {
+    cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); })
+      .catch(() => setSyncStatus("error")).finally(() => { initialized.current = true; });
+  }, []);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && initialized.current) {
+        setSyncStatus("syncing");
+        cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error"));
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  useEffect(() => {
+    save("frw_materials", materials); save("frw_labor", laborItems);
+    save("frw_products", products); save("frw_apikey", apiKey);
+    if (!initialized.current) return;
+    setSyncStatus("syncing");
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      cloudSave({ materials, laborItems, products, apiKey })
+        .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
+    }, 1500);
+  }, [materials, laborItems, products, apiKey]);
+
+  const activeProd = products.find(p => p.id === activeProdId) || products[0];
+
+  const calc = computeProduct(activeProd, materials, laborItems);
+  const fabricCost = calc.fCost;
+  const extraCost = calc.eCost;
+  const baseTotal = calc.base;
+  const adminAmt = calc.admin;
+  const beforeMargin = calc.beforeMargin;
+  const gradePrices = calc.grades;
+  const calcGradePrices = calc.calcGrades;
+  const overriddenGrades = calc.overridden;
+  const marginAmt = calc.marginAmt;
+  const finalPrice = calc.finalPrice;
+
+  const updProd = (field, value) =>
+    setProducts(ps => ps.map(p => p.id === activeProdId ? { ...p, [field]: value } : p));
+
+  const addProduct = () => {
+    if (!newProdName.trim()) return;
+    const p = newProduct(newProdName.trim());
+    setProducts(ps => [...ps, p]); setActiveProdId(p.id); setNewProdName("");
+  };
+  const deleteProduct = (id) => {
+    if (products.length <= 1) return;
+    const remaining = products.filter(p => p.id !== id);
+    setProducts(remaining);
+    if (activeProdId === id) setActiveProdId(remaining[0].id);
+  };
+  const saveProdName = () => {
+    if (!editingProdName) return;
+    const name = editingProdName.value.trim();
+    if (name) setProducts(ps => ps.map(p => p.id === editingProdName.id ? { ...p, name } : p));
+    setEditingProdName(null);
+  };
+  const startEditProdName = (p, e) => {
+    e && e.stopPropagation();
+    setEditingProdName({ id: p.id, value: p.name });
+  };
+
+  const addFabric = () => updProd("fabrics", [...activeProd.fabrics, newFabric()]);
+  const removeFabric = (fid) => { if (activeProd.fabrics.length <= 1) return; updProd("fabrics", activeProd.fabrics.filter(f => f.id !== fid)); };
+  const updFabric = (fid, k, v) => updProd("fabrics", activeProd.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f));
+  const addExtra = () => updProd("extras", [...activeProd.extras, newExtra()]);
+  const removeExtra = (eid) => updProd("extras", activeProd.extras.filter(e => e.id !== eid));
+  const updExtra = (eid, k, v) => updProd("extras", activeProd.extras.map(e => e.id === eid ? { ...e, [k]: v } : e));
+  const selectLabor = (eid, laborId) => {
+    const l = laborItems.find(x => x.id === Number(laborId));
+    updProd("extras", activeProd.extras.map(e =>
+      e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
+    ));
+    // qty preserved as-is
+  };
+
+  const buildFabricLines = () => activeProd.fabrics.map(f => {
+    const m = materials.find(x => x.id === Number(f.matId));
+    if (!m || !f.qty) return null;
+    return { name: m.name, qty: f.qty, unit: m.unit, unitPrice: m.price, total: m.price * parseFloat(f.qty) };
+  }).filter(Boolean);
+
+  const buildExtraLines = () => activeProd.extras.map(e => {
+    const l = e.laborId ? laborItems.find(x => x.id === Number(e.laborId)) : null;
+    const name = l ? l.name : e.customName;
+    const unitPrice = l ? l.price : parseFloat(e.price || 0);
+    const qty = parseFloat(e.qty || 1);
+    const total = unitPrice * qty;
+    if (!name || !total) return null;
+    return { name, qty, unitPrice, total };
+  }).filter(Boolean);
+
+  // 견적서에 포함될 제품들 (포함 여부 + 데이터 있는 것만)
+  const getQuotedProducts = () => {
+    return products.filter(p => p.include !== false).map(p => {
+      const c = computeProduct(p, materials, laborItems);
+      return { p, c };
+    }).filter(x => x.c.base > 0);
+  };
+
+  // 거래처용 견적서 템플릿 (애플 보고서 스타일, 제품명·단가만)
+  const generateTemplate = () => {
+    const items = getQuotedProducts();
+    const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    const quoteId = `FRW-${new Date().toISOString().slice(0,10).replace(/-/g,"")}-${String(new Date().getHours()).padStart(2,"0")}${String(new Date().getMinutes()).padStart(2,"0")}`;
+    const totalSum = items.reduce((s, x) => s + x.c.finalPrice, 0);
+
+    if (items.length === 0) {
+      return `# FR Workwear Quotation\n\n원가가 입력된 제품이 없습니다.`;
+    }
+
+    // 제품 단가 표 (제품명 / 수량 / 단가만)
+    const priceTable = items.map(({ p, c }) =>
+      `| ${p.name} | 1 | ${Math.round(c.finalPrice).toLocaleString()}원 |`
+    ).join("\n");
+
+    return `# FR Workwear Quotation
+
+**작성일** ${today}　　**견적번호** ${quoteId}　　**유효기간** 발행일로부터 30일
+
+---
+
+## Overview
+
+본 견적서는 ${items.length}개 제품의 단가를 안내드리는 문서입니다.
+모든 제품은 방염(FR) 인증 소재를 사용하여 산업 현장의 안전 기준에 부합하도록 설계·제작됩니다.
+
+---
+
+## Quotation
+
+| 제품명 | 수량 | 단가 |
+|---|---|---|
+${priceTable}
+
+**합계** ${Math.round(totalSum).toLocaleString()}원 *(부가세 별도)*
+
+---
+
+## Terms & Conditions
+
+| 항목 | 내용 |
+|---|---|
+| 납기 | 발주 확정 후 2–4주 (수량·사양에 따라 협의) |
+| 결제 | 발주 시 30%, 납품 완료 시 70% |
+| 최소 발주 수량 | 제품별 협의 |
+| 품질 보증 | 소재 및 봉제 불량 발생 시 교환·환불 |
+| 유효 기간 | 본 견적서 발행일로부터 30일 |
+
+---
+
+*본 견적서는 참고용이며, 최종 계약 시 담당자 확인이 필요합니다.*`;
+  };
+
+  const generateQuote = useCallback(async () => {
+    const items = getQuotedProducts();
+    if (items.length === 0) { setApiError("견적서에 포함된 제품이 없습니다. 원가를 입력하고 '견적 포함'을 체크해주세요."); return; }
+    setGenerating(true); setApiError("");
+    if (!apiKey.trim()) {
+      setQuote(generateTemplate()); setTab("quote"); setGenerating(false); return;
+    }
+    const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    const totalSum = items.reduce((s, x) => s + x.c.finalPrice, 0);
+
+    // 거래처용: 제품명·단가만 전달 (등급/원가 디테일은 절대 포함 금지)
+    const productList = items.map(({ p, c }) =>
+      `- ${p.name}: ${Math.round(c.finalPrice).toLocaleString()}원`
+    ).join("\n");
+
+    const prompt = `당신은 방염복(FR 워크웨어) 전문 업체의 견적 담당자입니다.
+거래처(고객사)에 발송할 **애플(Apple) 내부 보고서 스타일**의 견적서를 한국어로 작성해주세요.
+
+[작성일] ${today}
+[견적 제품 수] ${items.length}개
+[총 합계] ${Math.round(totalSum).toLocaleString()}원 (부가세 별도)
+
+[견적 제품 (제품명 / 단가)]
+${productList}
+
+[⚠️ 절대 금지 사항 — 거래처용 견적서이므로 노출 금지]
+- 원가, 원단 단가, 공임비, 일반관리비, 마진율, 마진 금액
+- 등급(A/B/C/D), 원가 구성, 비용 분석
+- 내부적인 가격 산정 근거나 디테일
+
+[애플 내부 보고서 스타일 가이드]
+- 영문 헤더 + 한글 본문 (예: "## Overview", "## Quotation")
+- 좌측 정렬, 위계는 H1 → H2 → H3
+- 간결하고 정제된 문장, 군더더기 없는 비즈니스 톤
+- 깔끔한 마크다운 표
+- 굵은 강조는 합계 같은 핵심 수치에만
+- 단락 사이 충분한 여백 (수평선 사용)
+
+[작성 구조]
+1. # FR Workwear Quotation (메인 타이틀)
+2. 작성일 · 견적번호 · 유효기간 한 줄 정렬
+3. ## Overview — FR 워크웨어 제품 소개 (2~3 문장, 방염 특성 강조)
+4. ## Quotation — 표 형식 (제품명 / 수량 / 단가 3컬럼만), 합계 강조
+5. ## Terms & Conditions — 납기, 결제, 최소 발주, 품질 보증, 유효 기간
+6. 마크다운 형식 사용`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
+      const data = await res.json();
+      setQuote(data.content[0].text); setTab("quote");
+    } catch (e) { setApiError(`오류: ${e.message}`); }
+    finally { setGenerating(false); }
+  }, [apiKey, products, materials, laborItems]);
+
+  const SyncBadge = () => {
+    const styles = {
+      wrap: { display: "flex", alignItems: "center", gap: 5, borderRadius: 100, padding: "5px 12px" },
+      dot: { width: 7, height: 7, borderRadius: "50%" },
+      text: { fontSize: 12, fontWeight: 500 },
+    };
+    if (syncStatus === "syncing") return <div style={{ ...styles.wrap, background: "rgba(255,255,255,0.15)" }}><div style={{ ...styles.dot, background: "#FBBF24", animation: "pulse 1.2s ease-in-out infinite" }} /><span style={{ ...styles.text, color: "#FEF3C7" }}>저장 중</span></div>;
+    if (syncStatus === "saved") return <div style={{ ...styles.wrap, background: "rgba(255,255,255,0.15)" }}><div style={{ ...styles.dot, background: "#4ADE80" }} /><span style={{ ...styles.text, color: "#D1FAE5" }}>동기화됨</span></div>;
+    return <div style={{ ...styles.wrap, background: "rgba(240,68,82,0.25)" }}><div style={{ ...styles.dot, background: "#F87171" }} /><span style={{ ...styles.text, color: "#FECACA" }}>연결 오류</span></div>;
+  };
+
+  const TABS = [["pricedb", "단가표"], ["calc", "단가 계산기"], ["quote", "견적서"]];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#F2F4F7" }}>
+
+      {/* ── 헤더 ── */}
+      <div style={{ background: NAVY, boxShadow: "0 2px 20px rgba(26,47,94,0.3)" }} className="no-print">
+        <div className="header-wrap" style={{ maxWidth: 1140, margin: "0 auto", padding: "0 24px" }}>
+          {/* 상단 타이틀 + 동기화 */}
+          <div className="header-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 0 14px", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+              <div className="header-icon" style={{ width: 38, height: 38, background: "rgba(255,255,255,0.12)", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>🔥</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="header-title" style={{ fontSize: 17, fontWeight: 800, color: "#fff", letterSpacing: -0.5, lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>FR 워크웨어 단가 계산기</div>
+                <div className="header-sub" style={{ fontSize: 11, color: "rgba(147,197,253,0.8)", marginTop: 2, fontWeight: 400 }}>방염복 원가 계산 및 AI 견적서 자동 생성</div>
+              </div>
+            </div>
+            <SyncBadge />
+          </div>
+          {/* 탭 네비게이션 */}
+          <div style={{ display: "flex", gap: 0, borderTop: "1px solid rgba(255,255,255,0.08)", overflowX: "auto" }}>
+            {TABS.map(([id, label]) => (
+              <button key={id} onClick={() => setTab(id)} className="tab-btn" style={{
+                padding: "13px 24px", border: "none", cursor: "pointer", fontWeight: 600,
+                fontSize: 14, fontFamily: "inherit", transition: "all 0.18s",
+                background: "transparent", position: "relative", whiteSpace: "nowrap", flexShrink: 0,
+                color: tab === id ? "#fff" : "rgba(255,255,255,0.45)",
+                borderBottom: tab === id ? `2.5px solid #f97316` : "2.5px solid transparent",
+              }}>{label}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="main-content" style={{ maxWidth: 1140, margin: "0 auto", padding: "28px 24px" }}>
+
+        {/* ── 단가표 탭 ── */}
+        {tab === "pricedb" && (
+          <PriceDB materials={materials} setMaterials={setMaterials} laborItems={laborItems} setLaborItems={setLaborItems} />
+        )}
+
+        {/* ── 계산기 탭 ── */}
+        {tab === "calc" && (
+          <div className="calc-grid" style={{ display: "grid", gridTemplateColumns: "1fr 308px", gap: 20, alignItems: "start" }}>
+
+            {/* 왼쪽 */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+
+              {/* 제품 선택 */}
+              <div className="card">
+                <div className="section-header">
+                  <span className="section-header-title">제품 선택</span>
+                  <span className="info-pill">총 {products.length}개</span>
+                </div>
+                {/* 가로 스크롤 칩 */}
+                <div className="chip-scroll" style={{ marginBottom: 14 }}>
+                  {products.map(p => (
+                    <div key={p.id} style={{ flexShrink: 0 }}>
+                      {editingProdName?.id === p.id ? (
+                        <input
+                          autoFocus
+                          value={editingProdName.value}
+                          style={{ width: 130, height: 38, padding: "0 14px", fontSize: 13, fontWeight: 600, borderRadius: 100, border: `2px solid ${NAVY}`, width: "auto", minWidth: 80 }}
+                          onChange={e => setEditingProdName({ ...editingProdName, value: e.target.value })}
+                          onBlur={saveProdName}
+                          onKeyDown={e => { if (e.key === "Enter") saveProdName(); if (e.key === "Escape") setEditingProdName(null); }}
+                        />
+                      ) : (
+                        <button onClick={() => setActiveProdId(p.id)} className={`prod-chip ${activeProdId === p.id ? "active" : ""}`}>
+                          <span onDoubleClick={e => startEditProdName(p, e)} title="더블클릭으로 이름 수정">{p.name}</span>
+                          {activeProdId === p.id && (
+                            <span onClick={e => startEditProdName(p, e)} title="이름 수정"
+                              style={{ fontSize: 11, opacity: 0.7, cursor: "pointer" }}>✏️</span>
+                          )}
+                          {products.length > 1 && (
+                            <span onClick={e => { e.stopPropagation(); deleteProduct(p.id); }}
+                              style={{ fontSize: 14, opacity: 0.5, cursor: "pointer" }}>×</span>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {/* 새 제품 추가 */}
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    placeholder="새 제품명 (예: 동복 자켓, 점프수트...)"
+                    value={newProdName}
+                    onChange={e => setNewProdName(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addProduct()}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn-orange" onClick={addProduct} style={{ height: 44, padding: "0 20px" }}>+ 추가</button>
+                </div>
+                <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩의 ✏️ 또는 더블클릭으로 이름 수정</div>
+              </div>
+
+              {/* 원단 구성 */}
+              <div className="card">
+                <div className="section-header">
+                  <span className="section-header-title">원단 구성 <span className="section-sub">— {activeProd.name}</span></span>
+                  <button className="btn-orange" onClick={addFabric} style={{ padding: "8px 16px", fontSize: 13 }}>+ 원단 추가</button>
+                </div>
+                {activeProd.fabrics.map((f, idx) => {
+                  const m = materials.find(x => x.id === Number(f.matId));
+                  const cost = m ? m.price * parseFloat(f.qty || 0) : 0;
+                  return (
+                    <div key={f.id} className="fabric-row">
+                      <span style={{ fontSize: 11, color: "#B0B8C1", fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
+                      <select style={{ flex: 2, height: 38 }} value={f.matId} onChange={e => updFabric(f.id, "matId", e.target.value)}>
+                        <option value="">소재 선택</option>
+                        {materials.map(x => <option key={x.id} value={x.id}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
+                      </select>
+                      <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
+                        onChange={e => updFabric(f.id, "qty", e.target.value)} />
+                      <span style={{ fontSize: 12, color: "#8B95A1", minWidth: 28 }}>{m?.unit || "yard"}</span>
+                      {cost > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{cost.toLocaleString()}원</span>}
+                      <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 기타 원가 / 공임비 */}
+              <div className="card">
+                <div className="section-header">
+                  <span className="section-header-title">기타 원가 · 공임비 <span className="section-sub">— {activeProd.name}</span></span>
+                  <button className="btn-orange" onClick={addExtra} style={{ padding: "8px 16px", fontSize: 13 }}>+ 항목 추가</button>
+                </div>
+                {activeProd.extras.map((e, idx) => {
+                  const selLabor = e.laborId ? laborItems.find(l => l.id === Number(e.laborId)) : null;
+                  const unitPrice = selLabor ? selLabor.price : parseFloat(e.price || 0);
+                  const qty = parseFloat(e.qty || 1);
+                  const total = unitPrice * qty;
+                  return (
+                    <div key={e.id} className="fabric-row">
+                      <span style={{ fontSize: 11, color: "#B0B8C1", fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>항목{idx + 1}</span>
+                      {e.laborId
+                        ? <>
+                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
+                              <option value="">직접 입력</option>
+                              <optgroup label="── 공임비 DB ──">
+                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
+                              </optgroup>
+                            </select>
+                            <input type="number" placeholder="개수" value={e.qty || ""}
+                              style={{ width: 76, textAlign: "right" }}
+                              onChange={x => updExtra(e.id, "qty", x.target.value)} />
+                            <span style={{ fontSize: 12, color: "#8B95A1", minWidth: 28 }}>개</span>
+                            {total > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{total.toLocaleString()}원</span>}
+                          </>
+                        : <>
+                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
+                              <option value="">직접 입력</option>
+                              <optgroup label="── 공임비 DB ──">
+                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
+                              </optgroup>
+                            </select>
+                            <input placeholder="항목명" value={e.customName || ""}
+                              style={{ width: 100, textAlign: "left" }}
+                              onChange={x => updExtra(e.id, "customName", x.target.value)} />
+                            <input type="number" placeholder="금액" value={e.price || ""}
+                              style={{ width: 90, textAlign: "right" }}
+                              onChange={x => updExtra(e.id, "price", x.target.value)} />
+                            <span style={{ fontSize: 12, color: "#8B95A1", minWidth: 16 }}>원</span>
+                          </>
+                      }
+                      <button onClick={() => removeExtra(e.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 비율 설정 */}
+              <div className="card">
+                <div className="section-header" style={{ marginBottom: 20 }}>
+                  <span className="section-header-title">비율 설정</span>
+                </div>
+                {/* 일반관리비율 */}
+                <div style={{ marginBottom: 22 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600 }}>일반관리비율</div>
+                      <div style={{ fontSize: 12, color: "#8B95A1", marginTop: 1 }}>원단 + 기타원가 기준</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <input type="number" value={activeProd.adminRate}
+                        className="rate-input"
+                        onChange={e => updProd("adminRate", Math.max(0, Number(e.target.value) || 0))} />
+                      <span style={{ fontWeight: 700, color: "#4E5968", fontSize: 15 }}>%</span>
+                    </div>
+                  </div>
+                  <input type="range" min={0} max={50} value={activeProd.adminRate}
+                    onChange={e => updProd("adminRate", Number(e.target.value))} style={{ width: "100%" }} />
+                  {baseTotal > 0 && <div style={{ fontSize: 12, color: "#8B95A1", marginTop: 6 }}>적용 금액 <strong style={{ color: NAVY }}>{Math.round(adminAmt).toLocaleString()}원</strong></div>}
+                </div>
+
+                {/* ABCD 등급별 마진율 + 단가 직접 수정 */}
+                <div style={{ borderTop: "1px solid #F2F4F7", paddingTop: 20 }}>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>등급별 마진율 · 단가</div>
+                    <div style={{ fontSize: 12, color: "#8B95A1", marginTop: 1 }}>마진율 기준으로 자동 계산되며, 단가를 직접 입력해 최종 조정할 수 있습니다.</div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {GRADES.map(g => {
+                      const isSel = activeProd.selectedGrade === g;
+                      const rate = activeProd.margins?.[g] ?? DEFAULT_MARGINS[g];
+                      const autoPrice = calcGradePrices[g] || 0;
+                      const isOverridden = overriddenGrades[g];
+                      const overrideVal = activeProd.priceOverrides?.[g] ?? "";
+                      return (
+                        <div key={g} style={{
+                          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                          padding: "10px 12px", borderRadius: 12,
+                          background: isSel ? "#EEF2FF" : "#F8F9FB",
+                          border: `1.5px solid ${isSel ? NAVY : "transparent"}`,
+                          transition: "all 0.15s",
+                        }}>
+                          {/* 등급 뱃지 */}
+                          <div style={{
+                            width: 28, height: 28, borderRadius: 8,
+                            background: isSel ? NAVY : "#fff",
+                            color: isSel ? "#fff" : "#8B95A1",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontWeight: 800, fontSize: 13, flexShrink: 0,
+                            border: isSel ? "none" : "1.5px solid #E5E8EB",
+                          }}>{g}</div>
+                          {/* 마진율 input */}
+                          <input type="number" value={rate}
+                            title="마진율"
+                            style={{ width: 56, height: 36, textAlign: "center", fontWeight: 700, padding: "0 4px", fontSize: 14, flexShrink: 0 }}
+                            onChange={e => updProd("margins", { ...activeProd.margins, [g]: Math.max(0, Number(e.target.value) || 0) })} />
+                          <span style={{ fontSize: 12, color: "#4E5968", fontWeight: 600, flexShrink: 0 }}>%</span>
+                          {/* 단가 input (편집 가능) */}
+                          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, minWidth: 100 }}>
+                            <input type="number" value={overrideVal}
+                              placeholder={autoPrice > 0 ? Math.round(autoPrice).toLocaleString() : "—"}
+                              title="단가 직접 입력"
+                              style={{
+                                flex: 1, height: 36, textAlign: "right", padding: "0 8px",
+                                fontSize: 14, fontWeight: 700,
+                                color: isOverridden ? ORANGE : (isSel ? NAVY : "#4E5968"),
+                                background: isOverridden ? "#FFF7ED" : "#fff",
+                                borderColor: isOverridden ? "#FED7AA" : undefined,
+                              }}
+                              onChange={e => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: e.target.value })} />
+                            <span style={{ fontSize: 12, color: "#8B95A1", flexShrink: 0 }}>원</span>
+                            {isOverridden && (
+                              <button onClick={() => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: "" })}
+                                title="자동 계산값으로 초기화"
+                                style={{
+                                  width: 28, height: 28, borderRadius: 6, border: "none", cursor: "pointer",
+                                  background: "#fff", color: "#8B95A1", fontFamily: "inherit", fontSize: 14,
+                                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                  border: "1.5px solid #E5E8EB",
+                                }}>↻</button>
+                            )}
+                          </div>
+                          {/* 선택 버튼 */}
+                          <button
+                            onClick={() => updProd("selectedGrade", g)}
+                            style={{
+                              padding: "6px 12px", fontSize: 12, fontWeight: 700,
+                              borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                              background: isSel ? NAVY : "#fff",
+                              color: isSel ? "#fff" : "#8B95A1",
+                              border: isSel ? "1.5px solid " + NAVY : "1.5px solid #E5E8EB",
+                              transition: "all 0.15s", flexShrink: 0,
+                            }}>{isSel ? "✓ 선택" : "선택"}</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF7ED", borderRadius: 10, fontSize: 12, color: "#9A3412", lineHeight: 1.6 }}>
+                    💡 단가 칸이 비어있으면 마진율 기준 자동 계산값을 사용합니다. 직접 입력한 단가는 <strong style={{ color: ORANGE }}>주황색</strong>으로 표시되며 ↻ 버튼으로 초기화할 수 있습니다.
+                  </div>
+                </div>
+              </div>
+
+              {/* 견적 포함 제품 */}
+              <div className="card">
+                <div className="section-header" style={{ marginBottom: 14 }}>
+                  <span className="section-header-title">견적 포함 제품</span>
+                  <span className="info-pill">{products.filter(p => p.include !== false).length} / {products.length} 선택</span>
+                </div>
+                <div style={{ fontSize: 12, color: "#8B95A1", marginBottom: 12 }}>여러 제품을 한 견적서에 함께 담을 수 있어요. 체크하면 견적서에 포함됩니다.</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {products.map(p => {
+                    const c = computeProduct(p, materials, laborItems);
+                    const isInc = p.include !== false;
+                    const hasData = c.base > 0;
+                    return (
+                      <div key={p.id} style={{
+                        borderRadius: 14,
+                        background: isInc && hasData ? "#F8F9FB" : "#fff",
+                        border: `1.5px solid ${isInc && hasData ? "#E5E8EB" : "#F2F4F7"}`,
+                        opacity: hasData ? 1 : 0.5,
+                        overflow: "hidden",
+                      }}>
+                        {/* 상단: 체크박스 + 이름 + 가격 */}
+                        <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: hasData ? "pointer" : "not-allowed" }}>
+                          <input type="checkbox" checked={isInc && hasData}
+                            disabled={!hasData}
+                            onChange={e => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, include: e.target.checked } : x))}
+                            style={{ width: 18, height: 18, accentColor: NAVY, cursor: hasData ? "pointer" : "not-allowed", flexShrink: 0 }} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#191F28", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+                            {hasData
+                              ? <div style={{ fontSize: 11, color: "#8B95A1", marginTop: 1 }}>{p.selectedGrade || "A"}급 · {Math.round(c.finalPrice).toLocaleString()}원</div>
+                              : <div style={{ fontSize: 11, color: "#CDD2D7", marginTop: 1 }}>원가 미입력</div>
+                            }
+                          </div>
+                        </label>
+                        {/* 하단: A/B/C/D 등급 선택 버튼 */}
+                        {hasData && (
+                          <div style={{ display: "flex", gap: 4, padding: "0 12px 10px", alignItems: "center" }}>
+                            <span style={{ fontSize: 10, color: "#B0B8C1", fontWeight: 600, letterSpacing: 0.5, marginRight: 4, whiteSpace: "nowrap" }}>등급</span>
+                            {GRADES.map(g => {
+                              const isSel = (p.selectedGrade || "A") === g;
+                              const gPrice = c.grades[g];
+                              return (
+                                <button key={g} onClick={() => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, selectedGrade: g } : x))}
+                                  style={{
+                                    flex: 1, padding: "5px 0", borderRadius: 8, border: `1.5px solid ${isSel ? NAVY : "#E5E8EB"}`,
+                                    background: isSel ? NAVY : "#fff", color: isSel ? "#fff" : "#8B95A1",
+                                    fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                                    transition: "all 0.12s", lineHeight: 1.3,
+                                  }}>
+                                  <div>{g}급</div>
+                                  <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>{Math.round(gPrice).toLocaleString()}원</div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 견적서 생성 */}
+              <div className="card">
+                <div className="section-header" style={{ marginBottom: 14 }}>
+                  <span className="section-header-title">견적서 생성</span>
+                </div>
+                <div style={{ fontSize: 13, color: "#8B95A1", marginBottom: 12 }}>
+                  API 키 없이도 즉시 생성됩니다. 키 입력 시 AI가 더 풍부하게 작성합니다.
+                </div>
+                <input type="password" placeholder="Claude API 키 (선택사항, sk-ant-...)" value={apiKey}
+                  style={{ marginBottom: 10 }} onChange={e => setApiKey(e.target.value)} />
+                {apiError && (
+                  <div style={{ color: "#F04452", fontSize: 13, marginBottom: 10, padding: "8px 12px", background: "#FFF0F1", borderRadius: 8 }}>
+                    {apiError}
+                  </div>
+                )}
+                <button onClick={generateQuote} disabled={generating || baseTotal === 0}
+                  style={{
+                    width: "100%", padding: "14px 0", fontSize: 15, border: "none", borderRadius: 12,
+                    background: (generating || baseTotal === 0) ? "#E5E8EB" : ORANGE,
+                    color: (generating || baseTotal === 0) ? "#B0B8C1" : "#fff",
+                    fontWeight: 700, cursor: (generating || baseTotal === 0) ? "not-allowed" : "pointer",
+                    fontFamily: "inherit", transition: "background 0.15s",
+                  }}>
+                  {generating ? "⏳ 생성 중..." : apiKey.trim() ? "✨ AI 견적서 생성" : "📄 견적서 생성"}
+                </button>
+                <div style={{ fontSize: 11, color: "#B0B8C1", marginTop: 8, textAlign: "center" }}>claude-sonnet-4-6 모델</div>
+              </div>
+            </div>
+
+            {/* 오른쪽 원가 요약 */}
+            <div style={{ position: "sticky", top: 24 }}>
+              <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ padding: "18px 20px", borderBottom: "1px solid #F2F4F7", background: "linear-gradient(135deg, #1a2f5e, #1e3a70)" }}>
+                  <div style={{ fontSize: 11, color: "rgba(147,197,253,0.8)", marginBottom: 4, fontWeight: 600, letterSpacing: 0.5 }}>원가 요약</div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", letterSpacing: -0.3 }}>FR {activeProd.name}</div>
+                </div>
+
+                {activeProd.fabrics.some(f => f.matId && f.qty) && (
+                  <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                    <div className="section-label">원단</div>
+                    {activeProd.fabrics.map((f, i) => {
+                      const m = materials.find(x => x.id === Number(f.matId));
+                      const c = m ? m.price * parseFloat(f.qty || 0) : 0;
+                      if (!m || c === 0) return null;
+                      return (
+                        <div key={f.id} className="row-item" style={{ padding: "3px 0" }}>
+                          <span className="row-label" style={{ maxWidth: 145, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{m.name}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "#191F28" }}>{c.toLocaleString()}원</span>
+                        </div>
+                      );
+                    })}
+                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #F2F4F7" }}>
+                      <span style={{ fontSize: 12, color: "#8B95A1" }}>원단 소계</span>
+                      <span style={{ fontSize: 13, fontWeight: 700 }}>{fabricCost.toLocaleString()}원</span>
+                    </div>
+                  </div>
+                )}
+
+                {activeProd.extras.some(e => (e.laborId || e.customName) && (e.laborId || e.price)) && (
+                  <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                    <div className="section-label">기타 · 공임비</div>
+                    {activeProd.extras.map(e => {
+                      const l = e.laborId ? laborItems.find(x => x.id === Number(e.laborId)) : null;
+                      const name = l ? l.name : e.customName;
+                      const unitPrice = l ? l.price : parseFloat(e.price || 0);
+                      const qty = parseFloat(e.qty || 1);
+                      const total = unitPrice * qty;
+                      if (!name || !total) return null;
+                      return (
+                        <div key={e.id} className="row-item" style={{ padding: "3px 0" }}>
+                          <span className="row-label" style={{ maxWidth: 145, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{name}{qty !== 1 ? ` ×${qty}` : ""}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: "#191F28" }}>{Math.round(total).toLocaleString()}원</span>
+                        </div>
+                      );
+                    })}
+                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #F2F4F7" }}>
+                      <span style={{ fontSize: 12, color: "#8B95A1" }}>공임비 소계</span>
+                      <span style={{ fontSize: 13, fontWeight: 700 }}>{extraCost.toLocaleString()}원</span>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                  <div className="row-item">
+                    <span className="row-label">소계</span>
+                    <span className="row-value">{baseTotal.toLocaleString()}원</span>
+                  </div>
+                  <div className="row-item">
+                    <span className="row-label">일반관리비 ({activeProd.adminRate}%)</span>
+                    <span className="row-value" style={{ color: "#7C3AED" }}>+{Math.round(adminAmt).toLocaleString()}원</span>
+                  </div>
+                  <div className="row-item">
+                    <span className="row-label">관리비 포함 원가</span>
+                    <span className="row-value">{Math.round(beforeMargin).toLocaleString()}원</span>
+                  </div>
+                </div>
+
+                {/* ABCD 등급 가격 */}
+                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                  <div className="section-label">등급별 단가</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {GRADES.map(g => {
+                      const isSel = activeProd.selectedGrade === g;
+                      const p = gradePrices[g] || 0;
+                      const r = activeProd.margins?.[g] ?? DEFAULT_MARGINS[g];
+                      const isOv = overriddenGrades[g];
+                      return (
+                        <button key={g}
+                          onClick={() => updProd("selectedGrade", g)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "8px 10px", borderRadius: 10, cursor: "pointer",
+                            border: isSel ? `1.5px solid ${NAVY}` : "1.5px solid transparent",
+                            background: isSel ? "#EEF2FF" : "transparent",
+                            fontFamily: "inherit", textAlign: "left", width: "100%",
+                            transition: "all 0.15s",
+                          }}>
+                          <span style={{
+                            width: 22, height: 22, borderRadius: 6,
+                            background: isSel ? NAVY : "#E5E8EB",
+                            color: isSel ? "#fff" : "#8B95A1",
+                            display: "inline-flex", alignItems: "center", justifyContent: "center",
+                            fontWeight: 800, fontSize: 11, flexShrink: 0,
+                          }}>{g}</span>
+                          <span style={{ fontSize: 11, color: "#8B95A1", flexShrink: 0, minWidth: 28 }}>{r}%</span>
+                          {isOv && <span title="수동 수정됨" style={{ fontSize: 9, fontWeight: 800, color: ORANGE, padding: "1px 5px", borderRadius: 4, background: "#FFF7ED", flexShrink: 0 }}>수정</span>}
+                          <span style={{ flex: 1, textAlign: "right", fontSize: 13, fontWeight: isSel ? 800 : 600, color: isSel ? NAVY : (isOv ? ORANGE : "#4E5968") }}>
+                            {p > 0 ? `${Math.round(p).toLocaleString()}원` : "—"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 최종 단가 (선택된 등급) */}
+                <div style={{ padding: 12 }}>
+                  <div className="price-highlight">
+                    <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "rgba(249,115,22,0.95)", padding: "3px 10px", borderRadius: 100, letterSpacing: 0.5 }}>
+                        {activeProd.selectedGrade || "A"}급 선택
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#93C5FD", marginBottom: 4, fontWeight: 500 }}>최종 단가 (1개)</div>
+                    <div style={{ fontSize: 30, fontWeight: 900, color: "#fff", letterSpacing: -1 }}>
+                      {finalPrice > 0 ? `${Math.round(finalPrice).toLocaleString()}원` : "—"}
+                    </div>
+                    {finalPrice > 0 && (
+                      <>
+                        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.15)" }}>
+                          <div style={{ fontSize: 11, color: "#93C5FD", marginBottom: 4 }}>납품가 대비 마진율</div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: ORANGE }}>
+                            {(marginAmt / finalPrice * 100).toFixed(1)}%
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, color: "rgba(147,197,253,0.65)", marginTop: 10, lineHeight: 1.7 }}>
+                          원단 {Math.round(fabricCost/finalPrice*100)}% · 공임비 {Math.round(extraCost/finalPrice*100)}%<br/>
+                          관리비 {Math.round(adminAmt/finalPrice*100)}% · 마진 {Math.round(marginAmt/finalPrice*100)}%
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── 견적서 탭 (애플 내부 보고서 스타일) ── */}
+        {tab === "quote" && (
+          <div>
+            {quote ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12, flexWrap: "wrap" }} className="no-print">
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#191F28" }}>견적서 미리보기</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => setEditingQuote(v => !v)}
+                      style={{
+                        padding: "10px 18px", border: `1.5px solid ${editingQuote ? ORANGE : "#E5E8EB"}`,
+                        borderRadius: 12, background: editingQuote ? "#FFF7ED" : "#fff",
+                        color: editingQuote ? ORANGE : "#4E5968", fontSize: 13, fontWeight: 700,
+                        cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
+                      }}>
+                      {editingQuote ? "✅ 완료" : "✏️ 수정"}
+                    </button>
+                    {!editingQuote && <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>}
+                  </div>
+                </div>
+                {editingQuote ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ fontSize: 12, color: "#8B95A1", padding: "8px 12px", background: "#FFF7ED", borderRadius: 10, border: "1px solid #FED7AA" }}>
+                      💡 마크다운 형식으로 편집하세요. <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}># 제목</code>, <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>| 표 |</code>, <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>**굵게**</code> 사용 가능
+                    </div>
+                    <textarea
+                      value={quote}
+                      onChange={e => setQuote(e.target.value)}
+                      style={{
+                        width: "100%", minHeight: 520, padding: "18px 20px",
+                        border: "1.5px solid #FED7AA", borderRadius: 16, fontSize: 13,
+                        lineHeight: 1.7, fontFamily: "'SF Mono', 'Fira Code', 'Menlo', monospace",
+                        color: "#334155", background: "#FAFAFA", resize: "vertical",
+                        outline: "none", boxShadow: "0 0 0 3px rgba(249,115,22,0.08)",
+                      }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                      <button onClick={() => setEditingQuote(false)} className="btn-orange" style={{ padding: "11px 24px" }}>
+                        ✅ 완료
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="apple-doc">
+                    <AppleMarkdown text={quote} />
+                    <div className="apple-doc-footer">
+                      본 문서는 참고용이며, 최종 계약 시 담당자 확인이 필요합니다.
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="card" style={{ padding: 64, textAlign: "center" }}>
+                <div style={{ fontSize: 56, marginBottom: 16 }}>📄</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#4E5968", marginBottom: 8 }}>견적서가 아직 없습니다</div>
+                <div style={{ fontSize: 14, color: "#B0B8C1", marginBottom: 24 }}>계산기에서 제품 원가를 입력하고 '견적 포함'을 체크한 뒤 견적서를 생성해주세요</div>
+                <button className="btn-orange" style={{ padding: "12px 24px", fontSize: 14 }} onClick={() => setTab("calc")}>계산기로 이동 →</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
