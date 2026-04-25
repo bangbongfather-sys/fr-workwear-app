@@ -311,21 +311,36 @@
 
     @media print {
       .no-print { display: none !important; }
-      body { background: white; margin: 0; padding: 0; }
+      body { background: white !important; margin: 0; padding: 0; }
       @page {
         size: A4 portrait;
-        margin: 10mm 12mm;
+        margin: 8mm 10mm;
       }
-      #root > div { background: white !important; }
+      #root > div { background: white !important; min-height: unset !important; }
       .apple-doc {
         box-shadow: none !important;
         border-radius: 0 !important;
-        padding: 0 !important;
+        padding: 24px 32px !important;
         max-width: 100% !important;
         margin: 0 !important;
-        transform-origin: top left;
         page-break-inside: avoid;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       }
+      .apple-doc img {
+        max-height: 32px !important;
+        width: auto !important;
+      }
+      .apple-doc-footer {
+        margin-top: 20px !important;
+        padding-top: 16px !important;
+        gap: 8px !important;
+      }
+      .apple-doc h1 { font-size: 20px !important; margin-bottom: 12px !important; }
+      .apple-doc h2 { font-size: 14px !important; margin: 12px 0 6px !important; }
+      .apple-doc p, .apple-doc td, .apple-doc th { font-size: 11px !important; }
+      .apple-doc table { margin: 6px 0 !important; }
+      .apple-doc hr { margin: 10px 0 !important; }
     }
   </style>
 </head>
@@ -1728,29 +1743,22 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 
 // ── PDF 1페이지 자동 맞춤 ──
 (function() {
-  // A4 portrait @ 96dpi, 10mm top/bottom margin = 297mm - 20mm = 277mm ≈ 1047px
-  const PAGE_H = 1047;
+  // A4 @ 96dpi, 8mm top/bottom margin = 297mm - 16mm ≈ 281mm ≈ 1062px
+  const PAGE_H = 1020;
 
   window.addEventListener('beforeprint', function() {
     const el = document.querySelector('.apple-doc');
     if (!el) return;
-    el.style.transform = '';
-    el.style.width = '';
-    const h = el.scrollHeight;
+    el.style.zoom = '1';
+    const h = el.offsetHeight;
     if (h > PAGE_H) {
-      const scale = PAGE_H / h;
-      el.style.transformOrigin = 'top left';
-      el.style.transform = 'scale(' + scale + ')';
-      el.style.width = (100 / scale) + '%';
+      el.style.zoom = (PAGE_H / h).toFixed(4);
     }
   });
 
   window.addEventListener('afterprint', function() {
     const el = document.querySelector('.apple-doc');
-    if (!el) return;
-    el.style.transform = '';
-    el.style.transformOrigin = '';
-    el.style.width = '';
+    if (el) el.style.zoom = '';
   });
 })();
 </script>
