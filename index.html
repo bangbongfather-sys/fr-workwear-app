@@ -1678,17 +1678,20 @@ ${productList}
                         }}
                         onDrop={e => {
                           e.preventDefault();
-                          if (!dragFabric.current || dragFabric.current === f.id) { setFabricDropInfo(null); return; }
+                          const dragId = dragFabric.current; // 즉시 캡처 (onDragEnd가 null로 초기화하기 전)
+                          const dropId = f.id;
+                          if (!dragId || dragId === dropId) { setFabricDropInfo(null); return; }
                           const rect = e.currentTarget.getBoundingClientRect();
                           const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                          const currentProdId = activeProdId;
                           setProducts(ps => ps.map(p => {
-                            if (p.id !== activeProdId) return p;
+                            if (p.id !== currentProdId) return p;
                             const arr = [...p.fabrics];
-                            const fromIdx = arr.findIndex(x => x.id === dragFabric.current);
-                            const toIdx = arr.findIndex(x => x.id === f.id);
-                            if (fromIdx < 0 || toIdx < 0) return p;
+                            const fromIdx = arr.findIndex(x => x.id === dragId);
+                            if (fromIdx < 0) return p;
                             const [item] = arr.splice(fromIdx, 1);
-                            const newTo = arr.findIndex(x => x.id === f.id);
+                            const newTo = arr.findIndex(x => x.id === dropId);
+                            if (newTo < 0) { arr.push(item); return { ...p, fabrics: arr }; }
                             arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
                             return { ...p, fabrics: arr };
                           }));
