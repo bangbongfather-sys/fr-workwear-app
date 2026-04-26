@@ -462,11 +462,11 @@ const LABOR_UNITS = ["벌", "장", "개", "m", "yard", "식"];
 // 모든 제품의 비용을 계산하는 helper
 function computeProduct(p, materials, laborItems) {
   const fCost = p.fabrics.reduce((s, f) => {
-    const m = materials.find(x => x.id === Number(f.matId));
+    const m = f.matId !== "" && f.matId != null ? materials.find(x => x.id == f.matId) : null;
     return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
   }, 0);
   const eCost = p.extras.reduce((s, e) => {
-    const u = e.laborId ? (laborItems.find(l => l.id === Number(e.laborId))?.price || 0) : parseFloat(e.price || 0);
+    const u = e.laborId !== "" && e.laborId != null ? (laborItems.find(l => l.id == e.laborId)?.price || 0) : parseFloat(e.price || 0);
     const q = parseFloat(e.qty || 1);
     return s + u * q;
   }, 0);
@@ -1249,9 +1249,10 @@ function App() {
   const addExtra = () => { pushHistory(); updProd("extras", [...activeProd.extras, newExtra()]); };
   const removeExtra = (eid) => { pushHistory(); updProd("extras", activeProd.extras.filter(e => e.id !== eid)); };
   const updExtra = (eid, k, v) => updProd("extras", activeProd.extras.map(e => e.id === eid ? { ...e, [k]: v } : e));
-  const selectLabor = (eid, rawVal) => {
-    const laborId = rawVal === "" ? "" : Number(rawVal);
-    const l = laborItems.find(x => x.id === laborId);
+  const selectLabor = (eid, rawIdx) => {
+    const i = rawIdx === "" ? -1 : parseInt(rawIdx, 10);
+    const l = i >= 0 && laborItems[i] ? laborItems[i] : null;
+    const laborId = l ? l.id : "";
     updProd("extras", activeProd.extras.map(e =>
       e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
     ));
@@ -1259,13 +1260,13 @@ function App() {
   };
 
   const buildFabricLines = () => activeProd.fabrics.map(f => {
-    const m = materials.find(x => x.id === Number(f.matId));
+    const m = materials.find(x => x.id == f.matId);
     if (!m || !f.qty) return null;
     return { name: m.name, qty: f.qty, unit: m.unit, unitPrice: m.price, total: m.price * parseFloat(f.qty) };
   }).filter(Boolean);
 
   const buildExtraLines = () => activeProd.extras.map(e => {
-    const l = e.laborId ? laborItems.find(x => x.id === Number(e.laborId)) : null;
+    const l = e.laborId ? laborItems.find(x => x.id == e.laborId) : null;
     const name = l ? l.name : e.customName;
     const unitPrice = l ? l.price : parseFloat(e.price || 0);
     const qty = parseFloat(e.qty || 1);
@@ -1623,14 +1624,18 @@ ${productList}
                   <button className="btn-orange" onClick={addFabric} style={{ padding: "8px 16px", fontSize: 13 }}>+ 원단 추가</button>
                 </div>
                 {activeProd.fabrics.map((f, idx) => {
-                  const m = materials.find(x => x.id === Number(f.matId));
+                  const m = materials.find(x => x.id == f.matId);
                   const cost = m ? m.price * parseFloat(f.qty || 0) : 0;
+                  const matIdx = f.matId !== "" && f.matId != null ? materials.findIndex(x => x.id == f.matId) : -1;
                   return (
                     <div key={f.id} className="fabric-row">
                       <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
-                      <select style={{ flex: 2, height: 38 }} value={f.matId || ""} onChange={e => updFabric(f.id, "matId", e.target.value === "" ? "" : Number(e.target.value))}>
+                      <select style={{ flex: 2, height: 38 }} value={matIdx >= 0 ? matIdx : ""} onChange={e => {
+                        const i = e.target.value === "" ? -1 : parseInt(e.target.value, 10);
+                        updFabric(f.id, "matId", i >= 0 && materials[i] ? materials[i].id : "");
+                      }}>
                         <option value="">소재 선택</option>
-                        {materials.map(x => <option key={x.id} value={x.id}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
+                        {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
                       </select>
                       <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
                         onChange={e => updFabric(f.id, "qty", e.target.value)} />
@@ -1649,20 +1654,25 @@ ${productList}
                   <button className="btn-orange" onClick={addExtra} style={{ padding: "8px 16px", fontSize: 13 }}>+ 항목 추가</button>
                 </div>
                 {activeProd.extras.map((e, idx) => {
-                  const selLabor = e.laborId ? laborItems.find(l => l.id === Number(e.laborId)) : null;
+                  const selLabor = e.laborId !== "" && e.laborId != null ? laborItems.find(l => l.id == e.laborId) : null;
                   const unitPrice = selLabor ? selLabor.price : parseFloat(e.price || 0);
                   const qty = parseFloat(e.qty || 1);
                   const total = unitPrice * qty;
+                  const labIdx = e.laborId !== "" && e.laborId != null ? laborItems.findIndex(l => l.id == e.laborId) : -1;
+                  const labSelectVal = labIdx >= 0 ? labIdx : "";
+                  const labOptions = <>
+                    <option value="">직접 입력</option>
+                    <optgroup label="── 공임비 DB ──">
+                      {laborItems.map((l, li) => <option key={l.id} value={li}>{l.name} ({l.price.toLocaleString()}원)</option>)}
+                    </optgroup>
+                  </>;
                   return (
                     <div key={e.id} className="fabric-row">
                       <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>항목{idx + 1}</span>
                       {e.laborId
                         ? <>
-                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
-                              <option value="">직접 입력</option>
-                              <optgroup label="── 공임비 DB ──">
-                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
-                              </optgroup>
+                            <select style={{ flex: 2, height: 38 }} value={labSelectVal} onChange={x => selectLabor(e.id, x.target.value)}>
+                              {labOptions}
                             </select>
                             <input type="number" placeholder="개수" value={e.qty || ""}
                               style={{ width: 76, textAlign: "right" }}
@@ -1671,11 +1681,8 @@ ${productList}
                             {total > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{total.toLocaleString()}원</span>}
                           </>
                         : <>
-                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
-                              <option value="">직접 입력</option>
-                              <optgroup label="── 공임비 DB ──">
-                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
-                              </optgroup>
+                            <select style={{ flex: 2, height: 38 }} value={labSelectVal} onChange={x => selectLabor(e.id, x.target.value)}>
+                              {labOptions}
                             </select>
                             <input placeholder="항목명" value={e.customName || ""}
                               style={{ width: 100, textAlign: "left" }}
@@ -1983,7 +1990,7 @@ ${productList}
                   <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                     <div className="section-label">원단</div>
                     {activeProd.fabrics.map((f, i) => {
-                      const m = materials.find(x => x.id === Number(f.matId));
+                      const m = materials.find(x => x.id == f.matId);
                       const c = m ? m.price * parseFloat(f.qty || 0) : 0;
                       if (!m || c === 0) return null;
                       return (
@@ -2004,7 +2011,7 @@ ${productList}
                   <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                     <div className="section-label">기타 · 공임비</div>
                     {activeProd.extras.map(e => {
-                      const l = e.laborId ? laborItems.find(x => x.id === Number(e.laborId)) : null;
+                      const l = e.laborId ? laborItems.find(x => x.id == e.laborId) : null;
                       const name = l ? l.name : e.customName;
                       const unitPrice = l ? l.price : parseFloat(e.price || 0);
                       const qty = parseFloat(e.qty || 1);
