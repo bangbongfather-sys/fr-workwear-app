@@ -726,30 +726,43 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
   );
 }
 
-function DashboardTab({ products, materials, laborItems, orders, setOrders, darkMode }) {
+function DashboardTab({ products, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", note: "" });
   const [showOrderForm, setShowOrderForm] = useState(false);
+  const [showMonthInput, setShowMonthInput] = useState(false);
   const salesRef = useRef(null); const salesInst = useRef(null);
   const pieRef = useRef(null); const pieInst = useRef(null);
   const marginRef = useRef(null); const marginInst = useRef(null);
 
-  const totalRevenue = orders.reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+  const thisYear = new Date().getFullYear();
+  const months12 = Array.from({length:12},(_,i) => `${thisYear}-${String(i+1).padStart(2,"0")}`);
+
+  // 월별 매출: 직접 입력 우선, 없으면 주문 기록 합산
+  const monthlyRevOrders = {};
+  orders.forEach(o => { const m=(o.date||"").slice(0,7); monthlyRevOrders[m]=(monthlyRevOrders[m]||0)+parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
+  const monthValues = months12.map(m => {
+    const direct = monthlySales[m];
+    return (direct !== undefined && direct !== null && direct !== "") ? parseFloat(direct) : (monthlyRevOrders[m]||0);
+  });
+  const monthLabels = months12.map(m => m.slice(5)+"월");
+  const hasAnyData = monthValues.some(v => v > 0);
+  const totalYearRevenue = monthValues.reduce((s,v)=>s+v,0);
+
+  const totalOrderRevenue = orders.reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
   const computed = products.map(p => computeProduct(p, materials, laborItems)).filter(c => c.base > 0);
-  const avgMargin = computed.length > 0 ? computed.reduce((s,c) => s + (c.finalPrice-c.beforeMargin)/c.beforeMargin*100, 0)/computed.length : 0;
+  const avgMarginSell = computed.length > 0 ? computed.reduce((s,c) => s + (c.finalPrice-c.beforeMargin)/c.finalPrice*100, 0)/computed.length : 0;
   const productSales = {};
   orders.forEach(o => { productSales[o.productName] = (productSales[o.productName]||0) + parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
   const topProduct = Object.entries(productSales).sort((a,b)=>b[1]-a[1])[0];
 
-  const last6 = Array.from({length:6},(_,i)=>{ const d=new Date(); d.setMonth(d.getMonth()-5+i); return d.toISOString().slice(0,7); });
-  const monthlyRev = {};
-  orders.forEach(o => { const m=(o.date||"").slice(0,7); monthlyRev[m]=(monthlyRev[m]||0)+parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
-  const monthLabels = last6.map(m => m.slice(5)+"월");
-  const monthValues = last6.map(m => monthlyRev[m]||0);
   const prodLabels = Object.keys(productSales);
   const prodValues = Object.values(productSales);
+
+  // 제품별 마진율: 납품가 대비
   const mProds = products.filter(p => computeProduct(p,materials,laborItems).base > 0);
   const mLabels = mProds.map(p => p.name);
-  const mValues = mProds.map(p => { const c=computeProduct(p,materials,laborItems); return parseFloat(((c.finalPrice-c.beforeMargin)/c.beforeMargin*100).toFixed(1)); });
+  const mValues = mProds.map(p => { const c=computeProduct(p,materials,laborItems); return parseFloat(((c.finalPrice-c.beforeMargin)/c.finalPrice*100).toFixed(1)); });
+
   const chartText = darkMode ? "rgba(235,235,245,0.55)" : "rgba(60,60,67,0.55)";
   const gridCol = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
 
@@ -758,9 +771,13 @@ function DashboardTab({ products, materials, laborItems, orders, setOrders, dark
     if (salesRef.current) {
       if (salesInst.current) salesInst.current.destroy();
       salesInst.current = new Chart(salesRef.current, {
-        type:"bar", data:{ labels:monthLabels, datasets:[{ label:"매출", data:monthValues, backgroundColor:"rgba(71,85,105,0.75)", borderRadius:5 }] },
-        options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}},
-          scales:{ x:{grid:{color:gridCol},ticks:{color:chartText}}, y:{grid:{color:gridCol},ticks:{color:chartText,callback:v=>v>=1000000?(v/1000000).toFixed(1)+"M":v>=1000?(v/1000).toFixed(0)+"K":v}} } }
+        type:"bar",
+        data:{ labels:monthLabels, datasets:[{ label:"월 매출", data:monthValues,
+          backgroundColor:monthValues.map((_,i)=>{ const m=months12[i]; return (monthlySales[m]!==undefined&&monthlySales[m]!=="")?"rgba(71,85,105,0.85)":"rgba(71,85,105,0.45)"; }),
+          borderRadius:5 }] },
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},
+          tooltip:{callbacks:{label:ctx=>" "+Math.round(ctx.raw/10000).toLocaleString()+"만원"}}},
+          scales:{ x:{grid:{color:gridCol},ticks:{color:chartText}}, y:{grid:{color:gridCol},ticks:{color:chartText,callback:v=>v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000000?(v/10000000).toFixed(0)+"천만":v>=1000000?(v/1000000).toFixed(0)+"백만":v>=10000?(v/10000).toFixed(0)+"만":v}} } }
       });
     }
     if (pieRef.current && prodLabels.length > 0) {
@@ -773,13 +790,14 @@ function DashboardTab({ products, materials, laborItems, orders, setOrders, dark
     if (marginRef.current && mLabels.length > 0) {
       if (marginInst.current) marginInst.current.destroy();
       marginInst.current = new Chart(marginRef.current, {
-        type:"bar", data:{ labels:mLabels, datasets:[{ label:"마진율(%)", data:mValues, backgroundColor:mValues.map(v=>v>=35?"rgba(0,180,147,0.75)":v>=25?"rgba(255,149,0,0.75)":"rgba(240,68,82,0.75)"), borderRadius:5 }] },
+        type:"bar", data:{ labels:mLabels, datasets:[{ label:"납품가 마진율(%)", data:mValues,
+          backgroundColor:mValues.map(v=>v>=26?"rgba(0,180,147,0.75)":v>=20?"rgba(255,149,0,0.75)":"rgba(240,68,82,0.75)"), borderRadius:5 }] },
         options:{ responsive:true, maintainAspectRatio:false, indexAxis:"y", plugins:{legend:{display:false}},
-          scales:{ x:{grid:{color:gridCol},ticks:{color:chartText,callback:v=>v+"%"}}, y:{grid:{display:false},ticks:{color:chartText}} } }
+          scales:{ x:{grid:{color:gridCol},ticks:{color:chartText,callback:v=>v+"%"},max:Math.ceil((Math.max(...mValues,30)+5)/5)*5}, y:{grid:{display:false},ticks:{color:chartText}} } }
       });
     }
     return () => { [salesInst,pieInst,marginInst].forEach(r=>{if(r.current){r.current.destroy();r.current=null;}}); };
-  }, [orders, darkMode, products.length]);
+  }, [orders, darkMode, products.length, JSON.stringify(monthlySales)]);
 
   const addOrder = () => {
     if (!newOrder.productName || !newOrder.unitPrice) return;
@@ -797,17 +815,46 @@ function DashboardTab({ products, materials, laborItems, orders, setOrders, dark
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-        {kpi("총 누적 매출", totalRevenue>0?Math.round(totalRevenue/10000).toLocaleString()+"만원":"—", orders.length+"건 기록", "#475569")}
-        {kpi("총 주문 건수", orders.length>0?orders.length+"건":"—", "누적 주문", null)}
-        {kpi("평균 마진율", avgMargin>0?avgMargin.toFixed(1)+"%":"—", "현재 제품 기준", avgMargin>=35?"#00B493":avgMargin>=25?"#FF9500":avgMargin>0?"#F04452":null)}
+        {kpi(thisYear+"년 총 매출", totalYearRevenue>0?Math.round(totalYearRevenue/10000).toLocaleString()+"만원":"—", "월별 입력 기준", "#475569")}
+        {kpi("주문 기록 매출", totalOrderRevenue>0?Math.round(totalOrderRevenue/10000).toLocaleString()+"만원":"—", orders.length+"건 합산", null)}
+        {kpi("납품가 마진율", avgMarginSell>0?avgMarginSell.toFixed(1)+"%":"—", "현재 제품 기준", avgMarginSell>=26?"#00B493":avgMarginSell>=20?"#FF9500":avgMarginSell>0?"#F04452":null)}
         {kpi("최다 매출 제품", topProduct?topProduct[0]:"—", topProduct?Math.round(topProduct[1]/10000).toLocaleString()+"만원":"기록 없음", null)}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <div className="card">
-          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📈 월별 매출 추이 (최근 6개월)</div>
-          <div style={{height:200,position:"relative"}}>
-            {orders.length>0?<canvas ref={salesRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>주문 기록을 추가하면<br/>그래프가 표시됩니다</div>}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>📈 {thisYear}년 월별 매출 추이</div>
+            <button onClick={()=>setShowMonthInput(v=>!v)} style={{fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>
+              {showMonthInput?"닫기":"✏️ 직접 입력"}
+            </button>
           </div>
+          <div style={{height:200,position:"relative"}}>
+            {hasAnyData?<canvas ref={salesRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>직접 입력 또는<br/>주문 기록을 추가하세요</div>}
+          </div>
+          {showMonthInput&&(
+            <div style={{marginTop:16,borderTop:"0.5px solid var(--divider)",paddingTop:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>월별 매출 직접 입력 (원) — 입력시 주문 기록 자동합산 값 대체</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                {months12.map(m=>{
+                  const autoVal = monthlyRevOrders[m];
+                  return (
+                    <div key={m}>
+                      <div style={{fontSize:11,fontWeight:600,color:"var(--text2)",marginBottom:4,textAlign:"center"}}>{m.slice(5)}월</div>
+                      <input type="number" placeholder={autoVal>0?Math.round(autoVal/10000)+"만":"-"}
+                        value={monthlySales[m]!==undefined&&monthlySales[m]!==""?monthlySales[m]:""}
+                        onChange={e=>setMonthlySales(prev=>({...prev,[m]:e.target.value===""?undefined:parseFloat(e.target.value)}))}
+                        style={{height:36,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:10}}>
+                <div style={{fontSize:11,color:"var(--text3)"}}>💡 진한 막대 = 직접 입력, 연한 막대 = 주문 기록 자동합산</div>
+                <div style={{flex:1}}/>
+                <button onClick={()=>setMonthlySales({})} style={{fontSize:11,color:"#F04452",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>전체 초기화</button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="card">
           <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>🥧 제품군별 매출 비중</div>
@@ -817,12 +864,12 @@ function DashboardTab({ products, materials, laborItems, orders, setOrders, dark
         </div>
       </div>
       <div className="card">
-        <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📊 제품별 마진율 현황</div>
+        <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:4}}>📊 제품별 마진율 현황 <span style={{fontSize:11,fontWeight:400,color:"var(--text3)"}}>(납품가 대비)</span></div>
         <div style={{height:Math.max(140,mLabels.length*48),position:"relative"}}>
           {mLabels.length>0?<canvas ref={marginRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:120,color:"var(--text3)",fontSize:13}}>원가가 입력된 제품이 없습니다</div>}
         </div>
         {mLabels.length>0&&(<div style={{display:"flex",gap:16,marginTop:12,paddingTop:12,borderTop:"0.5px solid var(--divider)",flexWrap:"wrap"}}>
-          {[["≥35% 우수","#00B493"],["25~34% 양호","#FF9500"],["<25% 주의","#F04452"]].map(([l,c])=>(
+          {[["≥26% 우수","#00B493"],["20~25% 양호","#FF9500"],["<20% 주의","#F04452"]].map(([l,c])=>(
             <div key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}><div style={{width:10,height:10,borderRadius:3,background:c}}/><span style={{color:"var(--text2)"}}>{l}</span></div>
           ))}
         </div>)}
@@ -1028,6 +1075,7 @@ function App() {
   const [showProdSearch, setShowProdSearch] = useState(false);
   const [orders, setOrders] = useState(() => load("frw_orders", []));
   const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
+  const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
   useEffect(() => {
     document.body.classList.toggle("dark", darkMode);
     save("frw_dark", darkMode);
@@ -1051,6 +1099,7 @@ function App() {
     if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
     if (d.orders) setOrders(d.orders);
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
+    if (d.monthlySales) setMonthlySales(d.monthlySales);
   };
 
   useEffect(() => {
@@ -1072,15 +1121,15 @@ function App() {
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
-    save("frw_orders", orders); save("frw_intakes", fabricIntakes);
+    save("frw_orders", orders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, fabricIntakes })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, fabricIntakes, monthlySales })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, fabricIntakes]);
+  }, [materials, laborItems, products, apiKey, orders, fabricIntakes, monthlySales]);
 
   const activeProd = products.find(p => p.id === activeProdId) || products[0];
 
@@ -2183,6 +2232,8 @@ ${productList}
             laborItems={laborItems}
             orders={orders}
             setOrders={setOrders}
+            monthlySales={monthlySales}
+            setMonthlySales={setMonthlySales}
             darkMode={darkMode}
           />
         )}
