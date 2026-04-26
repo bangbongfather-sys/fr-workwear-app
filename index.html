@@ -1958,12 +1958,24 @@ ${productList}
                   })}
                 </div>
                 {(() => {
-                  const withData = products.filter(p => p.include !== false).map(p => computeProduct(p, materials, laborItems)).filter(c => c.base > 0);
+                  const withData = products
+                    .filter(p => p.include !== false)
+                    .map(p => ({ p, c: computeProduct(p, materials, laborItems) }))
+                    .filter(({ c }) => c.base > 0);
                   if (withData.length === 0) return null;
-                  const avgM = withData.reduce((sum, c) => sum + ((c.finalPrice - c.beforeMargin) / c.beforeMargin * 100), 0) / withData.length;
-                  const avgMSell = withData.reduce((sum, c) => sum + ((c.finalPrice - c.beforeMargin) / c.finalPrice * 100), 0) / withData.length;
-                  const totalRev = withData.reduce((s, c) => s + c.finalPrice, 0);
-                  const totalCost = withData.reduce((s, c) => s + c.beforeMargin, 0);
+                  // 사용자가 직접 설정한 등급별 마진율의 평균
+                  const avgM = withData.reduce((sum, { p, c }) => {
+                    const sel = c.selectedGrade || "A";
+                    const m = (p.margins || DEFAULT_MARGINS)[sel] ?? DEFAULT_MARGINS[sel];
+                    return sum + m;
+                  }, 0) / withData.length;
+                  // 납품가 대비 실질 마진율 평균
+                  const avgMSell = withData.reduce((sum, { c }) => {
+                    if (!c.finalPrice) return sum;
+                    return sum + ((c.finalPrice - c.beforeMargin) / c.finalPrice * 100);
+                  }, 0) / withData.length;
+                  const totalRev = withData.reduce((s, { c }) => s + c.finalPrice, 0);
+                  const totalCost = withData.reduce((s, { c }) => s + c.beforeMargin, 0);
                   const mColor = avgM >= 35 ? "#00B493" : avgM >= 25 ? "#FF9500" : "#F04452";
                   const mColorSell = avgMSell >= 26 ? "#00B493" : avgMSell >= 20 ? "#FF9500" : "#F04452";
                   return (
@@ -1971,7 +1983,7 @@ ${productList}
                       <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 }}>견적 요약</div>
                       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                         <div style={{ flex: 1, minWidth: 80 }}>
-                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>원가 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(원가 대비)</span></div>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>평균 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(설정값 기준)</span></div>
                           <div style={{ fontSize: 24, fontWeight: 800, color: mColor, lineHeight: 1 }}>{avgM.toFixed(1)}<span style={{ fontSize: 14 }}>%</span></div>
                         </div>
                         <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
