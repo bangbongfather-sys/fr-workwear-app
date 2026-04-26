@@ -828,13 +828,15 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
   );
 }
 
-function DashboardTab({ products, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode }) {
+function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", note: "" });
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [showMonthInput, setShowMonthInput] = useState(false);
   const salesRef = useRef(null); const salesInst = useRef(null);
   const pieRef = useRef(null); const pieInst = useRef(null);
   const marginRef = useRef(null); const marginInst = useRef(null);
+  const dragMargin = useRef(null);
+  const [marginDropInfo, setMarginDropInfo] = useState(null);
 
   const thisYear = new Date().getFullYear();
   const months12 = Array.from({length:12},(_,i) => `${thisYear}-${String(i+1).padStart(2,"0")}`);
@@ -970,11 +972,80 @@ function DashboardTab({ products, materials, laborItems, orders, setOrders, mont
         <div style={{height:Math.max(140,mLabels.length*48),position:"relative"}}>
           {mLabels.length>0?<canvas ref={marginRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:120,color:"var(--text3)",fontSize:13}}>원가가 입력된 제품이 없습니다</div>}
         </div>
-        {mLabels.length>0&&(<div style={{display:"flex",gap:16,marginTop:12,paddingTop:12,borderTop:"0.5px solid var(--divider)",flexWrap:"wrap"}}>
-          {[["≥26% 우수","#00B493"],["20~25% 양호","#FF9500"],["<20% 주의","#F04452"]].map(([l,c])=>(
-            <div key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}><div style={{width:10,height:10,borderRadius:3,background:c}}/><span style={{color:"var(--text2)"}}>{l}</span></div>
-          ))}
-        </div>)}
+        {mLabels.length>0&&(<>
+          <div style={{display:"flex",gap:16,marginTop:12,paddingTop:12,borderTop:"0.5px solid var(--divider)",flexWrap:"wrap",marginBottom:14}}>
+            {[["≥26% 우수","#00B493"],["20~25% 양호","#FF9500"],["<20% 주의","#F04452"]].map(([l,c])=>(
+              <div key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}><div style={{width:10,height:10,borderRadius:3,background:c}}/><span style={{color:"var(--text2)"}}>{l}</span></div>
+            ))}
+          </div>
+          {/* 드래그 순서 조정 목록 */}
+          <div style={{fontSize:11,fontWeight:600,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>순서 조정 · 제품명 클릭 시 단가 계산기 이동</div>
+          <div>
+            {mProds.map((p, idx) => {
+              const c = computeProduct(p, materials, laborItems);
+              const mv = parseFloat(((c.finalPrice - c.beforeMargin) / c.finalPrice * 100).toFixed(1));
+              const barColor = mv >= 26 ? "#00B493" : mv >= 20 ? "#FF9500" : "#F04452";
+              const isDropTop = marginDropInfo?.id === p.id && marginDropInfo?.side === "top";
+              const isDropBot = marginDropInfo?.id === p.id && marginDropInfo?.side === "bottom";
+              const MInsertLine = () => (
+                <div style={{height:3,borderRadius:3,margin:"2px 0",background:"linear-gradient(90deg,#007AFF,#34AADC)",boxShadow:"0 0 8px rgba(0,122,255,0.6)",position:"relative"}}>
+                  <div style={{position:"absolute",left:4,top:"50%",transform:"translateY(-50%)",width:8,height:8,borderRadius:"50%",background:"#007AFF",boxShadow:"0 0 6px rgba(0,122,255,0.8)"}}/>
+                </div>
+              );
+              return (
+                <div key={p.id} style={{position:"relative"}}>
+                  {isDropTop && <MInsertLine/>}
+                  <div
+                    draggable
+                    onDragStart={e => { dragMargin.current = p.id; setTimeout(()=>{e.target.style.opacity="0.35";},0); }}
+                    onDragEnd={e => { e.currentTarget.style.opacity="1"; setMarginDropInfo(null); dragMargin.current=null; }}
+                    onDragOver={e => {
+                      e.preventDefault();
+                      if (dragMargin.current === p.id) return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
+                      if (marginDropInfo?.id !== p.id || marginDropInfo?.side !== side) setMarginDropInfo({id:p.id, side});
+                    }}
+                    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setMarginDropInfo(null); }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      const dragId = dragMargin.current;
+                      const dropId = p.id;
+                      if (!dragId || dragId === dropId) { setMarginDropInfo(null); return; }
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
+                      setProducts(ps => {
+                        const arr = [...ps];
+                        const fromIdx = arr.findIndex(x => x.id === dragId);
+                        if (fromIdx < 0) return ps;
+                        const [item] = arr.splice(fromIdx, 1);
+                        const newTo = arr.findIndex(x => x.id === dropId);
+                        if (newTo < 0) return [...arr, item];
+                        arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                        return arr;
+                      });
+                      setMarginDropInfo(null); dragMargin.current = null;
+                    }}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderRadius:10,background:"var(--surface2)",marginBottom:4,cursor:"default",transition:"opacity 0.15s"}}
+                  >
+                    <span style={{fontSize:14,color:"var(--text3)",cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span>
+                    <span style={{fontSize:11,color:"var(--text3)",fontWeight:600,minWidth:18,flexShrink:0}}>{idx+1}</span>
+                    <span
+                      onClick={() => { setTab("calc"); setActiveProdId(p.id); }}
+                      style={{flex:1,fontSize:13,fontWeight:600,color:"var(--text1)",cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}
+                      title={`${p.name} — 단가 계산기로 이동`}
+                    >{p.name}</span>
+                    <div style={{width:90,height:8,borderRadius:4,background:"var(--divider)",overflow:"hidden",flexShrink:0}}>
+                      <div style={{width:`${Math.min(mv/40*100,100)}%`,height:"100%",background:barColor,borderRadius:4,transition:"width 0.3s"}}/>
+                    </div>
+                    <span style={{fontSize:12,fontWeight:700,color:barColor,minWidth:42,textAlign:"right",flexShrink:0}}>{mv.toFixed(1)}%</span>
+                  </div>
+                  {isDropBot && <MInsertLine/>}
+                </div>
+              );
+            })}
+          </div>
+        </>)}
       </div>
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -2492,6 +2563,7 @@ ${productList}
         {tab === "dashboard" && (
           <DashboardTab
             products={products}
+            setProducts={setProducts}
             materials={materials}
             laborItems={laborItems}
             orders={orders}
@@ -2499,6 +2571,8 @@ ${productList}
             monthlySales={monthlySales}
             setMonthlySales={setMonthlySales}
             darkMode={darkMode}
+            setTab={setTab}
+            setActiveProdId={setActiveProdId}
           />
         )}
 
