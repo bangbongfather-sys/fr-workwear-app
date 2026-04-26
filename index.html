@@ -831,6 +831,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
 function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", note: "" });
   const [showOrderForm, setShowOrderForm] = useState(false);
+  const [editingOrderId, setEditingOrderId] = useState(null);
+  const [editOrderDraft, setEditOrderDraft] = useState(null);
   const [showMonthInput, setShowMonthInput] = useState(false);
   const salesRef = useRef(null); const salesInst = useRef(null);
   const pieRef = useRef(null); const pieInst = useRef(null);
@@ -908,6 +910,13 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
     setOrders(prev => [...prev, { id:uid(), ...newOrder }]);
     setNewOrder({ date:new Date().toISOString().slice(0,10), productName:"", qty:"1", unitPrice:"", client:"", note:"" });
     setShowOrderForm(false);
+  };
+  const startEditOrder = (o) => { setEditingOrderId(o.id); setEditOrderDraft({ ...o }); };
+  const cancelEditOrder = () => { setEditingOrderId(null); setEditOrderDraft(null); };
+  const saveEditOrder = () => {
+    if (!editOrderDraft || !editOrderDraft.productName || !editOrderDraft.unitPrice) return;
+    setOrders(prev => prev.map(x => x.id === editingOrderId ? { ...editOrderDraft } : x));
+    setEditingOrderId(null); setEditOrderDraft(null);
   };
   const kpi = (label,val,sub,color) => (
     <div className="card" style={{flex:1,minWidth:120}}>
@@ -1049,8 +1058,8 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       </div>
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📋 주문 기록</div>
-          <button onClick={()=>setShowOrderForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showOrderForm?"닫기":"+ 주문 추가"}</button>
+          <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📋 제품별 판매 현황</div>
+          <button onClick={()=>setShowOrderForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showOrderForm?"닫기":"+ 판매 추가"}</button>
         </div>
         {showOrderForm&&(
           <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
@@ -1068,16 +1077,33 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           </div>
         )}
         {orders.length===0?(
-          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>아직 주문 기록이 없습니다<br/>위 버튼으로 주문을 추가하면 매출 지표가 쌓입니다</div>
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>아직 판매 기록이 없습니다<br/>위 버튼으로 판매 내역을 추가하면 매출 지표가 쌓입니다</div>
         ):(
           <div style={{overflowX:"auto"}}>
             <table><thead><tr>
               <th>날짜</th><th>제품명</th><th style={{textAlign:"right"}}>수량</th>
               <th style={{textAlign:"right"}}>단가</th><th style={{textAlign:"right"}}>합계</th>
-              <th>거래처</th><th>비고</th><th style={{textAlign:"center"}}>삭제</th>
+              <th>거래처</th><th>비고</th><th style={{textAlign:"center",minWidth:110}}>관리</th>
             </tr></thead>
             <tbody>
               {[...orders].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(o=>{
+                const isEditing = editingOrderId === o.id;
+                if (isEditing && editOrderDraft) {
+                  const editTotal = parseFloat(editOrderDraft.unitPrice||0) * parseInt(editOrderDraft.qty||1);
+                  return (<tr key={o.id} style={{background:"var(--surface2)"}}>
+                    <td><input type="date" value={editOrderDraft.date||""} onChange={e=>setEditOrderDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/></td>
+                    <td><input value={editOrderDraft.productName||""} onChange={e=>setEditOrderDraft(d=>({...d,productName:e.target.value}))} placeholder="제품명 *" style={{height:34,fontSize:13,padding:"0 8px"}}/></td>
+                    <td><input type="number" value={editOrderDraft.qty||""} onChange={e=>setEditOrderDraft(d=>({...d,qty:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/></td>
+                    <td><input type="number" value={editOrderDraft.unitPrice||""} onChange={e=>setEditOrderDraft(d=>({...d,unitPrice:e.target.value}))} placeholder="단가 *" style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/></td>
+                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>{Math.round(editTotal).toLocaleString()}원</td>
+                    <td><input value={editOrderDraft.client||""} onChange={e=>setEditOrderDraft(d=>({...d,client:e.target.value}))} placeholder="거래처" style={{height:34,fontSize:13,padding:"0 8px"}}/></td>
+                    <td><input value={editOrderDraft.note||""} onChange={e=>setEditOrderDraft(d=>({...d,note:e.target.value}))} placeholder="비고" style={{height:34,fontSize:12,padding:"0 8px"}}/></td>
+                    <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                      <button onClick={saveEditOrder} title="저장" style={{background:"#007AFF",border:"none",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,borderRadius:6,padding:"5px 9px",marginRight:4,fontFamily:"inherit"}}>저장</button>
+                      <button onClick={cancelEditOrder} title="취소" style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:12,fontWeight:600,borderRadius:6,padding:"4px 8px",fontFamily:"inherit"}}>취소</button>
+                    </td>
+                  </tr>);
+                }
                 const total=parseFloat(o.unitPrice||0)*parseInt(o.qty||1);
                 return (<tr key={o.id}>
                   <td style={{whiteSpace:"nowrap",fontSize:13}}>{o.date}</td>
@@ -1087,7 +1113,10 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                   <td style={{textAlign:"right",fontWeight:700}}>{Math.round(total).toLocaleString()}원</td>
                   <td style={{fontSize:13}}>{o.client}</td>
                   <td style={{fontSize:12,color:"var(--text2)"}}>{o.note}</td>
-                  <td style={{textAlign:"center"}}><button onClick={()=>setOrders(prev=>prev.filter(x=>x.id!==o.id))} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button></td>
+                  <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                    <button onClick={()=>startEditOrder(o)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}>✏️</button>
+                    <button onClick={()=>{ if(confirm("이 판매 기록을 삭제할까요?")) setOrders(prev=>prev.filter(x=>x.id!==o.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                  </td>
                 </tr>);
               })}
             </tbody></table>
