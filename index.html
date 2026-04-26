@@ -633,13 +633,15 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <table>
             <thead><tr>
+              <th style={{ width: 28 }}></th>
               <th>원단명</th><th style={{ textAlign: "right" }}>단가</th>
               <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
               {materials.map(m => (
                 <tr key={m.id} draggable
-                  onDragStart={() => { dragMat.current = m.id; }}
+                  onDragStart={e => { dragMat.current = m.id; e.currentTarget.style.opacity = "0.45"; }}
+                  onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
                   onDragOver={e => e.preventDefault()}
                   onDrop={() => {
                     if (!dragMat.current || dragMat.current === m.id) return;
@@ -652,8 +654,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
                       return arr;
                     });
                     dragMat.current = null;
-                  }}
-                  style={{ cursor: "grab" }}>
+                  }}>
+                  <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }} title="드래그하여 순서 변경">⠿</td>
                   {editMat?.id === m.id ? (
                     <>
                       <td><input value={editMat.name} onChange={e => setEditMat({...editMat, name: e.target.value})} /></td>
@@ -705,13 +707,15 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <table>
             <thead><tr>
+              <th style={{ width: 28 }}></th>
               <th>항목명</th><th style={{ textAlign: "right" }}>단가</th>
               <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
               {laborItems.map(l => (
                 <tr key={l.id} draggable
-                  onDragStart={() => { dragLab.current = l.id; }}
+                  onDragStart={e => { dragLab.current = l.id; e.currentTarget.style.opacity = "0.45"; }}
+                  onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
                   onDragOver={e => e.preventDefault()}
                   onDrop={() => {
                     if (!dragLab.current || dragLab.current === l.id) return;
@@ -724,8 +728,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
                       return arr;
                     });
                     dragLab.current = null;
-                  }}
-                  style={{ cursor: "grab" }}>
+                  }}>
+                  <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }} title="드래그하여 순서 변경">⠿</td>
                   {editLab?.id === l.id ? (
                     <>
                       <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
@@ -1164,7 +1168,7 @@ function App() {
     if (d.products && d.products.length > 0) {
       const migrated = d.products.map(migrateProduct);
       setProducts(migrated);
-      setActiveProdId(migrated[0].id);
+      setActiveProdId(prev => migrated.find(p => p.id === prev) ? prev : migrated[0].id);
     }
     if (d.apiKey !== undefined) setApiKey(d.apiKey);
     if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
@@ -1245,17 +1249,19 @@ function App() {
 
   const addFabric = () => { pushHistory(); updProd("fabrics", [...activeProd.fabrics, newFabric()]); };
   const removeFabric = (fid) => { if (activeProd.fabrics.length <= 1) return; pushHistory(); updProd("fabrics", activeProd.fabrics.filter(f => f.id !== fid)); };
-  const updFabric = (fid, k, v) => updProd("fabrics", activeProd.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f));
+  const updFabric = (fid, k, v) => setProducts(ps => ps.map(p => p.id !== activeProdId ? p : { ...p, fabrics: p.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f) }));
   const addExtra = () => { pushHistory(); updProd("extras", [...activeProd.extras, newExtra()]); };
   const removeExtra = (eid) => { pushHistory(); updProd("extras", activeProd.extras.filter(e => e.id !== eid)); };
-  const updExtra = (eid, k, v) => updProd("extras", activeProd.extras.map(e => e.id === eid ? { ...e, [k]: v } : e));
+  const updExtra = (eid, k, v) => setProducts(ps => ps.map(p => p.id !== activeProdId ? p : { ...p, extras: p.extras.map(e => e.id === eid ? { ...e, [k]: v } : e) }));
   const selectLabor = (eid, rawIdx) => {
     const i = rawIdx === "" ? -1 : parseInt(rawIdx, 10);
     const l = i >= 0 && laborItems[i] ? laborItems[i] : null;
     const laborId = l ? l.id : "";
-    updProd("extras", activeProd.extras.map(e =>
-      e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
-    ));
+    setProducts(ps => ps.map(p => p.id !== activeProdId ? p : {
+      ...p, extras: p.extras.map(e =>
+        e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
+      )
+    }));
     // qty preserved as-is
   };
 
