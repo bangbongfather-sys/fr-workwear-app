@@ -1114,6 +1114,7 @@ function App() {
   const [orders, setOrders] = useState(() => load("frw_orders", []));
   const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
   const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
+  const [fabricDropInfo, setFabricDropInfo] = useState(null); // { id, side: 'top'|'bottom' }
   useEffect(() => {
     document.body.classList.toggle("dark", darkMode);
     save("frw_dark", darkMode);
@@ -1634,50 +1635,94 @@ ${productList}
                   const m = materials.find(x => x.id == f.matId);
                   const cost = m ? m.price * parseFloat(f.qty || 0) : 0;
                   const matIdx = f.matId !== "" && f.matId != null ? materials.findIndex(x => x.id == f.matId) : -1;
-                  return (
-                    <div key={f.id} className="fabric-row"
-                      draggable
-                      onDragStart={e => { dragFabric.current = f.id; e.currentTarget.style.opacity = "0.4"; }}
-                      onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={() => {
-                        if (!dragFabric.current || dragFabric.current === f.id) return;
-                        setProducts(ps => ps.map(p => {
-                          if (p.id !== activeProdId) return p;
-                          const arr = [...p.fabrics];
-                          const from = arr.findIndex(x => x.id === dragFabric.current);
-                          const to = arr.findIndex(x => x.id === f.id);
-                          if (from < 0 || to < 0) return p;
-                          arr.splice(to, 0, arr.splice(from, 1)[0]);
-                          return { ...p, fabrics: arr };
-                        }));
-                        dragFabric.current = null;
-                      }}
-                    >
-                      {/* 드래그 핸들 */}
+                  const isDropTop = fabricDropInfo?.id === f.id && fabricDropInfo?.side === "top";
+                  const isDropBot = fabricDropInfo?.id === f.id && fabricDropInfo?.side === "bottom";
+                  const InsertLine = () => (
+                    <div style={{
+                      height: 3, borderRadius: 3, margin: "2px 0",
+                      background: "linear-gradient(90deg,#007AFF,#34AADC)",
+                      boxShadow: "0 0 8px rgba(0,122,255,0.6)",
+                      position: "relative",
+                    }}>
                       <div style={{
-                        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                        width: 22, minHeight: 38, cursor: "grab", gap: 1, flexShrink: 0,
-                        color: T.text3, userSelect: "none",
-                      }} title="드래그하여 순서 변경">
-                        <span style={{ fontSize: 10, lineHeight: 1 }}>▲</span>
-                        <span style={{ fontSize: 8, lineHeight: 1, opacity: 0.5 }}>┃</span>
-                        <span style={{ fontSize: 8, lineHeight: 1, opacity: 0.5 }}>┃</span>
-                        <span style={{ fontSize: 10, lineHeight: 1 }}>▼</span>
+                        position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)",
+                        width: 8, height: 8, borderRadius: "50%",
+                        background: "#007AFF", boxShadow: "0 0 6px rgba(0,122,255,0.8)",
+                      }} />
+                    </div>
+                  );
+                  return (
+                    <div key={f.id} style={{ position: "relative" }}>
+                      {isDropTop && <InsertLine />}
+                      <div className="fabric-row"
+                        draggable
+                        onDragStart={e => {
+                          dragFabric.current = f.id;
+                          setTimeout(() => { if (e.target) e.target.style.opacity = "0.35"; }, 0);
+                        }}
+                        onDragEnd={e => {
+                          e.currentTarget.style.opacity = "1";
+                          setFabricDropInfo(null);
+                          dragFabric.current = null;
+                        }}
+                        onDragOver={e => {
+                          e.preventDefault();
+                          if (dragFabric.current === f.id) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                          if (fabricDropInfo?.id !== f.id || fabricDropInfo?.side !== side)
+                            setFabricDropInfo({ id: f.id, side });
+                        }}
+                        onDragLeave={e => {
+                          if (!e.currentTarget.contains(e.relatedTarget)) setFabricDropInfo(null);
+                        }}
+                        onDrop={e => {
+                          e.preventDefault();
+                          if (!dragFabric.current || dragFabric.current === f.id) { setFabricDropInfo(null); return; }
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                          setProducts(ps => ps.map(p => {
+                            if (p.id !== activeProdId) return p;
+                            const arr = [...p.fabrics];
+                            const fromIdx = arr.findIndex(x => x.id === dragFabric.current);
+                            const toIdx = arr.findIndex(x => x.id === f.id);
+                            if (fromIdx < 0 || toIdx < 0) return p;
+                            const [item] = arr.splice(fromIdx, 1);
+                            const newTo = arr.findIndex(x => x.id === f.id);
+                            arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                            return { ...p, fabrics: arr };
+                          }));
+                          setFabricDropInfo(null);
+                          dragFabric.current = null;
+                        }}
+                        style={{ transition: "opacity 0.15s", cursor: "default" }}
+                      >
+                        {/* 드래그 핸들 */}
+                        <div style={{
+                          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                          width: 20, minHeight: 38, cursor: "grab", gap: 1, flexShrink: 0,
+                          color: T.text3, userSelect: "none",
+                        }} title="드래그하여 순서 변경">
+                          <span style={{ fontSize: 11, lineHeight: 1 }}>▲</span>
+                          <span style={{ fontSize: 7, lineHeight: 1.2, opacity: 0.4 }}>┃</span>
+                          <span style={{ fontSize: 7, lineHeight: 1.2, opacity: 0.4 }}>┃</span>
+                          <span style={{ fontSize: 11, lineHeight: 1 }}>▼</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
+                        <select style={{ flex: 2, height: 38 }} value={matIdx >= 0 ? matIdx : ""} onChange={e => {
+                          const i = e.target.value === "" ? -1 : parseInt(e.target.value, 10);
+                          updFabric(f.id, "matId", i >= 0 && materials[i] ? materials[i].id : "");
+                        }}>
+                          <option value="">소재 선택</option>
+                          {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
+                        </select>
+                        <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
+                          onChange={e => updFabric(f.id, "qty", e.target.value)} />
+                        <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>{m?.unit || "yard"}</span>
+                        {cost > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{cost.toLocaleString()}원</span>}
+                        <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
                       </div>
-                      <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
-                      <select style={{ flex: 2, height: 38 }} value={matIdx >= 0 ? matIdx : ""} onChange={e => {
-                        const i = e.target.value === "" ? -1 : parseInt(e.target.value, 10);
-                        updFabric(f.id, "matId", i >= 0 && materials[i] ? materials[i].id : "");
-                      }}>
-                        <option value="">소재 선택</option>
-                        {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
-                      </select>
-                      <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
-                        onChange={e => updFabric(f.id, "qty", e.target.value)} />
-                      <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>{m?.unit || "yard"}</span>
-                      {cost > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{cost.toLocaleString()}원</span>}
-                      <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                      {isDropBot && <InsertLine />}
                     </div>
                   );
                 })}
