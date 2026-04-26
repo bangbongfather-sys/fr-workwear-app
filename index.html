@@ -591,6 +591,22 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
   const [editLab, setEditLab] = useState(null);
   const dragMat = useRef(null);
   const dragLab = useRef(null);
+  const [matDropInfo, setMatDropInfo] = useState(null);
+  const [labDropInfo, setLabDropInfo] = useState(null);
+  const InsertRow = ({ cols }) => (
+    <tr style={{ height: 0 }}>
+      <td colSpan={cols} style={{ padding: 0, lineHeight: 0 }}>
+        <div style={{
+          height: 3, borderRadius: 3,
+          background: "linear-gradient(90deg,#007AFF,#34AADC)",
+          boxShadow: "0 0 8px rgba(0,122,255,0.6)",
+          position: "relative",
+        }}>
+          <div style={{ position: "absolute", left: 4, top: "50%", transform: "translateY(-50%)", width: 8, height: 8, borderRadius: "50%", background: "#007AFF", boxShadow: "0 0 6px rgba(0,122,255,0.8)" }} />
+        </div>
+      </td>
+    </tr>
+  );
 
   const addMaterial = () => {
     if (!newMat.name.trim() || !newMat.price) return;
@@ -638,49 +654,73 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
               <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
-              {materials.map(m => (
-                <tr key={m.id} draggable
-                  onDragStart={e => { dragMat.current = m.id; e.currentTarget.style.opacity = "0.45"; }}
-                  onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={() => {
-                    if (!dragMat.current || dragMat.current === m.id) return;
-                    setMaterials(ms => {
-                      const arr = [...ms];
-                      const from = arr.findIndex(x => x.id === dragMat.current);
-                      const to = arr.findIndex(x => x.id === m.id);
-                      if (from < 0 || to < 0) return ms;
-                      arr.splice(to, 0, arr.splice(from, 1)[0]);
-                      return arr;
-                    });
-                    dragMat.current = null;
-                  }}>
-                  <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }} title="드래그하여 순서 변경">⠿</td>
-                  {editMat?.id === m.id ? (
-                    <>
-                      <td><input value={editMat.name} onChange={e => setEditMat({...editMat, name: e.target.value})} /></td>
-                      <td><input type="number" value={editMat.price} style={{ textAlign: "right" }} onChange={e => setEditMat({...editMat, price: parseFloat(e.target.value)})} /></td>
-                      <td><select value={editMat.unit} onChange={e => setEditMat({...editMat, unit: e.target.value})}><option value="yard">yard</option><option value="m">m</option></select></td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("저장", "#00B493", saveMat)}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("취소", "var(--text2)", () => setEditMat(null))}
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={{ fontWeight: 500 }}>{m.name}</td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>{m.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
-                      <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{m.unit}</td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("수정", NAVY, () => setEditMat({...m}))}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("삭제", "#F04452", () => setMaterials(ms => ms.filter(x => x.id !== m.id)))}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
+              {materials.map(m => {
+                const isDropTop = matDropInfo?.id === m.id && matDropInfo?.side === "top";
+                const isDropBot = matDropInfo?.id === m.id && matDropInfo?.side === "bottom";
+                return (
+                  <React.Fragment key={m.id}>
+                    {isDropTop && <InsertRow cols={5} />}
+                    <tr draggable
+                      onDragStart={e => { dragMat.current = m.id; e.currentTarget.style.opacity = "0.4"; }}
+                      onDragEnd={e => { e.currentTarget.style.opacity = "1"; setMatDropInfo(null); dragMat.current = null; }}
+                      onDragOver={e => {
+                        e.preventDefault();
+                        if (dragMat.current === m.id) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        if (matDropInfo?.id !== m.id || matDropInfo?.side !== side) setMatDropInfo({ id: m.id, side });
+                      }}
+                      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setMatDropInfo(null); }}
+                      onDrop={e => {
+                        e.preventDefault();
+                        const dragId = dragMat.current;
+                        const dropId = m.id;
+                        if (!dragId || dragId === dropId) { setMatDropInfo(null); return; }
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        setMaterials(ms => {
+                          const arr = [...ms];
+                          const fromIdx = arr.findIndex(x => x.id === dragId);
+                          if (fromIdx < 0) return ms;
+                          const [item] = arr.splice(fromIdx, 1);
+                          const newTo = arr.findIndex(x => x.id === dropId);
+                          if (newTo < 0) return [...arr, item];
+                          arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                          return arr;
+                        });
+                        setMatDropInfo(null);
+                        dragMat.current = null;
+                      }}
+                      style={{ opacity: 1, transition: "opacity 0.15s" }}>
+                      <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }}>⠿</td>
+                      {editMat?.id === m.id ? (
+                        <>
+                          <td><input value={editMat.name} onChange={e => setEditMat({...editMat, name: e.target.value})} /></td>
+                          <td><input type="number" value={editMat.price} style={{ textAlign: "right" }} onChange={e => setEditMat({...editMat, price: parseFloat(e.target.value)})} /></td>
+                          <td><select value={editMat.unit} onChange={e => setEditMat({...editMat, unit: e.target.value})}><option value="yard">yard</option><option value="m">m</option></select></td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("저장", "#00B493", saveMat)}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("취소", "var(--text2)", () => setEditMat(null))}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ fontWeight: 500 }}>{m.name}</td>
+                          <td style={{ textAlign: "right", fontWeight: 600 }}>{m.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
+                          <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{m.unit}</td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("수정", NAVY, () => setEditMat({...m}))}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("삭제", "#F04452", () => setMaterials(ms => ms.filter(x => x.id !== m.id)))}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                    {isDropBot && <InsertRow cols={5} />}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
           {materials.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "var(--empty-color)" }}>등록된 원단이 없습니다</div>}
@@ -712,49 +752,73 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
               <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
-              {laborItems.map(l => (
-                <tr key={l.id} draggable
-                  onDragStart={e => { dragLab.current = l.id; e.currentTarget.style.opacity = "0.45"; }}
-                  onDragEnd={e => { e.currentTarget.style.opacity = "1"; }}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={() => {
-                    if (!dragLab.current || dragLab.current === l.id) return;
-                    setLaborItems(ls => {
-                      const arr = [...ls];
-                      const from = arr.findIndex(x => x.id === dragLab.current);
-                      const to = arr.findIndex(x => x.id === l.id);
-                      if (from < 0 || to < 0) return ls;
-                      arr.splice(to, 0, arr.splice(from, 1)[0]);
-                      return arr;
-                    });
-                    dragLab.current = null;
-                  }}>
-                  <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }} title="드래그하여 순서 변경">⠿</td>
-                  {editLab?.id === l.id ? (
-                    <>
-                      <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
-                      <td><input type="number" value={editLab.price} style={{ textAlign: "right" }} onChange={e => setEditLab({...editLab, price: parseFloat(e.target.value)})} /></td>
-                      <td><select value={editLab.unit} onChange={e => setEditLab({...editLab, unit: e.target.value})}>{LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("저장", "#00B493", saveLab)}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("취소", "var(--text2)", () => setEditLab(null))}
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={{ fontWeight: 500 }}>{l.name}</td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>{l.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
-                      <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{l.unit}</td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("수정", NAVY, () => setEditLab({...l}))}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("삭제", "#F04452", () => setLaborItems(ls => ls.filter(x => x.id !== l.id)))}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
+              {laborItems.map(l => {
+                const isDropTop = labDropInfo?.id === l.id && labDropInfo?.side === "top";
+                const isDropBot = labDropInfo?.id === l.id && labDropInfo?.side === "bottom";
+                return (
+                  <React.Fragment key={l.id}>
+                    {isDropTop && <InsertRow cols={5} />}
+                    <tr draggable
+                      onDragStart={e => { dragLab.current = l.id; e.currentTarget.style.opacity = "0.4"; }}
+                      onDragEnd={e => { e.currentTarget.style.opacity = "1"; setLabDropInfo(null); dragLab.current = null; }}
+                      onDragOver={e => {
+                        e.preventDefault();
+                        if (dragLab.current === l.id) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        if (labDropInfo?.id !== l.id || labDropInfo?.side !== side) setLabDropInfo({ id: l.id, side });
+                      }}
+                      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setLabDropInfo(null); }}
+                      onDrop={e => {
+                        e.preventDefault();
+                        const dragId = dragLab.current;
+                        const dropId = l.id;
+                        if (!dragId || dragId === dropId) { setLabDropInfo(null); return; }
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        setLaborItems(ls => {
+                          const arr = [...ls];
+                          const fromIdx = arr.findIndex(x => x.id === dragId);
+                          if (fromIdx < 0) return ls;
+                          const [item] = arr.splice(fromIdx, 1);
+                          const newTo = arr.findIndex(x => x.id === dropId);
+                          if (newTo < 0) return [...arr, item];
+                          arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                          return arr;
+                        });
+                        setLabDropInfo(null);
+                        dragLab.current = null;
+                      }}
+                      style={{ opacity: 1, transition: "opacity 0.15s" }}>
+                      <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }}>⠿</td>
+                      {editLab?.id === l.id ? (
+                        <>
+                          <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
+                          <td><input type="number" value={editLab.price} style={{ textAlign: "right" }} onChange={e => setEditLab({...editLab, price: parseFloat(e.target.value)})} /></td>
+                          <td><select value={editLab.unit} onChange={e => setEditLab({...editLab, unit: e.target.value})}>{LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("저장", "#00B493", saveLab)}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("취소", "var(--text2)", () => setEditLab(null))}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ fontWeight: 500 }}>{l.name}</td>
+                          <td style={{ textAlign: "right", fontWeight: 600 }}>{l.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
+                          <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{l.unit}</td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("수정", NAVY, () => setEditLab({...l}))}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("삭제", "#F04452", () => setLaborItems(ls => ls.filter(x => x.id !== l.id)))}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                    {isDropBot && <InsertRow cols={5} />}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
           {laborItems.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "var(--empty-color)" }}>등록된 공임비가 없습니다</div>}
