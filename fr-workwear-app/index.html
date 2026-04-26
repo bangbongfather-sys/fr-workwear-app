@@ -7,6 +7,7 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   
   <style>
     :root {
@@ -63,6 +64,8 @@
       box-shadow: 0 0 0 3.5px rgba(0,122,255,0.35);
     }
     input::placeholder { color: var(--placeholder); }
+    body.dark select { color-scheme: dark; }
+    body.dark option { background: #1C1C1E; color: #fff; }
 
     /* ─── 비율 설정 숫자 입력 ─── */
     .rate-input {
@@ -124,8 +127,8 @@
       white-space: nowrap; transition: all 0.15s; font-family: inherit;
     }
     .prod-chip.active {
-      background: #007AFF; color: #fff;
-      box-shadow: 0 2px 8px rgba(0,122,255,0.3);
+      background: #475569; color: #fff;
+      box-shadow: 0 2px 8px rgba(71,85,105,0.3);
     }
     .prod-chip:hover:not(.active) { background: var(--chip-hover-bg); color: var(--chip-hover-color); }
 
@@ -155,7 +158,7 @@
 
     /* ─── 우측 패널 ─── */
     .price-highlight {
-      background: linear-gradient(145deg, #007AFF 0%, #0062CC 100%);
+      background: linear-gradient(145deg, #334155 0%, #1E293B 100%);
       border-radius: 16px; padding: 22px; text-align: center;
     }
     .row-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
@@ -270,7 +273,7 @@
     }
     .section-header-title::before {
       content: ''; display: inline-block;
-      width: 3px; height: 15px; background: #007AFF;
+      width: 3px; height: 15px; background: #475569;
       border-radius: 3px; flex-shrink: 0;
     }
     .section-sub {
@@ -280,7 +283,7 @@
     /* ─── 범례/인포 ─── */
     .info-pill {
       display: inline-flex; align-items: center; gap: 4px;
-      background: rgba(0,122,255,0.1); color: #007AFF; font-size: 11px; font-weight: 600;
+      background: rgba(71,85,105,0.12); color: #475569; font-size: 11px; font-weight: 600;
       padding: 3px 10px; border-radius: 100px;
     }
 
@@ -381,6 +384,7 @@ const { useState, useEffect, useCallback, useRef } = React;
 
 const FB_URL = "https://njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app/frw.json";
 const NAVY = "#007AFF";
+const ACCENT = "#475569";
 const ORANGE = "#FF9500";
 
 function load(key, fallback) {
@@ -416,7 +420,7 @@ const INIT_LABOR = [
   { id: 15, name: "검사·포장비", price: 1500, unit: "벌" },
 ];
 
-let _uid = 200;
+let _uid = Date.now();
 const uid = () => ++_uid;
 const newFabric = () => ({ id: uid(), matId: "", qty: "" });
 const newExtra = () => ({ id: uid(), laborId: "", customName: "", price: "", qty: "1" });
@@ -458,11 +462,11 @@ const LABOR_UNITS = ["벌", "장", "개", "m", "yard", "식"];
 // 모든 제품의 비용을 계산하는 helper
 function computeProduct(p, materials, laborItems) {
   const fCost = p.fabrics.reduce((s, f) => {
-    const m = materials.find(x => x.id === Number(f.matId));
+    const m = f.matId !== "" && f.matId != null ? materials.find(x => x.id == f.matId) : null;
     return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
   }, 0);
   const eCost = p.extras.reduce((s, e) => {
-    const u = e.laborId ? (laborItems.find(l => l.id === Number(e.laborId))?.price || 0) : parseFloat(e.price || 0);
+    const u = e.laborId !== "" && e.laborId != null ? (laborItems.find(l => l.id == e.laborId)?.price || 0) : parseFloat(e.price || 0);
     const q = parseFloat(e.qty || 1);
     return s + u * q;
   }, 0);
@@ -585,6 +589,24 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
   const [editMat, setEditMat] = useState(null);
   const [newLab, setNewLab] = useState({ name: "", price: "", unit: "벌" });
   const [editLab, setEditLab] = useState(null);
+  const dragMat = useRef(null);
+  const dragLab = useRef(null);
+  const [matDropInfo, setMatDropInfo] = useState(null);
+  const [labDropInfo, setLabDropInfo] = useState(null);
+  const InsertRow = ({ cols }) => (
+    <tr style={{ height: 0 }}>
+      <td colSpan={cols} style={{ padding: 0, lineHeight: 0 }}>
+        <div style={{
+          height: 3, borderRadius: 3,
+          background: "linear-gradient(90deg,#007AFF,#34AADC)",
+          boxShadow: "0 0 8px rgba(0,122,255,0.6)",
+          position: "relative",
+        }}>
+          <div style={{ position: "absolute", left: 4, top: "50%", transform: "translateY(-50%)", width: 8, height: 8, borderRadius: "50%", background: "#007AFF", boxShadow: "0 0 6px rgba(0,122,255,0.8)" }} />
+        </div>
+      </td>
+    </tr>
+  );
 
   const addMaterial = () => {
     if (!newMat.name.trim() || !newMat.price) return;
@@ -627,37 +649,78 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <table>
             <thead><tr>
+              <th style={{ width: 28 }}></th>
               <th>원단명</th><th style={{ textAlign: "right" }}>단가</th>
               <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
-              {materials.map(m => (
-                <tr key={m.id}>
-                  {editMat?.id === m.id ? (
-                    <>
-                      <td><input value={editMat.name} onChange={e => setEditMat({...editMat, name: e.target.value})} /></td>
-                      <td><input type="number" value={editMat.price} style={{ textAlign: "right" }} onChange={e => setEditMat({...editMat, price: parseFloat(e.target.value)})} /></td>
-                      <td><select value={editMat.unit} onChange={e => setEditMat({...editMat, unit: e.target.value})}><option value="yard">yard</option><option value="m">m</option></select></td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("저장", "#00B493", saveMat)}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("취소", "var(--text2)", () => setEditMat(null))}
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={{ fontWeight: 500 }}>{m.name}</td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>{m.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
-                      <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{m.unit}</td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("수정", NAVY, () => setEditMat({...m}))}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("삭제", "#F04452", () => setMaterials(ms => ms.filter(x => x.id !== m.id)))}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
+              {materials.map(m => {
+                const isDropTop = matDropInfo?.id === m.id && matDropInfo?.side === "top";
+                const isDropBot = matDropInfo?.id === m.id && matDropInfo?.side === "bottom";
+                return (
+                  <React.Fragment key={m.id}>
+                    {isDropTop && <InsertRow cols={5} />}
+                    <tr draggable
+                      onDragStart={e => { dragMat.current = m.id; e.currentTarget.style.opacity = "0.4"; }}
+                      onDragEnd={e => { e.currentTarget.style.opacity = "1"; setMatDropInfo(null); dragMat.current = null; }}
+                      onDragOver={e => {
+                        e.preventDefault();
+                        if (dragMat.current === m.id) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        if (matDropInfo?.id !== m.id || matDropInfo?.side !== side) setMatDropInfo({ id: m.id, side });
+                      }}
+                      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setMatDropInfo(null); }}
+                      onDrop={e => {
+                        e.preventDefault();
+                        const dragId = dragMat.current;
+                        const dropId = m.id;
+                        if (!dragId || dragId === dropId) { setMatDropInfo(null); return; }
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        setMaterials(ms => {
+                          const arr = [...ms];
+                          const fromIdx = arr.findIndex(x => x.id === dragId);
+                          if (fromIdx < 0) return ms;
+                          const [item] = arr.splice(fromIdx, 1);
+                          const newTo = arr.findIndex(x => x.id === dropId);
+                          if (newTo < 0) return [...arr, item];
+                          arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                          return arr;
+                        });
+                        setMatDropInfo(null);
+                        dragMat.current = null;
+                      }}
+                      style={{ opacity: 1, transition: "opacity 0.15s" }}>
+                      <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }}>⠿</td>
+                      {editMat?.id === m.id ? (
+                        <>
+                          <td><input value={editMat.name} onChange={e => setEditMat({...editMat, name: e.target.value})} /></td>
+                          <td><input type="number" value={editMat.price} style={{ textAlign: "right" }} onChange={e => setEditMat({...editMat, price: parseFloat(e.target.value)})} /></td>
+                          <td><select value={editMat.unit} onChange={e => setEditMat({...editMat, unit: e.target.value})}><option value="yard">yard</option><option value="m">m</option></select></td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("저장", "#00B493", saveMat)}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("취소", "var(--text2)", () => setEditMat(null))}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ fontWeight: 500 }}>{m.name}</td>
+                          <td style={{ textAlign: "right", fontWeight: 600 }}>{m.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
+                          <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{m.unit}</td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("수정", NAVY, () => setEditMat({...m}))}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("삭제", "#F04452", () => setMaterials(ms => ms.filter(x => x.id !== m.id)))}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                    {isDropBot && <InsertRow cols={5} />}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
           {materials.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "var(--empty-color)" }}>등록된 원단이 없습니다</div>}
@@ -684,41 +747,486 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <table>
             <thead><tr>
+              <th style={{ width: 28 }}></th>
               <th>항목명</th><th style={{ textAlign: "right" }}>단가</th>
               <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
-              {laborItems.map(l => (
-                <tr key={l.id}>
-                  {editLab?.id === l.id ? (
-                    <>
-                      <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
-                      <td><input type="number" value={editLab.price} style={{ textAlign: "right" }} onChange={e => setEditLab({...editLab, price: parseFloat(e.target.value)})} /></td>
-                      <td><select value={editLab.unit} onChange={e => setEditLab({...editLab, unit: e.target.value})}>{LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("저장", "#00B493", saveLab)}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("취소", "var(--text2)", () => setEditLab(null))}
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={{ fontWeight: 500 }}>{l.name}</td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>{l.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
-                      <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{l.unit}</td>
-                      <td style={{ textAlign: "center" }}>
-                        {tblBtn("수정", NAVY, () => setEditLab({...l}))}
-                        <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
-                        {tblBtn("삭제", "#F04452", () => setLaborItems(ls => ls.filter(x => x.id !== l.id)))}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
+              {laborItems.map(l => {
+                const isDropTop = labDropInfo?.id === l.id && labDropInfo?.side === "top";
+                const isDropBot = labDropInfo?.id === l.id && labDropInfo?.side === "bottom";
+                return (
+                  <React.Fragment key={l.id}>
+                    {isDropTop && <InsertRow cols={5} />}
+                    <tr draggable
+                      onDragStart={e => { dragLab.current = l.id; e.currentTarget.style.opacity = "0.4"; }}
+                      onDragEnd={e => { e.currentTarget.style.opacity = "1"; setLabDropInfo(null); dragLab.current = null; }}
+                      onDragOver={e => {
+                        e.preventDefault();
+                        if (dragLab.current === l.id) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        if (labDropInfo?.id !== l.id || labDropInfo?.side !== side) setLabDropInfo({ id: l.id, side });
+                      }}
+                      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setLabDropInfo(null); }}
+                      onDrop={e => {
+                        e.preventDefault();
+                        const dragId = dragLab.current;
+                        const dropId = l.id;
+                        if (!dragId || dragId === dropId) { setLabDropInfo(null); return; }
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                        setLaborItems(ls => {
+                          const arr = [...ls];
+                          const fromIdx = arr.findIndex(x => x.id === dragId);
+                          if (fromIdx < 0) return ls;
+                          const [item] = arr.splice(fromIdx, 1);
+                          const newTo = arr.findIndex(x => x.id === dropId);
+                          if (newTo < 0) return [...arr, item];
+                          arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                          return arr;
+                        });
+                        setLabDropInfo(null);
+                        dragLab.current = null;
+                      }}
+                      style={{ opacity: 1, transition: "opacity 0.15s" }}>
+                      <td style={{ textAlign: "center", cursor: "grab", color: "var(--text3)", fontSize: 16, userSelect: "none" }}>⠿</td>
+                      {editLab?.id === l.id ? (
+                        <>
+                          <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
+                          <td><input type="number" value={editLab.price} style={{ textAlign: "right" }} onChange={e => setEditLab({...editLab, price: parseFloat(e.target.value)})} /></td>
+                          <td><select value={editLab.unit} onChange={e => setEditLab({...editLab, unit: e.target.value})}>{LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("저장", "#00B493", saveLab)}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("취소", "var(--text2)", () => setEditLab(null))}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ fontWeight: 500 }}>{l.name}</td>
+                          <td style={{ textAlign: "right", fontWeight: 600 }}>{l.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
+                          <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{l.unit}</td>
+                          <td style={{ textAlign: "center" }}>
+                            {tblBtn("수정", NAVY, () => setEditLab({...l}))}
+                            <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
+                            {tblBtn("삭제", "#F04452", () => setLaborItems(ls => ls.filter(x => x.id !== l.id)))}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                    {isDropBot && <InsertRow cols={5} />}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
           {laborItems.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "var(--empty-color)" }}>등록된 공임비가 없습니다</div>}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId }) {
+  const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", note: "" });
+  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [showMonthInput, setShowMonthInput] = useState(false);
+  const salesRef = useRef(null); const salesInst = useRef(null);
+  const pieRef = useRef(null); const pieInst = useRef(null);
+  const dragMargin = useRef(null);
+  const [marginDropInfo, setMarginDropInfo] = useState(null);
+
+  const thisYear = new Date().getFullYear();
+  const months12 = Array.from({length:12},(_,i) => `${thisYear}-${String(i+1).padStart(2,"0")}`);
+
+  // 월별 매출: 직접 입력 우선, 없으면 주문 기록 합산
+  const monthlyRevOrders = {};
+  orders.forEach(o => { const m=(o.date||"").slice(0,7); monthlyRevOrders[m]=(monthlyRevOrders[m]||0)+parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
+  const monthValues = months12.map(m => {
+    const direct = monthlySales[m];
+    return (direct !== undefined && direct !== null && direct !== "") ? parseFloat(direct) : (monthlyRevOrders[m]||0);
+  });
+  const monthLabels = months12.map(m => m.slice(5)+"월");
+  const hasAnyData = monthValues.some(v => v > 0);
+  const totalYearRevenue = monthValues.reduce((s,v)=>s+v,0);
+
+  const totalOrderRevenue = orders.reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+  const computed = products.map(p => computeProduct(p, materials, laborItems)).filter(c => c.base > 0);
+  const avgMarginSell = computed.length > 0 ? computed.reduce((s,c) => s + (c.finalPrice-c.beforeMargin)/c.finalPrice*100, 0)/computed.length : 0;
+  const productSales = {};
+  orders.forEach(o => { productSales[o.productName] = (productSales[o.productName]||0) + parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
+  const topProduct = Object.entries(productSales).sort((a,b)=>b[1]-a[1])[0];
+
+  const prodLabels = Object.keys(productSales);
+  const prodValues = Object.values(productSales);
+
+  // 제품별 마진율: 납품가 대비
+  const mProds = products.filter(p => computeProduct(p,materials,laborItems).base > 0);
+  const mLabels = mProds.map(p => p.name);
+  const mValues = mProds.map(p => { const c=computeProduct(p,materials,laborItems); return parseFloat(((c.finalPrice-c.beforeMargin)/c.finalPrice*100).toFixed(1)); });
+
+  const chartText = darkMode ? "rgba(235,235,245,0.55)" : "rgba(60,60,67,0.55)";
+  const gridCol = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
+
+  useEffect(() => {
+    if (typeof Chart === "undefined") return;
+    if (salesRef.current) {
+      if (salesInst.current) salesInst.current.destroy();
+      salesInst.current = new Chart(salesRef.current, {
+        type:"bar",
+        data:{ labels:monthLabels, datasets:[{ label:"월 매출", data:monthValues,
+          backgroundColor:monthValues.map((_,i)=>{ const m=months12[i]; return (monthlySales[m]!==undefined&&monthlySales[m]!=="")?"rgba(71,85,105,0.85)":"rgba(71,85,105,0.45)"; }),
+          borderRadius:5 }] },
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},
+          tooltip:{callbacks:{label:ctx=>" "+Math.round(ctx.raw).toLocaleString()+"원"}}},
+          scales:{ x:{grid:{color:gridCol},ticks:{color:chartText}}, y:{grid:{color:gridCol},ticks:{color:chartText,callback:v=>v>=1000000000?(v/1000000000).toFixed(1)+"조":v>=100000000?(v/100000000).toFixed(0)+"억":v>=1000000?(v/1000000).toFixed(0)+"백만":v>=1000?(v/1000).toLocaleString()+"천":v}} } }
+      });
+    }
+    if (pieRef.current && prodLabels.length > 0) {
+      if (pieInst.current) pieInst.current.destroy();
+      pieInst.current = new Chart(pieRef.current, {
+        type:"doughnut", data:{ labels:prodLabels, datasets:[{ data:prodValues, backgroundColor:["#475569","#64748b","#94a3b8","#334155","#1e293b","#0f172a"].slice(0,prodLabels.length) }] },
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:"right",labels:{color:chartText,padding:10,font:{size:12}}}} }
+      });
+    }
+    return () => { [salesInst,pieInst].forEach(r=>{if(r.current){r.current.destroy();r.current=null;}}); };
+  }, [orders, darkMode, products.length, JSON.stringify(monthlySales)]);
+
+  const addOrder = () => {
+    if (!newOrder.productName || !newOrder.unitPrice) return;
+    setOrders(prev => [...prev, { id:uid(), ...newOrder }]);
+    setNewOrder({ date:new Date().toISOString().slice(0,10), productName:"", qty:"1", unitPrice:"", client:"", note:"" });
+    setShowOrderForm(false);
+  };
+  const kpi = (label,val,sub,color) => (
+    <div className="card" style={{flex:1,minWidth:120}}>
+      <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{label}</div>
+      <div style={{fontSize:24,fontWeight:800,color:color||"var(--text1)",lineHeight:1}}>{val}</div>
+      {sub && <div style={{fontSize:12,color:"var(--text2)",marginTop:4}}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+        {kpi(thisYear+"년 총 매출", totalYearRevenue>0?Math.round(totalYearRevenue).toLocaleString()+"원":"—", "월별 입력 기준", "#475569")}
+        {kpi("주문 기록 매출", totalOrderRevenue>0?Math.round(totalOrderRevenue).toLocaleString()+"원":"—", orders.length+"건 합산", null)}
+        {kpi("납품가 마진율", avgMarginSell>0?avgMarginSell.toFixed(1)+"%":"—", "현재 제품 기준", avgMarginSell>=26?"#00B493":avgMarginSell>=20?"#FF9500":avgMarginSell>0?"#F04452":null)}
+        {kpi("최다 매출 제품", topProduct?topProduct[0]:"—", topProduct?Math.round(topProduct[1]).toLocaleString()+"원":"기록 없음", null)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>📈 {thisYear}년 월별 매출 추이</div>
+            <button onClick={()=>setShowMonthInput(v=>!v)} style={{fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>
+              {showMonthInput?"닫기":"✏️ 직접 입력"}
+            </button>
+          </div>
+          <div style={{height:200,position:"relative"}}>
+            {hasAnyData?<canvas ref={salesRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>직접 입력 또는<br/>주문 기록을 추가하세요</div>}
+          </div>
+          {showMonthInput&&(
+            <div style={{marginTop:16,borderTop:"0.5px solid var(--divider)",paddingTop:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>월별 매출 직접 입력 (원) — 입력시 주문 기록 자동합산 값 대체</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                {months12.map(m=>{
+                  const autoVal = monthlyRevOrders[m];
+                  return (
+                    <div key={m}>
+                      <div style={{fontSize:11,fontWeight:600,color:"var(--text2)",marginBottom:4,textAlign:"center"}}>{m.slice(5)}월</div>
+                      <input type="number" placeholder={autoVal>0?Math.round(autoVal).toLocaleString()+"원":"-"}
+                        value={monthlySales[m]!==undefined&&monthlySales[m]!==""?monthlySales[m]:""}
+                        onChange={e=>setMonthlySales(prev=>({...prev,[m]:e.target.value===""?undefined:parseFloat(e.target.value)}))}
+                        style={{height:36,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:10}}>
+                <div style={{fontSize:11,color:"var(--text3)"}}>💡 진한 막대 = 직접 입력, 연한 막대 = 주문 기록 자동합산</div>
+                <div style={{flex:1}}/>
+                <button onClick={()=>setMonthlySales({})} style={{fontSize:11,color:"#F04452",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>전체 초기화</button>
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="card">
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>🥧 제품군별 매출 비중</div>
+          <div style={{height:200,position:"relative"}}>
+            {prodLabels.length>0?<canvas ref={pieRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>주문 기록을 추가하면<br/>그래프가 표시됩니다</div>}
+          </div>
+        </div>
+      </div>
+      <div className="card">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>📊 제품별 마진율 현황 <span style={{fontSize:11,fontWeight:400,color:"var(--text3)"}}>(납품가 대비)</span></div>
+          <div style={{display:"flex",gap:12}}>
+            {[["≥26%","#00B493"],["20~25%","#FF9500"],["<20%","#F04452"]].map(([l,c])=>(
+              <div key={l} style={{display:"flex",alignItems:"center",gap:4,fontSize:11}}><div style={{width:8,height:8,borderRadius:2,background:c}}/><span style={{color:"var(--text2)"}}>{l}</span></div>
+            ))}
+          </div>
+        </div>
+        {mProds.length === 0
+          ? <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:100,color:"var(--text3)",fontSize:13}}>원가가 입력된 제품이 없습니다</div>
+          : (() => {
+              const maxV = Math.max(...mValues, 5);
+              const MInsertLine = () => (
+                <div style={{height:3,borderRadius:3,margin:"2px 0",background:"linear-gradient(90deg,#007AFF,#34AADC)",boxShadow:"0 0 8px rgba(0,122,255,0.6)",position:"relative"}}>
+                  <div style={{position:"absolute",left:4,top:"50%",transform:"translateY(-50%)",width:8,height:8,borderRadius:"50%",background:"#007AFF",boxShadow:"0 0 6px rgba(0,122,255,0.8)"}}/>
+                </div>
+              );
+              return (
+                <div>
+                  {mProds.map((p, idx) => {
+                    const mv = mValues[idx];
+                    const barColor = mv >= 26 ? "#00B493" : mv >= 20 ? "#FF9500" : "#F04452";
+                    const barPct = Math.max((mv / maxV) * 100, 1);
+                    const isDropTop = marginDropInfo?.id === p.id && marginDropInfo?.side === "top";
+                    const isDropBot = marginDropInfo?.id === p.id && marginDropInfo?.side === "bottom";
+                    return (
+                      <div key={p.id} style={{position:"relative"}}>
+                        {isDropTop && <MInsertLine/>}
+                        <div
+                          draggable
+                          onDragStart={e => { dragMargin.current = p.id; setTimeout(()=>{ try{e.target.style.opacity="0.35";}catch(err){} },0); }}
+                          onDragEnd={e => { e.currentTarget.style.opacity="1"; setMarginDropInfo(null); dragMargin.current=null; }}
+                          onDragOver={e => {
+                            e.preventDefault();
+                            if (dragMargin.current === p.id) return;
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
+                            if (marginDropInfo?.id !== p.id || marginDropInfo?.side !== side) setMarginDropInfo({id:p.id, side});
+                          }}
+                          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setMarginDropInfo(null); }}
+                          onDrop={e => {
+                            e.preventDefault();
+                            const dragId = dragMargin.current;
+                            const dropId = p.id;
+                            if (!dragId || dragId === dropId) { setMarginDropInfo(null); return; }
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
+                            setProducts(ps => {
+                              const arr = [...ps];
+                              const fromIdx = arr.findIndex(x => x.id === dragId);
+                              if (fromIdx < 0) return ps;
+                              const [item] = arr.splice(fromIdx, 1);
+                              const newTo = arr.findIndex(x => x.id === dropId);
+                              if (newTo < 0) return [...arr, item];
+                              arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                              return arr;
+                            });
+                            setMarginDropInfo(null); dragMargin.current = null;
+                          }}
+                          style={{display:"flex",alignItems:"center",gap:8,padding:"5px 4px",borderRadius:8,marginBottom:2,transition:"opacity 0.15s",cursor:"default"}}
+                        >
+                          {/* 드래그 핸들 */}
+                          <span style={{fontSize:13,color:"var(--text3)",cursor:"grab",userSelect:"none",flexShrink:0,width:16,textAlign:"center"}}>⠿</span>
+                          {/* 제품명 — 클릭 시 단가 계산기 이동 */}
+                          <span
+                            onClick={() => { setTab("calc"); setActiveProdId(p.id); }}
+                            title="단가 계산기로 이동"
+                            style={{width:130,fontSize:12,fontWeight:500,color:"var(--text1)",cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",flexShrink:0,textDecoration:"underline dotted"}}
+                          >{p.name}</span>
+                          {/* 바 */}
+                          <div style={{flex:1,height:22,background:"var(--surface2)",borderRadius:5,overflow:"hidden",position:"relative"}}>
+                            <div style={{
+                              width:`${barPct}%`, height:"100%",
+                              background:`linear-gradient(90deg,${barColor}cc,${barColor})`,
+                              borderRadius:5, transition:"width 0.4s ease",
+                            }}/>
+                            {/* 격자선 표시 */}
+                            {[25,50,75].map(tick => (
+                              <div key={tick} style={{position:"absolute",top:0,bottom:0,left:`${tick}%`,width:1,background:"var(--divider)",opacity:0.5}}/>
+                            ))}
+                          </div>
+                          {/* 수치 */}
+                          <span style={{fontSize:12,fontWeight:700,color:barColor,minWidth:42,textAlign:"right",flexShrink:0}}>{mv.toFixed(1)}%</span>
+                        </div>
+                        {isDropBot && <MInsertLine/>}
+                      </div>
+                    );
+                  })}
+                  {/* X축 눈금 */}
+                  <div style={{display:"flex",paddingLeft:162,marginTop:2}}>
+                    {[0,25,50,75,100].map(t => (
+                      <div key={t} style={{flex: t===0?0:25,fontSize:10,color:"var(--text3)",textAlign: t===0?"left":"center"}}>{t===0?"0":t+"%"}</div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()
+        }
+      </div>
+      <div className="card">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📋 주문 기록</div>
+          <button onClick={()=>setShowOrderForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showOrderForm?"닫기":"+ 주문 추가"}</button>
+        </div>
+        {showOrderForm&&(
+          <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:"130px 1fr 70px 110px",gap:8,marginBottom:8}}>
+              <input type="date" value={newOrder.date} onChange={e=>setNewOrder(o=>({...o,date:e.target.value}))}/>
+              <input placeholder="제품명 *" value={newOrder.productName} onChange={e=>setNewOrder(o=>({...o,productName:e.target.value}))}/>
+              <input type="number" placeholder="수량" value={newOrder.qty} onChange={e=>setNewOrder(o=>({...o,qty:e.target.value}))}/>
+              <input type="number" placeholder="단가(원) *" value={newOrder.unitPrice} onChange={e=>setNewOrder(o=>({...o,unitPrice:e.target.value}))}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8}}>
+              <input placeholder="거래처명" value={newOrder.client} onChange={e=>setNewOrder(o=>({...o,client:e.target.value}))}/>
+              <input placeholder="비고" value={newOrder.note} onChange={e=>setNewOrder(o=>({...o,note:e.target.value}))}/>
+              <button className="btn-primary" onClick={addOrder} style={{padding:"0 20px",height:44,fontSize:13}}>저장</button>
+            </div>
+          </div>
+        )}
+        {orders.length===0?(
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>아직 주문 기록이 없습니다<br/>위 버튼으로 주문을 추가하면 매출 지표가 쌓입니다</div>
+        ):(
+          <div style={{overflowX:"auto"}}>
+            <table><thead><tr>
+              <th>날짜</th><th>제품명</th><th style={{textAlign:"right"}}>수량</th>
+              <th style={{textAlign:"right"}}>단가</th><th style={{textAlign:"right"}}>합계</th>
+              <th>거래처</th><th>비고</th><th style={{textAlign:"center"}}>삭제</th>
+            </tr></thead>
+            <tbody>
+              {[...orders].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(o=>{
+                const total=parseFloat(o.unitPrice||0)*parseInt(o.qty||1);
+                return (<tr key={o.id}>
+                  <td style={{whiteSpace:"nowrap",fontSize:13}}>{o.date}</td>
+                  <td style={{fontWeight:600}}>{o.productName}</td>
+                  <td style={{textAlign:"right"}}>{parseInt(o.qty||1).toLocaleString()}</td>
+                  <td style={{textAlign:"right"}}>{parseFloat(o.unitPrice||0).toLocaleString()}원</td>
+                  <td style={{textAlign:"right",fontWeight:700}}>{Math.round(total).toLocaleString()}원</td>
+                  <td style={{fontSize:13}}>{o.client}</td>
+                  <td style={{fontSize:12,color:"var(--text2)"}}>{o.note}</td>
+                  <td style={{textAlign:"center"}}><button onClick={()=>setOrders(prev=>prev.filter(x=>x.id!==o.id))} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button></td>
+                </tr>);
+              })}
+            </tbody></table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) {
+  const STATUSES = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
+  const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
+  const [filterMonth, setFilterMonth] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [newI, setNewI] = useState({ date:new Date().toISOString().slice(0,10), materialName:"", customMaterial:"", supplier:"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", inspector:"", note:"" });
+
+  const thisMonth = new Date().toISOString().slice(0,7);
+  const pendingCnt = fabricIntakes.filter(r=>["주문완료","운송중","검수중"].includes(r.status)).length;
+  const totalVal = fabricIntakes.reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0),0);
+  const thisMoComp = fabricIntakes.filter(r=>r.date?.startsWith(thisMonth)&&["입고완료","검수완료"].includes(r.status)).length;
+
+  const filtered = fabricIntakes.filter(r => {
+    if (filterMonth && !r.date?.startsWith(filterMonth)) return false;
+    if (filterStatus && r.status !== filterStatus) return false;
+    return true;
+  });
+
+  const addIntake = () => {
+    const matName = newI.materialName === "__custom__" ? newI.customMaterial : newI.materialName;
+    if (!matName || !newI.qty || !newI.supplier) return;
+    setFabricIntakes(prev => [...prev, { id:uid(), ...newI, materialName:matName }]);
+    setNewI({ date:new Date().toISOString().slice(0,10), materialName:"", customMaterial:"", supplier:"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", inspector:"", note:"" });
+    setShowForm(false);
+  };
+  const statCard = (label,val,color) => (
+    <div className="card" style={{flex:1,minWidth:120}}>
+      <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{label}</div>
+      <div style={{fontSize:24,fontWeight:800,color:color||"var(--text1)",lineHeight:1}}>{val}</div>
+    </div>
+  );
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+        {statCard("이번달 입고완료", thisMoComp+"건", "#475569")}
+        {statCard("처리 대기", pendingCnt+"건", pendingCnt>0?"#FF9500":"#00B493")}
+        {statCard("총 입고 기록", fabricIntakes.length+"건", null)}
+        {statCard("총 원단 가액", Math.round(totalVal).toLocaleString()+"원", null)}
+      </div>
+      <div className="card">
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:16}}>
+          <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{height:40,fontSize:13,flex:"0 0 160px"}}/>
+          <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{height:40,fontSize:13,width:140}}>
+            <option value="">전체 상태</option>
+            {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+          {(filterMonth||filterStatus)&&(
+            <button onClick={()=>{setFilterMonth("");setFilterStatus("");}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit"}}>필터 초기화</button>
+          )}
+          <div style={{flex:1}}/>
+          <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 입고 등록"}</button>
+        </div>
+        {showForm&&(
+          <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>신규 입고 등록</div>
+            <div style={{display:"grid",gridTemplateColumns:"130px 1fr 1fr",gap:8,marginBottom:8}}>
+              <input type="date" value={newI.date} onChange={e=>setNewI(p=>({...p,date:e.target.value}))}/>
+              <select value={newI.materialName} onChange={e=>setNewI(p=>({...p,materialName:e.target.value}))} style={{height:44}}>
+                <option value="">원단 선택...</option>
+                {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
+                <option value="__custom__">직접 입력</option>
+              </select>
+              {newI.materialName==="__custom__"
+                ?<input placeholder="원단명 직접 입력" value={newI.customMaterial} onChange={e=>setNewI(p=>({...p,customMaterial:e.target.value}))}/>
+                :<input placeholder="공급업체명 *" value={newI.supplier} onChange={e=>setNewI(p=>({...p,supplier:e.target.value}))}/>}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 80px 100px 110px 120px",gap:8,marginBottom:8}}>
+              {newI.materialName==="__custom__"
+                ?<input placeholder="공급업체명 *" value={newI.supplier} onChange={e=>setNewI(p=>({...p,supplier:e.target.value}))}/>
+                :<div style={{display:"flex",alignItems:"center",paddingLeft:8,fontSize:13,color:"var(--text2)"}}>{newI.materialName||"원단을 선택하세요"}</div>}
+              <input type="number" placeholder="수량 *" value={newI.qty} onChange={e=>setNewI(p=>({...p,qty:e.target.value}))}/>
+              <select value={newI.unit} onChange={e=>setNewI(p=>({...p,unit:e.target.value}))} style={{height:44}}>
+                <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
+              </select>
+              <input type="number" placeholder="단가(원)" value={newI.unitPrice} onChange={e=>setNewI(p=>({...p,unitPrice:e.target.value}))}/>
+              <select value={newI.status} onChange={e=>setNewI(p=>({...p,status:e.target.value}))} style={{height:44}}>
+                {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8}}>
+              <input placeholder="검수 담당자" value={newI.inspector} onChange={e=>setNewI(p=>({...p,inspector:e.target.value}))}/>
+              <input placeholder="비고 / 메모" value={newI.note} onChange={e=>setNewI(p=>({...p,note:e.target.value}))}/>
+              <button className="btn-primary" onClick={addIntake} style={{padding:"0 20px",height:44,fontSize:13}}>등록</button>
+            </div>
+          </div>
+        )}
+        {filtered.length===0?(
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>
+            {fabricIntakes.length===0?"원단 입고 기록이 없습니다\n위 버튼으로 입고를 등록하세요":"조건에 맞는 기록이 없습니다"}
+          </div>
+        ):(
+          <div style={{overflowX:"auto"}}>
+            <table><thead><tr>
+              <th>입고일</th><th>원단명</th><th>공급업체</th>
+              <th style={{textAlign:"right"}}>수량</th><th style={{textAlign:"right"}}>단가</th>
+              <th style={{textAlign:"right"}}>금액</th><th style={{textAlign:"center"}}>상태</th>
+              <th>담당자</th><th>비고</th><th style={{textAlign:"center"}}>삭제</th>
+            </tr></thead>
+            <tbody>
+              {[...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(r=>{
+                const total=parseFloat(r.unitPrice||0)*parseFloat(r.qty||0);
+                const sc=SC[r.status]||"#8B95A1";
+                return (<tr key={r.id}>
+                  <td style={{whiteSpace:"nowrap",fontSize:13}}>{r.date}</td>
+                  <td style={{fontWeight:600,fontSize:13}}>{r.materialName}</td>
+                  <td style={{fontSize:13}}>{r.supplier}</td>
+                  <td style={{textAlign:"right",fontSize:13}}>{parseFloat(r.qty||0).toLocaleString()} {r.unit}</td>
+                  <td style={{textAlign:"right",fontSize:13}}>{parseFloat(r.unitPrice||0).toLocaleString()}원</td>
+                  <td style={{textAlign:"right",fontWeight:600,fontSize:13}}>{total>0?Math.round(total).toLocaleString()+"원":"—"}</td>
+                  <td style={{textAlign:"center"}}><span style={{display:"inline-block",padding:"3px 9px",borderRadius:100,fontSize:11,fontWeight:700,background:sc+"22",color:sc,whiteSpace:"nowrap"}}>{r.status}</span></td>
+                  <td style={{fontSize:13,color:"var(--text2)"}}>{r.inspector}</td>
+                  <td style={{fontSize:12,color:"var(--text2)"}}>{r.note}</td>
+                  <td style={{textAlign:"center"}}><button onClick={()=>setFabricIntakes(prev=>prev.filter(x=>x.id!==r.id))} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button></td>
+                </tr>);
+              })}
+            </tbody></table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -748,6 +1256,10 @@ function App() {
   const [quoteClient, setQuoteClient] = useState("");
   const [prodSearch, setProdSearch] = useState("");
   const [showProdSearch, setShowProdSearch] = useState(false);
+  const [orders, setOrders] = useState(() => load("frw_orders", []));
+  const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
+  const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
+  const [fabricDropInfo, setFabricDropInfo] = useState(null); // { id, side: 'top'|'bottom' }
   useEffect(() => {
     document.body.classList.toggle("dark", darkMode);
     save("frw_dark", darkMode);
@@ -756,6 +1268,45 @@ function App() {
   const initialized = useRef(false);
   const syncTimer = useRef(null);
   const prodNameRef = useRef(null);
+  const dragProd = useRef(null);
+  const dragFabric = useRef(null);
+  const historyStack = useRef([]);
+  const historyPointer = useRef(-1);
+
+  const pushHistory = useCallback(() => {
+    const snapshot = {
+      materials: JSON.parse(JSON.stringify(materials)),
+      laborItems: JSON.parse(JSON.stringify(laborItems)),
+      products: JSON.parse(JSON.stringify(products)),
+    };
+    // Trim any redo-future if we branched
+    historyStack.current = historyStack.current.slice(0, historyPointer.current + 1);
+    historyStack.current.push(snapshot);
+    if (historyStack.current.length > 50) historyStack.current.shift();
+    historyPointer.current = historyStack.current.length - 1;
+  }, [materials, laborItems, products]);
+
+  const handleUndo = useCallback(() => {
+    if (historyPointer.current < 1) return; // nothing to undo (need at least 2 states)
+    historyPointer.current -= 1;
+    const snap = historyStack.current[historyPointer.current];
+    if (!snap) return;
+    setMaterials(snap.materials);
+    setLaborItems(snap.laborItems);
+    setProducts(snap.products);
+  }, []);
+
+  // Ctrl+Z / Cmd+Z keyboard listener
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleUndo]);
 
   const applyCloudData = (d) => {
     if (!d) return;
@@ -764,10 +1315,13 @@ function App() {
     if (d.products && d.products.length > 0) {
       const migrated = d.products.map(migrateProduct);
       setProducts(migrated);
-      setActiveProdId(migrated[0].id);
+      setActiveProdId(prev => migrated.find(p => p.id === prev) ? prev : migrated[0].id);
     }
     if (d.apiKey !== undefined) setApiKey(d.apiKey);
     if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
+    if (d.orders) setOrders(d.orders);
+    if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
+    if (d.monthlySales) setMonthlySales(d.monthlySales);
   };
 
   useEffect(() => {
@@ -789,14 +1343,15 @@ function App() {
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
+    save("frw_orders", orders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, fabricIntakes, monthlySales })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey]);
+  }, [materials, laborItems, products, apiKey, orders, fabricIntakes, monthlySales]);
 
   const activeProd = products.find(p => p.id === activeProdId) || products[0];
 
@@ -817,11 +1372,13 @@ function App() {
 
   const addProduct = () => {
     if (!newProdName.trim()) return;
+    pushHistory();
     const p = newProduct(newProdName.trim());
     setProducts(ps => [...ps, p]); setActiveProdId(p.id); setNewProdName("");
   };
   const deleteProduct = (id) => {
     if (products.length <= 1) return;
+    pushHistory();
     const remaining = products.filter(p => p.id !== id);
     setProducts(remaining);
     if (activeProdId === id) setActiveProdId(remaining[0].id);
@@ -837,28 +1394,32 @@ function App() {
     setEditingProdName({ id: p.id, value: p.name });
   };
 
-  const addFabric = () => updProd("fabrics", [...activeProd.fabrics, newFabric()]);
-  const removeFabric = (fid) => { if (activeProd.fabrics.length <= 1) return; updProd("fabrics", activeProd.fabrics.filter(f => f.id !== fid)); };
-  const updFabric = (fid, k, v) => updProd("fabrics", activeProd.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f));
-  const addExtra = () => updProd("extras", [...activeProd.extras, newExtra()]);
-  const removeExtra = (eid) => updProd("extras", activeProd.extras.filter(e => e.id !== eid));
-  const updExtra = (eid, k, v) => updProd("extras", activeProd.extras.map(e => e.id === eid ? { ...e, [k]: v } : e));
-  const selectLabor = (eid, laborId) => {
-    const l = laborItems.find(x => x.id === Number(laborId));
-    updProd("extras", activeProd.extras.map(e =>
-      e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
-    ));
+  const addFabric = () => { pushHistory(); updProd("fabrics", [...activeProd.fabrics, newFabric()]); };
+  const removeFabric = (fid) => { if (activeProd.fabrics.length <= 1) return; pushHistory(); updProd("fabrics", activeProd.fabrics.filter(f => f.id !== fid)); };
+  const updFabric = (fid, k, v) => setProducts(ps => ps.map(p => p.id !== activeProdId ? p : { ...p, fabrics: p.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f) }));
+  const addExtra = () => { pushHistory(); updProd("extras", [...activeProd.extras, newExtra()]); };
+  const removeExtra = (eid) => { pushHistory(); updProd("extras", activeProd.extras.filter(e => e.id !== eid)); };
+  const updExtra = (eid, k, v) => setProducts(ps => ps.map(p => p.id !== activeProdId ? p : { ...p, extras: p.extras.map(e => e.id === eid ? { ...e, [k]: v } : e) }));
+  const selectLabor = (eid, rawIdx) => {
+    const i = rawIdx === "" ? -1 : parseInt(rawIdx, 10);
+    const l = i >= 0 && laborItems[i] ? laborItems[i] : null;
+    const laborId = l ? l.id : "";
+    setProducts(ps => ps.map(p => p.id !== activeProdId ? p : {
+      ...p, extras: p.extras.map(e =>
+        e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
+      )
+    }));
     // qty preserved as-is
   };
 
   const buildFabricLines = () => activeProd.fabrics.map(f => {
-    const m = materials.find(x => x.id === Number(f.matId));
+    const m = materials.find(x => x.id == f.matId);
     if (!m || !f.qty) return null;
     return { name: m.name, qty: f.qty, unit: m.unit, unitPrice: m.price, total: m.price * parseFloat(f.qty) };
   }).filter(Boolean);
 
   const buildExtraLines = () => activeProd.extras.map(e => {
-    const l = e.laborId ? laborItems.find(x => x.id === Number(e.laborId)) : null;
+    const l = e.laborId ? laborItems.find(x => x.id == e.laborId) : null;
     const name = l ? l.name : e.customName;
     const unitPrice = l ? l.price : parseFloat(e.price || 0);
     const qty = parseFloat(e.qty || 1);
@@ -1024,7 +1585,7 @@ ${productList}
     tabBorder: "rgba(0,0,0,0.08)", tabInactive: "rgba(60,60,67,0.5)",
   };
 
-  const TABS = [["pricedb", "단가표"], ["calc", "단가 계산기"], ["quote", "견적서"], ["history", "견적 이력"]];
+  const TABS = [["pricedb", "단가표"], ["calc", "단가 계산기"], ["quote", "견적서"], ["history", "견적 이력"], ["dashboard", "경영 대시보드"], ["inventory", "원단 입고현황"]];
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -1052,7 +1613,7 @@ ${productList}
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F2F4F7" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
 
       {/* ── 헤더 ── */}
       <div style={{ background: "var(--header-bg)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: "0.5px solid var(--header-border)", position: "sticky", top: 0, zIndex: 100 }} className="no-print">
@@ -1069,6 +1630,17 @@ ${productList}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <SyncBadge />
+              <button onClick={handleUndo} title="실행 취소 (Ctrl+Z / ⌘Z)"
+                style={{
+                  width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
+                  background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
+                  fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 0.2s, transform 0.15s", flexShrink: 0,
+                  opacity: historyPointer.current >= 1 ? 1 : 0.35,
+                }}
+                onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
+                onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
+              >↩</button>
               <button onClick={() => setDarkMode(d => !d)} title={darkMode ? "라이트 모드" : "다크 모드"} style={{
                 width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
                 background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
@@ -1087,8 +1659,8 @@ ${productList}
                 padding: "13px 24px", border: "none", cursor: "pointer", fontWeight: 600,
                 fontSize: 14, fontFamily: "inherit", transition: "all 0.18s",
                 background: "transparent", position: "relative", whiteSpace: "nowrap", flexShrink: 0,
-                color: tab === id ? "#007AFF" : T.tabInactive,
-                borderBottom: tab === id ? `2.5px solid #007AFF` : "2.5px solid transparent",
+                color: tab === id ? ACCENT : T.tabInactive,
+                borderBottom: tab === id ? `2.5px solid ${ACCENT}` : "2.5px solid transparent",
               }}>{label}</button>
             ))}
           </div>
@@ -1135,7 +1707,23 @@ ${productList}
                 {/* 가로 스크롤 칩 */}
                 <div className="chip-scroll" style={{ marginBottom: 14 }}>
                   {products.filter(p => !prodSearch || p.name.toLowerCase().includes(prodSearch.toLowerCase())).map(p => (
-                    <div key={p.id} style={{ flexShrink: 0 }}>
+                    <div key={p.id} style={{ flexShrink: 0 }}
+                      draggable
+                      onDragStart={() => { dragProd.current = p.id; }}
+                      onDragOver={(e) => { e.preventDefault(); }}
+                      onDrop={() => {
+                        if (!dragProd.current || dragProd.current === p.id) return;
+                        pushHistory();
+                        setProducts(ps => {
+                          const arr = [...ps];
+                          const from = arr.findIndex(x => x.id === dragProd.current);
+                          const to = arr.findIndex(x => x.id === p.id);
+                          if (from < 0 || to < 0) return ps;
+                          arr.splice(to, 0, arr.splice(from, 1)[0]);
+                          return arr;
+                        });
+                        dragProd.current = null;
+                      }}>
                       {editingProdName?.id === p.id ? (
                         <input autoFocus value={editingProdName.value}
                           style={{ height: 38, padding: "0 14px", fontSize: 13, fontWeight: 600, borderRadius: 100, border: `2px solid ${NAVY}`, minWidth: 80 }}
@@ -1189,20 +1777,100 @@ ${productList}
                   <button className="btn-orange" onClick={addFabric} style={{ padding: "8px 16px", fontSize: 13 }}>+ 원단 추가</button>
                 </div>
                 {activeProd.fabrics.map((f, idx) => {
-                  const m = materials.find(x => x.id === Number(f.matId));
+                  const m = materials.find(x => x.id == f.matId);
                   const cost = m ? m.price * parseFloat(f.qty || 0) : 0;
+                  const matIdx = f.matId !== "" && f.matId != null ? materials.findIndex(x => x.id == f.matId) : -1;
+                  const isDropTop = fabricDropInfo?.id === f.id && fabricDropInfo?.side === "top";
+                  const isDropBot = fabricDropInfo?.id === f.id && fabricDropInfo?.side === "bottom";
+                  const InsertLine = () => (
+                    <div style={{
+                      height: 3, borderRadius: 3, margin: "2px 0",
+                      background: "linear-gradient(90deg,#007AFF,#34AADC)",
+                      boxShadow: "0 0 8px rgba(0,122,255,0.6)",
+                      position: "relative",
+                    }}>
+                      <div style={{
+                        position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)",
+                        width: 8, height: 8, borderRadius: "50%",
+                        background: "#007AFF", boxShadow: "0 0 6px rgba(0,122,255,0.8)",
+                      }} />
+                    </div>
+                  );
                   return (
-                    <div key={f.id} className="fabric-row">
-                      <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
-                      <select style={{ flex: 2, height: 38 }} value={f.matId} onChange={e => updFabric(f.id, "matId", e.target.value)}>
-                        <option value="">소재 선택</option>
-                        {materials.map(x => <option key={x.id} value={x.id}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
-                      </select>
-                      <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
-                        onChange={e => updFabric(f.id, "qty", e.target.value)} />
-                      <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>{m?.unit || "yard"}</span>
-                      {cost > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{cost.toLocaleString()}원</span>}
-                      <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                    <div key={f.id} style={{ position: "relative" }}>
+                      {isDropTop && <InsertLine />}
+                      <div className="fabric-row"
+                        draggable
+                        onDragStart={e => {
+                          dragFabric.current = f.id;
+                          setTimeout(() => { if (e.target) e.target.style.opacity = "0.35"; }, 0);
+                        }}
+                        onDragEnd={e => {
+                          e.currentTarget.style.opacity = "1";
+                          setFabricDropInfo(null);
+                          dragFabric.current = null;
+                        }}
+                        onDragOver={e => {
+                          e.preventDefault();
+                          if (dragFabric.current === f.id) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                          if (fabricDropInfo?.id !== f.id || fabricDropInfo?.side !== side)
+                            setFabricDropInfo({ id: f.id, side });
+                        }}
+                        onDragLeave={e => {
+                          if (!e.currentTarget.contains(e.relatedTarget)) setFabricDropInfo(null);
+                        }}
+                        onDrop={e => {
+                          e.preventDefault();
+                          const dragId = dragFabric.current; // 즉시 캡처 (onDragEnd가 null로 초기화하기 전)
+                          const dropId = f.id;
+                          if (!dragId || dragId === dropId) { setFabricDropInfo(null); return; }
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
+                          const currentProdId = activeProdId;
+                          setProducts(ps => ps.map(p => {
+                            if (p.id !== currentProdId) return p;
+                            const arr = [...p.fabrics];
+                            const fromIdx = arr.findIndex(x => x.id === dragId);
+                            if (fromIdx < 0) return p;
+                            const [item] = arr.splice(fromIdx, 1);
+                            const newTo = arr.findIndex(x => x.id === dropId);
+                            if (newTo < 0) { arr.push(item); return { ...p, fabrics: arr }; }
+                            arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                            return { ...p, fabrics: arr };
+                          }));
+                          setFabricDropInfo(null);
+                          dragFabric.current = null;
+                        }}
+                        style={{ transition: "opacity 0.15s", cursor: "default" }}
+                      >
+                        {/* 드래그 핸들 */}
+                        <div style={{
+                          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                          width: 20, minHeight: 38, cursor: "grab", gap: 1, flexShrink: 0,
+                          color: T.text3, userSelect: "none",
+                        }} title="드래그하여 순서 변경">
+                          <span style={{ fontSize: 11, lineHeight: 1 }}>▲</span>
+                          <span style={{ fontSize: 7, lineHeight: 1.2, opacity: 0.4 }}>┃</span>
+                          <span style={{ fontSize: 7, lineHeight: 1.2, opacity: 0.4 }}>┃</span>
+                          <span style={{ fontSize: 11, lineHeight: 1 }}>▼</span>
+                        </div>
+                        <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
+                        <select style={{ flex: 2, height: 38 }} value={matIdx >= 0 ? matIdx : ""} onChange={e => {
+                          const i = e.target.value === "" ? -1 : parseInt(e.target.value, 10);
+                          updFabric(f.id, "matId", i >= 0 && materials[i] ? materials[i].id : "");
+                        }}>
+                          <option value="">소재 선택</option>
+                          {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
+                        </select>
+                        <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
+                          onChange={e => updFabric(f.id, "qty", e.target.value)} />
+                        <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>{m?.unit || "yard"}</span>
+                        {cost > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{cost.toLocaleString()}원</span>}
+                        <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                      </div>
+                      {isDropBot && <InsertLine />}
                     </div>
                   );
                 })}
@@ -1215,20 +1883,25 @@ ${productList}
                   <button className="btn-orange" onClick={addExtra} style={{ padding: "8px 16px", fontSize: 13 }}>+ 항목 추가</button>
                 </div>
                 {activeProd.extras.map((e, idx) => {
-                  const selLabor = e.laborId ? laborItems.find(l => l.id === Number(e.laborId)) : null;
+                  const selLabor = e.laborId !== "" && e.laborId != null ? laborItems.find(l => l.id == e.laborId) : null;
                   const unitPrice = selLabor ? selLabor.price : parseFloat(e.price || 0);
                   const qty = parseFloat(e.qty || 1);
                   const total = unitPrice * qty;
+                  const labIdx = e.laborId !== "" && e.laborId != null ? laborItems.findIndex(l => l.id == e.laborId) : -1;
+                  const labSelectVal = labIdx >= 0 ? labIdx : "";
+                  const labOptions = <>
+                    <option value="">직접 입력</option>
+                    <optgroup label="── 공임비 DB ──">
+                      {laborItems.map((l, li) => <option key={l.id} value={li}>{l.name} ({l.price.toLocaleString()}원)</option>)}
+                    </optgroup>
+                  </>;
                   return (
                     <div key={e.id} className="fabric-row">
                       <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>항목{idx + 1}</span>
                       {e.laborId
                         ? <>
-                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
-                              <option value="">직접 입력</option>
-                              <optgroup label="── 공임비 DB ──">
-                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
-                              </optgroup>
+                            <select style={{ flex: 2, height: 38 }} value={labSelectVal} onChange={x => selectLabor(e.id, x.target.value)}>
+                              {labOptions}
                             </select>
                             <input type="number" placeholder="개수" value={e.qty || ""}
                               style={{ width: 76, textAlign: "right" }}
@@ -1237,11 +1910,8 @@ ${productList}
                             {total > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{total.toLocaleString()}원</span>}
                           </>
                         : <>
-                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
-                              <option value="">직접 입력</option>
-                              <optgroup label="── 공임비 DB ──">
-                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
-                              </optgroup>
+                            <select style={{ flex: 2, height: 38 }} value={labSelectVal} onChange={x => selectLabor(e.id, x.target.value)}>
+                              {labOptions}
                             </select>
                             <input placeholder="항목명" value={e.customName || ""}
                               style={{ width: 100, textAlign: "left" }}
@@ -1283,7 +1953,7 @@ ${productList}
                 </div>
 
                 {/* ABCD 등급별 마진율 + 단가 직접 수정 */}
-                <div style={{ borderTop: "1px solid #F2F4F7", paddingTop: 20 }}>
+                <div style={{ borderTop: `1px solid ${T.divider}`, paddingTop: 20 }}>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>등급별 마진율 · 단가</div>
                     <div style={{ fontSize: 12, color: T.text2, marginTop: 1 }}>마진율 기준으로 자동 계산되며, 단가를 직접 입력해 최종 조정할 수 있습니다.</div>
@@ -1299,18 +1969,18 @@ ${productList}
                         <div key={g} style={{
                           display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
                           padding: "10px 12px", borderRadius: 12,
-                          background: isSel ? "#EEF2FF" : "#F8F9FB",
-                          border: `1.5px solid ${isSel ? NAVY : "transparent"}`,
+                          background: isSel ? (darkMode ? "rgba(71,85,105,0.3)" : "#EEF2FF") : T.surface2,
+                          border: `1.5px solid ${isSel ? ACCENT : "transparent"}`,
                           transition: "all 0.15s",
                         }}>
                           {/* 등급 뱃지 */}
                           <div style={{
                             width: 28, height: 28, borderRadius: 8,
-                            background: isSel ? NAVY : "#fff",
+                            background: isSel ? ACCENT : T.ghostBg,
                             color: isSel ? "#fff" : T.text2,
                             display: "flex", alignItems: "center", justifyContent: "center",
                             fontWeight: 800, fontSize: 13, flexShrink: 0,
-                            border: isSel ? "none" : "1.5px solid #E5E8EB",
+                            border: isSel ? "none" : `1.5px solid ${T.ghostBorder}`,
                           }}>{g}</div>
                           {/* 마진율 input */}
                           <input type="number" value={rate}
@@ -1326,9 +1996,9 @@ ${productList}
                               style={{
                                 flex: 1, height: 36, textAlign: "right", padding: "0 8px",
                                 fontSize: 14, fontWeight: 700,
-                                color: isOverridden ? ORANGE : (isSel ? NAVY : T.ghostColor),
-                                background: isOverridden ? "#FFF7ED" : "#fff",
-                                borderColor: isOverridden ? "#FED7AA" : undefined,
+                                color: isOverridden ? ORANGE : (isSel ? ACCENT : T.ghostColor),
+                                background: isOverridden ? (darkMode ? "rgba(120,53,15,0.4)" : "#FFF7ED") : T.ghostBg,
+                                borderColor: isOverridden ? (darkMode ? "#92400E" : "#FED7AA") : undefined,
                               }}
                               onChange={e => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: e.target.value })} />
                             <span style={{ fontSize: 12, color: T.text2, flexShrink: 0 }}>원</span>
@@ -1336,8 +2006,8 @@ ${productList}
                               <button onClick={() => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: "" })}
                                 title="자동 계산값으로 초기화"
                                 style={{
-                                  width: 28, height: 28, borderRadius: 6, border: "none", cursor: "pointer",
-                                  background: "#fff", color: T.text2, fontFamily: "inherit", fontSize: 14,
+                                  width: 28, height: 28, borderRadius: 6, cursor: "pointer",
+                                  background: T.ghostBg, color: T.text2, fontFamily: "inherit", fontSize: 14,
                                   display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                                   border: `1.5px solid ${T.ghostBorder}`,
                                 }}>↻</button>
@@ -1345,7 +2015,7 @@ ${productList}
                           </div>
                           {/* 마진 금액 */}
                           {beforeMargin > 0 && (
-                            <div style={{ fontSize: 11, color: isSel ? "#6366F1" : T.text2, fontWeight: 600, flexShrink: 0, textAlign: "right", minWidth: 60 }}>
+                            <div style={{ fontSize: 11, color: isSel ? (darkMode ? "#A5B4FC" : "#6366F1") : T.text2, fontWeight: 600, flexShrink: 0, textAlign: "right", minWidth: 60 }}>
                               +{Math.round(gradePrices[g] - beforeMargin).toLocaleString()}원
                             </div>
                           )}
@@ -1355,22 +2025,22 @@ ${productList}
                             style={{
                               padding: "6px 12px", fontSize: 12, fontWeight: 700,
                               borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
-                              background: isSel ? NAVY : "#fff",
+                              background: isSel ? ACCENT : T.ghostBg,
                               color: isSel ? "#fff" : T.text2,
-                              border: isSel ? "1.5px solid " + NAVY : "1.5px solid #E5E8EB",
+                              border: `1.5px solid ${isSel ? ACCENT : T.ghostBorder}`,
                               transition: "all 0.15s", flexShrink: 0,
                             }}>{isSel ? "✓ 선택" : "선택"}</button>
                         </div>
                       );
                     })}
                   </div>
-                  <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF7ED", borderRadius: 10, fontSize: 12, color: "#9A3412", lineHeight: 1.6 }}>
+                  <div style={{ marginTop: 12, padding: "10px 12px", background: darkMode ? "rgba(154,52,18,0.2)" : "#FFF7ED", borderRadius: 10, fontSize: 12, color: darkMode ? "#FB923C" : "#9A3412", lineHeight: 1.6 }}>
                     💡 단가 칸이 비어있으면 마진율 기준 자동 계산값을 사용합니다. 직접 입력한 단가는 <strong style={{ color: ORANGE }}>주황색</strong>으로 표시되며 ↻ 버튼으로 초기화할 수 있습니다.
                   </div>
                 </div>
 
                 {/* 시장 소비자가 */}
-                <div style={{ borderTop: "1px solid #F2F4F7", paddingTop: 20, marginTop: 4 }}>
+                <div style={{ borderTop: `1px solid ${T.divider}`, paddingTop: 20, marginTop: 4 }}>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>시장 소비자가</div>
                     <div style={{ fontSize: 12, color: T.text2, marginTop: 1 }}>견적서에 참고 소비자가로 표시됩니다.</div>
@@ -1401,7 +2071,20 @@ ${productList}
               <div className="card">
                 <div className="section-header" style={{ marginBottom: 14 }}>
                   <span className="section-header-title">견적 포함 제품</span>
-                  <span className="info-pill">{products.filter(p => p.include !== false).length} / {products.length} 선택</span>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button onClick={() => {
+                      pushHistory();
+                      const eligible = products.filter(p => computeProduct(p, materials, laborItems).base > 0);
+                      const allOn = eligible.every(p => p.include !== false);
+                      setProducts(ps => ps.map(p => {
+                        const hasData = computeProduct(p, materials, laborItems).base > 0;
+                        return hasData ? { ...p, include: !allOn } : p;
+                      }));
+                    }} style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>
+                      {products.filter(p => computeProduct(p, materials, laborItems).base > 0).every(p => p.include !== false) ? "전체 해제" : "전체 선택"}
+                    </button>
+                    <span className="info-pill">{products.filter(p => p.include !== false).length}/{products.length}</span>
+                  </div>
                 </div>
                 <div style={{ fontSize: 12, color: T.text2, marginBottom: 12 }}>여러 제품을 한 견적서에 함께 담을 수 있어요. 체크하면 견적서에 포함됩니다.</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1412,25 +2095,35 @@ ${productList}
                     return (
                       <div key={p.id} style={{
                         borderRadius: 14,
-                        background: isInc && hasData ? "#F8F9FB" : "#fff",
-                        border: `1.5px solid ${isInc && hasData ? T.divider : "#F2F4F7"}`,
+                        background: isInc && hasData ? T.surface2 : T.surface,
+                        border: `1.5px solid ${isInc && hasData ? T.divider : T.border}`,
                         opacity: hasData ? 1 : 0.5,
                         overflow: "hidden",
                       }}>
-                        {/* 상단: 체크박스 + 이름 + 가격 */}
-                        <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: hasData ? "pointer" : "not-allowed" }}>
+                        {/* 상단: 체크박스 + 이름 + 가격 + 이동버튼 */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
                           <input type="checkbox" checked={isInc && hasData}
                             disabled={!hasData}
                             onChange={e => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, include: e.target.checked } : x))}
                             style={{ width: 18, height: 18, accentColor: NAVY, cursor: hasData ? "pointer" : "not-allowed", flexShrink: 0 }} />
-                          <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setActiveProdId(p.id)}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
                             {hasData
                               ? <div style={{ fontSize: 11, color: T.text2, marginTop: 1 }}>{p.selectedGrade || "A"}급 · {Math.round(c.finalPrice).toLocaleString()}원</div>
                               : <div style={{ fontSize: 11, color: "#CDD2D7", marginTop: 1 }}>원가 미입력</div>
                             }
                           </div>
-                        </label>
+                          <button onClick={() => setActiveProdId(p.id)} title="단가 계산기로 이동"
+                            style={{
+                              flexShrink: 0, background: "none", border: `1.5px solid ${T.border}`,
+                              borderRadius: 8, padding: "4px 8px", cursor: "pointer",
+                              fontSize: 12, fontWeight: 700, color: T.text2,
+                              fontFamily: "inherit", transition: "all 0.15s",
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = ACCENT; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = ACCENT; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = T.text2; e.currentTarget.style.borderColor = T.border; }}
+                          >이동 →</button>
+                        </div>
                         {/* 하단: A/B/C/D 등급 선택 버튼 */}
                         {hasData && (
                           <div style={{ display: "flex", gap: 4, padding: "0 12px 10px", alignItems: "center" }}>
@@ -1441,8 +2134,8 @@ ${productList}
                               return (
                                 <button key={g} onClick={() => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, selectedGrade: g } : x))}
                                   style={{
-                                    flex: 1, padding: "5px 0", borderRadius: 8, border: `1.5px solid ${isSel ? NAVY : T.divider}`,
-                                    background: isSel ? NAVY : "#fff", color: isSel ? "#fff" : T.text2,
+                                    flex: 1, padding: "5px 0", borderRadius: 8, border: `1.5px solid ${isSel ? ACCENT : T.divider}`,
+                                    background: isSel ? ACCENT : T.ghostBg, color: isSel ? "#fff" : T.text2,
                                     fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
                                     transition: "all 0.12s", lineHeight: 1.3,
                                   }}>
@@ -1457,6 +2150,54 @@ ${productList}
                     );
                   })}
                 </div>
+                {(() => {
+                  const withData = products
+                    .filter(p => p.include !== false)
+                    .map(p => ({ p, c: computeProduct(p, materials, laborItems) }))
+                    .filter(({ c }) => c.base > 0);
+                  if (withData.length === 0) return null;
+                  // 사용자가 직접 설정한 등급별 마진율의 평균
+                  const avgM = withData.reduce((sum, { p, c }) => {
+                    const sel = c.selectedGrade || "A";
+                    const m = (p.margins || DEFAULT_MARGINS)[sel] ?? DEFAULT_MARGINS[sel];
+                    return sum + m;
+                  }, 0) / withData.length;
+                  // 납품가 대비 실질 마진율 평균
+                  const avgMSell = withData.reduce((sum, { c }) => {
+                    if (!c.finalPrice) return sum;
+                    return sum + ((c.finalPrice - c.beforeMargin) / c.finalPrice * 100);
+                  }, 0) / withData.length;
+                  const totalRev = withData.reduce((s, { c }) => s + c.finalPrice, 0);
+                  const totalCost = withData.reduce((s, { c }) => s + c.beforeMargin, 0);
+                  const mColor = avgM >= 35 ? "#00B493" : avgM >= 25 ? "#FF9500" : "#F04452";
+                  const mColorSell = avgMSell >= 26 ? "#00B493" : avgMSell >= 20 ? "#FF9500" : "#F04452";
+                  return (
+                    <div style={{ marginTop: 12, padding: "12px 14px", background: "var(--surface2)", borderRadius: 12, border: "0.5px solid var(--border)" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 }}>견적 요약</div>
+                      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, minWidth: 80 }}>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>평균 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(설정값 기준)</span></div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: mColor, lineHeight: 1 }}>{avgM.toFixed(1)}<span style={{ fontSize: 14 }}>%</span></div>
+                        </div>
+                        <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
+                        <div style={{ flex: 1, minWidth: 80 }}>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>납품가 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(납품가 대비)</span></div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: mColorSell, lineHeight: 1 }}>{avgMSell.toFixed(1)}<span style={{ fontSize: 14 }}>%</span></div>
+                        </div>
+                        <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
+                        <div style={{ flex: 1.5, minWidth: 100 }}>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>총 견적금액</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)" }}>{Math.round(totalRev).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--text2)" }}>원</span></div>
+                        </div>
+                        <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
+                        <div style={{ flex: 1.5, minWidth: 100 }}>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>총 원가</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)" }}>{Math.round(totalCost).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--text2)" }}>원</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* 견적서 생성 */}
@@ -1491,16 +2232,16 @@ ${productList}
             {/* 오른쪽 원가 요약 */}
             <div style={{ position: "sticky", top: 24 }}>
               <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-                <div style={{ padding: "18px 20px", borderBottom: "1px solid #F2F4F7", background: "linear-gradient(135deg, #007AFF, #0062CC)" }}>
+                <div style={{ padding: "18px 20px", borderBottom: `1px solid ${T.divider}`, background: "linear-gradient(135deg, #007AFF, #0062CC)" }}>
                   <div style={{ fontSize: 11, color: "rgba(147,197,253,0.8)", marginBottom: 4, fontWeight: 600, letterSpacing: 0.5 }}>원가 요약</div>
                   <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", letterSpacing: -0.3 }}>FR {activeProd.name}</div>
                 </div>
 
                 {activeProd.fabrics.some(f => f.matId && f.qty) && (
-                  <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                  <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                     <div className="section-label">원단</div>
                     {activeProd.fabrics.map((f, i) => {
-                      const m = materials.find(x => x.id === Number(f.matId));
+                      const m = materials.find(x => x.id == f.matId);
                       const c = m ? m.price * parseFloat(f.qty || 0) : 0;
                       if (!m || c === 0) return null;
                       return (
@@ -1510,7 +2251,7 @@ ${productList}
                         </div>
                       );
                     })}
-                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #F2F4F7" }}>
+                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${T.divider}` }}>
                       <span style={{ fontSize: 12, color: T.text2 }}>원단 소계</span>
                       <span style={{ fontSize: 13, fontWeight: 700 }}>{fabricCost.toLocaleString()}원</span>
                     </div>
@@ -1518,10 +2259,10 @@ ${productList}
                 )}
 
                 {activeProd.extras.some(e => (e.laborId || e.customName) && (e.laborId || e.price)) && (
-                  <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                  <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                     <div className="section-label">기타 · 공임비</div>
                     {activeProd.extras.map(e => {
-                      const l = e.laborId ? laborItems.find(x => x.id === Number(e.laborId)) : null;
+                      const l = e.laborId ? laborItems.find(x => x.id == e.laborId) : null;
                       const name = l ? l.name : e.customName;
                       const unitPrice = l ? l.price : parseFloat(e.price || 0);
                       const qty = parseFloat(e.qty || 1);
@@ -1534,14 +2275,14 @@ ${productList}
                         </div>
                       );
                     })}
-                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #F2F4F7" }}>
+                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${T.divider}` }}>
                       <span style={{ fontSize: 12, color: T.text2 }}>공임비 소계</span>
                       <span style={{ fontSize: 13, fontWeight: 700 }}>{extraCost.toLocaleString()}원</span>
                     </div>
                   </div>
                 )}
 
-                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                   <div className="row-item">
                     <span className="row-label">소계</span>
                     <span className="row-value">{baseTotal.toLocaleString()}원</span>
@@ -1557,7 +2298,7 @@ ${productList}
                 </div>
 
                 {/* ABCD 등급 가격 */}
-                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                   <div className="section-label">등급별 단가</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {GRADES.map(g => {
@@ -1571,21 +2312,21 @@ ${productList}
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
                             padding: "8px 10px", borderRadius: 10, cursor: "pointer",
-                            border: isSel ? `1.5px solid ${NAVY}` : "1.5px solid transparent",
-                            background: isSel ? "#EEF2FF" : "transparent",
+                            border: isSel ? `1.5px solid ${ACCENT}` : "1.5px solid transparent",
+                            background: isSel ? (darkMode ? "rgba(71,85,105,0.3)" : "#EEF2FF") : "transparent",
                             fontFamily: "inherit", textAlign: "left", width: "100%",
                             transition: "all 0.15s",
                           }}>
                           <span style={{
                             width: 22, height: 22, borderRadius: 6,
-                            background: isSel ? NAVY : T.divider,
+                            background: isSel ? ACCENT : T.divider,
                             color: isSel ? "#fff" : T.text2,
                             display: "inline-flex", alignItems: "center", justifyContent: "center",
                             fontWeight: 800, fontSize: 11, flexShrink: 0,
                           }}>{g}</span>
                           <span style={{ fontSize: 11, color: T.text2, flexShrink: 0, minWidth: 28 }}>{r}%</span>
-                          {isOv && <span title="수동 수정됨" style={{ fontSize: 9, fontWeight: 800, color: ORANGE, padding: "1px 5px", borderRadius: 4, background: "#FFF7ED", flexShrink: 0 }}>수정</span>}
-                          <span style={{ flex: 1, textAlign: "right", fontSize: 13, fontWeight: isSel ? 800 : 600, color: isSel ? NAVY : (isOv ? ORANGE : T.ghostColor) }}>
+                          {isOv && <span title="수동 수정됨" style={{ fontSize: 9, fontWeight: 800, color: ORANGE, padding: "1px 5px", borderRadius: 4, background: darkMode ? "rgba(120,53,15,0.4)" : "#FFF7ED", flexShrink: 0 }}>수정</span>}
+                          <span style={{ flex: 1, textAlign: "right", fontSize: 13, fontWeight: isSel ? 800 : 600, color: isSel ? ACCENT : (isOv ? ORANGE : T.ghostColor) }}>
                             {p > 0 ? `${Math.round(p).toLocaleString()}원` : "—"}
                           </span>
                         </button>
@@ -1649,7 +2390,7 @@ ${productList}
                       onClick={() => setEditingQuote(v => !v)}
                       style={{
                         padding: "10px 18px", border: `1.5px solid ${editingQuote ? ORANGE : T.divider}`,
-                        borderRadius: 12, background: editingQuote ? "#FFF7ED" : "#fff",
+                        borderRadius: 12, background: editingQuote ? (darkMode ? "rgba(120,53,15,0.4)" : "#FFF7ED") : T.ghostBg,
                         color: editingQuote ? ORANGE : T.ghostColor, fontSize: 13, fontWeight: 700,
                         cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
                       }}>
@@ -1802,7 +2543,7 @@ ${productList}
                                 onMouseEnter={e => e.currentTarget.style.background = "#FAFBFC"}
                                 onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                                 onClick={() => setViewingQuote(q)}>
-                                <div style={{ width: 36, height: 36, borderRadius: 10, background: "#F2F4F7", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
+                                <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 14, fontWeight: 700, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{q.title}</div>
                                   <div style={{ display: "flex", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
@@ -1827,12 +2568,101 @@ ${productList}
             )}
           </div>
         )}
+
+        {/* 경영 대시보드 */}
+        {tab === "dashboard" && (
+          <DashboardTab
+            products={products}
+            setProducts={setProducts}
+            materials={materials}
+            laborItems={laborItems}
+            orders={orders}
+            setOrders={setOrders}
+            monthlySales={monthlySales}
+            setMonthlySales={setMonthlySales}
+            darkMode={darkMode}
+            setTab={setTab}
+            setActiveProdId={setActiveProdId}
+          />
+        )}
+
+        {/* 원단 입고현황 */}
+        {tab === "inventory" && (
+          <InventoryTab
+            fabricIntakes={fabricIntakes}
+            setFabricIntakes={setFabricIntakes}
+            materials={materials}
+            darkMode={darkMode}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+const CORRECT_PW = "911201";
+
+function LoginScreen({ onSuccess }) {
+  const [pw, setPw] = React.useState("");
+  const [shake, setShake] = React.useState(false);
+  const [err, setErr] = React.useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (pw === CORRECT_PW) {
+      sessionStorage.setItem("nj_auth", "1");
+      onSuccess();
+    } else {
+      setErr(true);
+      setShake(true);
+      setPw("");
+      setTimeout(() => setShake(false), 500);
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "var(--bg)", flexDirection: "column", gap: 0,
+    }}>
+      <form onSubmit={handleSubmit} style={{
+        background: "var(--surface)", borderRadius: 20, padding: "40px 36px 36px",
+        boxShadow: "0 4px 32px rgba(0,0,0,0.10)", border: "0.5px solid var(--border)",
+        width: 320, display: "flex", flexDirection: "column", gap: 18,
+        animation: shake ? "shake 0.45s ease" : "none",
+      }}>
+        <div style={{ textAlign: "center", marginBottom: 4 }}>
+          <div style={{ fontSize: 32, marginBottom: 6 }}>🔒</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>NJ SAFETY</div>
+          <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 4 }}>비밀번호를 입력하세요</div>
+        </div>
+        <input
+          type="password"
+          placeholder="비밀번호"
+          value={pw}
+          autoFocus
+          onChange={e => { setPw(e.target.value); setErr(false); }}
+          style={{
+            borderRadius: 12, height: 48, fontSize: 18, textAlign: "center", letterSpacing: 4,
+            border: err ? "2px solid #F04452" : "2px solid transparent",
+            background: "var(--input-bg)", color: "var(--input-color)",
+          }}
+        />
+        {err && <div style={{ fontSize: 12, color: "#F04452", textAlign: "center", marginTop: -10 }}>비밀번호가 틀렸습니다</div>}
+        <button type="submit" className="btn-primary" style={{ height: 48, fontSize: 15, borderRadius: 12 }}>입장</button>
+      </form>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-8px)}30%{transform:translateX(8px)}45%{transform:translateX(-6px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}`}</style>
+    </div>
+  );
+}
+
+function Root() {
+  const [authed, setAuthed] = React.useState(() => sessionStorage.getItem("nj_auth") === "1");
+  if (!authed) return <LoginScreen onSuccess={() => setAuthed(true)} />;
+  return <App />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
 
 // ── PDF 1페이지 자동 맞춤 ──
 (function() {
