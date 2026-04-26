@@ -834,6 +834,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const [showMonthInput, setShowMonthInput] = useState(false);
   const salesRef = useRef(null); const salesInst = useRef(null);
   const pieRef = useRef(null); const pieInst = useRef(null);
+  const marginRef = useRef(null); const marginInst = useRef(null);
   const dragMargin = useRef(null);
   const [marginDropInfo, setMarginDropInfo] = useState(null);
 
@@ -890,7 +891,16 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:"right",labels:{color:chartText,padding:10,font:{size:12}}}} }
       });
     }
-    return () => { [salesInst,pieInst].forEach(r=>{if(r.current){r.current.destroy();r.current=null;}}); };
+    if (marginRef.current && mLabels.length > 0) {
+      if (marginInst.current) marginInst.current.destroy();
+      marginInst.current = new Chart(marginRef.current, {
+        type:"bar", data:{ labels:mLabels, datasets:[{ label:"납품가 마진율(%)", data:mValues,
+          backgroundColor:mValues.map(v=>v>=26?"rgba(0,180,147,0.75)":v>=20?"rgba(255,149,0,0.75)":"rgba(240,68,82,0.75)"), borderRadius:5 }] },
+        options:{ responsive:true, maintainAspectRatio:false, indexAxis:"y", plugins:{legend:{display:false}},
+          scales:{ x:{grid:{color:gridCol},ticks:{color:chartText,callback:v=>v+"%"},max:Math.ceil((Math.max(...mValues,30)+5)/5)*5}, y:{grid:{display:false},ticks:{color:chartText}} } }
+      });
+    }
+    return () => { [salesInst,pieInst,marginInst].forEach(r=>{if(r.current){r.current.destroy();r.current=null;}}); };
   }, [orders, darkMode, products.length, JSON.stringify(monthlySales)]);
 
   const addOrder = () => {
@@ -958,104 +968,84 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         </div>
       </div>
       <div className="card">
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>📊 제품별 마진율 현황 <span style={{fontSize:11,fontWeight:400,color:"var(--text3)"}}>(납품가 대비)</span></div>
-          <div style={{display:"flex",gap:12}}>
-            {[["≥26%","#00B493"],["20~25%","#FF9500"],["<20%","#F04452"]].map(([l,c])=>(
-              <div key={l} style={{display:"flex",alignItems:"center",gap:4,fontSize:11}}><div style={{width:8,height:8,borderRadius:2,background:c}}/><span style={{color:"var(--text2)"}}>{l}</span></div>
+        <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:4}}>📊 제품별 마진율 현황 <span style={{fontSize:11,fontWeight:400,color:"var(--text3)"}}>(납품가 대비)</span></div>
+        <div style={{height:Math.max(140,mLabels.length*48),position:"relative"}}>
+          {mLabels.length>0?<canvas ref={marginRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:120,color:"var(--text3)",fontSize:13}}>원가가 입력된 제품이 없습니다</div>}
+        </div>
+        {mLabels.length>0&&(<>
+          <div style={{display:"flex",gap:16,marginTop:12,paddingTop:12,borderTop:"0.5px solid var(--divider)",flexWrap:"wrap",marginBottom:14}}>
+            {[["≥26% 우수","#00B493"],["20~25% 양호","#FF9500"],["<20% 주의","#F04452"]].map(([l,c])=>(
+              <div key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:12}}><div style={{width:10,height:10,borderRadius:3,background:c}}/><span style={{color:"var(--text2)"}}>{l}</span></div>
             ))}
           </div>
-        </div>
-        {mProds.length === 0
-          ? <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:100,color:"var(--text3)",fontSize:13}}>원가가 입력된 제품이 없습니다</div>
-          : (() => {
-              const maxV = Math.max(...mValues, 5);
+          {/* 드래그 순서 조정 목록 */}
+          <div style={{fontSize:11,fontWeight:600,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>순서 조정 · 제품명 클릭 시 단가 계산기 이동</div>
+          <div>
+            {mProds.map((p, idx) => {
+              const c = computeProduct(p, materials, laborItems);
+              const mv = parseFloat(((c.finalPrice - c.beforeMargin) / c.finalPrice * 100).toFixed(1));
+              const barColor = mv >= 26 ? "#00B493" : mv >= 20 ? "#FF9500" : "#F04452";
+              const isDropTop = marginDropInfo?.id === p.id && marginDropInfo?.side === "top";
+              const isDropBot = marginDropInfo?.id === p.id && marginDropInfo?.side === "bottom";
               const MInsertLine = () => (
                 <div style={{height:3,borderRadius:3,margin:"2px 0",background:"linear-gradient(90deg,#007AFF,#34AADC)",boxShadow:"0 0 8px rgba(0,122,255,0.6)",position:"relative"}}>
                   <div style={{position:"absolute",left:4,top:"50%",transform:"translateY(-50%)",width:8,height:8,borderRadius:"50%",background:"#007AFF",boxShadow:"0 0 6px rgba(0,122,255,0.8)"}}/>
                 </div>
               );
               return (
-                <div>
-                  {mProds.map((p, idx) => {
-                    const mv = mValues[idx];
-                    const barColor = mv >= 26 ? "#00B493" : mv >= 20 ? "#FF9500" : "#F04452";
-                    const barPct = Math.max((mv / maxV) * 100, 1);
-                    const isDropTop = marginDropInfo?.id === p.id && marginDropInfo?.side === "top";
-                    const isDropBot = marginDropInfo?.id === p.id && marginDropInfo?.side === "bottom";
-                    return (
-                      <div key={p.id} style={{position:"relative"}}>
-                        {isDropTop && <MInsertLine/>}
-                        <div
-                          draggable
-                          onDragStart={e => { dragMargin.current = p.id; setTimeout(()=>{ try{e.target.style.opacity="0.35";}catch(err){} },0); }}
-                          onDragEnd={e => { e.currentTarget.style.opacity="1"; setMarginDropInfo(null); dragMargin.current=null; }}
-                          onDragOver={e => {
-                            e.preventDefault();
-                            if (dragMargin.current === p.id) return;
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
-                            if (marginDropInfo?.id !== p.id || marginDropInfo?.side !== side) setMarginDropInfo({id:p.id, side});
-                          }}
-                          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setMarginDropInfo(null); }}
-                          onDrop={e => {
-                            e.preventDefault();
-                            const dragId = dragMargin.current;
-                            const dropId = p.id;
-                            if (!dragId || dragId === dropId) { setMarginDropInfo(null); return; }
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
-                            setProducts(ps => {
-                              const arr = [...ps];
-                              const fromIdx = arr.findIndex(x => x.id === dragId);
-                              if (fromIdx < 0) return ps;
-                              const [item] = arr.splice(fromIdx, 1);
-                              const newTo = arr.findIndex(x => x.id === dropId);
-                              if (newTo < 0) return [...arr, item];
-                              arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
-                              return arr;
-                            });
-                            setMarginDropInfo(null); dragMargin.current = null;
-                          }}
-                          style={{display:"flex",alignItems:"center",gap:8,padding:"5px 4px",borderRadius:8,marginBottom:2,transition:"opacity 0.15s",cursor:"default"}}
-                        >
-                          {/* 드래그 핸들 */}
-                          <span style={{fontSize:13,color:"var(--text3)",cursor:"grab",userSelect:"none",flexShrink:0,width:16,textAlign:"center"}}>⠿</span>
-                          {/* 제품명 — 클릭 시 단가 계산기 이동 */}
-                          <span
-                            onClick={() => { setTab("calc"); setActiveProdId(p.id); }}
-                            title="단가 계산기로 이동"
-                            style={{width:130,fontSize:12,fontWeight:500,color:"var(--text1)",cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",flexShrink:0,textDecoration:"underline dotted"}}
-                          >{p.name}</span>
-                          {/* 바 */}
-                          <div style={{flex:1,height:22,background:"var(--surface2)",borderRadius:5,overflow:"hidden",position:"relative"}}>
-                            <div style={{
-                              width:`${barPct}%`, height:"100%",
-                              background:`linear-gradient(90deg,${barColor}cc,${barColor})`,
-                              borderRadius:5, transition:"width 0.4s ease",
-                            }}/>
-                            {/* 격자선 표시 */}
-                            {[25,50,75].map(tick => (
-                              <div key={tick} style={{position:"absolute",top:0,bottom:0,left:`${tick}%`,width:1,background:"var(--divider)",opacity:0.5}}/>
-                            ))}
-                          </div>
-                          {/* 수치 */}
-                          <span style={{fontSize:12,fontWeight:700,color:barColor,minWidth:42,textAlign:"right",flexShrink:0}}>{mv.toFixed(1)}%</span>
-                        </div>
-                        {isDropBot && <MInsertLine/>}
-                      </div>
-                    );
-                  })}
-                  {/* X축 눈금 */}
-                  <div style={{display:"flex",paddingLeft:162,marginTop:2}}>
-                    {[0,25,50,75,100].map(t => (
-                      <div key={t} style={{flex: t===0?0:25,fontSize:10,color:"var(--text3)",textAlign: t===0?"left":"center"}}>{t===0?"0":t+"%"}</div>
-                    ))}
+                <div key={p.id} style={{position:"relative"}}>
+                  {isDropTop && <MInsertLine/>}
+                  <div
+                    draggable
+                    onDragStart={e => { dragMargin.current = p.id; setTimeout(()=>{e.target.style.opacity="0.35";},0); }}
+                    onDragEnd={e => { e.currentTarget.style.opacity="1"; setMarginDropInfo(null); dragMargin.current=null; }}
+                    onDragOver={e => {
+                      e.preventDefault();
+                      if (dragMargin.current === p.id) return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
+                      if (marginDropInfo?.id !== p.id || marginDropInfo?.side !== side) setMarginDropInfo({id:p.id, side});
+                    }}
+                    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setMarginDropInfo(null); }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      const dragId = dragMargin.current;
+                      const dropId = p.id;
+                      if (!dragId || dragId === dropId) { setMarginDropInfo(null); return; }
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const side = e.clientY < rect.top + rect.height/2 ? "top" : "bottom";
+                      setProducts(ps => {
+                        const arr = [...ps];
+                        const fromIdx = arr.findIndex(x => x.id === dragId);
+                        if (fromIdx < 0) return ps;
+                        const [item] = arr.splice(fromIdx, 1);
+                        const newTo = arr.findIndex(x => x.id === dropId);
+                        if (newTo < 0) return [...arr, item];
+                        arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
+                        return arr;
+                      });
+                      setMarginDropInfo(null); dragMargin.current = null;
+                    }}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderRadius:10,background:"var(--surface2)",marginBottom:4,cursor:"default",transition:"opacity 0.15s"}}
+                  >
+                    <span style={{fontSize:14,color:"var(--text3)",cursor:"grab",userSelect:"none",flexShrink:0}}>⠿</span>
+                    <span style={{fontSize:11,color:"var(--text3)",fontWeight:600,minWidth:18,flexShrink:0}}>{idx+1}</span>
+                    <span
+                      onClick={() => { setTab("calc"); setActiveProdId(p.id); }}
+                      style={{flex:1,fontSize:13,fontWeight:600,color:"var(--text1)",cursor:"pointer",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}
+                      title={`${p.name} — 단가 계산기로 이동`}
+                    >{p.name}</span>
+                    <div style={{width:90,height:8,borderRadius:4,background:"var(--divider)",overflow:"hidden",flexShrink:0}}>
+                      <div style={{width:`${Math.min(mv/40*100,100)}%`,height:"100%",background:barColor,borderRadius:4,transition:"width 0.3s"}}/>
+                    </div>
+                    <span style={{fontSize:12,fontWeight:700,color:barColor,minWidth:42,textAlign:"right",flexShrink:0}}>{mv.toFixed(1)}%</span>
                   </div>
+                  {isDropBot && <MInsertLine/>}
                 </div>
               );
-            })()
-        }
+            })}
+          </div>
+        </>)}
       </div>
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -1260,6 +1250,7 @@ function App() {
   const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
   const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
   const [fabricDropInfo, setFabricDropInfo] = useState(null); // { id, side: 'top'|'bottom' }
+  const [calcEditMode, setCalcEditMode] = useState(false);
   useEffect(() => {
     document.body.classList.toggle("dark", darkMode);
     save("frw_dark", darkMode);
@@ -1272,6 +1263,7 @@ function App() {
   const dragFabric = useRef(null);
   const historyStack = useRef([]);
   const historyPointer = useRef(-1);
+  const calcEditSnapshot = useRef(null);
 
   const pushHistory = useCallback(() => {
     const snapshot = {
@@ -1411,6 +1403,10 @@ function App() {
     }));
     // qty preserved as-is
   };
+
+  const enterCalcEdit = () => { calcEditSnapshot.current = JSON.parse(JSON.stringify(products)); setCalcEditMode(true); };
+  const saveCalcEdit = () => { calcEditSnapshot.current = null; setCalcEditMode(false); };
+  const cancelCalcEdit = () => { if (calcEditSnapshot.current) setProducts(calcEditSnapshot.current); calcEditSnapshot.current = null; setCalcEditMode(false); };
 
   const buildFabricLines = () => activeProd.fabrics.map(f => {
     const m = materials.find(x => x.id == f.matId);
@@ -1676,6 +1672,29 @@ ${productList}
 
         {/* ── 계산기 탭 ── */}
         {tab === "calc" && (
+          <>
+          {/* ── 수정/저장 바 ── */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "12px 18px", borderRadius: 14, background: calcEditMode ? (darkMode ? "rgba(234,179,8,0.1)" : "#FFFBEB") : (darkMode ? "rgba(255,255,255,0.04)" : "#F8FAFC"), border: `1.5px solid ${calcEditMode ? (darkMode ? "#854D0E" : "#FDE68A") : T.divider}`, transition: "all 0.2s" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: calcEditMode ? (darkMode ? "rgba(234,179,8,0.2)" : "#FEF3C7") : (darkMode ? "rgba(255,255,255,0.07)" : "#EFF2F5"), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
+                {calcEditMode ? "✏️" : "🔒"}
+              </div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: calcEditMode ? (darkMode ? "#FCD34D" : "#92400E") : T.text2 }}>{calcEditMode ? "수정 모드" : "보기 모드"}</div>
+                <div style={{ fontSize: 11, color: T.text3 }}>{calcEditMode ? "수정 후 저장 버튼을 눌러주세요" : "수정 버튼을 눌러야 편집할 수 있습니다"}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {calcEditMode ? (
+                <>
+                  <button onClick={cancelCalcEdit} style={{ padding: "9px 18px", borderRadius: 10, border: `1.5px solid ${T.divider}`, background: "none", color: T.text2, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>취소</button>
+                  <button onClick={saveCalcEdit} style={{ padding: "9px 22px", borderRadius: 10, border: "none", background: "#007AFF", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,122,255,0.35)", transition: "all 0.15s" }}>💾 저장</button>
+                </>
+              ) : (
+                <button onClick={enterCalcEdit} style={{ padding: "9px 22px", borderRadius: 10, border: "none", background: ACCENT, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>✏️ 수정</button>
+              )}
+            </div>
+          </div>
           <div className="calc-grid" style={{ display: "grid", gridTemplateColumns: "1fr 308px", gap: 20, alignItems: "start" }}>
 
             {/* 왼쪽 */}
@@ -1708,11 +1727,11 @@ ${productList}
                 <div className="chip-scroll" style={{ marginBottom: 14 }}>
                   {products.filter(p => !prodSearch || p.name.toLowerCase().includes(prodSearch.toLowerCase())).map(p => (
                     <div key={p.id} style={{ flexShrink: 0 }}
-                      draggable
-                      onDragStart={() => { dragProd.current = p.id; }}
-                      onDragOver={(e) => { e.preventDefault(); }}
+                      draggable={calcEditMode}
+                      onDragStart={() => { if (!calcEditMode) return; dragProd.current = p.id; }}
+                      onDragOver={(e) => { if (!calcEditMode) return; e.preventDefault(); }}
                       onDrop={() => {
-                        if (!dragProd.current || dragProd.current === p.id) return;
+                        if (!calcEditMode || !dragProd.current || dragProd.current === p.id) return;
                         pushHistory();
                         setProducts(ps => {
                           const arr = [...ps];
@@ -1733,11 +1752,11 @@ ${productList}
                         />
                       ) : (
                         <button onClick={() => setActiveProdId(p.id)} className={`prod-chip ${activeProdId === p.id ? "active" : ""}`}>
-                          <span onDoubleClick={e => startEditProdName(p, e)} title="더블클릭으로 이름 수정">{p.name}</span>
-                          {activeProdId === p.id && (
+                          <span onDoubleClick={e => { if (calcEditMode) startEditProdName(p, e); }} title={calcEditMode ? "더블클릭으로 이름 수정" : ""}>{p.name}</span>
+                          {calcEditMode && activeProdId === p.id && (
                             <span onClick={e => startEditProdName(p, e)} title="이름 수정" style={{ fontSize: 11, opacity: 0.7, cursor: "pointer" }}>✏️</span>
                           )}
-                          {products.length > 1 && (
+                          {calcEditMode && products.length > 1 && (
                             <span onClick={e => { e.stopPropagation(); deleteProduct(p.id); }} style={{ fontSize: 14, opacity: 0.5, cursor: "pointer" }}>×</span>
                           )}
                         </button>
@@ -1749,7 +1768,7 @@ ${productList}
                   )}
                 </div>
                 {/* 새 제품 추가 — Toss 스타일 */}
-                <div style={{ position: "relative", display: "flex", gap: 8, alignItems: "center" }}>
+                {calcEditMode && <div style={{ position: "relative", display: "flex", gap: 8, alignItems: "center" }}>
                   <div style={{ flex: 1, position: "relative" }}>
                     <input
                       placeholder=" "
@@ -1766,15 +1785,15 @@ ${productList}
                     style={{ height: 52, padding: "0 22px", borderRadius: 12, border: "none", background: newProdName.trim() ? ORANGE : T.divider, color: newProdName.trim() ? "#fff" : T.empty, fontWeight: 700, fontSize: 14, cursor: newProdName.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", transition: "all 0.18s", flexShrink: 0 }}>
                     + 추가
                   </button>
-                </div>
-                <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩의 ✏️ 또는 더블클릭으로 이름 수정</div>
+                </div>}
+                {calcEditMode && <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩의 ✏️ 또는 더블클릭으로 이름 수정</div>}
               </div>
 
               {/* 원단 구성 */}
               <div className="card">
                 <div className="section-header">
                   <span className="section-header-title">원단 구성 <span className="section-sub">— {activeProd.name}</span></span>
-                  <button className="btn-orange" onClick={addFabric} style={{ padding: "8px 16px", fontSize: 13 }}>+ 원단 추가</button>
+                  {calcEditMode && <button className="btn-orange" onClick={addFabric} style={{ padding: "8px 16px", fontSize: 13 }}>+ 원단 추가</button>}
                 </div>
                 {activeProd.fabrics.map((f, idx) => {
                   const m = materials.find(x => x.id == f.matId);
@@ -1800,17 +1819,20 @@ ${productList}
                     <div key={f.id} style={{ position: "relative" }}>
                       {isDropTop && <InsertLine />}
                       <div className="fabric-row"
-                        draggable
+                        draggable={calcEditMode}
                         onDragStart={e => {
+                          if (!calcEditMode) return;
                           dragFabric.current = f.id;
                           setTimeout(() => { if (e.target) e.target.style.opacity = "0.35"; }, 0);
                         }}
                         onDragEnd={e => {
+                          if (!calcEditMode) return;
                           e.currentTarget.style.opacity = "1";
                           setFabricDropInfo(null);
                           dragFabric.current = null;
                         }}
                         onDragOver={e => {
+                          if (!calcEditMode) return;
                           e.preventDefault();
                           if (dragFabric.current === f.id) return;
                           const rect = e.currentTarget.getBoundingClientRect();
@@ -1819,9 +1841,11 @@ ${productList}
                             setFabricDropInfo({ id: f.id, side });
                         }}
                         onDragLeave={e => {
+                          if (!calcEditMode) return;
                           if (!e.currentTarget.contains(e.relatedTarget)) setFabricDropInfo(null);
                         }}
                         onDrop={e => {
+                          if (!calcEditMode) return;
                           e.preventDefault();
                           const dragId = dragFabric.current; // 즉시 캡처 (onDragEnd가 null로 초기화하기 전)
                           const dropId = f.id;
@@ -1846,7 +1870,7 @@ ${productList}
                         style={{ transition: "opacity 0.15s", cursor: "default" }}
                       >
                         {/* 드래그 핸들 */}
-                        <div style={{
+                        {calcEditMode && <div style={{
                           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                           width: 20, minHeight: 38, cursor: "grab", gap: 1, flexShrink: 0,
                           color: T.text3, userSelect: "none",
@@ -1855,20 +1879,20 @@ ${productList}
                           <span style={{ fontSize: 7, lineHeight: 1.2, opacity: 0.4 }}>┃</span>
                           <span style={{ fontSize: 7, lineHeight: 1.2, opacity: 0.4 }}>┃</span>
                           <span style={{ fontSize: 11, lineHeight: 1 }}>▼</span>
-                        </div>
+                        </div>}
                         <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
-                        <select style={{ flex: 2, height: 38 }} value={matIdx >= 0 ? matIdx : ""} onChange={e => {
+                        <select style={{ flex: 2, height: 38 }} disabled={!calcEditMode} value={matIdx >= 0 ? matIdx : ""} onChange={e => {
                           const i = e.target.value === "" ? -1 : parseInt(e.target.value, 10);
                           updFabric(f.id, "matId", i >= 0 && materials[i] ? materials[i].id : "");
                         }}>
                           <option value="">소재 선택</option>
                           {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
                         </select>
-                        <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
-                          onChange={e => updFabric(f.id, "qty", e.target.value)} />
+                        <input type="number" placeholder="요척" value={f.qty} readOnly={!calcEditMode} style={{ width: 76, textAlign: "right", cursor: calcEditMode ? undefined : "default" }}
+                          onChange={e => calcEditMode && updFabric(f.id, "qty", e.target.value)} />
                         <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>{m?.unit || "yard"}</span>
                         {cost > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{cost.toLocaleString()}원</span>}
-                        <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                        {calcEditMode && <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>}
                       </div>
                       {isDropBot && <InsertLine />}
                     </div>
@@ -1880,7 +1904,7 @@ ${productList}
               <div className="card">
                 <div className="section-header">
                   <span className="section-header-title">기타 원가 · 공임비 <span className="section-sub">— {activeProd.name}</span></span>
-                  <button className="btn-orange" onClick={addExtra} style={{ padding: "8px 16px", fontSize: 13 }}>+ 항목 추가</button>
+                  {calcEditMode && <button className="btn-orange" onClick={addExtra} style={{ padding: "8px 16px", fontSize: 13 }}>+ 항목 추가</button>}
                 </div>
                 {activeProd.extras.map((e, idx) => {
                   const selLabor = e.laborId !== "" && e.laborId != null ? laborItems.find(l => l.id == e.laborId) : null;
@@ -1900,29 +1924,29 @@ ${productList}
                       <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>항목{idx + 1}</span>
                       {e.laborId
                         ? <>
-                            <select style={{ flex: 2, height: 38 }} value={labSelectVal} onChange={x => selectLabor(e.id, x.target.value)}>
+                            <select style={{ flex: 2, height: 38 }} disabled={!calcEditMode} value={labSelectVal} onChange={x => calcEditMode && selectLabor(e.id, x.target.value)}>
                               {labOptions}
                             </select>
                             <input type="number" placeholder="개수" value={e.qty || ""}
-                              style={{ width: 76, textAlign: "right" }}
-                              onChange={x => updExtra(e.id, "qty", x.target.value)} />
+                              readOnly={!calcEditMode} style={{ width: 76, textAlign: "right", cursor: calcEditMode ? undefined : "default" }}
+                              onChange={x => calcEditMode && updExtra(e.id, "qty", x.target.value)} />
                             <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>개</span>
                             {total > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{total.toLocaleString()}원</span>}
                           </>
                         : <>
-                            <select style={{ flex: 2, height: 38 }} value={labSelectVal} onChange={x => selectLabor(e.id, x.target.value)}>
+                            <select style={{ flex: 2, height: 38 }} disabled={!calcEditMode} value={labSelectVal} onChange={x => calcEditMode && selectLabor(e.id, x.target.value)}>
                               {labOptions}
                             </select>
                             <input placeholder="항목명" value={e.customName || ""}
-                              style={{ width: 100, textAlign: "left" }}
-                              onChange={x => updExtra(e.id, "customName", x.target.value)} />
+                              readOnly={!calcEditMode} style={{ width: 100, textAlign: "left", cursor: calcEditMode ? undefined : "default" }}
+                              onChange={x => calcEditMode && updExtra(e.id, "customName", x.target.value)} />
                             <input type="number" placeholder="금액" value={e.price || ""}
-                              style={{ width: 90, textAlign: "right" }}
-                              onChange={x => updExtra(e.id, "price", x.target.value)} />
+                              readOnly={!calcEditMode} style={{ width: 90, textAlign: "right", cursor: calcEditMode ? undefined : "default" }}
+                              onChange={x => calcEditMode && updExtra(e.id, "price", x.target.value)} />
                             <span style={{ fontSize: 12, color: T.text2, minWidth: 16 }}>원</span>
                           </>
                       }
-                      <button onClick={() => removeExtra(e.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
+                      {calcEditMode && <button onClick={() => removeExtra(e.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>}
                     </div>
                   );
                 })}
@@ -1942,13 +1966,15 @@ ${productList}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
                       <input type="number" value={activeProd.adminRate}
-                        className="rate-input"
-                        onChange={e => updProd("adminRate", Math.max(0, Number(e.target.value) || 0))} />
+                        className="rate-input" readOnly={!calcEditMode}
+                        style={{ cursor: calcEditMode ? undefined : "default" }}
+                        onChange={e => calcEditMode && updProd("adminRate", Math.max(0, Number(e.target.value) || 0))} />
                       <span style={{ fontWeight: 700, color: T.ghostColor, fontSize: 15 }}>%</span>
                     </div>
                   </div>
                   <input type="range" min={0} max={50} value={activeProd.adminRate}
-                    onChange={e => updProd("adminRate", Number(e.target.value))} style={{ width: "100%" }} />
+                    disabled={!calcEditMode}
+                    onChange={e => calcEditMode && updProd("adminRate", Number(e.target.value))} style={{ width: "100%", cursor: calcEditMode ? undefined : "default" }} />
                   {baseTotal > 0 && <div style={{ fontSize: 12, color: T.text2, marginTop: 6 }}>적용 금액 <strong style={{ color: NAVY }}>{Math.round(adminAmt).toLocaleString()}원</strong></div>}
                 </div>
 
@@ -1984,25 +2010,26 @@ ${productList}
                           }}>{g}</div>
                           {/* 마진율 input */}
                           <input type="number" value={rate}
-                            title="마진율"
-                            style={{ width: 56, height: 36, textAlign: "center", fontWeight: 700, padding: "0 4px", fontSize: 14, flexShrink: 0 }}
-                            onChange={e => updProd("margins", { ...activeProd.margins, [g]: Math.max(0, Number(e.target.value) || 0) })} />
+                            title="마진율" readOnly={!calcEditMode}
+                            style={{ width: 56, height: 36, textAlign: "center", fontWeight: 700, padding: "0 4px", fontSize: 14, flexShrink: 0, cursor: calcEditMode ? undefined : "default" }}
+                            onChange={e => calcEditMode && updProd("margins", { ...activeProd.margins, [g]: Math.max(0, Number(e.target.value) || 0) })} />
                           <span style={{ fontSize: 12, color: T.ghostColor, fontWeight: 600, flexShrink: 0 }}>%</span>
                           {/* 단가 input (편집 가능) */}
                           <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, minWidth: 100 }}>
                             <input type="number" value={overrideVal}
                               placeholder={autoPrice > 0 ? Math.round(autoPrice).toLocaleString() : "—"}
-                              title="단가 직접 입력"
+                              title="단가 직접 입력" readOnly={!calcEditMode}
                               style={{
                                 flex: 1, height: 36, textAlign: "right", padding: "0 8px",
                                 fontSize: 14, fontWeight: 700,
                                 color: isOverridden ? ORANGE : (isSel ? ACCENT : T.ghostColor),
                                 background: isOverridden ? (darkMode ? "rgba(120,53,15,0.4)" : "#FFF7ED") : T.ghostBg,
                                 borderColor: isOverridden ? (darkMode ? "#92400E" : "#FED7AA") : undefined,
+                                cursor: calcEditMode ? undefined : "default",
                               }}
-                              onChange={e => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: e.target.value })} />
+                              onChange={e => calcEditMode && updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: e.target.value })} />
                             <span style={{ fontSize: 12, color: T.text2, flexShrink: 0 }}>원</span>
-                            {isOverridden && (
+                            {calcEditMode && isOverridden && (
                               <button onClick={() => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: "" })}
                                 title="자동 계산값으로 초기화"
                                 style={{
@@ -2021,14 +2048,16 @@ ${productList}
                           )}
                           {/* 선택 버튼 */}
                           <button
-                            onClick={() => updProd("selectedGrade", g)}
+                            disabled={!calcEditMode}
+                            onClick={() => calcEditMode && updProd("selectedGrade", g)}
                             style={{
                               padding: "6px 12px", fontSize: 12, fontWeight: 700,
-                              borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                              borderRadius: 8, cursor: calcEditMode ? "pointer" : "default", fontFamily: "inherit",
                               background: isSel ? ACCENT : T.ghostBg,
                               color: isSel ? "#fff" : T.text2,
                               border: `1.5px solid ${isSel ? ACCENT : T.ghostBorder}`,
                               transition: "all 0.15s", flexShrink: 0,
+                              opacity: calcEditMode ? 1 : (isSel ? 1 : 0.45),
                             }}>{isSel ? "✓ 선택" : "선택"}</button>
                         </div>
                       );
@@ -2049,9 +2078,9 @@ ${productList}
                     <input
                       type="number"
                       value={activeProd.marketPrice || ""}
-                      placeholder=" "
-                      onChange={e => updProd("marketPrice", e.target.value)}
-                      style={{ width: "100%", height: 52, padding: "18px 40px 6px 14px", fontSize: 15, fontWeight: 700, borderRadius: 12, border: `1.5px solid ${activeProd.marketPrice ? NAVY : T.divider}`, color: NAVY, transition: "border-color 0.18s" }}
+                      placeholder=" " readOnly={!calcEditMode}
+                      onChange={e => calcEditMode && updProd("marketPrice", e.target.value)}
+                      style={{ width: "100%", height: 52, padding: "18px 40px 6px 14px", fontSize: 15, fontWeight: 700, borderRadius: 12, border: `1.5px solid ${activeProd.marketPrice ? NAVY : T.divider}`, color: NAVY, transition: "border-color 0.18s", cursor: calcEditMode ? undefined : "default" }}
                     />
                     <label style={{ position: "absolute", left: 14, top: activeProd.marketPrice ? 7 : "50%", transform: activeProd.marketPrice ? "none" : "translateY(-50%)", fontSize: activeProd.marketPrice ? 10 : 13, color: activeProd.marketPrice ? NAVY : T.empty, fontWeight: activeProd.marketPrice ? 700 : 400, pointerEvents: "none", transition: "all 0.18s" }}>
                       소비자가 (원)
@@ -2072,7 +2101,7 @@ ${productList}
                 <div className="section-header" style={{ marginBottom: 14 }}>
                   <span className="section-header-title">견적 포함 제품</span>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <button onClick={() => {
+                    {calcEditMode && <button onClick={() => {
                       pushHistory();
                       const eligible = products.filter(p => computeProduct(p, materials, laborItems).base > 0);
                       const allOn = eligible.every(p => p.include !== false);
@@ -2082,7 +2111,7 @@ ${productList}
                       }));
                     }} style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>
                       {products.filter(p => computeProduct(p, materials, laborItems).base > 0).every(p => p.include !== false) ? "전체 해제" : "전체 선택"}
-                    </button>
+                    </button>}
                     <span className="info-pill">{products.filter(p => p.include !== false).length}/{products.length}</span>
                   </div>
                 </div>
@@ -2103,9 +2132,9 @@ ${productList}
                         {/* 상단: 체크박스 + 이름 + 가격 + 이동버튼 */}
                         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
                           <input type="checkbox" checked={isInc && hasData}
-                            disabled={!hasData}
-                            onChange={e => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, include: e.target.checked } : x))}
-                            style={{ width: 18, height: 18, accentColor: NAVY, cursor: hasData ? "pointer" : "not-allowed", flexShrink: 0 }} />
+                            disabled={!hasData || !calcEditMode}
+                            onChange={e => calcEditMode && setProducts(ps => ps.map(x => x.id === p.id ? { ...x, include: e.target.checked } : x))}
+                            style={{ width: 18, height: 18, accentColor: NAVY, cursor: (hasData && calcEditMode) ? "pointer" : "not-allowed", flexShrink: 0 }} />
                           <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setActiveProdId(p.id)}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
                             {hasData
@@ -2132,12 +2161,12 @@ ${productList}
                               const isSel = (p.selectedGrade || "A") === g;
                               const gPrice = c.grades[g];
                               return (
-                                <button key={g} onClick={() => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, selectedGrade: g } : x))}
+                                <button key={g} disabled={!calcEditMode} onClick={() => calcEditMode && setProducts(ps => ps.map(x => x.id === p.id ? { ...x, selectedGrade: g } : x))}
                                   style={{
                                     flex: 1, padding: "5px 0", borderRadius: 8, border: `1.5px solid ${isSel ? ACCENT : T.divider}`,
                                     background: isSel ? ACCENT : T.ghostBg, color: isSel ? "#fff" : T.text2,
-                                    fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                                    transition: "all 0.12s", lineHeight: 1.3,
+                                    fontSize: 11, fontWeight: 700, cursor: calcEditMode ? "pointer" : "default", fontFamily: "inherit",
+                                    transition: "all 0.12s", lineHeight: 1.3, opacity: calcEditMode ? 1 : (isSel ? 1 : 0.5),
                                   }}>
                                   <div>{g}급</div>
                                   <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>{Math.round(gPrice).toLocaleString()}원</div>
@@ -2366,6 +2395,7 @@ ${productList}
               </div>
             </div>
           </div>
+          </>
         )}
 
         {/* ── 견적서 탭 (애플 내부 보고서 스타일) ── */}
