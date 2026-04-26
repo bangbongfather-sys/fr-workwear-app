@@ -460,11 +460,11 @@ const LABOR_UNITS = ["벌", "장", "개", "m", "yard", "식"];
 // 모든 제품의 비용을 계산하는 helper
 function computeProduct(p, materials, laborItems) {
   const fCost = p.fabrics.reduce((s, f) => {
-    const m = materials.find(x => x.id === Number(f.matId));
+    const m = materials.find(x => String(x.id) === String(f.matId));
     return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
   }, 0);
   const eCost = p.extras.reduce((s, e) => {
-    const u = e.laborId ? (laborItems.find(l => l.id === Number(e.laborId))?.price || 0) : parseFloat(e.price || 0);
+    const u = e.laborId ? (laborItems.find(l => String(l.id) === String(e.laborId))?.price || 0) : parseFloat(e.price || 0);
     const q = parseFloat(e.qty || 1);
     return s + u * q;
   }, 0);
@@ -587,6 +587,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
   const [editMat, setEditMat] = useState(null);
   const [newLab, setNewLab] = useState({ name: "", price: "", unit: "벌" });
   const [editLab, setEditLab] = useState(null);
+  const dragMat = useRef(null);
+  const dragLab = useRef(null);
 
   const addMaterial = () => {
     if (!newMat.name.trim() || !newMat.price) return;
@@ -634,7 +636,22 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
             </tr></thead>
             <tbody>
               {materials.map(m => (
-                <tr key={m.id}>
+                <tr key={m.id} draggable
+                  onDragStart={() => { dragMat.current = m.id; }}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={() => {
+                    if (!dragMat.current || dragMat.current === m.id) return;
+                    setMaterials(ms => {
+                      const arr = [...ms];
+                      const from = arr.findIndex(x => x.id === dragMat.current);
+                      const to = arr.findIndex(x => x.id === m.id);
+                      if (from < 0 || to < 0) return ms;
+                      arr.splice(to, 0, arr.splice(from, 1)[0]);
+                      return arr;
+                    });
+                    dragMat.current = null;
+                  }}
+                  style={{ cursor: "grab" }}>
                   {editMat?.id === m.id ? (
                     <>
                       <td><input value={editMat.name} onChange={e => setEditMat({...editMat, name: e.target.value})} /></td>
@@ -691,7 +708,22 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
             </tr></thead>
             <tbody>
               {laborItems.map(l => (
-                <tr key={l.id}>
+                <tr key={l.id} draggable
+                  onDragStart={() => { dragLab.current = l.id; }}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={() => {
+                    if (!dragLab.current || dragLab.current === l.id) return;
+                    setLaborItems(ls => {
+                      const arr = [...ls];
+                      const from = arr.findIndex(x => x.id === dragLab.current);
+                      const to = arr.findIndex(x => x.id === l.id);
+                      if (from < 0 || to < 0) return ls;
+                      arr.splice(to, 0, arr.splice(from, 1)[0]);
+                      return arr;
+                    });
+                    dragLab.current = null;
+                  }}
+                  style={{ cursor: "grab" }}>
                   {editLab?.id === l.id ? (
                     <>
                       <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
@@ -1085,6 +1117,43 @@ function App() {
   const syncTimer = useRef(null);
   const prodNameRef = useRef(null);
   const dragProd = useRef(null);
+  const historyStack = useRef([]);
+  const historyPointer = useRef(-1);
+
+  const pushHistory = useCallback(() => {
+    const snapshot = {
+      materials: JSON.parse(JSON.stringify(materials)),
+      laborItems: JSON.parse(JSON.stringify(laborItems)),
+      products: JSON.parse(JSON.stringify(products)),
+    };
+    // Trim any redo-future if we branched
+    historyStack.current = historyStack.current.slice(0, historyPointer.current + 1);
+    historyStack.current.push(snapshot);
+    if (historyStack.current.length > 50) historyStack.current.shift();
+    historyPointer.current = historyStack.current.length - 1;
+  }, [materials, laborItems, products]);
+
+  const handleUndo = useCallback(() => {
+    if (historyPointer.current < 1) return; // nothing to undo (need at least 2 states)
+    historyPointer.current -= 1;
+    const snap = historyStack.current[historyPointer.current];
+    if (!snap) return;
+    setMaterials(snap.materials);
+    setLaborItems(snap.laborItems);
+    setProducts(snap.products);
+  }, []);
+
+  // Ctrl+Z / Cmd+Z keyboard listener
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleUndo]);
 
   const applyCloudData = (d) => {
     if (!d) return;
@@ -1150,11 +1219,13 @@ function App() {
 
   const addProduct = () => {
     if (!newProdName.trim()) return;
+    pushHistory();
     const p = newProduct(newProdName.trim());
     setProducts(ps => [...ps, p]); setActiveProdId(p.id); setNewProdName("");
   };
   const deleteProduct = (id) => {
     if (products.length <= 1) return;
+    pushHistory();
     const remaining = products.filter(p => p.id !== id);
     setProducts(remaining);
     if (activeProdId === id) setActiveProdId(remaining[0].id);
@@ -1170,14 +1241,14 @@ function App() {
     setEditingProdName({ id: p.id, value: p.name });
   };
 
-  const addFabric = () => updProd("fabrics", [...activeProd.fabrics, newFabric()]);
-  const removeFabric = (fid) => { if (activeProd.fabrics.length <= 1) return; updProd("fabrics", activeProd.fabrics.filter(f => f.id !== fid)); };
+  const addFabric = () => { pushHistory(); updProd("fabrics", [...activeProd.fabrics, newFabric()]); };
+  const removeFabric = (fid) => { if (activeProd.fabrics.length <= 1) return; pushHistory(); updProd("fabrics", activeProd.fabrics.filter(f => f.id !== fid)); };
   const updFabric = (fid, k, v) => updProd("fabrics", activeProd.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f));
-  const addExtra = () => updProd("extras", [...activeProd.extras, newExtra()]);
-  const removeExtra = (eid) => updProd("extras", activeProd.extras.filter(e => e.id !== eid));
+  const addExtra = () => { pushHistory(); updProd("extras", [...activeProd.extras, newExtra()]); };
+  const removeExtra = (eid) => { pushHistory(); updProd("extras", activeProd.extras.filter(e => e.id !== eid)); };
   const updExtra = (eid, k, v) => updProd("extras", activeProd.extras.map(e => e.id === eid ? { ...e, [k]: v } : e));
   const selectLabor = (eid, laborId) => {
-    const l = laborItems.find(x => x.id === Number(laborId));
+    const l = laborItems.find(x => String(x.id) === String(laborId));
     updProd("extras", activeProd.extras.map(e =>
       e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
     ));
@@ -1185,7 +1256,7 @@ function App() {
   };
 
   const buildFabricLines = () => activeProd.fabrics.map(f => {
-    const m = materials.find(x => x.id === Number(f.matId));
+    const m = materials.find(x => String(x.id) === String(f.matId));
     if (!m || !f.qty) return null;
     return { name: m.name, qty: f.qty, unit: m.unit, unitPrice: m.price, total: m.price * parseFloat(f.qty) };
   }).filter(Boolean);
@@ -1402,6 +1473,17 @@ ${productList}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <SyncBadge />
+              <button onClick={handleUndo} title="실행 취소 (Ctrl+Z / ⌘Z)"
+                style={{
+                  width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
+                  background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
+                  fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "background 0.2s, transform 0.15s", flexShrink: 0,
+                  opacity: historyPointer.current >= 1 ? 1 : 0.35,
+                }}
+                onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
+                onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
+              >↩</button>
               <button onClick={() => setDarkMode(d => !d)} title={darkMode ? "라이트 모드" : "다크 모드"} style={{
                 width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
                 background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
@@ -1474,6 +1556,7 @@ ${productList}
                       onDragOver={(e) => { e.preventDefault(); }}
                       onDrop={() => {
                         if (!dragProd.current || dragProd.current === p.id) return;
+                        pushHistory();
                         setProducts(ps => {
                           const arr = [...ps];
                           const from = arr.findIndex(x => x.id === dragProd.current);
@@ -1537,14 +1620,14 @@ ${productList}
                   <button className="btn-orange" onClick={addFabric} style={{ padding: "8px 16px", fontSize: 13 }}>+ 원단 추가</button>
                 </div>
                 {activeProd.fabrics.map((f, idx) => {
-                  const m = materials.find(x => x.id === Number(f.matId));
+                  const m = materials.find(x => String(x.id) === String(f.matId));
                   const cost = m ? m.price * parseFloat(f.qty || 0) : 0;
                   return (
                     <div key={f.id} className="fabric-row">
                       <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
-                      <select style={{ flex: 2, height: 38 }} value={f.matId} onChange={e => updFabric(f.id, "matId", e.target.value)}>
+                      <select style={{ flex: 2, height: 38 }} value={String(f.matId || "")} onChange={e => updFabric(f.id, "matId", e.target.value)}>
                         <option value="">소재 선택</option>
-                        {materials.map(x => <option key={x.id} value={x.id}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
+                        {materials.map(x => <option key={x.id} value={String(x.id)}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
                       </select>
                       <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
                         onChange={e => updFabric(f.id, "qty", e.target.value)} />
@@ -1563,7 +1646,7 @@ ${productList}
                   <button className="btn-orange" onClick={addExtra} style={{ padding: "8px 16px", fontSize: 13 }}>+ 항목 추가</button>
                 </div>
                 {activeProd.extras.map((e, idx) => {
-                  const selLabor = e.laborId ? laborItems.find(l => l.id === Number(e.laborId)) : null;
+                  const selLabor = e.laborId ? laborItems.find(l => String(l.id) === String(e.laborId)) : null;
                   const unitPrice = selLabor ? selLabor.price : parseFloat(e.price || 0);
                   const qty = parseFloat(e.qty || 1);
                   const total = unitPrice * qty;
@@ -1572,10 +1655,10 @@ ${productList}
                       <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>항목{idx + 1}</span>
                       {e.laborId
                         ? <>
-                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
+                            <select style={{ flex: 2, height: 38 }} value={String(e.laborId || "")} onChange={x => selectLabor(e.id, x.target.value)}>
                               <option value="">직접 입력</option>
                               <optgroup label="── 공임비 DB ──">
-                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
+                                {laborItems.map(l => <option key={l.id} value={String(l.id)}>{l.name} ({l.price.toLocaleString()}원)</option>)}
                               </optgroup>
                             </select>
                             <input type="number" placeholder="개수" value={e.qty || ""}
@@ -1585,10 +1668,10 @@ ${productList}
                             {total > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{total.toLocaleString()}원</span>}
                           </>
                         : <>
-                            <select style={{ flex: 2, height: 38 }} value={e.laborId || ""} onChange={x => selectLabor(e.id, x.target.value)}>
+                            <select style={{ flex: 2, height: 38 }} value={String(e.laborId || "")} onChange={x => selectLabor(e.id, x.target.value)}>
                               <option value="">직접 입력</option>
                               <optgroup label="── 공임비 DB ──">
-                                {laborItems.map(l => <option key={l.id} value={l.id}>{l.name} ({l.price.toLocaleString()}원)</option>)}
+                                {laborItems.map(l => <option key={l.id} value={String(l.id)}>{l.name} ({l.price.toLocaleString()}원)</option>)}
                               </optgroup>
                             </select>
                             <input placeholder="항목명" value={e.customName || ""}
@@ -1631,7 +1714,7 @@ ${productList}
                 </div>
 
                 {/* ABCD 등급별 마진율 + 단가 직접 수정 */}
-                <div style={{ borderTop: "1px solid #F2F4F7", paddingTop: 20 }}>
+                <div style={{ borderTop: `1px solid ${T.divider}`, paddingTop: 20 }}>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>등급별 마진율 · 단가</div>
                     <div style={{ fontSize: 12, color: T.text2, marginTop: 1 }}>마진율 기준으로 자동 계산되며, 단가를 직접 입력해 최종 조정할 수 있습니다.</div>
@@ -1647,18 +1730,18 @@ ${productList}
                         <div key={g} style={{
                           display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
                           padding: "10px 12px", borderRadius: 12,
-                          background: isSel ? "#EEF2FF" : "#F8F9FB",
-                          border: `1.5px solid ${isSel ? NAVY : "transparent"}`,
+                          background: isSel ? (darkMode ? "rgba(71,85,105,0.3)" : "#EEF2FF") : T.surface2,
+                          border: `1.5px solid ${isSel ? ACCENT : "transparent"}`,
                           transition: "all 0.15s",
                         }}>
                           {/* 등급 뱃지 */}
                           <div style={{
                             width: 28, height: 28, borderRadius: 8,
-                            background: isSel ? NAVY : "#fff",
+                            background: isSel ? ACCENT : T.ghostBg,
                             color: isSel ? "#fff" : T.text2,
                             display: "flex", alignItems: "center", justifyContent: "center",
                             fontWeight: 800, fontSize: 13, flexShrink: 0,
-                            border: isSel ? "none" : "1.5px solid #E5E8EB",
+                            border: isSel ? "none" : `1.5px solid ${T.ghostBorder}`,
                           }}>{g}</div>
                           {/* 마진율 input */}
                           <input type="number" value={rate}
@@ -1674,9 +1757,9 @@ ${productList}
                               style={{
                                 flex: 1, height: 36, textAlign: "right", padding: "0 8px",
                                 fontSize: 14, fontWeight: 700,
-                                color: isOverridden ? ORANGE : (isSel ? NAVY : T.ghostColor),
-                                background: isOverridden ? "#FFF7ED" : "#fff",
-                                borderColor: isOverridden ? "#FED7AA" : undefined,
+                                color: isOverridden ? ORANGE : (isSel ? ACCENT : T.ghostColor),
+                                background: isOverridden ? (darkMode ? "rgba(120,53,15,0.4)" : "#FFF7ED") : T.ghostBg,
+                                borderColor: isOverridden ? (darkMode ? "#92400E" : "#FED7AA") : undefined,
                               }}
                               onChange={e => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: e.target.value })} />
                             <span style={{ fontSize: 12, color: T.text2, flexShrink: 0 }}>원</span>
@@ -1684,8 +1767,8 @@ ${productList}
                               <button onClick={() => updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: "" })}
                                 title="자동 계산값으로 초기화"
                                 style={{
-                                  width: 28, height: 28, borderRadius: 6, border: "none", cursor: "pointer",
-                                  background: "#fff", color: T.text2, fontFamily: "inherit", fontSize: 14,
+                                  width: 28, height: 28, borderRadius: 6, cursor: "pointer",
+                                  background: T.ghostBg, color: T.text2, fontFamily: "inherit", fontSize: 14,
                                   display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
                                   border: `1.5px solid ${T.ghostBorder}`,
                                 }}>↻</button>
@@ -1693,7 +1776,7 @@ ${productList}
                           </div>
                           {/* 마진 금액 */}
                           {beforeMargin > 0 && (
-                            <div style={{ fontSize: 11, color: isSel ? "#6366F1" : T.text2, fontWeight: 600, flexShrink: 0, textAlign: "right", minWidth: 60 }}>
+                            <div style={{ fontSize: 11, color: isSel ? (darkMode ? "#A5B4FC" : "#6366F1") : T.text2, fontWeight: 600, flexShrink: 0, textAlign: "right", minWidth: 60 }}>
                               +{Math.round(gradePrices[g] - beforeMargin).toLocaleString()}원
                             </div>
                           )}
@@ -1703,22 +1786,22 @@ ${productList}
                             style={{
                               padding: "6px 12px", fontSize: 12, fontWeight: 700,
                               borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
-                              background: isSel ? NAVY : "#fff",
+                              background: isSel ? ACCENT : T.ghostBg,
                               color: isSel ? "#fff" : T.text2,
-                              border: isSel ? "1.5px solid " + NAVY : "1.5px solid #E5E8EB",
+                              border: `1.5px solid ${isSel ? ACCENT : T.ghostBorder}`,
                               transition: "all 0.15s", flexShrink: 0,
                             }}>{isSel ? "✓ 선택" : "선택"}</button>
                         </div>
                       );
                     })}
                   </div>
-                  <div style={{ marginTop: 12, padding: "10px 12px", background: "#FFF7ED", borderRadius: 10, fontSize: 12, color: "#9A3412", lineHeight: 1.6 }}>
+                  <div style={{ marginTop: 12, padding: "10px 12px", background: darkMode ? "rgba(154,52,18,0.2)" : "#FFF7ED", borderRadius: 10, fontSize: 12, color: darkMode ? "#FB923C" : "#9A3412", lineHeight: 1.6 }}>
                     💡 단가 칸이 비어있으면 마진율 기준 자동 계산값을 사용합니다. 직접 입력한 단가는 <strong style={{ color: ORANGE }}>주황색</strong>으로 표시되며 ↻ 버튼으로 초기화할 수 있습니다.
                   </div>
                 </div>
 
                 {/* 시장 소비자가 */}
-                <div style={{ borderTop: "1px solid #F2F4F7", paddingTop: 20, marginTop: 4 }}>
+                <div style={{ borderTop: `1px solid ${T.divider}`, paddingTop: 20, marginTop: 4 }}>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 14, fontWeight: 600 }}>시장 소비자가</div>
                     <div style={{ fontSize: 12, color: T.text2, marginTop: 1 }}>견적서에 참고 소비자가로 표시됩니다.</div>
@@ -1751,6 +1834,7 @@ ${productList}
                   <span className="section-header-title">견적 포함 제품</span>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <button onClick={() => {
+                      pushHistory();
                       const eligible = products.filter(p => computeProduct(p, materials, laborItems).base > 0);
                       const allOn = eligible.every(p => p.include !== false);
                       setProducts(ps => ps.map(p => {
@@ -1772,8 +1856,8 @@ ${productList}
                     return (
                       <div key={p.id} style={{
                         borderRadius: 14,
-                        background: isInc && hasData ? "#F8F9FB" : "#fff",
-                        border: `1.5px solid ${isInc && hasData ? T.divider : "#F2F4F7"}`,
+                        background: isInc && hasData ? T.surface2 : T.surface,
+                        border: `1.5px solid ${isInc && hasData ? T.divider : T.border}`,
                         opacity: hasData ? 1 : 0.5,
                         overflow: "hidden",
                       }}>
@@ -1801,8 +1885,8 @@ ${productList}
                               return (
                                 <button key={g} onClick={() => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, selectedGrade: g } : x))}
                                   style={{
-                                    flex: 1, padding: "5px 0", borderRadius: 8, border: `1.5px solid ${isSel ? NAVY : T.divider}`,
-                                    background: isSel ? NAVY : "#fff", color: isSel ? "#fff" : T.text2,
+                                    flex: 1, padding: "5px 0", borderRadius: 8, border: `1.5px solid ${isSel ? ACCENT : T.divider}`,
+                                    background: isSel ? ACCENT : T.ghostBg, color: isSel ? "#fff" : T.text2,
                                     fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
                                     transition: "all 0.12s", lineHeight: 1.3,
                                   }}>
@@ -1887,13 +1971,13 @@ ${productList}
             {/* 오른쪽 원가 요약 */}
             <div style={{ position: "sticky", top: 24 }}>
               <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-                <div style={{ padding: "18px 20px", borderBottom: "1px solid #F2F4F7", background: "linear-gradient(135deg, #007AFF, #0062CC)" }}>
+                <div style={{ padding: "18px 20px", borderBottom: `1px solid ${T.divider}`, background: "linear-gradient(135deg, #007AFF, #0062CC)" }}>
                   <div style={{ fontSize: 11, color: "rgba(147,197,253,0.8)", marginBottom: 4, fontWeight: 600, letterSpacing: 0.5 }}>원가 요약</div>
                   <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", letterSpacing: -0.3 }}>FR {activeProd.name}</div>
                 </div>
 
                 {activeProd.fabrics.some(f => f.matId && f.qty) && (
-                  <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                  <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                     <div className="section-label">원단</div>
                     {activeProd.fabrics.map((f, i) => {
                       const m = materials.find(x => x.id === Number(f.matId));
@@ -1906,7 +1990,7 @@ ${productList}
                         </div>
                       );
                     })}
-                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #F2F4F7" }}>
+                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${T.divider}` }}>
                       <span style={{ fontSize: 12, color: T.text2 }}>원단 소계</span>
                       <span style={{ fontSize: 13, fontWeight: 700 }}>{fabricCost.toLocaleString()}원</span>
                     </div>
@@ -1914,7 +1998,7 @@ ${productList}
                 )}
 
                 {activeProd.extras.some(e => (e.laborId || e.customName) && (e.laborId || e.price)) && (
-                  <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                  <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                     <div className="section-label">기타 · 공임비</div>
                     {activeProd.extras.map(e => {
                       const l = e.laborId ? laborItems.find(x => x.id === Number(e.laborId)) : null;
@@ -1930,14 +2014,14 @@ ${productList}
                         </div>
                       );
                     })}
-                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #F2F4F7" }}>
+                    <div className="row-item" style={{ marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${T.divider}` }}>
                       <span style={{ fontSize: 12, color: T.text2 }}>공임비 소계</span>
                       <span style={{ fontSize: 13, fontWeight: 700 }}>{extraCost.toLocaleString()}원</span>
                     </div>
                   </div>
                 )}
 
-                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                   <div className="row-item">
                     <span className="row-label">소계</span>
                     <span className="row-value">{baseTotal.toLocaleString()}원</span>
@@ -1953,7 +2037,7 @@ ${productList}
                 </div>
 
                 {/* ABCD 등급 가격 */}
-                <div style={{ padding: "14px 20px", borderBottom: "1px solid #F2F4F7" }}>
+                <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                   <div className="section-label">등급별 단가</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {GRADES.map(g => {
@@ -1967,21 +2051,21 @@ ${productList}
                           style={{
                             display: "flex", alignItems: "center", gap: 8,
                             padding: "8px 10px", borderRadius: 10, cursor: "pointer",
-                            border: isSel ? `1.5px solid ${NAVY}` : "1.5px solid transparent",
-                            background: isSel ? "#EEF2FF" : "transparent",
+                            border: isSel ? `1.5px solid ${ACCENT}` : "1.5px solid transparent",
+                            background: isSel ? (darkMode ? "rgba(71,85,105,0.3)" : "#EEF2FF") : "transparent",
                             fontFamily: "inherit", textAlign: "left", width: "100%",
                             transition: "all 0.15s",
                           }}>
                           <span style={{
                             width: 22, height: 22, borderRadius: 6,
-                            background: isSel ? NAVY : T.divider,
+                            background: isSel ? ACCENT : T.divider,
                             color: isSel ? "#fff" : T.text2,
                             display: "inline-flex", alignItems: "center", justifyContent: "center",
                             fontWeight: 800, fontSize: 11, flexShrink: 0,
                           }}>{g}</span>
                           <span style={{ fontSize: 11, color: T.text2, flexShrink: 0, minWidth: 28 }}>{r}%</span>
-                          {isOv && <span title="수동 수정됨" style={{ fontSize: 9, fontWeight: 800, color: ORANGE, padding: "1px 5px", borderRadius: 4, background: "#FFF7ED", flexShrink: 0 }}>수정</span>}
-                          <span style={{ flex: 1, textAlign: "right", fontSize: 13, fontWeight: isSel ? 800 : 600, color: isSel ? NAVY : (isOv ? ORANGE : T.ghostColor) }}>
+                          {isOv && <span title="수동 수정됨" style={{ fontSize: 9, fontWeight: 800, color: ORANGE, padding: "1px 5px", borderRadius: 4, background: darkMode ? "rgba(120,53,15,0.4)" : "#FFF7ED", flexShrink: 0 }}>수정</span>}
+                          <span style={{ flex: 1, textAlign: "right", fontSize: 13, fontWeight: isSel ? 800 : 600, color: isSel ? ACCENT : (isOv ? ORANGE : T.ghostColor) }}>
                             {p > 0 ? `${Math.round(p).toLocaleString()}원` : "—"}
                           </span>
                         </button>
@@ -2045,7 +2129,7 @@ ${productList}
                       onClick={() => setEditingQuote(v => !v)}
                       style={{
                         padding: "10px 18px", border: `1.5px solid ${editingQuote ? ORANGE : T.divider}`,
-                        borderRadius: 12, background: editingQuote ? "#FFF7ED" : "#fff",
+                        borderRadius: 12, background: editingQuote ? (darkMode ? "rgba(120,53,15,0.4)" : "#FFF7ED") : T.ghostBg,
                         color: editingQuote ? ORANGE : T.ghostColor, fontSize: 13, fontWeight: 700,
                         cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
                       }}>
