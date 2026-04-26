@@ -1772,16 +1772,23 @@ ${productList}
                   const withData = products.filter(p => p.include !== false).map(p => computeProduct(p, materials, laborItems)).filter(c => c.base > 0);
                   if (withData.length === 0) return null;
                   const avgM = withData.reduce((sum, c) => sum + ((c.finalPrice - c.beforeMargin) / c.beforeMargin * 100), 0) / withData.length;
+                  const avgMSell = withData.reduce((sum, c) => sum + ((c.finalPrice - c.beforeMargin) / c.finalPrice * 100), 0) / withData.length;
                   const totalRev = withData.reduce((s, c) => s + c.finalPrice, 0);
                   const totalCost = withData.reduce((s, c) => s + c.beforeMargin, 0);
                   const mColor = avgM >= 35 ? "#00B493" : avgM >= 25 ? "#FF9500" : "#F04452";
+                  const mColorSell = avgMSell >= 26 ? "#00B493" : avgMSell >= 20 ? "#FF9500" : "#F04452";
                   return (
                     <div style={{ marginTop: 12, padding: "12px 14px", background: "var(--surface2)", borderRadius: 12, border: "0.5px solid var(--border)" }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 }}>견적 요약</div>
                       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                         <div style={{ flex: 1, minWidth: 80 }}>
-                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>평균 마진율</div>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>원가 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(원가 대비)</span></div>
                           <div style={{ fontSize: 24, fontWeight: 800, color: mColor, lineHeight: 1 }}>{avgM.toFixed(1)}<span style={{ fontSize: 14 }}>%</span></div>
+                        </div>
+                        <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
+                        <div style={{ flex: 1, minWidth: 80 }}>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>납품가 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(납품가 대비)</span></div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: mColorSell, lineHeight: 1 }}>{avgMSell.toFixed(1)}<span style={{ fontSize: 14 }}>%</span></div>
                         </div>
                         <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
                         <div style={{ flex: 1.5, minWidth: 100 }}>
