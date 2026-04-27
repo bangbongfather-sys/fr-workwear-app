@@ -1350,6 +1350,206 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) 
   );
 }
 
+function ClientsTab({ clients, setClients, orders, darkMode }) {
+  const [newClient, setNewClient] = useState({ name: "", grade: "A", note: "" });
+  const [editId, setEditId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [search, setSearch] = useState("");
+  const [gradeFilter, setGradeFilter] = useState("ALL");
+
+  // 검색 필터: 이름 또는 메모에 검색어 포함 + 등급 필터
+  const filteredClients = clients.filter(c => {
+    const q = search.trim().toLowerCase();
+    const nameHit = !q || (c.name || "").toLowerCase().includes(q);
+    const noteHit = !q || (c.note || "").toLowerCase().includes(q);
+    const matchSearch = nameHit || noteHit;
+    const matchGrade = gradeFilter === "ALL" || c.grade === gradeFilter;
+    return matchSearch && matchGrade;
+  });
+
+  // 수주(orders)에서 거래처명 추출 → 등록 안 된 것만
+  const registeredNames = new Set(clients.map(c => (c.name || "").trim()));
+  const detectedClients = Array.from(new Set(
+    (orders || [])
+      .map(o => (o.client || "").trim())
+      .filter(name => name && !registeredNames.has(name))
+  ));
+
+  const addClient = () => {
+    const name = newClient.name.trim();
+    if (!name) return;
+    if (registeredNames.has(name)) {
+      alert("이미 등록된 거래처입니다: " + name);
+      return;
+    }
+    setClients(cs => [...cs, {
+      id: uid(),
+      name,
+      grade: newClient.grade || "A",
+      note: newClient.note.trim(),
+      createdAt: Date.now(),
+    }]);
+    setNewClient({ name: "", grade: "A", note: "" });
+  };
+
+  const registerDetected = (name) => {
+    setClients(cs => [...cs, {
+      id: uid(),
+      name: name.trim(),
+      grade: "A",
+      note: "수주에서 자동 추가",
+      createdAt: Date.now(),
+    }]);
+  };
+
+  const startEdit = (c) => { setEditId(c.id); setEditDraft({ ...c }); };
+  const cancelEdit = () => { setEditId(null); setEditDraft(null); };
+  const saveEdit = () => {
+    if (!editDraft || !editDraft.name.trim()) return;
+    setClients(cs => cs.map(c => c.id === editId
+      ? { ...editDraft, name: editDraft.name.trim(), note: (editDraft.note || "").trim() }
+      : c));
+    cancelEdit();
+  };
+  const deleteClient = (id) => {
+    if (!window.confirm("이 거래처를 삭제할까요?")) return;
+    setClients(cs => cs.filter(c => c.id !== id));
+  };
+
+  const gradeColor = { A: "#6366F1", B: "#10B981", C: "#F59E0B", D: "#EF4444" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+
+      {/* 신규 등록 */}
+      <div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}>👥 거래처 등록</div>
+        <div className="card">
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 거래처 추가</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 120px 1.4fr auto", gap: 8 }}>
+            <input placeholder="거래처명 (예: ○○건설)" value={newClient.name}
+              onChange={e => setNewClient({ ...newClient, name: e.target.value })}
+              onKeyDown={e => e.key === "Enter" && addClient()} />
+            <select value={newClient.grade} onChange={e => setNewClient({ ...newClient, grade: e.target.value })}>
+              {GRADES.map(g => <option key={g} value={g}>{g} 등급</option>)}
+            </select>
+            <input type="text" placeholder="메모 (선택)" value={newClient.note}
+              onChange={e => setNewClient({ ...newClient, note: e.target.value })}
+              onKeyDown={e => e.key === "Enter" && addClient()} />
+            <button className="btn-orange" onClick={addClient} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 추가</button>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 12, color: "var(--text2)" }}>
+            ※ 등급(A/B/C/D)은 단가 계산기의 등급별 단가에 매핑됩니다. 견적서에서 거래처 선택 시 해당 등급이 자동 적용돼요.
+          </div>
+        </div>
+      </div>
+
+      {/* 등록된 거래처 목록 */}
+      <div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}>
+          📋 등록된 거래처{" "}
+          <span style={{ fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>
+            ({search.trim() || gradeFilter !== "ALL" ? `${filteredClients.length} / ${clients.length}` : `${clients.length}곳`})
+          </span>
+        </div>
+        {clients.length > 0 && (
+          <div className="card" style={{ marginBottom: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 140px auto", gap: 8, alignItems: "center" }}>
+              <input type="text" placeholder="🔍 거래처명 또는 메모 검색"
+                value={search} onChange={e => setSearch(e.target.value)} />
+              <select value={gradeFilter} onChange={e => setGradeFilter(e.target.value)}>
+                <option value="ALL">전체 등급</option>
+                {GRADES.map(g => <option key={g} value={g}>{g} 등급</option>)}
+              </select>
+              <button onClick={() => { setSearch(""); setGradeFilter("ALL"); }}
+                disabled={!search && gradeFilter === "ALL"}
+                style={{
+                  height: 42, padding: "0 14px", whiteSpace: "nowrap",
+                  border: "1.5px solid var(--divider)", borderRadius: 10,
+                  background: "transparent", cursor: (!search && gradeFilter === "ALL") ? "not-allowed" : "pointer",
+                  fontSize: 13, fontFamily: "inherit", color: "var(--text2)",
+                  opacity: (!search && gradeFilter === "ALL") ? 0.5 : 1
+                }}>초기화</button>
+            </div>
+          </div>
+        )}
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          {clients.length === 0 ? (
+            <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
+              등록된 거래처가 없습니다. 위에서 추가해보세요.
+            </div>
+          ) : filteredClients.length === 0 ? (
+            <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--text2)", fontSize: 13 }}>
+              검색 결과가 없습니다.
+            </div>
+          ) : (
+            <table>
+              <thead><tr>
+                <th>거래처명</th>
+                <th style={{ textAlign: "center", width: 100 }}>적용 등급</th>
+                <th>메모</th>
+                <th style={{ textAlign: "center", width: 110 }}>관리</th>
+              </tr></thead>
+              <tbody>
+                {filteredClients.map(c => (
+                  <tr key={c.id}>
+                    {editId === c.id ? (
+                      <>
+                        <td><input type="text" value={editDraft.name} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} /></td>
+                        <td><select value={editDraft.grade} onChange={e => setEditDraft({ ...editDraft, grade: e.target.value })}>
+                          {GRADES.map(g => <option key={g} value={g}>{g}</option>)}
+                        </select></td>
+                        <td><input type="text" value={editDraft.note || ""} onChange={e => setEditDraft({ ...editDraft, note: e.target.value })} /></td>
+                        <td style={{ textAlign: "center" }}>
+                          <button onClick={saveEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "#10B981", fontSize: 16, marginRight: 8 }}>✓</button>
+                          <button onClick={cancelEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 15 }}>✕</button>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ fontWeight: 600 }}>{c.name}</td>
+                        <td style={{ textAlign: "center" }}>
+                          <span style={{ display: "inline-block", padding: "3px 12px", borderRadius: 999, background: gradeColor[c.grade] + "22", color: gradeColor[c.grade], fontSize: 12, fontWeight: 700 }}>{c.grade}</span>
+                        </td>
+                        <td style={{ fontSize: 13, color: "var(--text2)" }}>{c.note}</td>
+                        <td style={{ textAlign: "center" }}>
+                          <button onClick={() => startEdit(c)} title="수정" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 14, marginRight: 8 }}>✏️</button>
+                          <button onClick={() => deleteClient(c.id)} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14 }}>✕</button>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* 수주에서 자동 추출 */}
+      {detectedClients.length > 0 && (
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}>🔍 수주에서 발견된 미등록 거래처</div>
+          <div className="card">
+            <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 12 }}>
+              경영 대시보드의 수주 정보에 입력된 거래처 중 아직 등록되지 않은 것입니다. 클릭하면 A 등급으로 빠르게 등록됩니다.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {detectedClients.map(name => (
+                <button key={name} onClick={() => registerDetected(name)} style={{
+                  padding: "8px 14px", borderRadius: 10, border: "1.5px dashed var(--divider)",
+                  background: "transparent", cursor: "pointer", fontSize: 13, fontFamily: "inherit",
+                  color: "var(--text)", transition: "all 0.15s"
+                }}>+ {name}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [tab, setTab] = useState("calc");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(load("frw_sidebar_collapsed", false));
@@ -1378,6 +1578,7 @@ function App() {
   const [prodSearch, setProdSearch] = useState("");
   const [showProdSearch, setShowProdSearch] = useState(false);
   const [orders, setOrders] = useState(() => load("frw_orders", []));
+  const [clients, setClients] = useState(() => load("frw_clients", []));
   const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
   const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
   const [fabricDropInfo, setFabricDropInfo] = useState(null); // { id, side: 'top'|'bottom' }
@@ -1441,6 +1642,7 @@ function App() {
     if (d.apiKey !== undefined) setApiKey(d.apiKey);
     if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
     if (d.orders) setOrders(d.orders);
+    if (d.clients) setClients(d.clients);
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
     if (d.monthlySales) setMonthlySales(d.monthlySales);
   };
@@ -1464,15 +1666,15 @@ function App() {
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
-    save("frw_orders", orders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
+    save("frw_orders", orders); save("frw_clients", clients); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, fabricIntakes, monthlySales })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, fabricIntakes, monthlySales })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, fabricIntakes, monthlySales]);
+  }, [materials, laborItems, products, apiKey, orders, clients, fabricIntakes, monthlySales]);
 
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
@@ -1817,7 +2019,7 @@ ${productList}
     tabBorder: "rgba(99,102,241,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적서", "◻"], ["history", "견적 이력", "▤"], ["dashboard", "경영 대시보드", "◉"], ["inventory", "원단 입고현황", "≋"]];
+  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적서", "◻"], ["history", "견적 이력", "▤"], ["dashboard", "경영 대시보드", "◉"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"]];
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -2726,9 +2928,41 @@ ${productList}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: T.text2, whiteSpace: "nowrap", width: 60, textAlign: "right" }}>견적 대상</div>
-                    <input type="text" value={quoteClient} onChange={e => setQuoteClient(e.target.value)}
-                      placeholder="거래처명 (예: ○○주식회사)" style={{ flex: 1, minWidth: 0 }} />
+                    <input type="text" value={quoteClient} list="quote-clients-list"
+                      onChange={e => {
+                        const v = e.target.value;
+                        setQuoteClient(v);
+                        const matched = clients.find(c => (c.name || "").trim() === v.trim());
+                        if (matched) {
+                          setProducts(ps => ps.map(p => {
+                            if (!p.include) return p;
+                            if (!p.specs || !Array.isArray(p.specs)) return p;
+                            return {
+                              ...p,
+                              specs: p.specs.map(s =>
+                                s.id === p.activeSpecId ? { ...s, selectedGrade: matched.grade } : s
+                              )
+                            };
+                          }));
+                        }
+                      }}
+                      placeholder="거래처명 (예: ○○주식회사) — 등록 거래처 선택 시 등급 자동 적용"
+                      style={{ flex: 1, minWidth: 0 }} />
+                    <datalist id="quote-clients-list">
+                      {clients.map(c => <option key={c.id} value={c.name}>{c.grade}등급 {c.note ? "· " + c.note : ""}</option>)}
+                    </datalist>
                   </div>
+                  {(() => {
+                    const matched = clients.find(c => (c.name || "").trim() === quoteClient.trim());
+                    if (!matched) return null;
+                    const gc = { A: "#6366F1", B: "#10B981", C: "#F59E0B", D: "#EF4444" }[matched.grade] || "#6366F1";
+                    return (
+                      <div style={{ marginLeft: 70, fontSize: 12, color: gc, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: gc + "22", fontSize: 11, fontWeight: 700 }}>{matched.grade}등급</span>
+                        <span>✓ {matched.name} 단가가 단가 계산기에 적용됐어요. 견적서를 다시 생성하면 새 단가가 반영됩니다.</span>
+                      </div>
+                    );
+                  })()}
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       onClick={() => setEditingQuote(v => !v)}
@@ -2936,6 +3170,14 @@ ${productList}
             fabricIntakes={fabricIntakes}
             setFabricIntakes={setFabricIntakes}
             materials={materials}
+            darkMode={darkMode}
+          />
+        )}
+        {tab === "clients" && (
+          <ClientsTab
+            clients={clients}
+            setClients={setClients}
+            orders={orders}
             darkMode={darkMode}
           />
         )}
