@@ -2502,7 +2502,8 @@ ${productList}
                   // 사용자가 직접 설정한 등급별 마진율의 평균
                   const avgM = withData.reduce((sum, { p, c }) => {
                     const sel = c.selectedGrade || "A";
-                    const m = (p.margins || DEFAULT_MARGINS)[sel] ?? DEFAULT_MARGINS[sel];
+                    const sp = getActiveSpec(p) || {};
+                    const m = (sp.margins || DEFAULT_MARGINS)[sel] ?? DEFAULT_MARGINS[sel];
                     return sum + m;
                   }, 0) / withData.length;
                   // 납품가 대비 실질 마진율 평균
