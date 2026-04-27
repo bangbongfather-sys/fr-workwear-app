@@ -495,7 +495,7 @@
         margin: 8mm 10mm;
       }
       #root > div { background: white !important; min-height: unset !important; }
-      .apple-doc {
+      .apple-doc, .bold-doc, .card-doc, .korean-doc {
         box-shadow: none !important;
         border-radius: 0 !important;
         padding: 24px 32px !important;
@@ -505,7 +505,7 @@
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      .apple-doc img {
+      .apple-doc img:not([alt]:not([alt=""])), .bold-doc img:not([alt]:not([alt=""])), .card-doc img:not([alt]:not([alt=""])), .korean-doc img:not([alt]:not([alt=""])) {
         max-height: 32px !important;
         width: auto !important;
       }
@@ -514,11 +514,14 @@
         padding-top: 16px !important;
         gap: 8px !important;
       }
-      .apple-doc h1 { font-size: 20px !important; margin-bottom: 12px !important; }
-      .apple-doc h2 { font-size: 14px !important; margin: 12px 0 6px !important; }
-      .apple-doc p, .apple-doc td, .apple-doc th { font-size: 11px !important; }
-      .apple-doc table { margin: 6px 0 !important; }
-      .apple-doc hr { margin: 10px 0 !important; }
+      .apple-doc h1, .bold-doc h1, .card-doc h1, .korean-doc h1 { font-size: 20px !important; margin-bottom: 12px !important; }
+      .apple-doc h2, .bold-doc h2, .card-doc h2, .korean-doc h2 { font-size: 14px !important; margin: 12px 0 6px !important; }
+      .apple-doc p, .apple-doc td, .apple-doc th,
+      .bold-doc p, .bold-doc td, .bold-doc th,
+      .card-doc p, .card-doc td, .card-doc th,
+      .korean-doc p, .korean-doc td, .korean-doc th { font-size: 11px !important; }
+      .apple-doc table, .bold-doc table, .card-doc table, .korean-doc table { margin: 6px 0 !important; }
+      .apple-doc hr, .bold-doc hr, .card-doc hr, .korean-doc hr { margin: 10px 0 !important; }
     }
   </style>
 </head>
@@ -1663,6 +1666,147 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
   );
 }
 
+function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkMode }) {
+  const [newSupplier, setNewSupplier] = useState({ name: "", contact: "", phone: "", email: "", address: "", items: "", paymentTerms: "", note: "" });
+  const [editId, setEditId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const filtered = suppliers.filter(s => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (s.name || "").toLowerCase().includes(q)
+      || (s.contact || "").toLowerCase().includes(q)
+      || (s.items || "").toLowerCase().includes(q)
+      || (s.note || "").toLowerCase().includes(q);
+  });
+
+  // 입고 기록에서 공급업체명 추출 → 미등록만
+  const registeredNames = new Set(suppliers.map(s => (s.name || "").trim()));
+  const detectedSuppliers = Array.from(new Set(
+    (fabricIntakes || [])
+      .map(r => (r.supplier || "").trim())
+      .filter(name => name && !registeredNames.has(name))
+  ));
+
+  const addSupplier = () => {
+    const name = newSupplier.name.trim();
+    if (!name) return;
+    if (registeredNames.has(name)) { alert("이미 등록된 공급처입니다: " + name); return; }
+    setSuppliers(ss => [...ss, { id: uid(), ...newSupplier, name, createdAt: Date.now() }]);
+    setNewSupplier({ name: "", contact: "", phone: "", email: "", address: "", items: "", paymentTerms: "", note: "" });
+  };
+
+  const registerDetected = (name) => {
+    setSuppliers(ss => [...ss, { id: uid(), name: name.trim(), contact: "", phone: "", email: "", address: "", items: "", paymentTerms: "", note: "입고기록에서 자동 추가", createdAt: Date.now() }]);
+  };
+
+  const startEdit = (s) => { setEditId(s.id); setEditDraft({ ...s }); };
+  const cancelEdit = () => { setEditId(null); setEditDraft(null); };
+  const saveEdit = () => {
+    if (!editDraft || !editDraft.name.trim()) return;
+    setSuppliers(ss => ss.map(s => s.id === editId ? { ...editDraft, name: editDraft.name.trim() } : s));
+    cancelEdit();
+  };
+  const deleteSupplier = (id) => {
+    if (!window.confirm("이 공급처를 삭제할까요?")) return;
+    setSuppliers(ss => ss.filter(s => s.id !== id));
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+      {/* 신규 등록 */}
+      <div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}>🏭 공급처 등록</div>
+        <div className="card">
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 공급처 추가</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1.2fr", gap: 8, marginBottom: 8 }}>
+            <input placeholder="공급처명 * (예: ○○섬유)" value={newSupplier.name} onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addSupplier()} />
+            <input placeholder="담당자" value={newSupplier.contact} onChange={e => setNewSupplier({ ...newSupplier, contact: e.target.value })} />
+            <input placeholder="전화번호" value={newSupplier.phone} onChange={e => setNewSupplier({ ...newSupplier, phone: e.target.value })} />
+            <input placeholder="이메일" value={newSupplier.email} onChange={e => setNewSupplier({ ...newSupplier, email: e.target.value })} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1.4fr 1fr auto", gap: 8 }}>
+            <input placeholder="주소" value={newSupplier.address} onChange={e => setNewSupplier({ ...newSupplier, address: e.target.value })} />
+            <input placeholder="공급 품목 (콤마 구분)" value={newSupplier.items} onChange={e => setNewSupplier({ ...newSupplier, items: e.target.value })} />
+            <input placeholder="결제 조건 (예: 월말 30일)" value={newSupplier.paymentTerms} onChange={e => setNewSupplier({ ...newSupplier, paymentTerms: e.target.value })} />
+            <button className="btn-primary" onClick={addSupplier} style={{ padding: "0 22px", height: 44, fontSize: 13, fontWeight: 700 }}>+ 등록</button>
+          </div>
+          {newSupplier.note !== undefined && (
+            <input style={{ marginTop: 8, width: "100%" }} placeholder="비고 / 메모" value={newSupplier.note} onChange={e => setNewSupplier({ ...newSupplier, note: e.target.value })} />
+          )}
+        </div>
+      </div>
+
+      {/* 자동 감지 */}
+      {detectedSuppliers.length > 0 && (
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#FF9500", marginBottom: 10 }}>🔍 입고기록에서 발견된 미등록 공급처 ({detectedSuppliers.length})</div>
+          <div className="card" style={{ background: "rgba(255,149,0,0.05)" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {detectedSuppliers.map(name => (
+                <button key={name} onClick={() => registerDetected(name)} style={{ padding: "8px 14px", borderRadius: 100, border: "1.5px solid #FF9500", background: "#fff", color: "#FF9500", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>+ {name}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 목록 */}
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: NAVY }}>📋 공급처 목록 ({filtered.length}/{suppliers.length})</div>
+          <input placeholder="공급처/담당자/품목 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, maxWidth: 320, height: 38, fontSize: 13 }} />
+        </div>
+        {filtered.length === 0 ? (
+          <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)" }}>
+            {suppliers.length === 0 ? "등록된 공급처가 없습니다" : "검색 결과가 없습니다"}
+          </div>
+        ) : (
+          <div className="card" style={{ overflowX: "auto" }}>
+            <table>
+              <thead><tr>
+                <th>공급처명</th><th>담당자</th><th>전화</th><th>이메일</th><th>품목</th><th>결제 조건</th><th>비고</th><th style={{ textAlign: "center", width: 100 }}>관리</th>
+              </tr></thead>
+              <tbody>
+                {filtered.map(s => editId === s.id ? (
+                  <tr key={s.id} style={{ background: "var(--surface2)" }}>
+                    <td><input value={editDraft.name} onChange={e => setEditDraft({ ...editDraft, name: e.target.value })} /></td>
+                    <td><input value={editDraft.contact || ""} onChange={e => setEditDraft({ ...editDraft, contact: e.target.value })} /></td>
+                    <td><input value={editDraft.phone || ""} onChange={e => setEditDraft({ ...editDraft, phone: e.target.value })} /></td>
+                    <td><input value={editDraft.email || ""} onChange={e => setEditDraft({ ...editDraft, email: e.target.value })} /></td>
+                    <td><input value={editDraft.items || ""} onChange={e => setEditDraft({ ...editDraft, items: e.target.value })} /></td>
+                    <td><input value={editDraft.paymentTerms || ""} onChange={e => setEditDraft({ ...editDraft, paymentTerms: e.target.value })} /></td>
+                    <td><input value={editDraft.note || ""} onChange={e => setEditDraft({ ...editDraft, note: e.target.value })} /></td>
+                    <td style={{ textAlign: "center" }}>
+                      <button onClick={saveEdit} style={{ padding: "4px 8px", marginRight: 4, border: "none", background: "#10B981", color: "#fff", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>저장</button>
+                      <button onClick={cancelEdit} style={{ padding: "4px 8px", border: "none", background: "var(--surface2)", color: "var(--text2)", borderRadius: 6, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={s.id}>
+                    <td style={{ fontWeight: 700, fontSize: 13 }}>{s.name}</td>
+                    <td style={{ fontSize: 13 }}>{s.contact}</td>
+                    <td style={{ fontSize: 13, color: "var(--text2)" }}>{s.phone}</td>
+                    <td style={{ fontSize: 13, color: "var(--text2)" }}>{s.email}</td>
+                    <td style={{ fontSize: 12, color: "var(--text2)", maxWidth: 200 }}>{s.items}</td>
+                    <td style={{ fontSize: 12, color: "var(--text2)" }}>{s.paymentTerms}</td>
+                    <td style={{ fontSize: 12, color: "var(--text2)" }}>{s.note}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <button onClick={() => startEdit(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "#6366F1", fontSize: 14, marginRight: 6, fontFamily: "inherit" }}>✏️</button>
+                      <button onClick={() => deleteSupplier(s.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [tab, setTab] = useState("calc");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(load("frw_sidebar_collapsed", false));
@@ -1695,6 +1839,15 @@ function App() {
   const [showProdSearch, setShowProdSearch] = useState(false);
   const [orders, setOrders] = useState(() => load("frw_orders", []));
   const [clients, setClients] = useState(() => load("frw_clients", []));
+  const [suppliers, setSuppliers] = useState(() => load("frw_suppliers", []));
+  const [purchaseOrders, setPurchaseOrders] = useState(() => load("frw_purchase_orders", []));
+  const [poSubTab, setPoSubTab] = useState("current"); // "current" | "history"
+  const [poStyle, setPoStyle] = useState(() => load("frw_po_style", "apple")); // apple | bold | card | korean
+  useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
+  const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
+  const [viewingPO, setViewingPO] = useState(null);
+  const [poGenerating, setPoGenerating] = useState(false);
+  const [poApiError, setPoApiError] = useState("");
   const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
   const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
   const [fabricDropInfo, setFabricDropInfo] = useState(null); // { id, side: 'top'|'bottom' }
@@ -1759,6 +1912,8 @@ function App() {
     if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
     if (d.orders) setOrders(d.orders);
     if (d.clients) setClients(d.clients);
+    if (d.suppliers) setSuppliers(d.suppliers);
+    if (d.purchaseOrders) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
     if (d.monthlySales) setMonthlySales(d.monthlySales);
   };
@@ -1782,15 +1937,15 @@ function App() {
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
-    save("frw_orders", orders); save("frw_clients", clients); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
+    save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, fabricIntakes, monthlySales })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, clients, fabricIntakes, monthlySales]);
+  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales]);
 
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
@@ -2109,6 +2264,155 @@ ${productList}
     finally { setGenerating(false); }
   }, [apiKey, products, materials, laborItems]);
 
+  // ── 발주서 (Purchase Order) ──
+  const buildPOMarkdown = (draft) => {
+    const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    const poNum = `PO-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+    const items = (draft.items || []).filter(it => (it.name || "").trim() && Number(it.qty) > 0);
+    const subtotal = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
+    const tax = Math.round(subtotal * 0.1);
+    const total = subtotal + tax;
+    const sup = draft.supplier || {};
+    const itemsTable = items.length === 0 ? "_품목이 없습니다_" : `| 품목 | 규격/단위 | 수량 | 단가 | 금액 |\n|------|----------|-----:|-----:|-----:|\n${items.map(it => `| ${it.name} | ${it.unit || "-"} | ${Number(it.qty).toLocaleString()} | ${Number(it.unitPrice||0).toLocaleString()}원 | ${Math.round((Number(it.qty)||0)*(Number(it.unitPrice)||0)).toLocaleString()}원 |`).join("\n")}`;
+    return `# 발주서 (Purchase Order)
+
+**발주 번호** ${poNum}  ·  **작성일** ${today}  ·  **납기일** ${draft.deliveryDate || "협의"}
+
+---
+
+## 공급처 정보 (Supplier)
+- **회사명** ${sup.name || "—"}
+- **담당자** ${sup.contact || "—"}
+- **연락처** ${sup.phone || "—"}${sup.email ? ` / ${sup.email}` : ""}
+- **주소** ${sup.address || "—"}
+
+## 발주 품목 (Items)
+${itemsTable}
+
+**공급가액** ${subtotal.toLocaleString()}원
+**부가세 (10%)** ${tax.toLocaleString()}원
+**합계 금액** **${total.toLocaleString()}원**
+
+## 거래 조건 (Terms)
+- **결제 조건** ${draft.paymentTerms || sup.paymentTerms || "협의"}
+- **납품 장소** ${draft.deliveryPlace || "당사 지정 장소"}
+- **품질 기준** 견본 동일 / KS 인증 원단 한정
+
+${draft.memo ? `## 비고\n${draft.memo}\n` : ""}
+---
+*본 발주서는 정식 계약 효력을 가지며, 변경 시 양사 협의 후 서면 확인합니다.*`;
+  };
+
+  const generatePO = useCallback(async () => {
+    if (!poDraft) { setPoApiError("발주서 작성을 먼저 시작해주세요."); return; }
+    const items = (poDraft.items || []).filter(it => (it.name || "").trim() && Number(it.qty) > 0);
+    if (items.length === 0) { setPoApiError("발주 품목이 없습니다. 품목과 수량을 입력해주세요."); return; }
+    setPoGenerating(true); setPoApiError("");
+    if (!apiKey.trim()) {
+      const md = buildPOMarkdown(poDraft);
+      setPoDraft({ ...poDraft, body: md });
+      setPoGenerating(false);
+      return;
+    }
+    const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    const sup = poDraft.supplier || {};
+    const subtotal = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
+    const itemsList = items.map(it => `- ${it.name} / ${it.unit || "-"} / 수량 ${it.qty} / 단가 ${Number(it.unitPrice||0).toLocaleString()}원`).join("\n");
+    const prompt = `당신은 방염복(FR 워크웨어) 전문 업체의 구매 담당자입니다.
+공급처(원단/공임 협력사)에 발송할 **정식 발주서**를 한국어로 작성해주세요.
+
+[작성일] ${today}
+[공급처] ${sup.name || "—"} (담당자: ${sup.contact || "—"}, 연락처: ${sup.phone || "—"})
+[납기일] ${poDraft.deliveryDate || "협의"}
+[결제조건] ${poDraft.paymentTerms || sup.paymentTerms || "월말 결제"}
+[공급가액 합계] ${subtotal.toLocaleString()}원 (부가세 별도)
+
+[발주 품목]
+${itemsList}
+
+${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
+
+[작성 가이드]
+- 정중하면서도 공식적인 비즈니스 톤
+- 마크다운 사용 (제목 #, ##, 표 활용)
+- 구조: # 발주서 → 발주번호·작성일·납기일 → ## 공급처 정보 → ## 발주 품목 (표) → 공급가액·부가세·합계 → ## 거래 조건 → ## 비고
+- 표는 (품목 / 규격 / 수량 / 단가 / 금액) 5컬럼
+- 합계 금액은 굵게 강조
+- 끝에 수평선 + "본 발주서는 정식 계약 효력을 가지며..." 면책 한 줄`;
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
+      });
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
+      const data = await res.json();
+      setPoDraft({ ...poDraft, body: data.content[0].text });
+    } catch (e) { setPoApiError(`오류: ${e.message}`); }
+    finally { setPoGenerating(false); }
+  }, [apiKey, poDraft]);
+
+  const savePOToHistory = () => {
+    if (!poDraft || !poDraft.body) return;
+    const items = (poDraft.items || []).filter(it => (it.name || "").trim() && Number(it.qty) > 0);
+    const subtotal = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
+    const tax = Math.round(subtotal * 0.1);
+    const sup = poDraft.supplier || {};
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,"0")}.${String(now.getDate()).padStart(2,"0")}`;
+    const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
+    const title = (poDraft.title || "").trim() || `${sup.name || "공급처"} - ${items.map(it => it.name).slice(0, 2).join(", ")}${items.length > 2 ? " 외" : ""}`;
+    const entry = {
+      id: uid(), title, dateStr, timeStr, savedAt: now.getTime(),
+      supplier: sup, items, photos: poDraft.photos || [], deliveryDate: poDraft.deliveryDate || "",
+      paymentTerms: poDraft.paymentTerms || "", deliveryPlace: poDraft.deliveryPlace || "",
+      memo: poDraft.memo || "", body: poDraft.body, poStyle, totalAmount: subtotal + tax,
+    };
+    const next = [entry, ...purchaseOrders];
+    setPurchaseOrders(next);
+    save("frw_purchase_orders", next);
+    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders: next, fabricIntakes, monthlySales }).catch(() => {});
+    alert(`💾 발주서가 저장됐습니다!\n${dateStr} ${timeStr}`);
+  };
+
+  const deletePO = (id) => {
+    if (!window.confirm("이 발주서를 삭제할까요?")) return;
+    const next = purchaseOrders.filter(p => p.id !== id);
+    setPurchaseOrders(next); save("frw_purchase_orders", next);
+    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders: next, fabricIntakes, monthlySales }).catch(() => {});
+    if (viewingPO && viewingPO.id === id) setViewingPO(null);
+  };
+
+  const startNewPO = () => {
+    setPoDraft({
+      title: "",
+      supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" },
+      items: [{ id: uid(), kind: "custom", name: "", unit: "yard", qty: "", unitPrice: "", note: "" }],
+      photos: [],
+      deliveryDate: "", paymentTerms: "", deliveryPlace: "", memo: "", body: "",
+    });
+    save("frw_po_draft", null);
+  };
+
+  const handlePOPhotoUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!poDraft) return;
+    const promises = files.map(file => new Promise((res, rej) => {
+      if (!file.type.startsWith("image/")) { rej(new Error("이미지 파일만 가능")); return; }
+      if (file.size > 2 * 1024 * 1024) { rej(new Error(`${file.name}: 2MB 초과`)); return; }
+      const reader = new FileReader();
+      reader.onload = () => res({ name: file.name, dataUrl: reader.result });
+      reader.onerror = rej;
+      reader.readAsDataURL(file);
+    }));
+    Promise.all(promises).then(photos => {
+      setPoDraft(d => ({ ...d, photos: [...(d.photos || []), ...photos] }));
+    }).catch(err => alert("사진 업로드 실패: " + err.message));
+    e.target.value = "";
+  };
+
+  useEffect(() => { if (poDraft) save("frw_po_draft", poDraft); }, [poDraft]);
+
   const SyncBadge = () => {
     const styles = {
       wrap: { display: "flex", alignItems: "center", gap: 5, borderRadius: 100, padding: "5px 12px" },
@@ -2135,7 +2439,7 @@ ${productList}
     tabBorder: "rgba(99,102,241,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["dashboard", "경영 대시보드", "◉"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"]];
+  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["purchase", "발주 관리", "◨"], ["dashboard", "경영 대시보드", "◉"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"], ["suppliers", "공급처 관리", "◧"]];
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -3348,6 +3652,336 @@ ${productList}
             darkMode={darkMode}
           />
         )}
+        {tab === "suppliers" && (
+          <SuppliersTab
+            suppliers={suppliers}
+            setSuppliers={setSuppliers}
+            materials={materials}
+            fabricIntakes={fabricIntakes}
+            darkMode={darkMode}
+          />
+        )}
+
+        {/* ── 발주 관리 (서브탭) ── */}
+        {tab === "purchase" && (
+          <div>
+            <div className="no-print" style={{ display: "flex", gap: 4, marginBottom: 20, padding: 4, background: T.surface2, borderRadius: 12, width: "fit-content" }}>
+              {[["current", "📦 발주서 작성"], ["history", "🗂️ 발주 이력"]].map(([id, label]) => (
+                <button key={id} onClick={() => { setPoSubTab(id); if (id === "history") setViewingPO(null); }}
+                  style={{
+                    padding: "9px 18px", border: "none", borderRadius: 9,
+                    background: poSubTab === id ? (darkMode ? "#2A2A40" : "#fff") : "transparent",
+                    color: poSubTab === id ? T.text : T.text2,
+                    fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                    boxShadow: poSubTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                    transition: "all 0.15s",
+                  }}>{label}</button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 발주서 작성 */}
+        {tab === "purchase" && poSubTab === "current" && (
+          <div>
+            {!poDraft ? (
+              <div className="card" style={{ padding: 64, textAlign: "center" }}>
+                <div style={{ fontSize: 56, marginBottom: 16 }}>📦</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>새 발주서를 작성해보세요</div>
+                <div style={{ fontSize: 14, color: T.empty, marginBottom: 24 }}>공급처를 선택하고 발주 품목을 입력한 뒤 양식을 골라 출력할 수 있습니다</div>
+                <button className="btn-primary" style={{ padding: "12px 24px", fontSize: 14 }} onClick={startNewPO}>+ 새 발주서 작성</button>
+              </div>
+            ) : !poDraft.body ? (
+              /* 작성 폼 */
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {/* 공급처 정보 */}
+                <div className="card">
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>🏭 공급처 정보</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>등록된 공급처에서 선택</label>
+                      <select value={poDraft.supplier?.id || ""} onChange={e => {
+                        const sel = suppliers.find(s => s.id === e.target.value);
+                        if (sel) setPoDraft({ ...poDraft, supplier: { id: sel.id, name: sel.name, contact: sel.contact || "", phone: sel.phone || "", email: sel.email || "", address: sel.address || "", paymentTerms: sel.paymentTerms || "" } });
+                        else setPoDraft({ ...poDraft, supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" } });
+                      }} style={{ width: "100%", height: 40 }}>
+                        <option value="">— 직접 입력 —</option>
+                        {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    </div>
+                    <input placeholder="공급처명 *" value={poDraft.supplier?.name || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, name: e.target.value } })} />
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                    <input placeholder="담당자" value={poDraft.supplier?.contact || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, contact: e.target.value } })} />
+                    <input placeholder="전화번호" value={poDraft.supplier?.phone || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, phone: e.target.value } })} />
+                    <input placeholder="이메일" value={poDraft.supplier?.email || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, email: e.target.value } })} />
+                  </div>
+                  <input placeholder="주소" value={poDraft.supplier?.address || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, address: e.target.value } })} style={{ width: "100%" }} />
+                </div>
+
+                {/* 발주 품목 */}
+                <div className="card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>📋 발주 품목</div>
+                    <button onClick={() => setPoDraft({ ...poDraft, items: [...(poDraft.items || []), { id: uid(), kind: "custom", name: "", unit: "yard", qty: "", unitPrice: "", note: "" }] })}
+                      style={{ padding: "6px 12px", border: `1px solid ${T.ghostBorder}`, borderRadius: 8, background: T.ghostBg, color: T.ghostColor, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>+ 품목 추가</button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {(poDraft.items || []).map((it, idx) => (
+                      <div key={it.id} style={{ display: "grid", gridTemplateColumns: "120px 1.6fr 80px 100px 110px 110px 30px", gap: 6, alignItems: "center" }}>
+                        <select value={it.kind} onChange={e => {
+                          const kind = e.target.value;
+                          const items = [...poDraft.items];
+                          items[idx] = { ...items[idx], kind, name: kind === "custom" ? items[idx].name : "" };
+                          setPoDraft({ ...poDraft, items });
+                        }} style={{ height: 38, fontSize: 12 }}>
+                          <option value="custom">직접입력</option>
+                          <option value="material">원단</option>
+                          <option value="labor">공임</option>
+                        </select>
+                        {it.kind === "material" ? (
+                          <select value={it.name} onChange={e => {
+                            const m = materials.find(mm => mm.name === e.target.value);
+                            const items = [...poDraft.items];
+                            items[idx] = { ...items[idx], name: e.target.value, unitPrice: m ? String(m.unitPrice || "") : items[idx].unitPrice };
+                            setPoDraft({ ...poDraft, items });
+                          }} style={{ height: 38 }}>
+                            <option value="">원단 선택...</option>
+                            {materials.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                          </select>
+                        ) : it.kind === "labor" ? (
+                          <select value={it.name} onChange={e => {
+                            const l = laborItems.find(ll => ll.name === e.target.value);
+                            const items = [...poDraft.items];
+                            items[idx] = { ...items[idx], name: e.target.value, unit: l ? (l.unit || items[idx].unit) : items[idx].unit, unitPrice: l ? String(l.unitPrice || "") : items[idx].unitPrice };
+                            setPoDraft({ ...poDraft, items });
+                          }} style={{ height: 38 }}>
+                            <option value="">공임 선택...</option>
+                            {laborItems.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
+                          </select>
+                        ) : (
+                          <input placeholder="품목명 직접 입력" value={it.name} onChange={e => {
+                            const items = [...poDraft.items]; items[idx] = { ...items[idx], name: e.target.value };
+                            setPoDraft({ ...poDraft, items });
+                          }} />
+                        )}
+                        <input placeholder="단위" value={it.unit} onChange={e => {
+                          const items = [...poDraft.items]; items[idx] = { ...items[idx], unit: e.target.value };
+                          setPoDraft({ ...poDraft, items });
+                        }} />
+                        <input type="number" placeholder="수량" value={it.qty} onChange={e => {
+                          const items = [...poDraft.items]; items[idx] = { ...items[idx], qty: e.target.value };
+                          setPoDraft({ ...poDraft, items });
+                        }} />
+                        <input type="number" placeholder="단가(원)" value={it.unitPrice} onChange={e => {
+                          const items = [...poDraft.items]; items[idx] = { ...items[idx], unitPrice: e.target.value };
+                          setPoDraft({ ...poDraft, items });
+                        }} />
+                        <div style={{ fontSize: 12, fontWeight: 700, color: T.text2, textAlign: "right" }}>
+                          {Math.round((Number(it.qty) || 0) * (Number(it.unitPrice) || 0)).toLocaleString()}원
+                        </div>
+                        <button onClick={() => setPoDraft({ ...poDraft, items: poDraft.items.filter(x => x.id !== it.id) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  {(poDraft.items || []).length > 0 && (() => {
+                    const subtotal = poDraft.items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
+                    const tax = Math.round(subtotal * 0.1);
+                    return (
+                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.divider}`, display: "flex", justifyContent: "flex-end", gap: 24, fontSize: 13 }}>
+                        <span style={{ color: T.text2 }}>공급가액 <strong style={{ color: T.text, marginLeft: 6 }}>{subtotal.toLocaleString()}원</strong></span>
+                        <span style={{ color: T.text2 }}>부가세 <strong style={{ color: T.text, marginLeft: 6 }}>{tax.toLocaleString()}원</strong></span>
+                        <span style={{ color: NAVY, fontWeight: 800 }}>합계 {(subtotal + tax).toLocaleString()}원</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* 사진 첨부 */}
+                <div className="card">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>📷 참고 사진 ({(poDraft.photos || []).length})</div>
+                    <label style={{ padding: "6px 12px", border: `1px solid ${T.ghostBorder}`, borderRadius: 8, background: T.ghostBg, color: T.ghostColor, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                      + 사진 추가
+                      <input type="file" accept="image/*" multiple onChange={handlePOPhotoUpload} style={{ display: "none" }} />
+                    </label>
+                  </div>
+                  {(poDraft.photos || []).length === 0 ? (
+                    <div style={{ fontSize: 12, color: T.text3, textAlign: "center", padding: 16 }}>사진을 첨부하면 발주서에 함께 출력됩니다 (최대 2MB/장)</div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
+                      {poDraft.photos.map((ph, idx) => (
+                        <div key={idx} style={{ position: "relative", borderRadius: 8, overflow: "hidden", border: `1px solid ${T.divider}` }}>
+                          <img src={ph.dataUrl} alt={ph.name} style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} />
+                          <button onClick={() => setPoDraft({ ...poDraft, photos: poDraft.photos.filter((_, i) => i !== idx) })}
+                            style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>
+                          <div style={{ padding: "4px 8px", fontSize: 10, color: T.text2, background: T.surface, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ph.name}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 거래 조건 */}
+                <div className="card">
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>📅 거래 조건</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>납기일</label>
+                      <input type="date" value={poDraft.deliveryDate || ""} onChange={e => setPoDraft({ ...poDraft, deliveryDate: e.target.value })} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>결제 조건</label>
+                      <input placeholder="예: 월말 30일" value={poDraft.paymentTerms || ""} onChange={e => setPoDraft({ ...poDraft, paymentTerms: e.target.value })} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>납품 장소</label>
+                      <input placeholder="예: 당사 본사" value={poDraft.deliveryPlace || ""} onChange={e => setPoDraft({ ...poDraft, deliveryPlace: e.target.value })} />
+                    </div>
+                  </div>
+                  <textarea placeholder="추가 메모 (선택)" value={poDraft.memo || ""} onChange={e => setPoDraft({ ...poDraft, memo: e.target.value })} rows={3} style={{ width: "100%", padding: 10, border: `1px solid ${T.divider}`, borderRadius: 8, fontFamily: "inherit", fontSize: 13, resize: "vertical", background: T.surface, color: T.text }} />
+                </div>
+
+                {/* 액션 */}
+                {poApiError && <div style={{ padding: 12, background: "rgba(255,59,48,0.1)", border: "1px solid rgba(255,59,48,0.3)", borderRadius: 10, color: "#FF3B30", fontSize: 13 }}>{poApiError}</div>}
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button onClick={() => { if (window.confirm("작성 중인 발주서를 취소할까요?")) { setPoDraft(null); save("frw_po_draft", null); } }}
+                    style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                  <button onClick={() => { setPoDraft({ ...poDraft, body: buildPOMarkdown(poDraft) }); }}
+                    style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>📝 템플릿으로 생성</button>
+                  <button onClick={generatePO} disabled={poGenerating} className="btn-primary" style={{ padding: "10px 22px", fontSize: 13 }}>
+                    {poGenerating ? "생성 중..." : (apiKey.trim() ? "🤖 AI로 생성" : "📝 생성")}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* 미리보기 + 양식 선택 */
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, alignItems: "center" }} className="no-print">
+                  <button onClick={() => setPoDraft({ ...poDraft, body: "" })} style={{ padding: "8px 14px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 10, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>← 편집으로</button>
+                  <input placeholder="발주서 이름 (저장 시 사용)" value={poDraft.title || ""} onChange={e => setPoDraft({ ...poDraft, title: e.target.value })} style={{ flex: 1, minWidth: 200, height: 38 }} />
+                  <button onClick={savePOToHistory} style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>💾 이력에 저장</button>
+                  <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>
+                </div>
+                <div className="no-print" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: T.text2, letterSpacing: 0.3, marginRight: 4 }}>양식</span>
+                  {[["apple", "🍎 Apple Minimal"], ["bold", "🔥 Modern Bold"], ["card", "🃏 Card Layout"], ["korean", "📜 한국 정형"]].map(([id, label]) => (
+                    <button key={id} onClick={() => setPoStyle(id)}
+                      style={{ padding: "8px 14px", border: `1.5px solid ${poStyle === id ? NAVY : T.divider}`, borderRadius: 10, background: poStyle === id ? (darkMode ? "rgba(99,102,241,0.16)" : "rgba(99,102,241,0.08)") : "transparent", color: poStyle === id ? NAVY : T.text2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
+                  ))}
+                </div>
+                <div className={
+                  poStyle === "bold" ? "bold-doc" :
+                  poStyle === "card" ? "card-doc" :
+                  poStyle === "korean" ? "korean-doc" :
+                  "apple-doc"
+                }>
+                  <AppleMarkdown text={poDraft.body} />
+                  {(poDraft.photos || []).length > 0 && (
+                    <div style={{ marginTop: 32 }}>
+                      <h2>참고 사진 (Reference Photos)</h2>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, marginTop: 12 }}>
+                        {poDraft.photos.map((ph, idx) => (
+                          <div key={idx} style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB" }}>
+                            <img src={ph.dataUrl} alt={ph.name} style={{ width: "100%", height: 160, objectFit: "cover", display: "block" }} />
+                            <div style={{ padding: "6px 10px", fontSize: 11, color: "#64748B", background: "#F8FAFC" }}>{ph.name}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {poStyle === "korean" && (
+                    <div className="korean-seal-box">
+                      <div className="korean-seal-label">발 주 자</div>
+                      <div className="korean-seal-circle">(인)</div>
+                      <div style={{ width: 40 }} />
+                      <div className="korean-seal-label">공 급 자</div>
+                      <div className="korean-seal-circle">(인)</div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 발주 이력 */}
+        {tab === "purchase" && poSubTab === "history" && (
+          <div>
+            {viewingPO ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, gap: 12, flexWrap: "wrap" }} className="no-print">
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button onClick={() => setViewingPO(null)} style={{ padding: "8px 14px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 10, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>← 목록</button>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: T.text }}>{viewingPO.title}</div>
+                      <div style={{ fontSize: 12, color: T.text2 }}>{viewingPO.dateStr} {viewingPO.timeStr} · {viewingPO.supplier?.name}</div>
+                    </div>
+                  </div>
+                  <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>
+                </div>
+                <div className={
+                  viewingPO.poStyle === "bold" ? "bold-doc" :
+                  viewingPO.poStyle === "card" ? "card-doc" :
+                  viewingPO.poStyle === "korean" ? "korean-doc" :
+                  "apple-doc"
+                }>
+                  <AppleMarkdown text={viewingPO.body} />
+                  {(viewingPO.photos || []).length > 0 && (
+                    <div style={{ marginTop: 32 }}>
+                      <h2>참고 사진 (Reference Photos)</h2>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, marginTop: 12 }}>
+                        {viewingPO.photos.map((ph, idx) => (
+                          <div key={idx} style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB" }}>
+                            <img src={ph.dataUrl} alt={ph.name} style={{ width: "100%", height: 160, objectFit: "cover", display: "block" }} />
+                            <div style={{ padding: "6px 10px", fontSize: 11, color: "#64748B", background: "#F8FAFC" }}>{ph.name}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {viewingPO.poStyle === "korean" && (
+                    <div className="korean-seal-box">
+                      <div className="korean-seal-label">발 주 자</div>
+                      <div className="korean-seal-circle">(인)</div>
+                      <div style={{ width: 40 }} />
+                      <div className="korean-seal-label">공 급 자</div>
+                      <div className="korean-seal-circle">(인)</div>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 800, color: T.text, marginBottom: 20 }}>발주 이력 ({purchaseOrders.length})</div>
+                {purchaseOrders.length === 0 ? (
+                  <div className="card" style={{ padding: 64, textAlign: "center" }}>
+                    <div style={{ fontSize: 48, marginBottom: 16 }}>🗂️</div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>저장된 발주서가 없습니다</div>
+                    <div style={{ fontSize: 14, color: T.empty }}>발주서를 작성하고 저장하면 이곳에 누적됩니다</div>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+                    {purchaseOrders.map(po => (
+                      <div key={po.id} className="card" style={{ cursor: "pointer", transition: "all 0.15s" }} onClick={() => setViewingPO(po)}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: T.text, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title}</div>
+                            <div style={{ fontSize: 12, color: T.text2 }}>{po.dateStr} {po.timeStr}</div>
+                          </div>
+                          <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}>✕</button>
+                        </div>
+                        <div style={{ fontSize: 12, color: T.text2, marginBottom: 6 }}>🏭 {po.supplier?.name || "—"}</div>
+                        <div style={{ fontSize: 12, color: T.text2, marginBottom: 6 }}>📋 품목 {po.items?.length || 0}건{po.photos?.length > 0 ? ` · 📷 ${po.photos.length}장` : ""}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: NAVY }}>합계 {Number(po.totalAmount || 0).toLocaleString()}원</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
       </div>
     </div>
@@ -3423,8 +4057,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
   // A4 @ 96dpi, 8mm top/bottom margin = 297mm - 16mm ≈ 281mm ≈ 1062px
   const PAGE_H = 1020;
 
+  const findDoc = () => document.querySelector('.apple-doc, .bold-doc, .card-doc, .korean-doc');
   window.addEventListener('beforeprint', function() {
-    const el = document.querySelector('.apple-doc');
+    const el = findDoc();
     if (!el) return;
     el.style.zoom = '1';
     const h = el.offsetHeight;
@@ -3434,7 +4069,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
   });
 
   window.addEventListener('afterprint', function() {
-    const el = document.querySelector('.apple-doc');
+    const el = findDoc();
     if (el) el.style.zoom = '';
   });
 })();
