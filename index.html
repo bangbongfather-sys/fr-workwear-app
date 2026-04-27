@@ -405,7 +405,11 @@
       font-size: 12px; color: var(--text3); font-weight: 400; margin-left: 4px;
     }
 
-    /* ─── 발주서 폼 라벨 ─── */
+    /* ─── 발주서 폼 ─── */
+    .po-form {
+      max-width: 980px;
+      margin: 0 auto;
+    }
     .po-label {
       display: block;
       font-size: 11px;
@@ -416,6 +420,41 @@
       text-transform: uppercase;
     }
     .po-req { color: #EF4444; margin-left: 2px; }
+    /* 입력칸 경계를 더 명확하게 (애플 스타일) */
+    .po-form input[type=text],
+    .po-form input[type=number],
+    .po-form input[type=date],
+    .po-form input[type=email],
+    .po-form select,
+    .po-form textarea {
+      background: var(--surface) !important;
+      border: 1px solid var(--row-border) !important;
+      box-shadow: 0 1px 2px rgba(15,15,26,0.03);
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    .po-form input:hover:not(:focus),
+    .po-form select:hover:not(:focus),
+    .po-form textarea:hover:not(:focus) {
+      border-color: rgba(99,102,241,0.25) !important;
+      background: var(--surface) !important;
+    }
+    .po-form input:focus,
+    .po-form select:focus,
+    .po-form textarea:focus {
+      border-color: rgba(99,102,241,0.5) !important;
+      box-shadow: 0 0 0 4px rgba(99,102,241,0.12), 0 1px 2px rgba(15,15,26,0.04) !important;
+      background: var(--surface) !important;
+    }
+    body.dark .po-form input,
+    body.dark .po-form select,
+    body.dark .po-form textarea {
+      background: rgba(255,255,255,0.03) !important;
+    }
+    /* fabric-row 내부 입력칸도 동일 처리 */
+    .po-form .fabric-row {
+      background: var(--surface) !important;
+      border: 1px solid var(--row-border);
+    }
 
     /* ─── 범례/인포 ─── */
     .info-pill {
@@ -3705,7 +3744,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </div>
             ) : !poDraft.body ? (
               /* 작성 폼 — 애플/토스 스타일 */
-              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div className="po-form" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
                 {/* ① 공급처 정보 */}
                 <div className="card">
@@ -3718,7 +3757,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
                   {/* 공급처 빠른 선택 칩 */}
                   {suppliers.length > 0 && (
-                    <div style={{ marginBottom: 16 }}>
+                    <div style={{ marginBottom: 18 }}>
                       <label className="po-label">빠른 선택</label>
                       <div className="chip-scroll" style={{ paddingTop: 2 }}>
                         <button
@@ -3735,8 +3774,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     </div>
                   )}
 
-                  {/* 공급처 입력 그리드 */}
-                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
+                  {/* 공급처 입력 — 2단 균등 그리드 */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 14 }}>
                     <div>
                       <label className="po-label">공급처명 <span className="po-req">*</span></label>
                       <input placeholder="예: ○○섬유" value={poDraft.supplier?.name || ""}
@@ -3744,11 +3783,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     </div>
                     <div>
                       <label className="po-label">담당자</label>
-                      <input placeholder="이름" value={poDraft.supplier?.contact || ""}
+                      <input placeholder="담당자 이름" value={poDraft.supplier?.contact || ""}
                         onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, contact: e.target.value } })} />
                     </div>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
                     <div>
                       <label className="po-label">전화번호</label>
                       <input placeholder="010-0000-0000" value={poDraft.supplier?.phone || ""}
