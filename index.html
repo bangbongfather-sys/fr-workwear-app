@@ -1448,6 +1448,31 @@ function App() {
     setProducts(remaining);
     if (activeProdId === id) setActiveProdId(remaining[0].id);
   };
+  const duplicateProduct = (id) => {
+    const src = products.find(p => p.id === id);
+    if (!src) return;
+    pushHistory();
+    const now = new Date();
+    const stamp = `${String(now.getMonth()+1).padStart(2,"0")}.${String(now.getDate()).padStart(2,"0")}`;
+    const baseName = src.name.replace(/ \([0-9]{2}\.[0-9]{2}\)$/, "").replace(/ \(사본( \d+)?\)$/, "");
+    const dupName = `${baseName} (${stamp})`;
+    const copy = {
+      ...src,
+      id: uid(),
+      name: dupName,
+      fabrics: src.fabrics.map(f => ({ ...f, id: uid() })),
+      extras: src.extras.map(e => ({ ...e, id: uid() })),
+      margins: { ...src.margins },
+      priceOverrides: { ...(src.priceOverrides || {}) },
+    };
+    const idx = products.findIndex(p => p.id === id);
+    setProducts(ps => {
+      const arr = [...ps];
+      arr.splice(idx + 1, 0, copy);
+      return arr;
+    });
+    setActiveProdId(copy.id);
+  };
   const saveProdName = () => {
     if (!editingProdName) return;
     const name = editingProdName.value.trim();
