@@ -405,6 +405,18 @@
       font-size: 12px; color: var(--text3); font-weight: 400; margin-left: 4px;
     }
 
+    /* ─── 발주서 폼 라벨 ─── */
+    .po-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text2);
+      letter-spacing: 0.2px;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .po-req { color: #EF4444; margin-left: 2px; }
+
     /* ─── 범례/인포 ─── */
     .info-pill {
       display: inline-flex; align-items: center; gap: 4px;
@@ -3692,164 +3704,263 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 <button className="btn-primary" style={{ padding: "12px 24px", fontSize: 14 }} onClick={startNewPO}>+ 새 발주서 작성</button>
               </div>
             ) : !poDraft.body ? (
-              /* 작성 폼 */
+              /* 작성 폼 — 애플/토스 스타일 */
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                {/* 공급처 정보 */}
+
+                {/* ① 공급처 정보 */}
                 <div className="card">
-                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>🏭 공급처 정보</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                    <div>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>등록된 공급처에서 선택</label>
-                      <select value={poDraft.supplier?.id || ""} onChange={e => {
-                        const sel = suppliers.find(s => s.id === e.target.value);
-                        if (sel) setPoDraft({ ...poDraft, supplier: { id: sel.id, name: sel.name, contact: sel.contact || "", phone: sel.phone || "", email: sel.email || "", address: sel.address || "", paymentTerms: sel.paymentTerms || "" } });
-                        else setPoDraft({ ...poDraft, supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" } });
-                      }} style={{ width: "100%", height: 40 }}>
-                        <option value="">— 직접 입력 —</option>
-                        {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
+                  <div className="section-header">
+                    <span className="section-header-title">공급처 정보 <span className="section-sub">— Supplier</span></span>
+                    {suppliers.length > 0 && (
+                      <span className="info-pill">{suppliers.length}개 등록됨</span>
+                    )}
+                  </div>
+
+                  {/* 공급처 빠른 선택 칩 */}
+                  {suppliers.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <label className="po-label">빠른 선택</label>
+                      <div className="chip-scroll" style={{ paddingTop: 2 }}>
+                        <button
+                          className={"prod-chip" + (!poDraft.supplier?.id ? " active" : "")}
+                          onClick={() => setPoDraft({ ...poDraft, supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" } })}
+                        >직접 입력</button>
+                        {suppliers.map(s => (
+                          <button key={s.id}
+                            className={"prod-chip" + (poDraft.supplier?.id === s.id ? " active" : "")}
+                            onClick={() => setPoDraft({ ...poDraft, supplier: { id: s.id, name: s.name, contact: s.contact || "", phone: s.phone || "", email: s.email || "", address: s.address || "", paymentTerms: s.paymentTerms || "" } })}
+                          >🏭 {s.name}</button>
+                        ))}
+                      </div>
                     </div>
-                    <input placeholder="공급처명 *" value={poDraft.supplier?.name || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, name: e.target.value } })} />
+                  )}
+
+                  {/* 공급처 입력 그리드 */}
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <label className="po-label">공급처명 <span className="po-req">*</span></label>
+                      <input placeholder="예: ○○섬유" value={poDraft.supplier?.name || ""}
+                        onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, name: e.target.value } })} />
+                    </div>
+                    <div>
+                      <label className="po-label">담당자</label>
+                      <input placeholder="이름" value={poDraft.supplier?.contact || ""}
+                        onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, contact: e.target.value } })} />
+                    </div>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
-                    <input placeholder="담당자" value={poDraft.supplier?.contact || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, contact: e.target.value } })} />
-                    <input placeholder="전화번호" value={poDraft.supplier?.phone || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, phone: e.target.value } })} />
-                    <input placeholder="이메일" value={poDraft.supplier?.email || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, email: e.target.value } })} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <label className="po-label">전화번호</label>
+                      <input placeholder="010-0000-0000" value={poDraft.supplier?.phone || ""}
+                        onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, phone: e.target.value } })} />
+                    </div>
+                    <div>
+                      <label className="po-label">이메일</label>
+                      <input placeholder="contact@example.com" value={poDraft.supplier?.email || ""}
+                        onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, email: e.target.value } })} />
+                    </div>
                   </div>
-                  <input placeholder="주소" value={poDraft.supplier?.address || ""} onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, address: e.target.value } })} style={{ width: "100%" }} />
+                  <div>
+                    <label className="po-label">주소</label>
+                    <input placeholder="공급처 주소" value={poDraft.supplier?.address || ""}
+                      onChange={e => setPoDraft({ ...poDraft, supplier: { ...poDraft.supplier, address: e.target.value } })} />
+                  </div>
                 </div>
 
-                {/* 발주 품목 */}
+                {/* ② 발주 품목 */}
                 <div className="card">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>📋 발주 품목</div>
-                    <button onClick={() => setPoDraft({ ...poDraft, items: [...(poDraft.items || []), { id: uid(), kind: "custom", name: "", unit: "yard", qty: "", unitPrice: "", note: "" }] })}
-                      style={{ padding: "6px 12px", border: `1px solid ${T.ghostBorder}`, borderRadius: 8, background: T.ghostBg, color: T.ghostColor, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>+ 품목 추가</button>
+                  <div className="section-header">
+                    <span className="section-header-title">발주 품목 <span className="section-sub">— Items</span></span>
+                    <button className="btn-orange" onClick={() => setPoDraft({ ...poDraft, items: [...(poDraft.items || []), { id: uid(), kind: "custom", name: "", unit: "yard", qty: "", unitPrice: "", note: "" }] })}
+                      style={{ padding: "8px 16px", fontSize: 13 }}>+ 품목 추가</button>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {(poDraft.items || []).map((it, idx) => (
-                      <div key={it.id} style={{ display: "grid", gridTemplateColumns: "120px 1.6fr 80px 100px 110px 110px 30px", gap: 6, alignItems: "center" }}>
-                        <select value={it.kind} onChange={e => {
-                          const kind = e.target.value;
-                          const items = [...poDraft.items];
-                          items[idx] = { ...items[idx], kind, name: kind === "custom" ? items[idx].name : "" };
-                          setPoDraft({ ...poDraft, items });
-                        }} style={{ height: 38, fontSize: 12 }}>
-                          <option value="custom">직접입력</option>
-                          <option value="material">원단</option>
-                          <option value="labor">공임</option>
-                        </select>
-                        {it.kind === "material" ? (
-                          <select value={it.name} onChange={e => {
-                            const m = materials.find(mm => mm.name === e.target.value);
-                            const items = [...poDraft.items];
-                            items[idx] = { ...items[idx], name: e.target.value, unitPrice: m ? String(m.unitPrice || "") : items[idx].unitPrice };
-                            setPoDraft({ ...poDraft, items });
-                          }} style={{ height: 38 }}>
-                            <option value="">원단 선택...</option>
-                            {materials.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-                          </select>
-                        ) : it.kind === "labor" ? (
-                          <select value={it.name} onChange={e => {
-                            const l = laborItems.find(ll => ll.name === e.target.value);
-                            const items = [...poDraft.items];
-                            items[idx] = { ...items[idx], name: e.target.value, unit: l ? (l.unit || items[idx].unit) : items[idx].unit, unitPrice: l ? String(l.unitPrice || "") : items[idx].unitPrice };
-                            setPoDraft({ ...poDraft, items });
-                          }} style={{ height: 38 }}>
-                            <option value="">공임 선택...</option>
-                            {laborItems.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
-                          </select>
-                        ) : (
-                          <input placeholder="품목명 직접 입력" value={it.name} onChange={e => {
-                            const items = [...poDraft.items]; items[idx] = { ...items[idx], name: e.target.value };
+
+                  {(poDraft.items || []).length === 0 ? (
+                    <div style={{ padding: "32px 16px", textAlign: "center", color: T.text3, fontSize: 13, background: "var(--row-bg)", borderRadius: 12 }}>
+                      [+ 품목 추가] 버튼을 눌러 발주할 원단·공임·기타 품목을 추가해주세요
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {(poDraft.items || []).map((it, idx) => (
+                        <div key={it.id} className="fabric-row" style={{ flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>품목{idx + 1}</span>
+
+                          {/* kind: 칩 형태 */}
+                          <div style={{ display: "inline-flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 100, flexShrink: 0 }}>
+                            {[["material", "원단"], ["labor", "공임"], ["custom", "직접"]].map(([k, label]) => (
+                              <button key={k} onClick={() => {
+                                const items = [...poDraft.items];
+                                items[idx] = { ...items[idx], kind: k, name: k === "custom" ? items[idx].name : "" };
+                                setPoDraft({ ...poDraft, items });
+                              }} style={{
+                                padding: "5px 11px", border: "none", borderRadius: 100, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                                background: it.kind === k ? "linear-gradient(135deg,#6366F1,#8B5CF6)" : "transparent",
+                                color: it.kind === k ? "#fff" : T.text2,
+                                boxShadow: it.kind === k ? "0 1px 4px rgba(99,102,241,0.3)" : "none",
+                                transition: "all 0.15s",
+                              }}>{label}</button>
+                            ))}
+                          </div>
+
+                          {/* 품목명 */}
+                          {it.kind === "material" ? (
+                            <select style={{ flex: "2 1 200px", minWidth: 160 }} value={it.name} onChange={e => {
+                              const m = materials.find(mm => mm.name === e.target.value);
+                              const items = [...poDraft.items];
+                              items[idx] = { ...items[idx], name: e.target.value, unitPrice: m ? String(m.unitPrice || "") : items[idx].unitPrice };
+                              setPoDraft({ ...poDraft, items });
+                            }}>
+                              <option value="">원단 선택...</option>
+                              {materials.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                            </select>
+                          ) : it.kind === "labor" ? (
+                            <select style={{ flex: "2 1 200px", minWidth: 160 }} value={it.name} onChange={e => {
+                              const l = laborItems.find(ll => ll.name === e.target.value);
+                              const items = [...poDraft.items];
+                              items[idx] = { ...items[idx], name: e.target.value, unit: l ? (l.unit || items[idx].unit) : items[idx].unit, unitPrice: l ? String(l.unitPrice || "") : items[idx].unitPrice };
+                              setPoDraft({ ...poDraft, items });
+                            }}>
+                              <option value="">공임 선택...</option>
+                              {laborItems.map(l => <option key={l.id} value={l.name}>{l.name}</option>)}
+                            </select>
+                          ) : (
+                            <input style={{ flex: "2 1 200px", minWidth: 160 }} placeholder="품목명 직접 입력" value={it.name} onChange={e => {
+                              const items = [...poDraft.items]; items[idx] = { ...items[idx], name: e.target.value };
+                              setPoDraft({ ...poDraft, items });
+                            }} />
+                          )}
+
+                          {/* 단위 */}
+                          <input style={{ flex: "0 0 80px" }} placeholder="단위" value={it.unit} onChange={e => {
+                            const items = [...poDraft.items]; items[idx] = { ...items[idx], unit: e.target.value };
                             setPoDraft({ ...poDraft, items });
                           }} />
-                        )}
-                        <input placeholder="단위" value={it.unit} onChange={e => {
-                          const items = [...poDraft.items]; items[idx] = { ...items[idx], unit: e.target.value };
-                          setPoDraft({ ...poDraft, items });
-                        }} />
-                        <input type="number" placeholder="수량" value={it.qty} onChange={e => {
-                          const items = [...poDraft.items]; items[idx] = { ...items[idx], qty: e.target.value };
-                          setPoDraft({ ...poDraft, items });
-                        }} />
-                        <input type="number" placeholder="단가(원)" value={it.unitPrice} onChange={e => {
-                          const items = [...poDraft.items]; items[idx] = { ...items[idx], unitPrice: e.target.value };
-                          setPoDraft({ ...poDraft, items });
-                        }} />
-                        <div style={{ fontSize: 12, fontWeight: 700, color: T.text2, textAlign: "right" }}>
-                          {Math.round((Number(it.qty) || 0) * (Number(it.unitPrice) || 0)).toLocaleString()}원
+
+                          {/* 수량 */}
+                          <input style={{ flex: "0 0 90px" }} type="number" placeholder="수량" value={it.qty} onChange={e => {
+                            const items = [...poDraft.items]; items[idx] = { ...items[idx], qty: e.target.value };
+                            setPoDraft({ ...poDraft, items });
+                          }} />
+
+                          {/* 단가 */}
+                          <input style={{ flex: "0 0 110px" }} type="number" placeholder="단가(원)" value={it.unitPrice} onChange={e => {
+                            const items = [...poDraft.items]; items[idx] = { ...items[idx], unitPrice: e.target.value };
+                            setPoDraft({ ...poDraft, items });
+                          }} />
+
+                          {/* 금액 표시 */}
+                          <div style={{ flex: "1 1 100px", textAlign: "right", fontSize: 14, fontWeight: 700, color: NAVY, whiteSpace: "nowrap" }}>
+                            {Math.round((Number(it.qty) || 0) * (Number(it.unitPrice) || 0)).toLocaleString()}원
+                          </div>
+
+                          {/* 삭제 */}
+                          <button onClick={() => setPoDraft({ ...poDraft, items: poDraft.items.filter(x => x.id !== it.id) })}
+                            style={{ width: 32, height: 32, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", color: T.text3, fontSize: 14, fontFamily: "inherit", flexShrink: 0, transition: "all 0.15s" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "rgba(240,68,82,0.1)"; e.currentTarget.style.color = "#F04452"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text3; }}>✕</button>
                         </div>
-                        <button onClick={() => setPoDraft({ ...poDraft, items: poDraft.items.filter(x => x.id !== it.id) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}>✕</button>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 합계 박스 */}
                   {(poDraft.items || []).length > 0 && (() => {
                     const subtotal = poDraft.items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
                     const tax = Math.round(subtotal * 0.1);
                     return (
-                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${T.divider}`, display: "flex", justifyContent: "flex-end", gap: 24, fontSize: 13 }}>
-                        <span style={{ color: T.text2 }}>공급가액 <strong style={{ color: T.text, marginLeft: 6 }}>{subtotal.toLocaleString()}원</strong></span>
-                        <span style={{ color: T.text2 }}>부가세 <strong style={{ color: T.text, marginLeft: 6 }}>{tax.toLocaleString()}원</strong></span>
-                        <span style={{ color: NAVY, fontWeight: 800 }}>합계 {(subtotal + tax).toLocaleString()}원</span>
+                      <div style={{
+                        marginTop: 16, padding: "16px 20px",
+                        background: "linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.06))",
+                        borderRadius: 14, border: "1px solid rgba(99,102,241,0.12)",
+                        display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12
+                      }}>
+                        <div style={{ display: "flex", gap: 28, fontSize: 13, color: T.text2 }}>
+                          <span>공급가액 <strong style={{ color: T.text, marginLeft: 6, fontSize: 14 }}>{subtotal.toLocaleString()}원</strong></span>
+                          <span>부가세 (10%) <strong style={{ color: T.text, marginLeft: 6, fontSize: 14 }}>{tax.toLocaleString()}원</strong></span>
+                        </div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: NAVY, letterSpacing: -0.4 }}>
+                          합계 {(subtotal + tax).toLocaleString()}원
+                        </div>
                       </div>
                     );
                   })()}
                 </div>
 
-                {/* 사진 첨부 */}
+                {/* ③ 참고 사진 */}
                 <div className="card">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>📷 참고 사진 ({(poDraft.photos || []).length})</div>
-                    <label style={{ padding: "6px 12px", border: `1px solid ${T.ghostBorder}`, borderRadius: 8, background: T.ghostBg, color: T.ghostColor, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                  <div className="section-header">
+                    <span className="section-header-title">참고 사진 <span className="section-sub">— Photos {(poDraft.photos || []).length > 0 ? `(${poDraft.photos.length})` : ""}</span></span>
+                    <label className="btn-orange" style={{ padding: "8px 16px", fontSize: 13, display: "inline-block" }}>
                       + 사진 추가
                       <input type="file" accept="image/*" multiple onChange={handlePOPhotoUpload} style={{ display: "none" }} />
                     </label>
                   </div>
                   {(poDraft.photos || []).length === 0 ? (
-                    <div style={{ fontSize: 12, color: T.text3, textAlign: "center", padding: 16 }}>사진을 첨부하면 발주서에 함께 출력됩니다 (최대 2MB/장)</div>
+                    <label style={{ display: "block", cursor: "pointer" }}>
+                      <input type="file" accept="image/*" multiple onChange={handlePOPhotoUpload} style={{ display: "none" }} />
+                      <div style={{
+                        padding: "40px 20px", textAlign: "center",
+                        background: "var(--row-bg)", borderRadius: 14,
+                        border: `2px dashed ${T.divider}`,
+                        transition: "all 0.15s",
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = "rgba(99,102,241,0.4)"}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = T.divider}>
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text2, marginBottom: 4 }}>사진을 첨부하면 발주서에 함께 출력됩니다</div>
+                        <div style={{ fontSize: 11, color: T.text3 }}>JPG · PNG · GIF / 최대 2MB / 다중 선택 가능</div>
+                      </div>
+                    </label>
                   ) : (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
                       {poDraft.photos.map((ph, idx) => (
-                        <div key={idx} style={{ position: "relative", borderRadius: 8, overflow: "hidden", border: `1px solid ${T.divider}` }}>
+                        <div key={idx} style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${T.divider}`, background: T.surface2, transition: "transform 0.15s" }}>
                           <img src={ph.dataUrl} alt={ph.name} style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} />
                           <button onClick={() => setPoDraft({ ...poDraft, photos: poDraft.photos.filter((_, i) => i !== idx) })}
-                            style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>
-                          <div style={{ padding: "4px 8px", fontSize: 10, color: T.text2, background: T.surface, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ph.name}</div>
+                            style={{ position: "absolute", top: 6, right: 6, width: 26, height: 26, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.65)", color: "#fff", cursor: "pointer", fontSize: 12, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "blur(4px)" }}>✕</button>
+                          <div style={{ padding: "6px 10px", fontSize: 11, fontWeight: 500, color: T.text2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ph.name}</div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {/* 거래 조건 */}
+                {/* ④ 거래 조건 */}
                 <div className="card">
-                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>📅 거래 조건</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                  <div className="section-header">
+                    <span className="section-header-title">거래 조건 <span className="section-sub">— Terms</span></span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 14 }}>
                     <div>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>납기일</label>
+                      <label className="po-label">납기일</label>
                       <input type="date" value={poDraft.deliveryDate || ""} onChange={e => setPoDraft({ ...poDraft, deliveryDate: e.target.value })} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>결제 조건</label>
+                      <label className="po-label">결제 조건</label>
                       <input placeholder="예: 월말 30일" value={poDraft.paymentTerms || ""} onChange={e => setPoDraft({ ...poDraft, paymentTerms: e.target.value })} />
                     </div>
                     <div>
-                      <label style={{ fontSize: 11, fontWeight: 600, color: T.text2, marginBottom: 4, display: "block" }}>납품 장소</label>
+                      <label className="po-label">납품 장소</label>
                       <input placeholder="예: 당사 본사" value={poDraft.deliveryPlace || ""} onChange={e => setPoDraft({ ...poDraft, deliveryPlace: e.target.value })} />
                     </div>
                   </div>
-                  <textarea placeholder="추가 메모 (선택)" value={poDraft.memo || ""} onChange={e => setPoDraft({ ...poDraft, memo: e.target.value })} rows={3} style={{ width: "100%", padding: 10, border: `1px solid ${T.divider}`, borderRadius: 8, fontFamily: "inherit", fontSize: 13, resize: "vertical", background: T.surface, color: T.text }} />
+                  <div>
+                    <label className="po-label">추가 메모 (선택)</label>
+                    <textarea placeholder="공급처에 전달할 메모를 자유롭게 입력하세요" value={poDraft.memo || ""} onChange={e => setPoDraft({ ...poDraft, memo: e.target.value })} rows={3}
+                      style={{ width: "100%", padding: "12px 14px", border: "none", borderRadius: 10, fontFamily: "inherit", fontSize: 14, resize: "vertical", background: "var(--input-bg)", color: "var(--input-color)", lineHeight: 1.6, transition: "box-shadow 0.18s" }}
+                      onFocus={e => e.currentTarget.style.boxShadow = "0 0 0 3px rgba(99,102,241,0.3)"}
+                      onBlur={e => e.currentTarget.style.boxShadow = "none"} />
+                  </div>
                 </div>
 
-                {/* 액션 */}
-                {poApiError && <div style={{ padding: 12, background: "rgba(255,59,48,0.1)", border: "1px solid rgba(255,59,48,0.3)", borderRadius: 10, color: "#FF3B30", fontSize: 13 }}>{poApiError}</div>}
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                {/* 액션 바 */}
+                {poApiError && <div style={{ padding: "12px 16px", background: "rgba(255,59,48,0.08)", border: "1px solid rgba(255,59,48,0.25)", borderRadius: 12, color: "#FF3B30", fontSize: 13, fontWeight: 600 }}>⚠️ {poApiError}</div>}
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 8, borderTop: `1px solid ${T.divider}`, marginTop: 4 }}>
                   <button onClick={() => { if (window.confirm("작성 중인 발주서를 취소할까요?")) { setPoDraft(null); save("frw_po_draft", null); } }}
-                    style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                    style={{ padding: "12px 22px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>취소</button>
                   <button onClick={() => { setPoDraft({ ...poDraft, body: buildPOMarkdown(poDraft) }); }}
-                    style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>📝 템플릿으로 생성</button>
-                  <button onClick={generatePO} disabled={poGenerating} className="btn-primary" style={{ padding: "10px 22px", fontSize: 13 }}>
+                    style={{ padding: "12px 22px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>📝 템플릿으로 생성</button>
+                  <button onClick={generatePO} disabled={poGenerating} className="btn-primary" style={{ padding: "12px 26px", fontSize: 14 }}>
                     {poGenerating ? "생성 중..." : (apiKey.trim() ? "🤖 AI로 생성" : "📝 생성")}
                   </button>
                 </div>
