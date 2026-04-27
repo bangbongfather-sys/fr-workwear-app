@@ -2465,10 +2465,17 @@ ${productList}
                           <div style={{ display: "flex", gap: 4, padding: "0 12px 10px", alignItems: "center" }}>
                             <span style={{ fontSize: 10, color: T.empty, fontWeight: 600, letterSpacing: 0.5, marginRight: 4, whiteSpace: "nowrap" }}>등급</span>
                             {GRADES.map(g => {
-                              const isSel = (p.selectedGrade || "A") === g;
+                              const isSel = (c.selectedGrade || "A") === g;
                               const gPrice = c.grades[g];
                               return (
-                                <button key={g} onClick={() => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, selectedGrade: g } : x))}
+                                <button key={g} onClick={() => setProducts(ps => ps.map(x => {
+                                  if (x.id !== p.id) return x;
+                                  const idx = x.specs.findIndex(s => s.id === x.activeSpecId);
+                                  if (idx < 0) return x;
+                                  const newSpecs = [...x.specs];
+                                  newSpecs[idx] = { ...newSpecs[idx], selectedGrade: g };
+                                  return { ...x, specs: newSpecs };
+                                }))}
                                   style={{
                                     flex: 1, padding: "5px 0", borderRadius: 8, border: `1.5px solid ${isSel ? ACCENT : T.divider}`,
                                     background: isSel ? ACCENT : T.ghostBg, color: isSel ? "#fff" : T.text2,
