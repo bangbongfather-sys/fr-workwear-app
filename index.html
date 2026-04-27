@@ -1588,16 +1588,23 @@ function App() {
     pushHistory();
     const now = new Date();
     const stamp = `${String(now.getMonth()+1).padStart(2,"0")}.${String(now.getDate()).padStart(2,"0")}`;
-    const baseName = src.name.replace(/ \([0-9]{2}\.[0-9]{2}\)$/, "").replace(/ \(사본( \d+)?\)$/, "");
+    const baseName = (src.name || "").replace(/ \([0-9]{2}\.[0-9]{2}\)$/, "").replace(/ \(사본( \d+)?\)$/, "");
     const dupName = `${baseName} (${stamp})`;
+    const newSpecs = (src.specs || []).map(s => ({
+      ...s,
+      id: uid(),
+      fabrics: (s.fabrics || []).map(f => ({ ...f, id: uid() })),
+      extras: (s.extras || []).map(e => ({ ...e, id: uid() })),
+      margins: { ...(s.margins || DEFAULT_MARGINS) },
+      priceOverrides: { ...(s.priceOverrides || {}) },
+    }));
     const copy = {
-      ...src,
       id: uid(),
       name: dupName,
-      fabrics: src.fabrics.map(f => ({ ...f, id: uid() })),
-      extras: src.extras.map(e => ({ ...e, id: uid() })),
-      margins: { ...src.margins },
-      priceOverrides: { ...(src.priceOverrides || {}) },
+      specs: newSpecs,
+      activeSpecId: newSpecs[0] && newSpecs[0].id,
+      include: src.include,
+      marketPrice: src.marketPrice,
     };
     const idx = products.findIndex(p => p.id === id);
     setProducts(ps => {
