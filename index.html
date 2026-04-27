@@ -1620,20 +1620,20 @@ function App() {
 
   const addFabric = () => { pushHistory(); updProd("fabrics", [...activeProd.fabrics, newFabric()]); };
   const removeFabric = (fid) => { if (activeProd.fabrics.length <= 1) return; pushHistory(); updProd("fabrics", activeProd.fabrics.filter(f => f.id !== fid)); };
-  const updFabric = (fid, k, v) => setProducts(ps => ps.map(p => p.id !== activeProdId ? p : { ...p, fabrics: p.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f) }));
+  const updFabric = (fid, k, v) => updateActiveSpec(s => ({ ...s, fabrics: s.fabrics.map(f => f.id === fid ? { ...f, [k]: v } : f) }));
   const addExtra = () => { pushHistory(); updProd("extras", [...activeProd.extras, newExtra()]); };
   const removeExtra = (eid) => { pushHistory(); updProd("extras", activeProd.extras.filter(e => e.id !== eid)); };
-  const updExtra = (eid, k, v) => setProducts(ps => ps.map(p => p.id !== activeProdId ? p : { ...p, extras: p.extras.map(e => e.id === eid ? { ...e, [k]: v } : e) }));
+  const updExtra = (eid, k, v) => updateActiveSpec(s => ({ ...s, extras: s.extras.map(e => e.id === eid ? { ...e, [k]: v } : e) }));
   const selectLabor = (eid, rawIdx) => {
     const i = rawIdx === "" ? -1 : parseInt(rawIdx, 10);
     const l = i >= 0 && laborItems[i] ? laborItems[i] : null;
     const laborId = l ? l.id : "";
-    setProducts(ps => ps.map(p => p.id !== activeProdId ? p : {
-      ...p, extras: p.extras.map(e =>
+    updateActiveSpec(s => ({
+      ...s,
+      extras: s.extras.map(e =>
         e.id === eid ? { ...e, laborId, customName: l ? l.name : "", price: l ? String(l.price) : "" } : e
       )
     }));
-    // qty preserved as-is
   };
 
   const buildFabricLines = () => activeProd.fabrics.map(f => {
