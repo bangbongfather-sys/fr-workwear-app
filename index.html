@@ -2048,7 +2048,63 @@ ${productList}
                     + 추가
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩 — ✏️ 이름 수정 · 📋 복제(단가 비교용) · × 삭제</div>
+                <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩의 ✏️ 또는 더블클릭으로 이름 수정</div>
+
+                {/* ── 요척서 (spec) 관리 ── */}
+                <div style={{ marginTop: 18, padding: "14px 16px", borderRadius: 12, background: "linear-gradient(135deg, rgba(99,102,241,0.06), rgba(139,92,246,0.04))", border: "1px solid rgba(99,102,241,0.14)" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: ACCENT, letterSpacing: 0.6, textTransform: "uppercase" }}>📑 {activeProd.name} · 요척서</span>
+                      <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 500 }}>{(activeProd.specs || []).length}건</span>
+                    </div>
+                    <button onClick={addSpec}
+                      style={{ padding: "6px 12px", border: "none", borderRadius: 8, background: "linear-gradient(135deg, #6366F1, #8B5CF6)", color: "#fff", fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(99,102,241,0.32)" }}>
+                      + 요척서 추가
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {(activeProd.specs || []).map((s, i) => {
+                      const isActive = s.id === activeProd.activeSpecId;
+                      const isEditing = editingSpec && editingSpec.id === s.id;
+                      const dateStr = s.createdAt ? new Date(s.createdAt).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" }).replace(/\./g, ".").replace(/ /g, "") : "";
+                      return (
+                        <div key={s.id} style={{ display: "flex", alignItems: "center" }}>
+                          {isEditing ? (
+                            <input autoFocus value={editingSpec.value}
+                              onChange={e => setEditingSpec({ ...editingSpec, value: e.target.value })}
+                              onBlur={() => { const nm = editingSpec.value.trim(); if (nm) renameSpec(s.id, nm); setEditingSpec(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") { const nm = editingSpec.value.trim(); if (nm) renameSpec(s.id, nm); setEditingSpec(null); } if (e.key === "Escape") setEditingSpec(null); }}
+                              style={{ height: 32, padding: "0 12px", fontSize: 12, fontWeight: 600, borderRadius: 100, border: `2px solid ${ACCENT}`, minWidth: 100 }}
+                            />
+                          ) : (
+                            <button onClick={() => switchSpec(s.id)}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: 6,
+                                padding: "7px 14px", borderRadius: 100, fontSize: 12, fontWeight: 600,
+                                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                                border: `1px solid ${isActive ? "transparent" : "rgba(99,102,241,0.2)"}`,
+                                background: isActive ? "linear-gradient(135deg, #6366F1, #8B5CF6)" : "var(--surface)",
+                                color: isActive ? "#fff" : "var(--text2)",
+                                boxShadow: isActive ? "0 2px 8px rgba(99,102,241,0.3)" : "none",
+                                transition: "all 0.15s",
+                              }}>
+                              <span onDoubleClick={e => { e.stopPropagation(); setEditingSpec({ id: s.id, value: s.name }); }} title="더블클릭으로 이름 수정">{s.name}</span>
+                              {dateStr && <span style={{ fontSize: 10, opacity: isActive ? 0.8 : 0.5, fontWeight: 500 }}>· {dateStr}</span>}
+                              {isActive && (
+                                <span onClick={e => { e.stopPropagation(); setEditingSpec({ id: s.id, value: s.name }); }} title="이름 수정" style={{ fontSize: 10, opacity: 0.85, cursor: "pointer" }}>✏️</span>
+                              )}
+                              {(activeProd.specs || []).length > 1 && (
+                                <span onClick={e => { e.stopPropagation(); if (confirm(`'${s.name}' 요척서를 삭제할까요?`)) deleteSpec(s.id); }}
+                                  style={{ fontSize: 13, opacity: isActive ? 0.85 : 0.5, cursor: "pointer", marginLeft: 2 }}>×</span>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}>💡 원단 단가가 바뀌면 [+ 요척서 추가]로 새 버전을 만들어 비교하세요. 새 요척서는 현재 활성 요척서의 값을 그대로 복사해서 시작합니다.</div>
+                </div>
               </div>
 
               {/* 원단 구성 */}
