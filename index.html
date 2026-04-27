@@ -2166,18 +2166,16 @@ ${productList}
                           if (!dragId || dragId === dropId) { setFabricDropInfo(null); return; }
                           const rect = e.currentTarget.getBoundingClientRect();
                           const side = e.clientY < rect.top + rect.height / 2 ? "top" : "bottom";
-                          const currentProdId = activeProdId;
-                          setProducts(ps => ps.map(p => {
-                            if (p.id !== currentProdId) return p;
-                            const arr = [...p.fabrics];
+                          updateActiveSpec(s => {
+                            const arr = [...s.fabrics];
                             const fromIdx = arr.findIndex(x => x.id === dragId);
-                            if (fromIdx < 0) return p;
+                            if (fromIdx < 0) return s;
                             const [item] = arr.splice(fromIdx, 1);
                             const newTo = arr.findIndex(x => x.id === dropId);
-                            if (newTo < 0) { arr.push(item); return { ...p, fabrics: arr }; }
+                            if (newTo < 0) { arr.push(item); return { ...s, fabrics: arr }; }
                             arr.splice(side === "top" ? newTo : newTo + 1, 0, item);
-                            return { ...p, fabrics: arr };
-                          }));
+                            return { ...s, fabrics: arr };
+                          });
                           setFabricDropInfo(null);
                           dragFabric.current = null;
                         }}
