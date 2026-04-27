@@ -1557,7 +1557,17 @@ function App() {
   const finalPrice = calc.finalPrice;
 
   const updProd = (field, value) =>
-    setProducts(ps => ps.map(p => p.id === activeProdId ? { ...p, [field]: value } : p));
+    setProducts(ps => ps.map(p => {
+      if (p.id !== activeProdId) return p;
+      if (PRODUCT_LEVEL_FIELDS.has(field)) {
+        return { ...p, [field]: value };
+      }
+      const idx = p.specs.findIndex(s => s.id === p.activeSpecId);
+      if (idx < 0) return p;
+      const newSpecs = [...p.specs];
+      newSpecs[idx] = { ...newSpecs[idx], [field]: value };
+      return { ...p, specs: newSpecs };
+    }));
 
   const addProduct = () => {
     if (!newProdName.trim()) return;
