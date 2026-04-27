@@ -828,8 +828,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
   );
 }
 
-function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId }) {
-  const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", note: "" });
+function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], setClients }) {
+  const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", clientId: "", client: "", note: "", paymentDue: "", paidDate: "" });
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [editOrderDraft, setEditOrderDraft] = useState(null);
@@ -855,6 +855,11 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const totalYearRevenue = monthValues.reduce((s,v)=>s+v,0);
 
   const totalOrderRevenue = orders.reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+  // 미수금 계산
+  const todayDateStr = new Date().toISOString().slice(0,10);
+  const totalUnpaidAmt = orders.filter(o => !o.paidDate).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+  const totalOverdueAmt = orders.filter(o => !o.paidDate && o.paymentDue && o.paymentDue < todayDateStr).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+  const overdueCount = orders.filter(o => !o.paidDate && o.paymentDue && o.paymentDue < todayDateStr).length;
   const computed = products.map(p => computeProduct(p, materials, laborItems)).filter(c => c.base > 0);
   const avgMarginSell = computed.length > 0 ? computed.reduce((s,c) => s + (c.finalPrice-c.beforeMargin)/c.finalPrice*100, 0)/computed.length : 0;
   const productSales = {};
@@ -907,8 +912,14 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
 
   const addOrder = () => {
     if (!newOrder.productName || !newOrder.unitPrice) return;
-    setOrders(prev => [...prev, { id:uid(), ...newOrder }]);
-    setNewOrder({ date:new Date().toISOString().slice(0,10), productName:"", qty:"1", unitPrice:"", client:"", note:"" });
+    // clientId가 있으면 client name도 함께 저장 (legacy 호환)
+    let finalOrder = { ...newOrder };
+    if (newOrder.clientId) {
+      const c = clients.find(x => x.id === newOrder.clientId);
+      if (c) finalOrder.client = c.name;
+    }
+    setOrders(prev => [...prev, { id:uid(), ...finalOrder }]);
+    setNewOrder({ date:new Date().toISOString().slice(0,10), productName:"", qty:"1", unitPrice:"", clientId:"", client:"", note:"", paymentDue:"", paidDate:"" });
     setShowOrderForm(false);
   };
   const startEditOrder = (o) => { setEditingOrderId(o.id); setEditOrderDraft({ ...o }); };
@@ -929,10 +940,19 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
         {kpi(thisYear+"년 총 매출", totalYearRevenue>0?Math.round(totalYearRevenue).toLocaleString()+"원":"—", "월별 입력 기준", "#475569")}
-        {kpi("주문 기록 매출", totalOrderRevenue>0?Math.round(totalOrderRevenue).toLocaleString()+"원":"—", orders.length+"건 합산", null)}
+        {kpi("판매 기록 매출", totalOrderRevenue>0?Math.round(totalOrderRevenue).toLocaleString()+"원":"—", orders.length+"건 합산", null)}
         {kpi("납품가 마진율", avgMarginSell>0?avgMarginSell.toFixed(1)+"%":"—", "현재 제품 기준", avgMarginSell>=26?"#00B493":avgMarginSell>=20?"#FF9500":avgMarginSell>0?"#F04452":null)}
         {kpi("최다 매출 제품", topProduct?topProduct[0]:"—", topProduct?Math.round(topProduct[1]).toLocaleString()+"원":"기록 없음", null)}
       </div>
+      {/* 미수금 KPI */}
+      {(totalUnpaidAmt > 0 || totalOverdueAmt > 0) && (
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+          {kpi("총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", orders.filter(o=>!o.paidDate).length+"건", totalUnpaidAmt>0?"#FF9500":"#00B493")}
+          {kpi("연체 미수금", Math.round(totalOverdueAmt).toLocaleString()+"원", overdueCount>0?overdueCount+"건 연체":"연체 없음", totalOverdueAmt>0?"#F04452":"#00B493")}
+          {kpi("완납 매출", Math.round(totalOrderRevenue - totalUnpaidAmt).toLocaleString()+"원", orders.filter(o=>o.paidDate).length+"건", "#00B493")}
+          {kpi("회수율", totalOrderRevenue>0?Math.round((totalOrderRevenue-totalUnpaidAmt)/totalOrderRevenue*100)+"%":"—", "전체 매출 대비", null)}
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -1069,10 +1089,38 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
               <input type="number" placeholder="수량" value={newOrder.qty} onChange={e=>setNewOrder(o=>({...o,qty:e.target.value}))}/>
               <input type="number" placeholder="단가(원) *" value={newOrder.unitPrice} onChange={e=>setNewOrder(o=>({...o,unitPrice:e.target.value}))}/>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8}}>
-              <input placeholder="거래처명" value={newOrder.client} onChange={e=>setNewOrder(o=>({...o,client:e.target.value}))}/>
-              <input placeholder="비고" value={newOrder.note} onChange={e=>setNewOrder(o=>({...o,note:e.target.value}))}/>
-              <button className="btn-primary" onClick={addOrder} style={{padding:"0 20px",height:44,fontSize:13}}>저장</button>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+              {clients.length > 0 ? (
+                <select value={newOrder.clientId||""} onChange={e=>{ const id=e.target.value; const c=clients.find(x=>x.id===id); setNewOrder(o=>({...o, clientId:id, client: c?c.name:""})); }} style={{height:44}}>
+                  <option value="">거래처 선택 (또는 직접입력)</option>
+                  {clients.map(c=><option key={c.id} value={c.id}>{c.name}{c.contact?` - ${c.contact}`:""}</option>)}
+                </select>
+              ) : (
+                <input placeholder="거래처명 (거래처 탭에서 등록 후 선택 가능)" value={newOrder.client} onChange={e=>setNewOrder(o=>({...o,client:e.target.value, clientId:""}))}/>
+              )}
+              {clients.length > 0 && !newOrder.clientId && (
+                <input placeholder="거래처명 직접입력" value={newOrder.client} onChange={e=>setNewOrder(o=>({...o,client:e.target.value}))}/>
+              )}
+              {(clients.length === 0 || newOrder.clientId) && (
+                <input placeholder="비고" value={newOrder.note} onChange={e=>setNewOrder(o=>({...o,note:e.target.value}))}/>
+              )}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr auto",gap:8,alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>결제 예정일</div>
+                <input type="date" value={newOrder.paymentDue} onChange={e=>setNewOrder(o=>({...o,paymentDue:e.target.value}))}/>
+              </div>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>결제 완료일</div>
+                <input type="date" value={newOrder.paidDate} onChange={e=>setNewOrder(o=>({...o,paidDate:e.target.value}))}/>
+              </div>
+              {clients.length > 0 && newOrder.clientId && (
+                <input placeholder="비고" value={newOrder.note} onChange={e=>setNewOrder(o=>({...o,note:e.target.value}))}/>
+              )}
+              {(clients.length === 0 || !newOrder.clientId) && (
+                <div style={{height:44}}/>
+              )}
+              <button className="btn-primary" onClick={addOrder} style={{padding:"0 24px",height:44,fontSize:13,alignSelf:"flex-end"}}>저장</button>
             </div>
           </div>
         )}
@@ -1083,11 +1131,12 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
             <table><thead><tr>
               <th>날짜</th><th>제품명</th><th style={{textAlign:"right"}}>수량</th>
               <th style={{textAlign:"right"}}>단가</th><th style={{textAlign:"right"}}>합계</th>
-              <th>거래처</th><th>비고</th><th style={{textAlign:"center",minWidth:110}}>관리</th>
+              <th>거래처</th><th style={{textAlign:"center"}}>결제상태</th><th>비고</th><th style={{textAlign:"center",minWidth:110}}>관리</th>
             </tr></thead>
             <tbody>
               {[...orders].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(o=>{
                 const isEditing = editingOrderId === o.id;
+                const todayStr = new Date().toISOString().slice(0,10);
                 if (isEditing && editOrderDraft) {
                   const editTotal = parseFloat(editOrderDraft.unitPrice||0) * parseInt(editOrderDraft.qty||1);
                   return (<tr key={o.id} style={{background:"var(--surface2)"}}>
@@ -1096,7 +1145,22 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                     <td><input type="number" value={editOrderDraft.qty||""} onChange={e=>setEditOrderDraft(d=>({...d,qty:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/></td>
                     <td><input type="number" value={editOrderDraft.unitPrice||""} onChange={e=>setEditOrderDraft(d=>({...d,unitPrice:e.target.value}))} placeholder="단가 *" style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/></td>
                     <td style={{textAlign:"right",fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>{Math.round(editTotal).toLocaleString()}원</td>
-                    <td><input value={editOrderDraft.client||""} onChange={e=>setEditOrderDraft(d=>({...d,client:e.target.value}))} placeholder="거래처" style={{height:34,fontSize:13,padding:"0 8px"}}/></td>
+                    <td>
+                      {clients.length > 0 ? (
+                        <select value={editOrderDraft.clientId||""} onChange={e=>{ const id=e.target.value; const c=clients.find(x=>x.id===id); setEditOrderDraft(d=>({...d, clientId:id, client: c?c.name:d.client})); }} style={{height:34,fontSize:12,padding:"0 6px"}}>
+                          <option value="">거래처 선택</option>
+                          {clients.map(cl=><option key={cl.id} value={cl.id}>{cl.name}</option>)}
+                        </select>
+                      ) : (
+                        <input value={editOrderDraft.client||""} onChange={e=>setEditOrderDraft(d=>({...d,client:e.target.value}))} placeholder="거래처" style={{height:34,fontSize:13,padding:"0 8px"}}/>
+                      )}
+                    </td>
+                    <td style={{padding:"4px 8px"}}>
+                      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                        <input type="date" value={editOrderDraft.paymentDue||""} onChange={e=>setEditOrderDraft(d=>({...d,paymentDue:e.target.value}))} title="결제 예정일" style={{height:28,fontSize:11,padding:"0 6px"}}/>
+                        <input type="date" value={editOrderDraft.paidDate||""} onChange={e=>setEditOrderDraft(d=>({...d,paidDate:e.target.value}))} title="결제 완료일" style={{height:28,fontSize:11,padding:"0 6px"}}/>
+                      </div>
+                    </td>
                     <td><input value={editOrderDraft.note||""} onChange={e=>setEditOrderDraft(d=>({...d,note:e.target.value}))} placeholder="비고" style={{height:34,fontSize:12,padding:"0 8px"}}/></td>
                     <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                       <button onClick={saveEditOrder} title="저장" style={{background:"#007AFF",border:"none",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,borderRadius:6,padding:"5px 9px",marginRight:4,fontFamily:"inherit"}}>저장</button>
@@ -1105,21 +1169,222 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                   </tr>);
                 }
                 const total=parseFloat(o.unitPrice||0)*parseInt(o.qty||1);
-                return (<tr key={o.id}>
+                const isPaid = !!o.paidDate;
+                const isOverdue = !isPaid && o.paymentDue && o.paymentDue < todayStr;
+                const isPending = !isPaid && o.paymentDue && o.paymentDue >= todayStr;
+                const noPaymentInfo = !isPaid && !o.paymentDue;
+                const rowBg = isOverdue ? (darkMode?"rgba(240,68,82,0.06)":"rgba(240,68,82,0.04)") : "transparent";
+                return (<tr key={o.id} style={{background:rowBg}}>
                   <td style={{whiteSpace:"nowrap",fontSize:13}}>{o.date}</td>
                   <td style={{fontWeight:600}}>{o.productName}</td>
                   <td style={{textAlign:"right"}}>{parseInt(o.qty||1).toLocaleString()}</td>
                   <td style={{textAlign:"right"}}>{parseFloat(o.unitPrice||0).toLocaleString()}원</td>
                   <td style={{textAlign:"right",fontWeight:700}}>{Math.round(total).toLocaleString()}원</td>
                   <td style={{fontSize:13}}>{o.client}</td>
+                  <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                    {isPaid ? (
+                      <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(0,180,147,0.15)",color:"#00B493",fontWeight:700}} title={`결제일: ${o.paidDate}`}>✓ 완납</span>
+                    ) : isOverdue ? (
+                      <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}} title={`예정일: ${o.paymentDue}`}>⚠ 연체</span>
+                    ) : isPending ? (
+                      <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(255,149,0,0.15)",color:"#FF9500",fontWeight:700}} title={`예정일: ${o.paymentDue}`}>⏰ 미수</span>
+                    ) : (
+                      <button onClick={()=>{ const today=new Date().toISOString().slice(0,10); setOrders(prev=>prev.map(x=>x.id===o.id?{...x,paidDate:today}:x)); }} title="완납 처리" style={{fontSize:11,padding:"3px 8px",borderRadius:6,background:"none",color:"var(--text3)",fontWeight:600,border:"1px dashed var(--border)",cursor:"pointer",fontFamily:"inherit"}}>미입력</button>
+                    )}
+                  </td>
                   <td style={{fontSize:12,color:"var(--text2)"}}>{o.note}</td>
                   <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                    {!isPaid && (
+                      <button onClick={()=>{ const today=new Date().toISOString().slice(0,10); setOrders(prev=>prev.map(x=>x.id===o.id?{...x,paidDate:today}:x)); }} title="완납 처리" style={{background:"none",border:"none",cursor:"pointer",color:"#00B493",fontSize:14,marginRight:4}}>💰</button>
+                    )}
+                    {isPaid && (
+                      <button onClick={()=>setOrders(prev=>prev.map(x=>x.id===o.id?{...x,paidDate:""}:x))} title="결제 취소" style={{background:"none",border:"none",cursor:"pointer",color:"#FF9500",fontSize:14,marginRight:4}}>↩</button>
+                    )}
                     <button onClick={()=>startEditOrder(o)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}>✏️</button>
                     <button onClick={()=>{ if(confirm("이 판매 기록을 삭제할까요?")) setOrders(prev=>prev.filter(x=>x.id!==o.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
                   </td>
                 </tr>);
               })}
             </tbody></table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ClientsTab({ clients, setClients, orders, savedQuotes, darkMode, setTab, setActiveProdId, products }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState({ name:"", contact:"", phone:"", email:"", bizNo:"", address:"", defaultDiscount:"0", memo:"" });
+  const [search, setSearch] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const reset = () => { setDraft({ name:"", contact:"", phone:"", email:"", bizNo:"", address:"", defaultDiscount:"0", memo:"" }); setEditingId(null); setShowForm(false); };
+
+  const saveClient = () => {
+    if (!draft.name.trim()) { alert("회사명은 필수입니다"); return; }
+    if (editingId) {
+      setClients(prev => prev.map(c => c.id === editingId ? { ...c, ...draft, defaultDiscount: parseFloat(draft.defaultDiscount)||0 } : c));
+    } else {
+      setClients(prev => [...prev, { id: uid(), createdAt: Date.now(), ...draft, defaultDiscount: parseFloat(draft.defaultDiscount)||0 }]);
+    }
+    reset();
+  };
+  const editClient = (c) => { setDraft({ name:c.name||"", contact:c.contact||"", phone:c.phone||"", email:c.email||"", bizNo:c.bizNo||"", address:c.address||"", defaultDiscount:String(c.defaultDiscount||0), memo:c.memo||"" }); setEditingId(c.id); setShowForm(true); };
+  const deleteClient = (id) => { if (confirm("이 거래처를 삭제할까요? (관련 주문/견적 데이터는 그대로 유지됩니다)")) { setClients(prev => prev.filter(c => c.id !== id)); if (expandedId === id) setExpandedId(null); } };
+
+  // 거래처별 통계 계산
+  const statsByClient = (c) => {
+    const linkedOrders = orders.filter(o => o.clientId === c.id || (o.client && o.client === c.name));
+    const totalRev = linkedOrders.reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+    const unpaid = linkedOrders.filter(o => !o.paidDate).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+    const today = new Date().toISOString().slice(0,10);
+    const overdue = linkedOrders.filter(o => !o.paidDate && o.paymentDue && o.paymentDue < today).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+    const linkedQuotes = (savedQuotes||[]).filter(q => q.clientId === c.id || (q.quoteClient && q.quoteClient === c.name));
+    return { orderCount: linkedOrders.length, totalRev, unpaid, overdue, quoteCount: linkedQuotes.length, linkedOrders, linkedQuotes };
+  };
+
+  const filtered = clients.filter(c => !search || (c.name||"").toLowerCase().includes(search.toLowerCase()) || (c.contact||"").toLowerCase().includes(search.toLowerCase()) || (c.phone||"").includes(search) || (c.bizNo||"").includes(search));
+
+  // 전체 KPI
+  const totalUnpaid = clients.reduce((s,c) => s + statsByClient(c).unpaid, 0);
+  const totalOverdue = clients.reduce((s,c) => s + statsByClient(c).overdue, 0);
+  const totalRevAll = clients.reduce((s,c) => s + statsByClient(c).totalRev, 0);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {/* KPI */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 거래처</div>
+          <div style={{fontSize:24,fontWeight:800,color:"var(--text1)",lineHeight:1}}>{clients.length}<span style={{fontSize:14,fontWeight:600,marginLeft:4}}>개사</span></div>
+        </div>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>누적 매출</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#475569",lineHeight:1}}>{Math.round(totalRevAll).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
+        </div>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 미수금</div>
+          <div style={{fontSize:24,fontWeight:800,color:totalUnpaid>0?"#FF9500":"#00B493",lineHeight:1}}>{Math.round(totalUnpaid).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
+        </div>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>연체 미수금</div>
+          <div style={{fontSize:24,fontWeight:800,color:totalOverdue>0?"#F04452":"#00B493",lineHeight:1}}>{Math.round(totalOverdue).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
+        </div>
+      </div>
+
+      {/* 거래처 목록 */}
+      <div className="card">
+        <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
+          <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>🏢 거래처 목록</div>
+          <input placeholder="회사명·담당자·연락처·사업자번호 검색..." value={search} onChange={e=>setSearch(e.target.value)} style={{flex:1,minWidth:200,height:40,fontSize:13}}/>
+          <button onClick={()=>{ if (showForm && !editingId) { reset(); } else { reset(); setShowForm(true); } }} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 거래처 추가"}</button>
+        </div>
+
+        {showForm && (
+          <div style={{background:"var(--surface2)",borderRadius:12,padding:18,marginBottom:18}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:12}}>{editingId?"거래처 수정":"신규 거래처 등록"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <input placeholder="회사명 *" value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))}/>
+              <input placeholder="담당자명" value={draft.contact} onChange={e=>setDraft(d=>({...d,contact:e.target.value}))}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+              <input placeholder="연락처 (010-...)" value={draft.phone} onChange={e=>setDraft(d=>({...d,phone:e.target.value}))}/>
+              <input placeholder="이메일" value={draft.email} onChange={e=>setDraft(d=>({...d,email:e.target.value}))}/>
+              <input placeholder="사업자번호 (xxx-xx-xxxxx)" value={draft.bizNo} onChange={e=>setDraft(d=>({...d,bizNo:e.target.value}))}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"3fr 1fr",gap:10,marginBottom:10}}>
+              <input placeholder="주소" value={draft.address} onChange={e=>setDraft(d=>({...d,address:e.target.value}))}/>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <input type="number" placeholder="0" value={draft.defaultDiscount} onChange={e=>setDraft(d=>({...d,defaultDiscount:e.target.value}))} style={{textAlign:"right"}}/>
+                <span style={{fontSize:13,color:"var(--text2)",whiteSpace:"nowrap"}}>% 기본할인</span>
+              </div>
+            </div>
+            <input placeholder="메모 (특이사항·결제조건 등)" value={draft.memo} onChange={e=>setDraft(d=>({...d,memo:e.target.value}))} style={{marginBottom:10}}/>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={reset} style={{padding:"10px 18px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit"}}>취소</button>
+              <button onClick={saveClient} className="btn-primary" style={{padding:"10px 22px",fontSize:13}}>{editingId?"수정 저장":"등록"}</button>
+            </div>
+          </div>
+        )}
+
+        {filtered.length === 0 ? (
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>
+            {clients.length===0?<>아직 등록된 거래처가 없습니다<br/>위 + 거래처 추가 버튼으로 등록해주세요</>:"검색 결과가 없습니다"}
+          </div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {filtered.map(c => {
+              const s = statsByClient(c);
+              const isExpanded = expandedId === c.id;
+              const today = new Date().toISOString().slice(0,10);
+              return (
+                <div key={c.id} style={{border:"1px solid var(--border)",borderRadius:12,overflow:"hidden",background:"var(--surface)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",cursor:"pointer"}} onClick={()=>setExpandedId(isExpanded?null:c.id)}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>{c.name}</span>
+                        {c.contact && <span style={{fontSize:12,color:"var(--text2)"}}>· {c.contact}</span>}
+                        {c.defaultDiscount > 0 && <span style={{fontSize:11,padding:"2px 7px",borderRadius:6,background:"rgba(255,149,0,0.15)",color:"#FF9500",fontWeight:700}}>{c.defaultDiscount}% 할인</span>}
+                        {s.overdue > 0 && <span style={{fontSize:11,padding:"2px 7px",borderRadius:6,background:"rgba(240,68,82,0.15)",color:"#F04452",fontWeight:700}}>⚠ 연체 {Math.round(s.overdue).toLocaleString()}원</span>}
+                      </div>
+                      <div style={{fontSize:12,color:"var(--text2)",marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
+                        {c.phone && <span>📞 {c.phone}</span>}
+                        {c.bizNo && <span>🧾 {c.bizNo}</span>}
+                        <span>📦 주문 {s.orderCount}건</span>
+                        <span>📄 견적 {s.quoteCount}건</span>
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:11,color:"var(--text3)",marginBottom:2}}>누적</div>
+                      <div style={{fontSize:14,fontWeight:700,color:"var(--text1)"}}>{Math.round(s.totalRev).toLocaleString()}원</div>
+                      {s.unpaid > 0 && <div style={{fontSize:11,color:"#FF9500",fontWeight:600,marginTop:2}}>미수 {Math.round(s.unpaid).toLocaleString()}원</div>}
+                    </div>
+                    <button onClick={e=>{e.stopPropagation(); editClient(c);}} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:16,padding:4}}>✏️</button>
+                    <button onClick={e=>{e.stopPropagation(); deleteClient(c.id);}} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:16,padding:4}}>✕</button>
+                    <span style={{fontSize:14,color:"var(--text3)",marginLeft:4}}>{isExpanded?"▲":"▼"}</span>
+                  </div>
+                  {isExpanded && (
+                    <div style={{borderTop:"1px solid var(--border)",padding:"14px 18px",background:"var(--surface2)"}}>
+                      {(c.address || c.email || c.memo) && (
+                        <div style={{marginBottom:12,fontSize:13,color:"var(--text2)",lineHeight:1.7}}>
+                          {c.address && <div>📍 {c.address}</div>}
+                          {c.email && <div>✉️ {c.email}</div>}
+                          {c.memo && <div style={{marginTop:6,padding:"8px 10px",background:"var(--surface)",borderRadius:8,fontSize:12,color:"var(--text2)",border:"1px solid var(--border)"}}>📝 {c.memo}</div>}
+                        </div>
+                      )}
+                      {s.linkedOrders.length > 0 && (
+                        <div style={{marginBottom:12}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>최근 주문 (최대 5건)</div>
+                          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                            {[...s.linkedOrders].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,5).map(o=>{
+                              const total = parseFloat(o.unitPrice||0)*parseInt(o.qty||1);
+                              const isOverdueRow = !o.paidDate && o.paymentDue && o.paymentDue < today;
+                              return (
+                                <div key={o.id} style={{display:"flex",gap:10,fontSize:12,padding:"6px 10px",background:"var(--surface)",borderRadius:6,alignItems:"center"}}>
+                                  <span style={{color:"var(--text3)",minWidth:80}}>{o.date}</span>
+                                  <span style={{flex:1,fontWeight:600,color:"var(--text1)"}}>{o.productName}</span>
+                                  <span style={{color:"var(--text2)"}}>{parseInt(o.qty||1)}개</span>
+                                  <span style={{fontWeight:700,color:"var(--text1)",minWidth:80,textAlign:"right"}}>{Math.round(total).toLocaleString()}원</span>
+                                  {o.paidDate ? <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.15)",color:"#00B493",fontWeight:700}}>완납</span>
+                                    : isOverdueRow ? <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"rgba(240,68,82,0.15)",color:"#F04452",fontWeight:700}}>연체</span>
+                                    : <span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"rgba(255,149,0,0.15)",color:"#FF9500",fontWeight:700}}>미수</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        <button onClick={()=>setTab("dashboard")} style={{padding:"6px 12px",fontSize:12,borderRadius:8,border:"1px solid var(--border)",background:"none",cursor:"pointer",color:"var(--text2)",fontFamily:"inherit"}}>📊 대시보드에서 보기</button>
+                        <button onClick={()=>setTab("history")} style={{padding:"6px 12px",fontSize:12,borderRadius:8,border:"1px solid var(--border)",background:"none",cursor:"pointer",color:"var(--text2)",fontFamily:"inherit"}}>📄 견적 이력 보기</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -1278,6 +1543,8 @@ function App() {
   const [orders, setOrders] = useState(() => load("frw_orders", []));
   const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
   const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
+  const [clients, setClients] = useState(() => load("frw_clients", []));
+  const [globalSearch, setGlobalSearch] = useState("");
   const [fabricDropInfo, setFabricDropInfo] = useState(null); // { id, side: 'top'|'bottom' }
   useEffect(() => {
     document.body.classList.toggle("dark", darkMode);
@@ -1341,6 +1608,7 @@ function App() {
     if (d.orders) setOrders(d.orders);
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
     if (d.monthlySales) setMonthlySales(d.monthlySales);
+    if (d.clients) setClients(d.clients);
   };
 
   useEffect(() => {
@@ -1363,14 +1631,15 @@ function App() {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
+    save("frw_clients", clients);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, fabricIntakes, monthlySales })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, fabricIntakes, monthlySales, clients })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, fabricIntakes, monthlySales]);
+  }, [materials, laborItems, products, apiKey, orders, fabricIntakes, monthlySales, clients]);
 
   const activeProd = products.find(p => p.id === activeProdId) || products[0];
 
@@ -1604,7 +1873,7 @@ ${productList}
     tabBorder: "rgba(0,0,0,0.08)", tabInactive: "rgba(60,60,67,0.5)",
   };
 
-  const TABS = [["pricedb", "단가표"], ["calc", "단가 계산기"], ["quote", "견적서"], ["history", "견적 이력"], ["dashboard", "경영 대시보드"], ["inventory", "원단 입고현황"]];
+  const TABS = [["pricedb", "단가표"], ["calc", "단가 계산기"], ["quote", "견적서"], ["history", "견적 이력"], ["dashboard", "경영 대시보드"], ["inventory", "원단 입고현황"], ["clients", "거래처"]];
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -1670,6 +1939,91 @@ ${productList}
               onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
               >{darkMode ? "☀️" : "🌙"}</button>
             </div>
+          </div>
+          {/* 통합 검색 바 */}
+          <div className="no-print" style={{ padding: "0 0 10px 0", position: "relative" }}>
+            <div style={{ position: "relative" }}>
+              <input
+                placeholder="🔍 통합 검색 — 거래처·제품·주문·견적·원단 이름으로..."
+                value={globalSearch}
+                onChange={e => setGlobalSearch(e.target.value)}
+                style={{
+                  width: "100%", height: 38, padding: "0 36px 0 14px", fontSize: 13,
+                  borderRadius: 10, background: T.surface2, border: `1px solid ${T.divider}`,
+                  color: T.text,
+                }}
+              />
+              {globalSearch && (
+                <button onClick={() => setGlobalSearch("")} style={{
+                  position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                  width: 24, height: 24, borderRadius: "50%", border: "none",
+                  background: T.divider, color: T.text2, cursor: "pointer", fontSize: 13,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>×</button>
+              )}
+            </div>
+            {/* 검색 결과 드롭다운 */}
+            {globalSearch.trim() && (() => {
+              const q = globalSearch.toLowerCase().trim();
+              const res = [];
+              clients.forEach(c => {
+                if ((c.name||"").toLowerCase().includes(q) || (c.contact||"").toLowerCase().includes(q) || (c.phone||"").includes(q) || (c.bizNo||"").includes(q)) {
+                  res.push({ type:"거래처", icon:"🏢", title:c.name, sub:`${c.contact||""} ${c.phone||""}`.trim()||c.bizNo||"-", action:()=>{setTab("clients"); setGlobalSearch("");} });
+                }
+              });
+              products.forEach(p => {
+                if ((p.name||"").toLowerCase().includes(q)) {
+                  res.push({ type:"제품", icon:"👕", title:p.name, sub:`${p.fabrics?.length||0}개 원단 / ${p.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
+                }
+              });
+              orders.forEach(o => {
+                if ((o.productName||"").toLowerCase().includes(q) || (o.client||"").toLowerCase().includes(q) || (o.note||"").toLowerCase().includes(q)) {
+                  res.push({ type:"판매", icon:"📦", title:o.productName, sub:`${o.date||""} · ${o.client||""} · ${(parseFloat(o.unitPrice||0)*parseInt(o.qty||1)).toLocaleString()}원`, action:()=>{setTab("dashboard"); setGlobalSearch("");} });
+                }
+              });
+              materials.forEach(m => {
+                if ((m.name||"").toLowerCase().includes(q)) {
+                  res.push({ type:"원단", icon:"🧵", title:m.name, sub:`${m.price?.toLocaleString()||0}원/${m.unit||"yard"}`, action:()=>{setTab("pricedb"); setGlobalSearch("");} });
+                }
+              });
+              (savedQuotes||[]).forEach(q2 => {
+                if ((q2.title||"").toLowerCase().includes(q) || (q2.quoteClient||"").toLowerCase().includes(q)) {
+                  res.push({ type:"견적", icon:"📄", title:q2.title||"무제", sub:`${q2.dateStr||""} · ${q2.quoteClient||""}`, action:()=>{setTab("history"); setGlobalSearch("");} });
+                }
+              });
+              fabricIntakes.forEach(f => {
+                if ((f.materialName||"").toLowerCase().includes(q) || (f.supplier||"").toLowerCase().includes(q)) {
+                  res.push({ type:"입고", icon:"📥", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} });
+                }
+              });
+              const limited = res.slice(0, 12);
+              return (
+                <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: T.surface, border: `1px solid ${T.divider}`, borderRadius: 10, marginTop: 4, maxHeight: 360, overflowY: "auto", zIndex: 1000, boxShadow: "0 8px 24px rgba(0,0,0,0.15)" }}>
+                  {limited.length === 0 ? (
+                    <div style={{ padding: 20, textAlign: "center", color: T.text3, fontSize: 13 }}>검색 결과가 없습니다</div>
+                  ) : (
+                    <>
+                      {limited.map((r, i) => (
+                        <div key={i} onClick={r.action} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: i < limited.length - 1 ? `1px solid ${T.divider}` : "none", display: "flex", alignItems: "center", gap: 10, transition: "background 0.12s" }}
+                          onMouseEnter={e => e.currentTarget.style.background = T.surface2}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                        >
+                          <span style={{ fontSize: 18, flexShrink: 0 }}>{r.icon}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+                            <div style={{ fontSize: 11, color: T.text2, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.sub}</div>
+                          </div>
+                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: T.divider, color: T.text2, fontWeight: 700, flexShrink: 0 }}>{r.type}</span>
+                        </div>
+                      ))}
+                      {res.length > 12 && (
+                        <div style={{ padding: "8px 14px", textAlign: "center", fontSize: 11, color: T.text3, borderTop: `1px solid ${T.divider}` }}>총 {res.length}건 중 상위 12건 표시</div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           {/* 탭 네비게이션 */}
           <div style={{ display: "flex", gap: 0, borderTop: `0.5px solid ${T.tabBorder}`, overflowX: "auto", background: darkMode ? "#1C1C1E" : "transparent" }}>
@@ -2602,6 +2956,8 @@ ${productList}
             darkMode={darkMode}
             setTab={setTab}
             setActiveProdId={setActiveProdId}
+            clients={clients}
+            setClients={setClients}
           />
         )}
 
@@ -2612,6 +2968,20 @@ ${productList}
             setFabricIntakes={setFabricIntakes}
             materials={materials}
             darkMode={darkMode}
+          />
+        )}
+
+        {/* 거래처 */}
+        {tab === "clients" && (
+          <ClientsTab
+            clients={clients}
+            setClients={setClients}
+            orders={orders}
+            savedQuotes={savedQuotes}
+            darkMode={darkMode}
+            setTab={setTab}
+            setActiveProdId={setActiveProdId}
+            products={products}
           />
         )}
       </div>
