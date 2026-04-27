@@ -459,18 +459,59 @@ const newFabric = () => ({ id: uid(), matId: "", qty: "" });
 const newExtra = () => ({ id: uid(), laborId: "", customName: "", price: "", qty: "1" });
 const DEFAULT_MARGINS = { A: 50, B: 40, C: 30, D: 20 };
 const GRADES = ["A", "B", "C", "D"];
-const newProduct = (name) => ({
-  id: uid(), name,
+const newSpec = (name) => ({
+  id: uid(),
+  name: name || "요척서 1",
   fabrics: [newFabric()],
   extras: [newExtra()],
   margins: { ...DEFAULT_MARGINS },
   priceOverrides: { A: "", B: "", C: "", D: "" },
   selectedGrade: "A",
-  include: true,
   adminRate: 10,
-  marketPrice: "",
+  createdAt: Date.now(),
 });
+const newProduct = (name) => {
+  const spec = newSpec("요척서 1");
+  return {
+    id: uid(), name,
+    specs: [spec],
+    activeSpecId: spec.id,
+    include: true,
+    marketPrice: "",
+  };
+};
+const getActiveSpec = (p) => {
+  if (!p) return null;
+  if (p.specs && Array.isArray(p.specs) && p.specs.length > 0) {
+    return p.specs.find(s => s.id === p.activeSpecId) || p.specs[0];
+  }
+  return null;
+};
 const migrateProduct = (p) => {
+  // 신규 포맷 (specs 배열 있음)
+  if (p.specs && Array.isArray(p.specs) && p.specs.length > 0) {
+    const fixSpec = s => ({
+      id: s.id ?? uid(),
+      name: s.name || "요척서",
+      fabrics: s.fabrics || [newFabric()],
+      extras: s.extras || [newExtra()],
+      margins: { ...DEFAULT_MARGINS, ...(s.margins || {}) },
+      priceOverrides: s.priceOverrides || { A: "", B: "", C: "", D: "" },
+      selectedGrade: s.selectedGrade || "A",
+      adminRate: s.adminRate ?? 10,
+      createdAt: s.createdAt || Date.now(),
+    });
+    const fixed = p.specs.map(fixSpec);
+    return {
+      id: p.id,
+      name: p.name,
+      specs: fixed,
+      activeSpecId: p.activeSpecId && fixed.find(s => s.id === p.activeSpecId) ? p.activeSpecId : fixed[0].id,
+      include: p.include === undefined ? true : p.include,
+      marketPrice: p.marketPrice === undefined ? "" : p.marketPrice,
+    };
+  }
+  // 레거시 포맷 → specs 배열로 변환
   let q = { ...p };
   if (!q.margins) {
     const m = typeof q.margin === "number" ? q.margin : 30;
@@ -480,13 +521,26 @@ const migrateProduct = (p) => {
       C: Math.round(m),
       D: Math.max(0, Math.round(m - 10)),
     };
-    delete q.margin;
   }
-  if (!q.priceOverrides) q.priceOverrides = { A: "", B: "", C: "", D: "" };
-  if (!q.selectedGrade) q.selectedGrade = "A";
-  if (q.include === undefined) q.include = true;
-  if (q.marketPrice === undefined) q.marketPrice = "";
-  return q;
+  const spec = {
+    id: uid(),
+    name: "요척서 1",
+    fabrics: q.fabrics || [newFabric()],
+    extras: q.extras || [newExtra()],
+    margins: q.margins,
+    priceOverrides: q.priceOverrides || { A: "", B: "", C: "", D: "" },
+    selectedGrade: q.selectedGrade || "A",
+    adminRate: q.adminRate ?? 10,
+    createdAt: Date.now(),
+  };
+  return {
+    id: q.id,
+    name: q.name,
+    specs: [spec],
+    activeSpecId: spec.id,
+    include: q.include === undefined ? true : q.include,
+    marketPrice: q.marketPrice === undefined ? "" : q.marketPrice,
+  };
 };
 const INIT_PRODUCTS = [newProduct("자켓"), newProduct("바지"), newProduct("조끼")];
 
