@@ -515,14 +515,29 @@
       th, td { padding: 10px 12px; }
     }
 
-    /* ─── 작은 모바일 (480px 이하) ─── */
+    /* ─── 태블릿/작은 노트북 (768px 이하) ─── */
     @media (max-width: 768px) {
       .app-sidebar { width: 60px !important; }
       .app-sidebar .sidebar-label-mobile { display: none !important; }
       .main-content { padding: 18px 16px !important; }
       .header-wrap { padding: 0 16px !important; }
       .global-search-wrap { display: none !important; }
+      /* 입력 필드 터치 최적화 */
+      input[type=text], input[type=number], input[type=password], input[type=date], select, textarea {
+        font-size: 16px !important; /* iOS 자동 줌 방지 */
+        min-height: 42px;
+      }
+      /* 버튼 터치 영역 */
+      button { min-height: 38px; }
+      /* 그리드 단순화 - 자주 깨지는 grid를 stack으로 */
+      .calc-grid { grid-template-columns: 1fr !important; }
+      /* 테이블 가로 스크롤 강제 */
+      table { min-width: 600px; }
+      /* 카드 패딩 축소 */
+      .card { padding: 16px !important; }
     }
+
+    /* ─── 모바일 (480px 이하 - iPhone 등) ─── */
     @media (max-width: 480px) {
       .card { padding: 14px; border-radius: 14px; }
       .section-header { flex-wrap: wrap; gap: 8px; }
@@ -536,7 +551,29 @@
       .header-title { font-size: 15px !important; }
       .header-sub { display: none; }
       .tab-btn { padding: 11px 14px !important; font-size: 13px !important; }
-      .main-content { padding: 14px !important; }
+      .main-content { padding: 14px 10px !important; }
+      /* 사이드바 더 좁게 */
+      .app-sidebar { width: 52px !important; }
+      /* 모든 grid를 1열로 */
+      .calc-grid, [class*="grid-cols"] { grid-template-columns: 1fr !important; }
+      /* KPI 카드 2열 */
+      .card[style*="minWidth: 120"] { min-width: calc(50% - 6px) !important; }
+      .card[style*="minWidth: 140"] { min-width: calc(50% - 6px) !important; }
+      /* h1/h2 크기 줄이기 */
+      h1 { font-size: 18px; }
+      h2 { font-size: 16px; }
+      /* 폼 필드 grid → stack */
+      [class*="grid-template-columns"][style*="1fr 1fr"] { grid-template-columns: 1fr !important; }
+      /* 결제 상태 배지 작게 */
+      table th, table td { padding: 8px 6px !important; font-size: 12px !important; }
+    }
+
+    /* ─── 매우 작은 화면 (360px 이하) ─── */
+    @media (max-width: 360px) {
+      .app-sidebar { width: 48px !important; }
+      .main-content { padding: 12px 8px !important; }
+      .card { padding: 12px !important; }
+      .header-title { font-size: 13px !important; }
     }
 
     @media print {
