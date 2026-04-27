@@ -1966,6 +1966,7 @@ function App() {
   const [orders, setOrders] = useState(() => load("frw_orders", []));
   const [clients, setClients] = useState(() => load("frw_clients", []));
   const [globalSearch, setGlobalSearch] = useState("");
+  const [bids, setBids] = useState(() => load("frw_bids", []));
   const [suppliers, setSuppliers] = useState(() => load("frw_suppliers", []));
   const [purchaseOrders, setPurchaseOrders] = useState(() => load("frw_purchase_orders", []));
   const [poSubTab, setPoSubTab] = useState("current"); // "current" | "history"
@@ -2039,6 +2040,7 @@ function App() {
     if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
     if (d.orders) setOrders(d.orders);
     if (d.clients) setClients(d.clients);
+    if (d.bids) setBids(d.bids);
     if (d.suppliers) setSuppliers(d.suppliers);
     if (d.purchaseOrders) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
@@ -2064,15 +2066,15 @@ function App() {
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
-    save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales);
+    save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales]);
+  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids]);
 
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
@@ -2566,7 +2568,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(99,102,241,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["purchase", "발주 관리", "◨"], ["dashboard", "경영 대시보드", "◉"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"], ["suppliers", "공급처 관리", "◧"]];
+  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["purchase", "발주 관리", "◨"], ["dashboard", "경영 대시보드", "◉"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"], ["suppliers", "공급처 관리", "◧"], ["bids", "입찰 캘린더", "◊"], ["news", "뉴스", "◑"]];
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -3871,6 +3873,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             darkMode={darkMode}
           />
         )}
+        {tab === "bids" && (
+          <BidsTab bids={bids} setBids={setBids} darkMode={darkMode} />
+        )}
+        {tab === "news" && (
+          <NewsTab darkMode={darkMode} />
+        )}
 
         {/* ── 발주 관리 (서브탭) ── */}
         {tab === "purchase" && (
@@ -4290,6 +4298,324 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           </div>
         )}
       </div>
+      </div>
+    </div>
+  );
+}
+
+function BidsTab({ bids, setBids, darkMode }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const STATUSES = [
+    { v: "예정", c: "#007AFF" },
+    { v: "진행중", c: "#FF9500" },
+    { v: "마감", c: "#475569" },
+    { v: "낙찰", c: "#00B493" },
+    { v: "유찰", c: "#F04452" },
+  ];
+  const [draft, setDraft] = useState({ title:"", agency:"", openDate:"", closeDate:"", awardDate:"", amount:"", status:"예정", url:"", note:"" });
+  const [filterStatus, setFilterStatus] = useState("");
+  const [viewMode, setViewMode] = useState("list"); // list | calendar
+  const [calMonth, setCalMonth] = useState(new Date().toISOString().slice(0,7));
+
+  const reset = () => { setDraft({ title:"", agency:"", openDate:"", closeDate:"", awardDate:"", amount:"", status:"예정", url:"", note:"" }); setEditingId(null); setShowForm(false); };
+  const saveBid = () => {
+    if (!draft.title.trim()) { alert("입찰 공고명은 필수입니다"); return; }
+    if (editingId) {
+      setBids(prev => prev.map(b => b.id === editingId ? { ...b, ...draft } : b));
+    } else {
+      setBids(prev => [...prev, { id: uid(), createdAt: Date.now(), ...draft }]);
+    }
+    reset();
+  };
+  const editBid = (b) => { setDraft({ title:b.title||"", agency:b.agency||"", openDate:b.openDate||"", closeDate:b.closeDate||"", awardDate:b.awardDate||"", amount:b.amount||"", status:b.status||"예정", url:b.url||"", note:b.note||"" }); setEditingId(b.id); setShowForm(true); };
+  const deleteBid = (id) => { if (confirm("이 입찰 정보를 삭제할까요?")) setBids(prev => prev.filter(b => b.id !== id)); };
+
+  const today = new Date().toISOString().slice(0,10);
+  const filtered = bids.filter(b => !filterStatus || b.status === filterStatus);
+  const sortedBids = [...filtered].sort((a,b) => (a.closeDate||"9999").localeCompare(b.closeDate||"9999"));
+
+  // KPI
+  const upcoming = bids.filter(b => b.status === "예정" || b.status === "진행중");
+  const closingSoon = upcoming.filter(b => b.closeDate && b.closeDate >= today && b.closeDate <= new Date(Date.now()+7*86400000).toISOString().slice(0,10));
+  const won = bids.filter(b => b.status === "낙찰");
+  const totalWonAmt = won.reduce((s,b) => s + parseFloat(b.amount||0), 0);
+
+  // 캘린더 그리드 생성
+  const calData = (() => {
+    const [y, m] = calMonth.split("-").map(Number);
+    const first = new Date(y, m-1, 1);
+    const lastDay = new Date(y, m, 0).getDate();
+    const startDow = first.getDay();
+    const cells = [];
+    for (let i = 0; i < startDow; i++) cells.push(null);
+    for (let d = 1; d <= lastDay; d++) {
+      const dateStr = `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const dayBids = bids.filter(b => b.openDate === dateStr || b.closeDate === dateStr || b.awardDate === dateStr);
+      cells.push({ date: d, dateStr, bids: dayBids });
+    }
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  })();
+
+  const prevMonth = () => { const [y,m] = calMonth.split("-").map(Number); const nd = new Date(y, m-2, 1); setCalMonth(`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,"0")}`); };
+  const nextMonth = () => { const [y,m] = calMonth.split("-").map(Number); const nd = new Date(y, m, 1); setCalMonth(`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,"0")}`); };
+
+  const statColor = (s) => STATUSES.find(x => x.v === s)?.c || "#475569";
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {/* KPI */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>등록된 입찰</div>
+          <div style={{fontSize:24,fontWeight:800,color:"var(--text1)",lineHeight:1}}>{bids.length}<span style={{fontSize:14,fontWeight:600,marginLeft:4}}>건</span></div>
+        </div>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>진행 중</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#FF9500",lineHeight:1}}>{upcoming.length}<span style={{fontSize:14,fontWeight:600,marginLeft:4}}>건</span></div>
+        </div>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>7일내 마감</div>
+          <div style={{fontSize:24,fontWeight:800,color:closingSoon.length>0?"#F04452":"#475569",lineHeight:1}}>{closingSoon.length}<span style={{fontSize:14,fontWeight:600,marginLeft:4}}>건</span></div>
+        </div>
+        <div className="card" style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>낙찰 누계</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#00B493",lineHeight:1}}>{Math.round(totalWonAmt).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
+        </div>
+      </div>
+
+      {/* 컨트롤 바 */}
+      <div className="card">
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+          <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📅 입찰 캘린더</div>
+          <div style={{display:"flex",gap:4,marginLeft:10}}>
+            <button onClick={()=>setViewMode("list")} style={{padding:"6px 14px",borderRadius:8,border:"none",background:viewMode==="list"?"#475569":"var(--surface2)",color:viewMode==="list"?"#fff":"var(--text2)",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>📋 목록</button>
+            <button onClick={()=>setViewMode("calendar")} style={{padding:"6px 14px",borderRadius:8,border:"none",background:viewMode==="calendar"?"#475569":"var(--surface2)",color:viewMode==="calendar"?"#fff":"var(--text2)",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>📅 캘린더</button>
+          </div>
+          <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{height:36,fontSize:12,width:130}}>
+            <option value="">전체 상태</option>
+            {STATUSES.map(s=><option key={s.v} value={s.v}>{s.v}</option>)}
+          </select>
+          <div style={{flex:1}}/>
+          <button onClick={()=>{ if(showForm){reset();}else{reset();setShowForm(true);} }} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showForm?"닫기":"+ 입찰 추가"}</button>
+        </div>
+
+        {showForm && (
+          <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>{editingId?"입찰 수정":"신규 입찰 등록"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:8,marginBottom:8}}>
+              <input placeholder="입찰 공고명 *" value={draft.title} onChange={e=>setDraft(d=>({...d,title:e.target.value}))}/>
+              <input placeholder="발주처 (예: ○○공사, △△청)" value={draft.agency} onChange={e=>setDraft(d=>({...d,agency:e.target.value}))}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 130px",gap:8,marginBottom:8}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>공고일</div>
+                <input type="date" value={draft.openDate} onChange={e=>setDraft(d=>({...d,openDate:e.target.value}))}/>
+              </div>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>마감일 *</div>
+                <input type="date" value={draft.closeDate} onChange={e=>setDraft(d=>({...d,closeDate:e.target.value}))}/>
+              </div>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>개찰/낙찰일</div>
+                <input type="date" value={draft.awardDate} onChange={e=>setDraft(d=>({...d,awardDate:e.target.value}))}/>
+              </div>
+              <select value={draft.status} onChange={e=>setDraft(d=>({...d,status:e.target.value}))} style={{height:44,marginTop:18}}>
+                {STATUSES.map(s=><option key={s.v} value={s.v}>{s.v}</option>)}
+              </select>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"180px 1fr",gap:8,marginBottom:8}}>
+              <input type="number" placeholder="예가/낙찰가 (원)" value={draft.amount} onChange={e=>setDraft(d=>({...d,amount:e.target.value}))}/>
+              <input placeholder="공고 URL (선택)" value={draft.url} onChange={e=>setDraft(d=>({...d,url:e.target.value}))}/>
+            </div>
+            <input placeholder="비고 / 입찰 조건 / 메모" value={draft.note} onChange={e=>setDraft(d=>({...d,note:e.target.value}))} style={{marginBottom:10}}/>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={reset} style={{padding:"10px 18px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit"}}>취소</button>
+              <button onClick={saveBid} className="btn-primary" style={{padding:"10px 22px",fontSize:13}}>{editingId?"수정 저장":"등록"}</button>
+            </div>
+          </div>
+        )}
+
+        {viewMode === "list" ? (
+          sortedBids.length === 0 ? (
+            <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>
+              {bids.length===0?<>아직 등록된 입찰이 없습니다<br/>위 + 입찰 추가 버튼으로 등록해주세요</>:"필터 조건에 맞는 입찰이 없습니다"}
+            </div>
+          ) : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {sortedBids.map(b => {
+                const daysToClose = b.closeDate ? Math.ceil((new Date(b.closeDate) - new Date(today))/86400000) : null;
+                const isClosingSoon = daysToClose !== null && daysToClose >= 0 && daysToClose <= 7 && (b.status === "예정" || b.status === "진행중");
+                const isPast = daysToClose !== null && daysToClose < 0 && (b.status === "예정" || b.status === "진행중");
+                return (
+                  <div key={b.id} style={{border:"1px solid var(--border)",borderRadius:12,padding:"14px 16px",background:isClosingSoon?(darkMode?"rgba(240,68,82,0.08)":"#FFF5F5"):"var(--surface)"}}>
+                    <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                          <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:statColor(b.status)+"22",color:statColor(b.status),fontWeight:700}}>{b.status}</span>
+                          {isClosingSoon && <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}}>⚠ D-{daysToClose} 마감 임박</span>}
+                          {isPast && <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:"rgba(60,60,67,0.15)",color:"#475569",fontWeight:700}}>마감 지남</span>}
+                          <span style={{fontSize:14,fontWeight:700,color:"var(--text1)"}}>{b.title}</span>
+                        </div>
+                        <div style={{fontSize:12,color:"var(--text2)",display:"flex",gap:14,flexWrap:"wrap"}}>
+                          {b.agency && <span>🏢 {b.agency}</span>}
+                          {b.openDate && <span>📅 공고 {b.openDate}</span>}
+                          {b.closeDate && <span style={{color:isClosingSoon?"#F04452":"var(--text2)",fontWeight:isClosingSoon?700:400}}>⏰ 마감 {b.closeDate}</span>}
+                          {b.awardDate && <span>🎯 개찰 {b.awardDate}</span>}
+                          {b.amount && <span>💰 {parseFloat(b.amount).toLocaleString()}원</span>}
+                        </div>
+                        {b.note && <div style={{fontSize:12,color:"var(--text2)",marginTop:6,padding:"6px 10px",background:"var(--surface2)",borderRadius:6}}>📝 {b.note}</div>}
+                        {b.url && <div style={{marginTop:6}}><a href={b.url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"#007AFF"}}>🔗 공고 페이지 열기</a></div>}
+                      </div>
+                      <div style={{display:"flex",gap:6,flexShrink:0}}>
+                        <button onClick={()=>editBid(b)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:16,padding:4}}>✏️</button>
+                        <button onClick={()=>deleteBid(b.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:16,padding:4}}>✕</button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        ) : (
+          // 캘린더 뷰
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+              <button onClick={prevMonth} style={{height:36,width:36,borderRadius:8,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:14,color:"var(--text2)",fontFamily:"inherit"}}>‹</button>
+              <div style={{fontSize:18,fontWeight:700,color:"var(--text1)"}}>{calMonth.replace("-","년 ")}월</div>
+              <button onClick={nextMonth} style={{height:36,width:36,borderRadius:8,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:14,color:"var(--text2)",fontFamily:"inherit"}}>›</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:1,background:"var(--divider)",border:"1px solid var(--divider)",borderRadius:8,overflow:"hidden"}}>
+              {["일","월","화","수","목","금","토"].map((d,i)=>(
+                <div key={d} style={{padding:"8px 4px",textAlign:"center",fontSize:12,fontWeight:700,background:"var(--surface2)",color:i===0?"#F04452":i===6?"#007AFF":"var(--text2)"}}>{d}</div>
+              ))}
+              {calData.map((cell, i) => (
+                <div key={i} style={{minHeight:80,padding:6,background:"var(--surface)",position:"relative"}}>
+                  {cell && (
+                    <>
+                      <div style={{fontSize:11,fontWeight:700,color:cell.dateStr===today?"#FF9500":"var(--text2)",marginBottom:4}}>{cell.date}{cell.dateStr===today?" (오늘)":""}</div>
+                      <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                        {cell.bids.slice(0,3).map(b => {
+                          const isOpen = b.openDate === cell.dateStr;
+                          const isClose = b.closeDate === cell.dateStr;
+                          const isAward = b.awardDate === cell.dateStr;
+                          const label = isClose ? "마감" : isOpen ? "공고" : "개찰";
+                          return (
+                            <div key={b.id+label} onClick={()=>editBid(b)} title={`${b.title} (${label})`} style={{fontSize:10,padding:"2px 5px",borderRadius:4,background:statColor(b.status)+"22",color:statColor(b.status),fontWeight:600,cursor:"pointer",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label} · {b.title.slice(0,8)}</div>
+                          );
+                        })}
+                        {cell.bids.length > 3 && <div style={{fontSize:10,color:"var(--text3)",fontWeight:600}}>+{cell.bids.length-3}</div>}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NewsTab({ darkMode }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [feedKey, setFeedKey] = useState("ko-economy");
+  const [lastFetch, setLastFetch] = useState(null);
+
+  // RSS feeds (rss2json 무료 API 경유 - CORS 우회)
+  const FEEDS = {
+    "ko-economy": { name: "한국 경제 뉴스", url: "https://news.google.com/rss/search?q=경제+OR+제조업+OR+수출&hl=ko&gl=KR&ceid=KR:ko" },
+    "fr-safety": { name: "방염/방화복 동향", url: "https://news.google.com/rss/search?q=방염+OR+난연+OR+방화복+OR+소방복+OR+산업안전&hl=ko&gl=KR&ceid=KR:ko" },
+    "fr-industry": { name: "조선/플랜트/석유화학", url: "https://news.google.com/rss/search?q=조선+OR+플랜트+OR+석유화학+안전&hl=ko&gl=KR&ceid=KR:ko" },
+    "global-fr": { name: "Global FR Industry", url: "https://news.google.com/rss/search?q=flame+resistant+workwear+OR+FR+clothing&hl=en&gl=US&ceid=US:en" },
+  };
+
+  const fetchFeed = async (key) => {
+    setLoading(true);
+    setError("");
+    try {
+      const cacheKey = `frw_news_${key}`;
+      const cache = load(cacheKey, null);
+      const now = Date.now();
+      // 1시간 캐시
+      if (cache && cache.ts && (now - cache.ts) < 3600000) {
+        setItems(cache.items);
+        setLastFetch(new Date(cache.ts));
+        setLoading(false);
+        return;
+      }
+      const feed = FEEDS[key];
+      const url = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}&count=20`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.status !== "ok") throw new Error(data.message || "Feed load failed");
+      const newItems = (data.items || []).map(it => ({
+        title: it.title,
+        link: it.link,
+        date: it.pubDate,
+        desc: (it.description || "").replace(/<[^>]+>/g, "").slice(0, 200),
+        source: it.author || "",
+      }));
+      setItems(newItems);
+      setLastFetch(new Date());
+      save(cacheKey, { ts: now, items: newItems });
+    } catch (e) {
+      setError("뉴스를 불러올 수 없습니다: " + e.message);
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchFeed(feedKey); }, [feedKey]);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div className="card">
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+          <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📰 산업/경제 뉴스</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginLeft:10}}>
+            {Object.entries(FEEDS).map(([k,v]) => (
+              <button key={k} onClick={()=>setFeedKey(k)} style={{padding:"6px 12px",borderRadius:8,border:"none",background:feedKey===k?"#475569":"var(--surface2)",color:feedKey===k?"#fff":"var(--text2)",fontWeight:600,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{v.name}</button>
+            ))}
+          </div>
+          <div style={{flex:1}}/>
+          <button onClick={()=>{ const cacheKey = `frw_news_${feedKey}`; save(cacheKey, null); fetchFeed(feedKey); }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--text2)",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>🔄 새로고침</button>
+        </div>
+        {lastFetch && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>마지막 갱신: {lastFetch.toLocaleString("ko-KR")} (1시간 캐시)</div>}
+        {loading ? (
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14}}>⏳ 뉴스 불러오는 중...</div>
+        ) : error ? (
+          <div style={{padding:"20px",background:"rgba(240,68,82,0.08)",borderRadius:10,color:"#F04452",fontSize:13}}>{error}<div style={{fontSize:11,marginTop:6,color:"var(--text2)"}}>네트워크 또는 외부 RSS 서비스 문제일 수 있습니다. 새로고침 버튼을 눌러보세요.</div></div>
+        ) : items.length === 0 ? (
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14}}>표시할 뉴스가 없습니다</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {items.map((it, i) => (
+              <a key={i} href={it.link} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none",color:"inherit",display:"block"}}>
+                <div style={{padding:"14px 16px",borderRadius:12,border:"1px solid var(--border)",background:"var(--surface)",cursor:"pointer",transition:"background 0.15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="var(--surface2)"}
+                  onMouseLeave={e=>e.currentTarget.style.background="var(--surface)"}
+                >
+                  <div style={{fontSize:14,fontWeight:700,color:"var(--text1)",lineHeight:1.4,marginBottom:4}}>{it.title}</div>
+                  {it.desc && <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.6,marginBottom:6,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{it.desc}</div>}
+                  <div style={{fontSize:11,color:"var(--text3)",display:"flex",gap:8,alignItems:"center"}}>
+                    <span>📅 {it.date ? new Date(it.date).toLocaleString("ko-KR",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}</span>
+                    {it.source && <span>· {it.source}</span>}
+                    <span style={{marginLeft:"auto",color:"#007AFF",fontWeight:600}}>원문 보기 →</span>
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
+        <div style={{fontSize:11,color:"var(--text3)",marginTop:14,padding:"10px 12px",background:"var(--surface2)",borderRadius:8,lineHeight:1.6}}>
+          ℹ️ 뉴스는 Google News RSS를 rss2json 서비스를 통해 가져옵니다. 1시간 단위로 자동 갱신되며, 새로고침 버튼으로 즉시 갱신할 수 있습니다.
+        </div>
       </div>
     </div>
   );
