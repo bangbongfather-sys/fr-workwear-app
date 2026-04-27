@@ -1473,9 +1473,78 @@ function App() {
     }, 1500);
   }, [materials, laborItems, products, apiKey, orders, fabricIntakes, monthlySales]);
 
-  const activeProd = products.find(p => p.id === activeProdId) || products[0];
+  const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
+  const activeSpec = getActiveSpec(rawActiveProd) || {};
+  // 호환성을 위해 spec 필드를 product 레벨에 머지해서 노출
+  const activeProd = {
+    id: rawActiveProd.id,
+    name: rawActiveProd.name,
+    specs: rawActiveProd.specs,
+    activeSpecId: rawActiveProd.activeSpecId,
+    include: rawActiveProd.include,
+    marketPrice: rawActiveProd.marketPrice,
+    fabrics: activeSpec.fabrics || [],
+    extras: activeSpec.extras || [],
+    margins: activeSpec.margins || { ...DEFAULT_MARGINS },
+    priceOverrides: activeSpec.priceOverrides || { A: "", B: "", C: "", D: "" },
+    selectedGrade: activeSpec.selectedGrade || "A",
+    adminRate: activeSpec.adminRate ?? 10,
+  };
 
-  const calc = computeProduct(activeProd, materials, laborItems);
+  const PRODUCT_LEVEL_FIELDS = new Set(["name", "include", "marketPrice"]);
+  const updateActiveSpec = (updater) =>
+    setProducts(ps => ps.map(p => {
+      if (p.id !== activeProdId) return p;
+      const idx = p.specs.findIndex(s => s.id === p.activeSpecId);
+      if (idx < 0) return p;
+      const newSpecs = [...p.specs];
+      newSpecs[idx] = updater(newSpecs[idx]);
+      return { ...p, specs: newSpecs };
+    }));
+
+  // 요척서 (spec) 관리
+  const addSpec = () => {
+    pushHistory();
+    setProducts(ps => ps.map(p => {
+      if (p.id !== activeProdId) return p;
+      const baseNum = (p.specs.length || 0) + 1;
+      let n = baseNum;
+      while (p.specs.some(s => s.name === `요척서 ${n}`)) n++;
+      const s = { ...newSpec(`요척서 ${n}`) };
+      // 기존 활성 spec의 데이터를 복제 (단가 비교용)
+      const cur = p.specs.find(x => x.id === p.activeSpecId) || p.specs[0];
+      if (cur) {
+        s.fabrics = (cur.fabrics || []).map(f => ({ ...f, id: uid() }));
+        s.extras = (cur.extras || []).map(e => ({ ...e, id: uid() }));
+        s.margins = { ...(cur.margins || DEFAULT_MARGINS) };
+        s.priceOverrides = { ...(cur.priceOverrides || { A: "", B: "", C: "", D: "" }) };
+        s.selectedGrade = cur.selectedGrade || "A";
+        s.adminRate = cur.adminRate ?? 10;
+      }
+      return { ...p, specs: [...p.specs, s], activeSpecId: s.id };
+    }));
+  };
+  const deleteSpec = (specId) => {
+    pushHistory();
+    setProducts(ps => ps.map(p => {
+      if (p.id !== activeProdId) return p;
+      if (p.specs.length <= 1) return p;
+      const remaining = p.specs.filter(s => s.id !== specId);
+      const newActive = p.activeSpecId === specId ? remaining[0].id : p.activeSpecId;
+      return { ...p, specs: remaining, activeSpecId: newActive };
+    }));
+  };
+  const renameSpec = (specId, name) => {
+    setProducts(ps => ps.map(p => p.id !== activeProdId ? p : {
+      ...p,
+      specs: p.specs.map(s => s.id === specId ? { ...s, name } : s),
+    }));
+  };
+  const switchSpec = (specId) => {
+    setProducts(ps => ps.map(p => p.id === activeProdId ? { ...p, activeSpecId: specId } : p));
+  };
+
+  const calc = computeProduct(rawActiveProd, materials, laborItems);
   const fabricCost = calc.fCost;
   const extraCost = calc.eCost;
   const baseTotal = calc.base;
