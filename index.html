@@ -548,20 +548,21 @@ const LABOR_UNITS = ["벌", "장", "개", "m", "yard", "식"];
 
 // 모든 제품의 비용을 계산하는 helper
 function computeProduct(p, materials, laborItems) {
-  const fCost = p.fabrics.reduce((s, f) => {
+  const spec = getActiveSpec(p) || p;
+  const fCost = (spec.fabrics || []).reduce((s, f) => {
     const m = f.matId !== "" && f.matId != null ? materials.find(x => x.id == f.matId) : null;
     return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
   }, 0);
-  const eCost = p.extras.reduce((s, e) => {
+  const eCost = (spec.extras || []).reduce((s, e) => {
     const u = e.laborId !== "" && e.laborId != null ? (laborItems.find(l => l.id == e.laborId)?.price || 0) : parseFloat(e.price || 0);
     const q = parseFloat(e.qty || 1);
     return s + u * q;
   }, 0);
   const base = fCost + eCost;
-  const admin = base * ((p.adminRate || 0) / 100);
+  const admin = base * ((spec.adminRate || 0) / 100);
   const beforeMargin = base + admin;
-  const margins = p.margins || DEFAULT_MARGINS;
-  const overrides = p.priceOverrides || {};
+  const margins = spec.margins || DEFAULT_MARGINS;
+  const overrides = spec.priceOverrides || {};
   const grades = {};         // 적용 단가 (override 우선)
   const calcGrades = {};     // 마진율 계산값 (참조용)
   const overridden = {};     // 어느 등급이 수동 수정됐는지
