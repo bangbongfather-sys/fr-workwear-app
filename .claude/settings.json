@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/bangbong/Desktop/fr-workwear-app && git pull 2>&1 | tail -5",
+            "statusMessage": "GitHub에서 최신 코드 가져오는 중..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/bangbong/Desktop/fr-workwear-app && git add -A && git diff --staged --quiet || (git commit -m \"auto: $(date '+%Y-%m-%d %H:%M')\" && git push)",
+            "statusMessage": "GitHub에 저장 중..."
+          }
+        ]
+      }
+    ]
+  }
+}
