@@ -1564,6 +1564,59 @@ function App() {
     setProducts(ps => ps.map(p => p.id === activeProdId ? { ...p, activeSpecId: specId } : p));
   };
 
+  // 등급(grade) 관리
+  const generateGradeName = (grades, afterIdx) => {
+    const a = grades[afterIdx];
+    const b = grades[afterIdx + 1];
+    if (a && b) return `${a}-${b}`;
+    if (a) return `${a}+`;
+    return "신규";
+  };
+  const insertGrade = (afterIdx) => {
+    pushHistory();
+    updateActiveSpec(s => {
+      const grades = [...(s.grades || [...GRADES])];
+      let baseName = generateGradeName(grades, afterIdx);
+      let name = baseName;
+      let n = 2;
+      while (grades.includes(name)) { name = `${baseName} (${n++})`; }
+      const insertAt = afterIdx + 1;
+      grades.splice(insertAt, 0, name);
+      // 인접 등급 마진율 평균
+      const before = s.margins?.[grades[afterIdx]] ?? 30;
+      const after = (afterIdx + 2 < grades.length) ? (s.margins?.[grades[afterIdx + 2]] ?? before) : before;
+      const avgMargin = Math.round((before + after) / 2);
+      return {
+        ...s,
+        grades,
+        margins: { ...(s.margins || {}), [name]: avgMargin },
+        priceOverrides: { ...(s.priceOverrides || {}), [name]: "" },
+      };
+    });
+  };
+  const deleteGrade = (g) => {
+    updateActiveSpec(s => {
+      const grades = (s.grades || [...GRADES]).filter(x => x !== g);
+      if (grades.length === 0) return s;
+      const margins = { ...(s.margins || {}) }; delete margins[g];
+      const priceOverrides = { ...(s.priceOverrides || {}) }; delete priceOverrides[g];
+      const selectedGrade = s.selectedGrade === g ? grades[0] : s.selectedGrade;
+      return { ...s, grades, margins, priceOverrides, selectedGrade };
+    });
+  };
+  const renameGrade = (oldName, newName) => {
+    if (!newName || oldName === newName) return;
+    updateActiveSpec(s => {
+      const grades = (s.grades || [...GRADES]).map(x => x === oldName ? newName : x);
+      const margins = { ...(s.margins || {}) };
+      const priceOverrides = { ...(s.priceOverrides || {}) };
+      if (margins[oldName] !== undefined) { margins[newName] = margins[oldName]; delete margins[oldName]; }
+      if (priceOverrides[oldName] !== undefined) { priceOverrides[newName] = priceOverrides[oldName]; delete priceOverrides[oldName]; }
+      const selectedGrade = s.selectedGrade === oldName ? newName : s.selectedGrade;
+      return { ...s, grades, margins, priceOverrides, selectedGrade };
+    });
+  };
+
   const calc = computeProduct(rawActiveProd, materials, laborItems);
   const fabricCost = calc.fCost;
   const extraCost = calc.eCost;
