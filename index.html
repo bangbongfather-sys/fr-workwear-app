@@ -1705,6 +1705,102 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           </div>
         )}
       </div>
+      {expandedChart && (
+        <ChartExpandModal
+          type={expandedChart}
+          onClose={() => setExpandedChart(null)}
+          darkMode={darkMode}
+          data={{
+            sales: { labels: monthLabels, values: monthValues, monthlySales, months12, year: thisYear, total: totalYearRevenue },
+            pie: { labels: prodLabels, values: prodValues },
+            margin: { labels: mLabels, values: mValues, sorted: marginSorted },
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// 차트 확대 모달 — 모바일에서 작은 차트를 풀스크린으로 확대해서 보기
+function ChartExpandModal({ type, data, darkMode, onClose }) {
+  const cv = React.useRef(null);
+  const inst = React.useRef(null);
+  const TITLES = {
+    sales: `📈 ${data.sales?.year || ""}년 월별 매출 추이`,
+    pie: "🥧 제품군별 매출 비중",
+    margin: "📊 제품별 마진율 현황",
+  };
+  React.useEffect(() => {
+    if (typeof Chart === "undefined" || !cv.current) return;
+    if (inst.current) { inst.current.destroy(); inst.current = null; }
+    const txt = darkMode ? "rgba(235,235,245,0.7)" : "rgba(60,60,67,0.7)";
+    const grid = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
+    const fontSize = window.innerWidth < 480 ? 12 : 14;
+    if (type === "sales") {
+      const monthlySales = data.sales.monthlySales || {};
+      const months12 = data.sales.months12 || [];
+      inst.current = new Chart(cv.current, {
+        type: "bar",
+        data: { labels: data.sales.labels, datasets: [{ label: "월 매출", data: data.sales.values,
+          backgroundColor: data.sales.values.map((_, i) => { const m = months12[i]; return (monthlySales[m] !== undefined && monthlySales[m] !== "") ? "rgba(99,102,241,0.85)" : "rgba(99,102,241,0.4)"; }),
+          borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { color: grid }, ticks: { color: txt, font: { size: fontSize } } }, y: { grid: { color: grid }, ticks: { color: txt, font: { size: fontSize }, callback: v => v >= 1000000000 ? (v/1000000000).toFixed(1)+"조" : v >= 100000000 ? (v/100000000).toFixed(0)+"억" : v >= 1000000 ? (v/1000000).toFixed(0)+"백만" : v >= 1000 ? (v/1000).toLocaleString()+"천" : v } } } }
+      });
+    } else if (type === "pie") {
+      inst.current = new Chart(cv.current, {
+        type: "doughnut",
+        data: { labels: data.pie.labels, datasets: [{ data: data.pie.values, backgroundColor: ["#6366F1", "#8B5CF6", "#EC4899", "#F59E0B", "#10B981", "#14B8A6", "#3B82F6", "#A855F7"].slice(0, data.pie.labels.length) }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: window.innerWidth < 480 ? "bottom" : "right", labels: { color: txt, padding: 14, font: { size: fontSize } } },
+            tooltip: { callbacks: { label: ctx => " " + ctx.label + ": " + Math.round(ctx.raw).toLocaleString() + "원" } } } }
+      });
+    } else if (type === "margin") {
+      const sorted = data.margin.sorted;
+      const pairs = data.margin.labels.map((l, i) => ({ l, v: data.margin.values[i] }));
+      const display = sorted ? [...pairs].sort((a, b) => b.v - a.v) : pairs;
+      const labels = display.map(x => x.l);
+      const values = display.map(x => x.v);
+      inst.current = new Chart(cv.current, {
+        type: "bar",
+        data: { labels, datasets: [{ label: "납품가 마진율(%)", data: values,
+          backgroundColor: values.map(v => v >= 26 ? "rgba(16,185,129,0.78)" : v >= 20 ? "rgba(245,158,11,0.78)" : "rgba(239,68,68,0.78)"),
+          borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + ctx.raw + "%" } } },
+          scales: { x: { grid: { color: grid }, ticks: { color: txt, font: { size: fontSize }, callback: v => v + "%" }, max: Math.ceil((Math.max(...values, 30) + 5) / 5) * 5 }, y: { grid: { display: false }, ticks: { color: txt, font: { size: fontSize } } } } }
+      });
+    }
+    return () => { if (inst.current) { inst.current.destroy(); inst.current = null; } };
+  }, [type, darkMode, data]);
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, zIndex: 200,
+      background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: 16, animation: "fadeIn 0.2s ease",
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: "var(--surface)", borderRadius: 16,
+        width: "100%", maxWidth: 920, maxHeight: "92vh",
+        display: "flex", flexDirection: "column",
+        boxShadow: "0 20px 48px rgba(0,0,0,0.32)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--divider)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text1)" }}>{TITLES[type] || "차트"}</div>
+          <button onClick={onClose} title="닫기 (ESC)" style={{
+            width: 36, height: 36, borderRadius: 10, border: "none",
+            background: "var(--surface2)", color: "var(--text2)",
+            cursor: "pointer", fontSize: 18, fontWeight: 600,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>✕</button>
+        </div>
+        <div style={{ flex: 1, padding: 20, minHeight: 360, position: "relative" }}>
+          <canvas ref={cv} />
+        </div>
+      </div>
     </div>
   );
 }
