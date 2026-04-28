@@ -2444,8 +2444,44 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
     const key = (clientName || "").trim();
     return (clientAR[key] && clientAR[key].entries) || [];
   };
+  // 자동 미수금: 모든 월 ledgers 중 status="미입금" 청구합계 (거래처명 기준)
+  const autoUnpaid = (clientName) => {
+    const name = (clientName || "").trim();
+    if (!name) return 0;
+    let sum = 0;
+    Object.values(ledgers || {}).forEach(m => {
+      const list = (m && m.clients) || [];
+      list.forEach(c => {
+        if ((c.name || "").trim() === name && c.status === "미입금") {
+          const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+          if (amt > 0) sum += amt;
+        }
+      });
+    });
+    return sum;
+  };
+  // 자동 미수금 항목 목록 (월/금액/상태/메모) — 펼친 패널에 표시용
+  const autoUnpaidEntries = (clientName) => {
+    const name = (clientName || "").trim();
+    if (!name) return [];
+    const list = [];
+    Object.entries(ledgers || {}).forEach(([ym, m]) => {
+      const cs = (m && m.clients) || [];
+      cs.forEach(c => {
+        if ((c.name || "").trim() === name && (c.status === "미입금" || c.status === "입금완료")) {
+          const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+          if (amt > 0) list.push({ ym, status: c.status, amount: amt, memo: c.memo || "" });
+        }
+      });
+    });
+    list.sort((a, b) => a.ym.localeCompare(b.ym));
+    return list;
+  };
   const arBalance = (clientName) => {
-    return getAR(clientName).reduce((s, a) => s + (a.type === "청구" ? (parseFloat(a.amount)||0) : -(parseFloat(a.amount)||0)), 0);
+    // 잔액 = 자동 미수금 + 수동 청구 - 수동 입금
+    const auto = autoUnpaid(clientName);
+    const manual = getAR(clientName).reduce((s, a) => s + (a.type === "청구" ? (parseFloat(a.amount)||0) : -(parseFloat(a.amount)||0)), 0);
+    return auto + manual;
   };
 
   // 윈도우 전역 드래그 차단 (실수로 브라우저에서 파일 열리는 것 방지)
@@ -2895,6 +2931,12 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                   const isCorp = c.status === "법인 거래";
                   const isSelected = selectedIds.has(c.id);
                   const rowBg = isSelected ? (darkMode?"rgba(99,102,241,0.10)":"rgba(99,102,241,0.06)") : (isPaid ? (darkMode?"rgba(0,180,147,0.06)":"rgba(0,180,147,0.04)") : "transparent");
+                  // 펼친 패널용 데이터 (펼쳐진 거래처만 계산)
+                  const expAutoEntries = isExpanded ? autoUnpaidEntries(c.name) : [];
+                  const expAutoSum = expAutoEntries.filter(e => e.status === "미입금").reduce((s,e) => s + e.amount, 0);
+                  // 모든 행에 표시할 잔액 (자동+수동)
+                  const clientBal = arBalance(c.name);
+                  const expBalance = clientBal;
                   return (
                     <React.Fragment key={c.id}>
                       <tr style={{background:rowBg}}>
@@ -2904,7 +2946,9 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                         <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
                         <td style={{fontWeight:600,fontSize:13}}>
                           <span onClick={()=>setExpandedClientId(isExpanded?null:c.id)} style={{cursor:"pointer"}} title="클릭하여 미수금 내역 펼치기">
-                            {c.name} <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>{getAR(c.name).length>0 ? `▶ ${getAR(c.name).length}건 / 잔액 ${Math.round(arBalance(c.name)).toLocaleString()}원` : ""}</span>
+                            {c.name}
+                            {clientBal > 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(240,68,82,0.12)",color:"#F04452",marginLeft:6}}>미수 {Math.round(clientBal).toLocaleString()}원</span>}
+                            {clientBal < 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.12)",color:"#00B493",marginLeft:6}}>선납 {Math.round(Math.abs(clientBal)).toLocaleString()}원</span>}
                           </span>
                         </td>
                         <td style={{textAlign:"right",fontSize:13}}>{isCorp ? "—" : Math.round(c.supply||0).toLocaleString()+"원"}</td>
@@ -2931,14 +2975,48 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                       {isExpanded && (
                         <tr key={c.id+"_exp"}>
                           <td colSpan={9} style={{padding:"14px 22px",background:"var(--surface2)"}}>
+                            {/* 1. 자동 미수금 (장부 미입금 상태에서 자동 집계) */}
                             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>📋 청구/입금 내역 (모든 월 공유)</div>
-                              <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>이 거래처의 미수금은 다른 달에서도 동일하게 표시됩니다</div>
+                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>📒 자동 미수금 (장부 미입금 상태)</div>
+                              <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부에서 입금완료로 바꾸면 자동 차감</div>
                             </div>
-                            {getAR(c.name).length === 0 ? (
-                              <div style={{fontSize:12,color:"var(--text3)",padding:"8px 0",fontStyle:"italic"}}>등록된 내역이 없습니다. 아래에서 추가하세요.</div>
+                            {expAutoEntries.length === 0 ? (
+                              <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0 12px",fontStyle:"italic"}}>이 거래처에 등록된 청구가 없습니다.</div>
                             ) : (
-                              <table style={{marginBottom:10}}>
+                              <table style={{marginBottom:14}}>
+                                <thead><tr>
+                                  <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
+                                  <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
+                                  <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
+                                  <th style={{fontSize:11}}>메모</th>
+                                </tr></thead>
+                                <tbody>
+                                  {expAutoEntries.map((ae, aei) => {
+                                    const isUnpaid = ae.status === "미입금";
+                                    return (
+                                      <tr key={"a"+aei} style={{opacity:isUnpaid?1:0.55}}>
+                                        <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{ae.ym}</td>
+                                        <td style={{textAlign:"center"}}>
+                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isUnpaid?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isUnpaid?"#FF9500":"#00B493"}}>{isUnpaid?"⏳ 미입금":"✓ 완납"}</span>
+                                        </td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isUnpaid?"#F04452":"var(--text3)",textDecoration:isUnpaid?"none":"line-through"}}>{isUnpaid?"+":""}{Math.round(ae.amount).toLocaleString()}원</td>
+                                        <td style={{fontSize:12,color:"var(--text2)"}}>{ae.memo}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                  <tr style={{borderTop:"1px solid var(--divider)"}}>
+                                    <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
+                                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(expAutoSum).toLocaleString()}원</td>
+                                    <td/>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            )}
+
+                            {/* 2. 수동 부분입금/조정 */}
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>✏️ 부분 입금/수동 조정 (선택)</div>
+                            {getAR(c.name).length === 0 ? null : (
+                              <table style={{marginBottom:8}}>
                                 <thead><tr>
                                   <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
                                   <th style={{fontSize:11}}>내역</th>
@@ -2955,30 +3033,33 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                                           <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FF9500":"#00B493"}}>{a.type}</span>
                                         </td>
                                         <td style={{fontSize:13}}>{a.desc}</td>
-                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":""}{Math.round(a.amount||0).toLocaleString()}원</td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
                                         <td style={{fontSize:12,color:"var(--text2)"}}>{a.date}</td>
                                         <td style={{textAlign:"center"}}><button onClick={()=>deleteAR(c.name, a.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
                                       </tr>
                                     );
                                   })}
-                                  <tr style={{borderTop:"2px solid var(--divider)"}}>
-                                    <td colSpan={2} style={{fontWeight:700,paddingTop:8}}>잔액 (청구 - 입금)</td>
-                                    <td style={{textAlign:"right",fontWeight:800,fontSize:13,paddingTop:8,color:"#475569"}}>
-                                      {Math.round(arBalance(c.name)).toLocaleString()}원
-                                    </td>
-                                    <td colSpan={2}></td>
-                                  </tr>
                                 </tbody>
                               </table>
                             )}
+                            {/* 수동 청구/입금 추가 폼 */}
                             <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6,marginTop:8}}>
                               <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
-                                <option value="청구">청구</option><option value="입금">입금</option>
+                                <option value="입금">입금</option><option value="청구">청구</option>
                               </select>
-                              <input placeholder="내역 (예: 25년 12월 / 2025-12-02)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
+                              <input placeholder="내역 (예: 부분 입금 / 조정)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
                               <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
                               <input type="date" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:11,padding:"0 6px"}}/>
                               <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
+                            </div>
+
+                            {/* 최종 잔액 카드 */}
+                            <div style={{marginTop:14,padding:"10px 14px",background:darkMode?"rgba(240,68,82,0.08)":"rgba(240,68,82,0.04)",borderRadius:10,border:`1.5px solid ${darkMode?"rgba(240,68,82,0.3)":"rgba(240,68,82,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+                              <div>
+                                <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>최종 미수금 잔액</div>
+                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>= 자동 미수금 + 수동 청구 - 수동 입금</div>
+                              </div>
+                              <div style={{fontSize:22,fontWeight:900,color:expBalance>0?"#F04452":expBalance<0?"#00B493":"var(--text2)"}}>{Math.round(expBalance).toLocaleString()}원</div>
                             </div>
                           </td>
                         </tr>
@@ -3021,16 +3102,43 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
   Object.values(ledgers || {}).forEach(m => (m.clients || []).forEach(c => { if (c.name) allNames.add(c.name.trim()); }));
 
   const summary = Array.from(allNames).map(name => {
-    const entries = (clientAR[name] && clientAR[name].entries) || [];
-    const charge = entries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
-    const paid = entries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
-    const balance = charge - paid;
-    // 어느 월에 등장했는지
+    const manualEntries = (clientAR[name] && clientAR[name].entries) || [];
+    const manualCharge = manualEntries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const manualPaid = manualEntries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    // 자동 미수금 항목들 + 입금완료 항목들
+    const autoUnpaidList = [];  // 미입금 청구
+    const autoPaidList = [];    // 입금완료 청구
     const months = [];
     Object.entries(ledgers || {}).forEach(([ym, m]) => {
-      if ((m.clients || []).some(c => (c.name||"").trim() === name)) months.push(ym);
+      const cs = (m && m.clients) || [];
+      let appeared = false;
+      cs.forEach(c => {
+        if ((c.name || "").trim() !== name) return;
+        appeared = true;
+        const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+        if (amt <= 0) return;
+        if (c.status === "미입금") autoUnpaidList.push({ ym, amount: amt, memo: c.memo||"" });
+        else if (c.status === "입금완료") autoPaidList.push({ ym, amount: amt, memo: c.memo||"" });
+      });
+      if (appeared) months.push(ym);
     });
-    return { name, charge, paid, balance, entries, months: months.sort() };
+    autoUnpaidList.sort((a,b) => a.ym.localeCompare(b.ym));
+    autoPaidList.sort((a,b) => a.ym.localeCompare(b.ym));
+    const autoUnpaidSum = autoUnpaidList.reduce((s,e) => s + e.amount, 0);
+    const autoPaidSum = autoPaidList.reduce((s,e) => s + e.amount, 0);
+    // 잔액: 자동 미수금 + 수동 청구 - 수동 입금
+    const balance = autoUnpaidSum + manualCharge - manualPaid;
+    // 표시용 누적
+    const charge = autoUnpaidSum + autoPaidSum + manualCharge;
+    const paid = autoPaidSum + manualPaid;
+    return {
+      name,
+      manualEntries, manualCharge, manualPaid,
+      autoUnpaidList, autoPaidList, autoUnpaidSum, autoPaidSum,
+      charge, paid, balance,
+      entries: manualEntries, // 호환성
+      months: months.sort()
+    };
   });
 
   const filtered = summary
@@ -3178,9 +3286,54 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
                       {isExpanded && (
                         <tr>
                           <td colSpan={7} style={{padding:"14px 22px",background:"var(--surface2)"}}>
-                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>📋 청구/입금 내역 (모든 월 공유)</div>
+                            {/* 1. 자동 미수금 (장부 기반) */}
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>📒 자동 미수금 (장부 미입금)</div>
+                              <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부에서 입금완료 처리하면 자동 차감</div>
+                            </div>
+                            {(c.autoUnpaidList.length === 0 && c.autoPaidList.length === 0) ? (
+                              <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0 12px",fontStyle:"italic"}}>장부에 등록된 청구가 없습니다.</div>
+                            ) : (
+                              <table style={{marginBottom:14}}>
+                                <thead><tr>
+                                  <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
+                                  <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
+                                  <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
+                                  <th style={{fontSize:11}}>메모</th>
+                                </tr></thead>
+                                <tbody>
+                                  {c.autoUnpaidList.map((e, ei) => (
+                                    <tr key={"u"+ei}>
+                                      <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{e.ym}</td>
+                                      <td style={{textAlign:"center"}}>
+                                        <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(255,149,0,0.15)",color:"#FF9500"}}>⏳ 미입금</span>
+                                      </td>
+                                      <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#F04452"}}>+{Math.round(e.amount).toLocaleString()}원</td>
+                                      <td style={{fontSize:12,color:"var(--text2)"}}>{e.memo}</td>
+                                    </tr>
+                                  ))}
+                                  {c.autoPaidList.map((e, ei) => (
+                                    <tr key={"p"+ei} style={{opacity:0.55}}>
+                                      <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{e.ym}</td>
+                                      <td style={{textAlign:"center"}}>
+                                        <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493"}}>✓ 완납</span>
+                                      </td>
+                                      <td style={{textAlign:"right",fontSize:12,color:"var(--text3)",textDecoration:"line-through"}}>{Math.round(e.amount).toLocaleString()}원</td>
+                                      <td style={{fontSize:11,color:"var(--text3)"}}>장부에서 입금완료 처리됨</td>
+                                    </tr>
+                                  ))}
+                                  <tr style={{borderTop:"1px solid var(--divider)"}}>
+                                    <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
+                                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(c.autoUnpaidSum).toLocaleString()}원</td>
+                                    <td/>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            )}
+                            {/* 2. 수동 부분입금/조정 */}
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>✏️ 부분 입금/수동 조정 (선택)</div>
                             {c.entries.length === 0 ? (
-                              <div style={{fontSize:12,color:"var(--text3)",padding:"8px 0",fontStyle:"italic"}}>등록된 내역이 없습니다.</div>
+                              <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0",fontStyle:"italic"}}>수동 등록된 내역이 없습니다. 아래 폼에서 추가하세요.</div>
                             ) : (
                               <table style={{marginBottom:10}}>
                                 <thead><tr>
@@ -3226,23 +3379,26 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
                                       </tr>
                                     );
                                   })}
-                                  <tr style={{borderTop:"2px solid var(--divider)"}}>
-                                    <td colSpan={2} style={{fontWeight:700,paddingTop:8}}>잔액 (청구 - 입금)</td>
-                                    <td style={{textAlign:"right",fontWeight:800,fontSize:14,paddingTop:8,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</td>
-                                    <td colSpan={2}></td>
-                                  </tr>
                                 </tbody>
                               </table>
                             )}
                             {/* 새 내역 추가 폼 */}
                             <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
                               <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
-                                <option value="청구">청구</option><option value="입금">입금</option>
+                                <option value="입금">입금</option><option value="청구">청구</option>
                               </select>
-                              <input placeholder="내역 (예: 25년 12월 / 분기 정산)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
+                              <input placeholder="내역 (예: 부분 입금 / 분기 조정)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
                               <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
                               <input type="date" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:11,padding:"0 6px"}}/>
                               <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
+                            </div>
+                            {/* 최종 잔액 카드 */}
+                            <div style={{marginTop:14,padding:"10px 14px",background:darkMode?"rgba(240,68,82,0.08)":"rgba(240,68,82,0.04)",borderRadius:10,border:`1.5px solid ${darkMode?"rgba(240,68,82,0.3)":"rgba(240,68,82,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+                              <div>
+                                <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>최종 미수금 잔액</div>
+                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>= 자동 미수금({Math.round(c.autoUnpaidSum).toLocaleString()}) + 수동 청구({Math.round(c.manualCharge).toLocaleString()}) - 수동 입금({Math.round(c.manualPaid).toLocaleString()})</div>
+                              </div>
+                              <div style={{fontSize:22,fontWeight:900,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</div>
                             </div>
                           </td>
                         </tr>
