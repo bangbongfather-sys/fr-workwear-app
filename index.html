@@ -2278,13 +2278,9 @@ function App() {
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
   // 호환성을 위해 spec 필드를 product 레벨에 머지해서 노출
+  // rawActiveProd의 모든 필드(image 등 미래 필드 포함)를 보존
   const activeProd = {
-    id: rawActiveProd.id,
-    name: rawActiveProd.name,
-    specs: rawActiveProd.specs,
-    activeSpecId: rawActiveProd.activeSpecId,
-    include: rawActiveProd.include,
-    marketPrice: rawActiveProd.marketPrice,
+    ...rawActiveProd,
     fabrics: activeSpec.fabrics || [],
     extras: activeSpec.extras || [],
     grades: (activeSpec.grades && activeSpec.grades.length > 0) ? activeSpec.grades : [...GRADES],
