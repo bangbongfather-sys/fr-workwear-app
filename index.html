@@ -2909,21 +2909,6 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                   const isCorp = c.status === "법인 거래";
                   const isSelected = selectedIds.has(c.id);
                   const rowBg = isSelected ? (darkMode?"rgba(99,102,241,0.10)":"rgba(99,102,241,0.06)") : (isPaid ? (darkMode?"rgba(0,180,147,0.06)":"rgba(0,180,147,0.04)") : "transparent");
-                  // 펼침용 데이터 — 모든 월에서 같은 거래처 청구 항목들
-                  const allMonthEntries = [];
-                  if (isExpanded) {
-                    Object.entries(ledgers || {}).forEach(([ym, mm]) => {
-                      (mm.clients || []).forEach(mc => {
-                        if ((mc.name || "").trim() === c.name && (mc.status === "미입금" || mc.status === "입금완료")) {
-                          const amt = parseFloat(mc.total) || ((parseFloat(mc.supply)||0) + (parseFloat(mc.tax)||0));
-                          if (amt > 0) allMonthEntries.push({ ym, status: mc.status, amount: amt, memo: mc.memo||"" });
-                        }
-                      });
-                    });
-                    allMonthEntries.sort((a,b) => a.ym.localeCompare(b.ym));
-                  }
-                  const autoSum = allMonthEntries.filter(e => e.status === "미입금").reduce((s,e) => s + e.amount, 0);
-                  const manualEntries = getAR(c.name);
                   return (
                     <React.Fragment key={c.id}>
                       <tr style={{background:rowBg}}>
@@ -2961,7 +2946,21 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                           <button onClick={()=>deleteOne(c.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
                         </td>
                       </tr>
-                      {isExpanded && (
+                      {isExpanded && (() => {
+                        // 자동 미수금 항목들 (모든 월의 미입금/입금완료)
+                        const allMonthEntries = [];
+                        Object.entries(ledgers || {}).forEach(([ym, m]) => {
+                          (m.clients || []).forEach(mc => {
+                            if ((mc.name || "").trim() === c.name && (mc.status === "미입금" || mc.status === "입금완료")) {
+                              const amt = parseFloat(mc.total) || ((parseFloat(mc.supply)||0) + (parseFloat(mc.tax)||0));
+                              if (amt > 0) allMonthEntries.push({ ym, status: mc.status, amount: amt, memo: mc.memo||"" });
+                            }
+                          });
+                        });
+                        allMonthEntries.sort((a,b) => a.ym.localeCompare(b.ym));
+                        const autoSum = allMonthEntries.filter(e => e.status === "미입금").reduce((s,e) => s + e.amount, 0);
+                        const manualEntries = getAR(c.name);
+                        return (
                         <tr key={c.id+"_exp"}>
                           <td colSpan={9} style={{padding:"14px 22px",background:"var(--surface2)"}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
@@ -3050,7 +3049,8 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                             </div>
                           </td>
                         </tr>
-                      )}
+                        );
+                      })()}
                     </React.Fragment>
                   );
                 })}
