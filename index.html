@@ -2458,7 +2458,38 @@ ${productList}
                               border: `1.5px solid ${isSel ? ACCENT : T.ghostBorder}`,
                               transition: "all 0.15s", flexShrink: 0,
                             }}>{isSel ? "✓ 선택" : "선택"}</button>
+                          {/* 삭제 버튼 (등급이 2개 이상일 때) */}
+                          {gArr.length > 1 && (
+                            <button onClick={() => { if (confirm(`'${g}' 등급을 삭제할까요?`)) deleteGrade(g); }}
+                              title="등급 삭제"
+                              style={{
+                                width: 28, height: 28, borderRadius: 6, cursor: "pointer",
+                                background: "transparent", color: T.text3, fontFamily: "inherit", fontSize: 16,
+                                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                                border: "none",
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.background = "rgba(240,68,82,0.12)"; e.currentTarget.style.color = "#F04452"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text3; }}
+                            >×</button>
+                          )}
                         </div>
+                        {/* 행 사이 + 버튼 (마지막 행 제외) */}
+                        {gIdx < gArr.length - 1 && (
+                          <div style={{ display: "flex", justifyContent: "center", margin: "-2px 0", position: "relative", height: 4 }}>
+                            <button onClick={() => insertGrade(gIdx)} title={`${g} ↔ ${gArr[gIdx+1]} 사이에 등급 추가`}
+                              style={{
+                                width: 24, height: 24, borderRadius: "50%", cursor: "pointer",
+                                background: T.ghostBg, color: T.text3, fontFamily: "inherit", fontSize: 14, fontWeight: 700,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                border: `1.5px dashed ${T.divider}`, opacity: 0.4,
+                                transition: "all 0.15s", padding: 0, lineHeight: 1,
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.opacity = 1; e.currentTarget.style.borderStyle = "solid"; e.currentTarget.style.borderColor = ACCENT; e.currentTarget.style.color = ACCENT; e.currentTarget.style.background = darkMode ? "rgba(99,102,241,0.15)" : "#EEF2FF"; }}
+                              onMouseLeave={e => { e.currentTarget.style.opacity = 0.4; e.currentTarget.style.borderStyle = "dashed"; e.currentTarget.style.borderColor = T.divider; e.currentTarget.style.color = T.text3; e.currentTarget.style.background = T.ghostBg; }}
+                            >+</button>
+                          </div>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </div>
