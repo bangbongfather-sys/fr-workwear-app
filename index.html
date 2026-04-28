@@ -2478,8 +2478,10 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
     return list;
   };
   const arBalance = (clientName) => {
-    // 잔액 = 자동 미수금만 (장부 미입금 기준). 수동 entries는 기록용
-    return autoUnpaid(clientName);
+    // 잔액 = 자동 미수금 + 수동 청구 - 수동 입금
+    const auto = autoUnpaid(clientName);
+    const manual = getAR(clientName).reduce((s, a) => s + (a.type === "청구" ? (parseFloat(a.amount)||0) : -(parseFloat(a.amount)||0)), 0);
+    return auto + manual;
   };
 
   // 윈도우 전역 드래그 차단 (실수로 브라우저에서 파일 열리는 것 방지)
@@ -3124,10 +3126,8 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
     autoPaidList.sort((a,b) => a.ym.localeCompare(b.ym));
     const autoUnpaidSum = autoUnpaidList.reduce((s,e) => s + e.amount, 0);
     const autoPaidSum = autoPaidList.reduce((s,e) => s + e.amount, 0);
-    // 잔액 = 자동 미수금 합계만 (장부 미입금 상태 = 현재 미수금)
-    // 수동 청구/입금은 참고용 히스토리 (이미 자동 미수금에 반영된 12월 거래내역 등)
-    const balance = autoUnpaidSum;
-    // 표시용 누적 (정보성, 잔액 계산 안함)
+    // 잔액 = 자동 미수금 + 수동 청구 - 수동 입금 (모두 종합)
+    const balance = autoUnpaidSum + manualCharge - manualPaid;
     const charge = autoUnpaidSum + manualCharge;
     const paid = manualPaid;
     return {
@@ -3395,7 +3395,7 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
                             <div style={{marginTop:14,padding:"10px 14px",background:darkMode?"rgba(240,68,82,0.08)":"rgba(240,68,82,0.04)",borderRadius:10,border:`1.5px solid ${darkMode?"rgba(240,68,82,0.3)":"rgba(240,68,82,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
                               <div>
                                 <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>최종 미수금 잔액</div>
-                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>= 미입금 합계 (자동) {Math.round(c.autoUnpaidSum).toLocaleString()}원. 수동 청구/입금 내역은 참고용 (이미 반영됨)</div>
+                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>= 자동 미수금({Math.round(c.autoUnpaidSum).toLocaleString()}) + 수동 청구({Math.round(c.manualCharge).toLocaleString()}) - 수동 입금({Math.round(c.manualPaid).toLocaleString()})</div>
                               </div>
                               <div style={{fontSize:22,fontWeight:900,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</div>
                             </div>
