@@ -2896,7 +2896,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   });
                   products.forEach(p => {
                     if ((p.name||"").toLowerCase().includes(q)) {
-                      res.push({ type:"제품", icon:"👕", title:p.name, sub:`${p.fabrics?.length||0}개 원단 / ${p.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
+                      const sp = getActiveSpec(p) || {};
+                      res.push({ type:"제품", icon:"👕", title:p.name, sub:`${sp.fabrics?.length||0}개 원단 / ${sp.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
                     }
                   });
                   orders.forEach(o => {
