@@ -2378,6 +2378,34 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) 
   const [filterStatus, setFilterStatus] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [newI, setNewI] = useState({ date:new Date().toISOString().slice(0,10), materialName:"", customMaterial:"", supplier:"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", inspector:"", note:"" });
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [editId, setEditId] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+
+  const startEdit = (r) => { setEditId(r.id); setEditDraft({ ...r }); };
+  const cancelEdit = () => { setEditId(null); setEditDraft(null); };
+  const saveEdit = () => {
+    if (!editDraft || !editDraft.materialName) { alert("원단명은 필수입니다"); return; }
+    if (!editDraft.qty) { alert("수량은 필수입니다"); return; }
+    setFabricIntakes(prev => prev.map(r => r.id === editId ? { ...editDraft } : r));
+    cancelEdit();
+  };
+
+  const toggleSelect = (id) => setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const clearSelection = () => setSelectedIds(new Set());
+  const deleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`선택한 ${selectedIds.size}건의 입고 기록을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+    setFabricIntakes(prev => prev.filter(r => !selectedIds.has(r.id)));
+    clearSelection();
+  };
+  const deleteAll = () => {
+    if (fabricIntakes.length === 0) return;
+    if (!window.confirm(`전체 입고 기록 ${fabricIntakes.length}건을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+    if (!window.confirm(`⚠️ 한 번 더 확인합니다.\n전체 입고 기록 ${fabricIntakes.length}건 삭제 후 복구 불가능합니다.`)) return;
+    setFabricIntakes([]);
+    clearSelection();
+  };
 
   const thisMonth = new Date().toISOString().slice(0,7);
   const pendingCnt = fabricIntakes.filter(r=>["주문완료","운송중","검수중"].includes(r.status)).length;
@@ -2422,8 +2450,29 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) 
             <button onClick={()=>{setFilterMonth("");setFilterStatus("");}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit"}}>필터 초기화</button>
           )}
           <div style={{flex:1}}/>
+          {fabricIntakes.length > 0 && (
+            <button onClick={deleteAll}
+              style={{ padding:"8px 12px", fontSize:12, fontWeight:700, color:"#F04452", background:"transparent", border:"1.5px solid rgba(240,68,82,0.4)", borderRadius:10, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}
+              title="전체 입고 기록 삭제 (확인 2회)"
+            >🗑 전체 삭제</button>
+          )}
           <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 입고 등록"}</button>
         </div>
+        {selectedIds.size > 0 && (
+          <div style={{
+            marginBottom: 14, padding: "10px 14px", borderRadius: 12,
+            background: darkMode ? "rgba(99,102,241,0.16)" : "rgba(99,102,241,0.08)",
+            border: `1.5px solid ${darkMode ? "rgba(99,102,241,0.45)" : "rgba(99,102,241,0.3)"}`,
+            display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#475569" }}>✓ {selectedIds.size}건 선택됨</span>
+            <div style={{ flex: 1 }} />
+            <button onClick={clearSelection}
+              style={{ padding:"8px 14px", fontSize:12, fontWeight:600, color:"var(--text2)", background:"transparent", border:"1.5px solid var(--divider)", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>선택 해제</button>
+            <button onClick={deleteSelected}
+              style={{ padding:"8px 16px", fontSize:12, fontWeight:700, color:"#fff", background:"linear-gradient(135deg, #EF4444, #DC2626)", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", boxShadow:"0 2px 8px rgba(239,68,68,0.32)" }}>🗑 선택 삭제 ({selectedIds.size})</button>
+          </div>
+        )}
         {showForm&&(
           <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>신규 입고 등록</div>
@@ -2465,16 +2514,83 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) 
         ):(
           <div style={{overflowX:"auto"}}>
             <table><thead><tr>
+              <th style={{ width: 40, textAlign: "center", padding: "10px 6px" }}>
+                {(() => {
+                  const visibleIds = filtered.map(r => r.id);
+                  const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+                  const someSelected = visibleIds.some(id => selectedIds.has(id));
+                  return (
+                    <input type="checkbox"
+                      checked={allSelected}
+                      ref={el => { if (el) el.indeterminate = !allSelected && someSelected; }}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedIds(prev => { const n = new Set(prev); visibleIds.forEach(id => n.add(id)); return n; });
+                        } else {
+                          setSelectedIds(prev => { const n = new Set(prev); visibleIds.forEach(id => n.delete(id)); return n; });
+                        }
+                      }}
+                      title={allSelected ? "전체 해제" : "전체 선택"}
+                      style={{ width: 18, height: 18, accentColor: "#475569", cursor: "pointer" }} />
+                  );
+                })()}
+              </th>
               <th>입고일</th><th>원단명</th><th>공급업체</th>
               <th style={{textAlign:"right"}}>수량</th><th style={{textAlign:"right"}}>단가</th>
               <th style={{textAlign:"right"}}>금액</th><th style={{textAlign:"center"}}>상태</th>
-              <th>담당자</th><th>비고</th><th style={{textAlign:"center"}}>삭제</th>
+              <th>담당자</th><th>비고</th><th style={{textAlign:"center", minWidth: 110}}>관리</th>
             </tr></thead>
             <tbody>
               {[...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(r=>{
+                const isEditing = editId === r.id;
+                if (isEditing && editDraft) {
+                  const editTotal = parseFloat(editDraft.unitPrice||0) * parseFloat(editDraft.qty||0);
+                  return (
+                    <tr key={r.id} style={{background:"var(--surface2)"}}>
+                      <td style={{textAlign:"center"}}>
+                        <input type="checkbox" disabled style={{width:18,height:18,opacity:0.4}} />
+                      </td>
+                      <td><input type="date" value={editDraft.date||""} onChange={e=>setEditDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
+                      <td>
+                        <select value={editDraft.materialName||""} onChange={e=>setEditDraft(d=>({...d,materialName:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
+                          <option value="">선택...</option>
+                          {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
+                          {editDraft.materialName && !materials.find(m=>m.name===editDraft.materialName) && <option value={editDraft.materialName}>{editDraft.materialName} (직접입력)</option>}
+                        </select>
+                      </td>
+                      <td><input value={editDraft.supplier||""} onChange={e=>setEditDraft(d=>({...d,supplier:e.target.value}))} placeholder="공급업체" style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
+                      <td>
+                        <div style={{display:"flex",gap:4}}>
+                          <input type="number" value={editDraft.qty||""} onChange={e=>setEditDraft(d=>({...d,qty:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px",textAlign:"right",width:80}}/>
+                          <select value={editDraft.unit||"yard"} onChange={e=>setEditDraft(d=>({...d,unit:e.target.value}))} style={{height:34,fontSize:11,padding:"0 4px",width:60}}>
+                            <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
+                          </select>
+                        </div>
+                      </td>
+                      <td><input type="number" value={editDraft.unitPrice||""} onChange={e=>setEditDraft(d=>({...d,unitPrice:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
+                      <td style={{textAlign:"right",fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>{editTotal>0?Math.round(editTotal).toLocaleString()+"원":"—"}</td>
+                      <td style={{textAlign:"center"}}>
+                        <select value={editDraft.status||"주문완료"} onChange={e=>setEditDraft(d=>({...d,status:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
+                          {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
+                      <td><input value={editDraft.inspector||""} onChange={e=>setEditDraft(d=>({...d,inspector:e.target.value}))} placeholder="담당자" style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
+                      <td><input value={editDraft.note||""} onChange={e=>setEditDraft(d=>({...d,note:e.target.value}))} placeholder="비고" style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
+                      <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                        <button onClick={saveEdit} style={{background:"#007AFF",border:"none",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,borderRadius:6,padding:"5px 9px",marginRight:4,fontFamily:"inherit"}}>저장</button>
+                        <button onClick={cancelEdit} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:12,fontWeight:600,borderRadius:6,padding:"4px 8px",fontFamily:"inherit"}}>취소</button>
+                      </td>
+                    </tr>
+                  );
+                }
                 const total=parseFloat(r.unitPrice||0)*parseFloat(r.qty||0);
                 const sc=SC[r.status]||"#8B95A1";
-                return (<tr key={r.id}>
+                const isSelected = selectedIds.has(r.id);
+                return (<tr key={r.id} style={{background: isSelected ? (darkMode ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.06)") : "transparent"}}>
+                  <td style={{textAlign:"center"}}>
+                    <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(r.id)}
+                      style={{width:18,height:18,accentColor:"#475569",cursor:"pointer"}}/>
+                  </td>
                   <td style={{whiteSpace:"nowrap",fontSize:13}}>{r.date}</td>
                   <td style={{fontWeight:600,fontSize:13}}>{r.materialName}</td>
                   <td style={{fontSize:13}}>{r.supplier}</td>
@@ -2484,7 +2600,10 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) 
                   <td style={{textAlign:"center"}}><span style={{display:"inline-block",padding:"3px 9px",borderRadius:100,fontSize:11,fontWeight:700,background:sc+"22",color:sc,whiteSpace:"nowrap"}}>{r.status}</span></td>
                   <td style={{fontSize:13,color:"var(--text2)"}}>{r.inspector}</td>
                   <td style={{fontSize:12,color:"var(--text2)"}}>{r.note}</td>
-                  <td style={{textAlign:"center"}}><button onClick={()=>setFabricIntakes(prev=>prev.filter(x=>x.id!==r.id))} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button></td>
+                  <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                    <button onClick={()=>startEdit(r)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}>✏️</button>
+                    <button onClick={()=>{ if(window.confirm(`이 입고 기록을 삭제할까요?\n${r.date} · ${r.materialName}`)) setFabricIntakes(prev=>prev.filter(x=>x.id!==r.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                  </td>
                 </tr>);
               })}
             </tbody></table>
