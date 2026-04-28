@@ -1690,6 +1690,13 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const dragRef = useRef(null); // { key, startX, startY, startW, startH, mode: 'br'|'r'|'b' }
   const [dragging, setDragging] = useState(null);
 
+  // 8방향 모드: tl, t, tr, l, r, bl, b, br
+  const cursorFor = (mode) => ({
+    tl: "nw-resize", t: "ns-resize", tr: "ne-resize",
+    l: "ew-resize", r: "ew-resize",
+    bl: "sw-resize", b: "ns-resize", br: "se-resize",
+  }[mode] || "default");
+
   const startResize = (key, mode, defW, defH) => (e) => {
     e.preventDefault(); e.stopPropagation();
     const cur = cardLayouts[key] || {};
@@ -1705,7 +1712,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
     };
     setDragging(key);
     document.body.style.userSelect = "none";
-    document.body.style.cursor = mode === "br" ? "se-resize" : mode === "r" ? "ew-resize" : "ns-resize";
+    document.body.style.cursor = cursorFor(mode);
   };
 
   useEffect(() => {
@@ -1717,8 +1724,12 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       const dx = cx - startX;
       const dy = cy - startY;
       let newW = startW, newH = startH;
-      if (mode === "r" || mode === "br") newW = Math.max(140, startW + dx);
-      if (mode === "b" || mode === "br") newH = Math.max(80, startH + dy);
+      // 가로: r/br/tr → +dx, l/bl/tl → -dx
+      if (mode === "r" || mode === "br" || mode === "tr") newW = Math.max(140, startW + dx);
+      if (mode === "l" || mode === "bl" || mode === "tl") newW = Math.max(140, startW - dx);
+      // 세로: b/br/bl → +dy, t/tr/tl → -dy
+      if (mode === "b" || mode === "br" || mode === "bl") newH = Math.max(80, startH + dy);
+      if (mode === "t" || mode === "tr" || mode === "tl") newH = Math.max(80, startH - dy);
       setCardLayouts(prev => ({ ...prev, [key]: { width: newW, height: newH } }));
     };
     const onEnd = () => {
@@ -1749,38 +1760,57 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const resetCardSize = (key) => {
     setCardLayouts(prev => { const next = { ...prev }; delete next[key]; return next; });
   };
-  const ResizeHandles = ({ keyName }) => (
-    <>
-      {/* 우측 가장자리 */}
-      <div
-        onMouseDown={startResize(keyName, "r")}
-        onTouchStart={startResize(keyName, "r")}
-        style={{ position: "absolute", top: 8, bottom: 14, right: -2, width: 8, cursor: "ew-resize", zIndex: 5 }}
-      />
-      {/* 하단 가장자리 */}
-      <div
-        onMouseDown={startResize(keyName, "b")}
-        onTouchStart={startResize(keyName, "b")}
-        style={{ position: "absolute", left: 8, right: 14, bottom: -2, height: 8, cursor: "ns-resize", zIndex: 5 }}
-      />
-      {/* 우하단 코너 (메인 핸들) */}
-      <div
-        onMouseDown={startResize(keyName, "br")}
-        onTouchStart={startResize(keyName, "br")}
-        title="드래그하여 크기 조절 (더블클릭으로 초기화)"
-        onDoubleClick={(e) => { e.stopPropagation(); resetCardSize(keyName); }}
-        style={{
-          position: "absolute", right: 0, bottom: 0,
-          width: 18, height: 18, cursor: "se-resize", zIndex: 6,
-          display: "flex", alignItems: "flex-end", justifyContent: "flex-end",
-          color: dragging === keyName ? "#007AFF" : "var(--text3)",
-          fontSize: 14, lineHeight: 1, paddingRight: 2, paddingBottom: 1,
-          opacity: dragging === keyName ? 1 : 0.6,
-          transition: "opacity 0.15s, color 0.15s",
-        }}
-      >⤡</div>
-    </>
-  );
+  const ResizeHandles = ({ keyName }) => {
+    const isActive = dragging === keyName;
+    const edgeStyle = { position: "absolute", zIndex: 5, background: "transparent" };
+    const cornerStyle = {
+      position: "absolute", zIndex: 6, width: 14, height: 14,
+      background: isActive ? "rgba(0,122,255,0.7)" : "transparent",
+      border: isActive ? "1px solid #fff" : "none",
+      borderRadius: 3,
+      transition: "background 0.15s",
+    };
+    // hover로 코너만 약간 보이게 하려면 :hover CSS 필요한데 여기선 단순화
+    return (
+      <>
+        {/* 가장자리 4개 */}
+        <div onMouseDown={startResize(keyName, "t")} onTouchStart={startResize(keyName, "t")}
+          style={{ ...edgeStyle, top: -4, left: 12, right: 12, height: 8, cursor: "ns-resize" }} />
+        <div onMouseDown={startResize(keyName, "b")} onTouchStart={startResize(keyName, "b")}
+          style={{ ...edgeStyle, bottom: -4, left: 12, right: 12, height: 8, cursor: "ns-resize" }} />
+        <div onMouseDown={startResize(keyName, "l")} onTouchStart={startResize(keyName, "l")}
+          style={{ ...edgeStyle, left: -4, top: 12, bottom: 12, width: 8, cursor: "ew-resize" }} />
+        <div onMouseDown={startResize(keyName, "r")} onTouchStart={startResize(keyName, "r")}
+          style={{ ...edgeStyle, right: -4, top: 12, bottom: 12, width: 8, cursor: "ew-resize" }} />
+
+        {/* 모서리 4개 */}
+        <div onMouseDown={startResize(keyName, "tl")} onTouchStart={startResize(keyName, "tl")}
+          onDoubleClick={(e) => { e.stopPropagation(); resetCardSize(keyName); }}
+          title="크기 조절 (더블클릭 초기화)"
+          style={{ ...cornerStyle, top: -3, left: -3, cursor: "nw-resize" }} />
+        <div onMouseDown={startResize(keyName, "tr")} onTouchStart={startResize(keyName, "tr")}
+          onDoubleClick={(e) => { e.stopPropagation(); resetCardSize(keyName); }}
+          title="크기 조절 (더블클릭 초기화)"
+          style={{ ...cornerStyle, top: -3, right: -3, cursor: "ne-resize" }} />
+        <div onMouseDown={startResize(keyName, "bl")} onTouchStart={startResize(keyName, "bl")}
+          onDoubleClick={(e) => { e.stopPropagation(); resetCardSize(keyName); }}
+          title="크기 조절 (더블클릭 초기화)"
+          style={{ ...cornerStyle, bottom: -3, left: -3, cursor: "sw-resize" }} />
+        <div onMouseDown={startResize(keyName, "br")} onTouchStart={startResize(keyName, "br")}
+          onDoubleClick={(e) => { e.stopPropagation(); resetCardSize(keyName); }}
+          title="드래그하여 크기 조절 (더블클릭 초기화)"
+          style={{
+            position: "absolute", right: 0, bottom: 0,
+            width: 18, height: 18, cursor: "se-resize", zIndex: 7,
+            display: "flex", alignItems: "flex-end", justifyContent: "flex-end",
+            color: isActive ? "#007AFF" : "var(--text3)",
+            fontSize: 14, lineHeight: 1, paddingRight: 2, paddingBottom: 1,
+            opacity: isActive ? 1 : 0.6,
+            transition: "opacity 0.15s, color 0.15s",
+          }}>⤡</div>
+      </>
+    );
+  };
 
   // ESC로 모달/상세 닫기
   useEffect(() => {
