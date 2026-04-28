@@ -1319,6 +1319,15 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const dragMargin = useRef(null);
   const [marginDropInfo, setMarginDropInfo] = useState(null);
   const [marginSorted, setMarginSorted] = useState(false);
+  const [expandedChart, setExpandedChart] = useState(null); // "sales" | "pie" | "margin" | "kpis"
+  // ESC로 모달 닫기
+  useEffect(() => {
+    if (!expandedChart) return;
+    const onKey = (e) => { if (e.key === "Escape") setExpandedChart(null); };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+  }, [expandedChart]);
 
   const thisYear = new Date().getFullYear();
   const months12 = Array.from({length:12},(_,i) => `${thisYear}-${String(i+1).padStart(2,"0")}`);
