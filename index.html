@@ -2501,6 +2501,77 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
   const [editDraft, setEditDraft] = useState(null);
   const [search, setSearch] = useState("");
   const [gradeFilter, setGradeFilter] = useState("ALL");
+  const [dragActive, setDragActive] = useState(false);
+
+  // 엑셀 파일 처리 (드래그 또는 클릭 모두 사용)
+  const processExcelFile = (file) => {
+    if (!file) return;
+    if (!/\.(xlsx|xls)$/i.test(file.name)) {
+      alert("엑셀 파일(.xlsx 또는 .xls)만 지원합니다.");
+      return;
+    }
+    if (typeof XLSX === "undefined") { alert("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target.result);
+        const wb = XLSX.read(data, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        const existingNames = new Set(clients.map(c => (c.name || "").trim()));
+        const newOnes = [];
+        let skipped = 0;
+        let headerIdx = -1, nameCol = -1, ceoCol = -1, telCol = -1, mobileCol = -1, codeCol = -1;
+        for (let i = 0; i < Math.min(rows.length, 5); i++) {
+          const row = rows[i] || [];
+          for (let j = 0; j < row.length; j++) {
+            const v = String(row[j] || "").trim();
+            if (/거래처명|회사명|업체명|상호|^name$/i.test(v) && nameCol < 0) { nameCol = j; headerIdx = i; }
+            if (/대표자|대표/.test(v) && ceoCol < 0) ceoCol = j;
+            if (/전화|tel/i.test(v) && !/모바일|mobile/i.test(v) && telCol < 0) telCol = j;
+            if (/모바일|mobile|핸드폰|휴대/i.test(v) && mobileCol < 0) mobileCol = j;
+            if (/거래처코드|코드|code/i.test(v) && codeCol < 0) codeCol = j;
+          }
+          if (nameCol >= 0) break;
+        }
+        if (nameCol < 0) {
+          alert("거래처명 열을 찾을 수 없습니다. 첫 행에 '거래처명' 헤더가 있는지 확인해주세요.");
+          return;
+        }
+        const startRow = headerIdx + 1;
+        let baseId = Date.now();
+        for (let i = startRow; i < rows.length; i++) {
+          const row = rows[i] || [];
+          const nm = String(row[nameCol] || "").trim();
+          if (!nm) continue;
+          if (existingNames.has(nm)) { skipped++; continue; }
+          const parts = [];
+          if (ceoCol >= 0 && row[ceoCol]) parts.push(`대표: ${String(row[ceoCol]).trim()}`);
+          if (telCol >= 0 && row[telCol]) parts.push(`☎ ${String(row[telCol]).trim()}`);
+          if (mobileCol >= 0 && row[mobileCol]) parts.push(`📱 ${String(row[mobileCol]).trim()}`);
+          if (codeCol >= 0 && row[codeCol]) parts.push(`코드: ${String(row[codeCol]).trim()}`);
+          newOnes.push({ id: ++baseId, name: nm, grade: "A", note: parts.join(" · "), createdAt: baseId });
+          existingNames.add(nm);
+        }
+        if (newOnes.length === 0) { alert(`추가된 거래처 없음. ${skipped > 0 ? `중복 ${skipped}곳 제외` : "유효한 행이 없습니다"}`); return; }
+        if (!confirm(`📂 ${file.name}\n${newOnes.length}곳을 신규 등록합니다.${skipped > 0 ? ` (이미 등록된 ${skipped}곳 제외)` : ""}\n진행할까요?`)) return;
+        setClients(cs => [...cs, ...newOnes]);
+        alert(`✅ ${newOnes.length}곳 등록 완료!`);
+      } catch (err) { alert("엑셀 파일 처리 실패: " + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // 윈도우 전역 드래그 이벤트 (실수로 브라우저에서 파일 열리는 것 방지)
+  useEffect(() => {
+    const prev = (e) => { e.preventDefault(); };
+    window.addEventListener("dragover", prev);
+    window.addEventListener("drop", prev);
+    return () => {
+      window.removeEventListener("dragover", prev);
+      window.removeEventListener("drop", prev);
+    };
+  }, []);
 
   // 검색 필터: 이름 또는 메모에 검색어 포함 + 등급 필터
   const filteredClients = clients.filter(c => {
@@ -2586,68 +2657,53 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
           <div style={{ marginTop: 10, fontSize: 12, color: "var(--text2)" }}>
             ※ 등급(A/B/C/D)은 단가 계산기의 등급별 단가에 매핑됩니다. 견적서에서 거래처 선택 시 해당 등급이 자동 적용돼요.
           </div>
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--divider)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 12, color: "var(--text2)" }}>📂 엑셀 파일로 한 번에 등록 (.xlsx · 거래처명 / 대표자 / 전화 / 모바일 / 코드 자동 인식)</div>
+          {/* 드래그 앤 드롭 영역 + 클릭 업로드 */}
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--divider)" }}>
             <input type="file" accept=".xlsx,.xls" id="frw-clients-xlsx" style={{ display: "none" }}
               onChange={(e) => {
-                const file = e.target.files?.[0]; if (!file) return;
-                if (typeof XLSX === "undefined") { alert("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                  try {
-                    const data = new Uint8Array(ev.target.result);
-                    const wb = XLSX.read(data, { type: "array" });
-                    const ws = wb.Sheets[wb.SheetNames[0]];
-                    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-                    const existingNames = new Set(clients.map(c => (c.name || "").trim()));
-                    const newOnes = [];
-                    let skipped = 0;
-                    // 헤더 행 자동 감지: "거래처명" 또는 "회사명" 또는 "name"이 있는 행을 찾음
-                    let headerIdx = -1, nameCol = -1, ceoCol = -1, telCol = -1, mobileCol = -1, codeCol = -1;
-                    for (let i = 0; i < Math.min(rows.length, 5); i++) {
-                      const row = rows[i] || [];
-                      for (let j = 0; j < row.length; j++) {
-                        const v = String(row[j] || "").trim();
-                        if (/거래처명|회사명|업체명|상호|^name$/i.test(v) && nameCol < 0) { nameCol = j; headerIdx = i; }
-                        if (/대표자|대표/.test(v) && ceoCol < 0) ceoCol = j;
-                        if (/전화|tel/i.test(v) && !/모바일|mobile/i.test(v) && telCol < 0) telCol = j;
-                        if (/모바일|mobile|핸드폰|휴대/i.test(v) && mobileCol < 0) mobileCol = j;
-                        if (/거래처코드|코드|code/i.test(v) && codeCol < 0) codeCol = j;
-                      }
-                      if (nameCol >= 0) break;
-                    }
-                    if (nameCol < 0) {
-                      alert("거래처명 열을 찾을 수 없습니다. 첫 행에 '거래처명' 헤더가 있는지 확인해주세요.");
-                      e.target.value = ""; return;
-                    }
-                    const startRow = headerIdx + 1;
-                    let baseId = Date.now();
-                    for (let i = startRow; i < rows.length; i++) {
-                      const row = rows[i] || [];
-                      const nm = String(row[nameCol] || "").trim();
-                      if (!nm) continue;
-                      if (existingNames.has(nm)) { skipped++; continue; }
-                      const parts = [];
-                      if (ceoCol >= 0 && row[ceoCol]) parts.push(`대표: ${String(row[ceoCol]).trim()}`);
-                      if (telCol >= 0 && row[telCol]) parts.push(`☎ ${String(row[telCol]).trim()}`);
-                      if (mobileCol >= 0 && row[mobileCol]) parts.push(`📱 ${String(row[mobileCol]).trim()}`);
-                      if (codeCol >= 0 && row[codeCol]) parts.push(`코드: ${String(row[codeCol]).trim()}`);
-                      newOnes.push({ id: ++baseId, name: nm, grade: "A", note: parts.join(" · "), createdAt: baseId });
-                      existingNames.add(nm);
-                    }
-                    if (newOnes.length === 0) { alert(`추가된 거래처 없음. ${skipped > 0 ? `중복 ${skipped}곳 제외` : "유효한 행이 없습니다"}`); e.target.value = ""; return; }
-                    if (!confirm(`${newOnes.length}곳을 신규 등록합니다.${skipped > 0 ? ` (이미 등록된 ${skipped}곳 제외)` : ""}\n진행할까요?`)) { e.target.value = ""; return; }
-                    setClients(cs => [...cs, ...newOnes]);
-                    alert(`✅ ${newOnes.length}곳 등록 완료!`);
-                    e.target.value = "";
-                  } catch (err) { alert("엑셀 파일 처리 실패: " + err.message); e.target.value = ""; }
-                };
-                reader.readAsArrayBuffer(file);
+                const file = e.target.files?.[0];
+                processExcelFile(file);
+                e.target.value = "";
               }} />
-            <button onClick={() => document.getElementById("frw-clients-xlsx")?.click()}
-              style={{ padding: "8px 16px", fontSize: 13, fontWeight: 600, color: "#fff", background: "linear-gradient(135deg, #10B981, #059669)", border: "none", borderRadius: 9, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(16,185,129,0.32)", whiteSpace: "nowrap" }}>
-              📂 엑셀 일괄 등록
-            </button>
+            <div
+              onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!dragActive) setDragActive(true); }}
+              onDragLeave={(e) => {
+                e.preventDefault(); e.stopPropagation();
+                // 컨테이너 밖으로 나갈 때만 해제
+                if (!e.currentTarget.contains(e.relatedTarget)) setDragActive(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault(); e.stopPropagation();
+                setDragActive(false);
+                const file = e.dataTransfer?.files?.[0];
+                processExcelFile(file);
+              }}
+              onClick={() => document.getElementById("frw-clients-xlsx")?.click()}
+              style={{
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                gap: 8, padding: "20px 16px", borderRadius: 14,
+                border: dragActive
+                  ? "2.5px dashed #10B981"
+                  : `2px dashed ${darkMode ? "rgba(16,185,129,0.35)" : "rgba(16,185,129,0.45)"}`,
+                background: dragActive
+                  ? (darkMode ? "rgba(16,185,129,0.16)" : "rgba(16,185,129,0.08)")
+                  : (darkMode ? "rgba(16,185,129,0.05)" : "rgba(236,253,245,0.6)"),
+                cursor: "pointer", transition: "all 0.18s",
+                transform: dragActive ? "scale(1.01)" : "scale(1)",
+                pointerEvents: "auto",
+              }}>
+              <div style={{ fontSize: 30, lineHeight: 1, transition: "transform 0.18s", transform: dragActive ? "scale(1.15)" : "scale(1)" }}>
+                {dragActive ? "📥" : "📂"}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: dragActive ? "#10B981" : (darkMode ? "#34D399" : "#059669") }}>
+                {dragActive ? "여기에 놓으세요" : "엑셀 파일로 한 번에 등록"}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text2)", textAlign: "center", lineHeight: 1.5 }}>
+                .xlsx · .xls 파일을 <strong>이 영역에 드래그</strong>하거나 <strong>클릭</strong>해서 선택<br/>
+                거래처명 / 대표자 / 전화 / 모바일 / 코드 헤더 자동 인식
+              </div>
+            </div>
           </div>
         </div>
       </div>
