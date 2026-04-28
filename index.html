@@ -1332,7 +1332,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
 }
 
 // 매출 추이 전용 상세 페이지
-function SalesDetailView({ onBack, thisYear, months12, monthLabels, monthValues, monthlyRevOrders, monthlySales, setMonthlySales, orders, darkMode }) {
+function SalesDetailView({ onBack, thisYear, months12, monthLabels, monthValues, monthlyRevOrders, monthlyRevLedger = {}, monthSource = [], monthlySales, setMonthlySales, orders, darkMode }) {
   const chartRef = useRef(null);
   const chartInst = useRef(null);
   const chartText = darkMode ? "rgba(235,235,245,0.55)" : "rgba(60,60,67,0.55)";
@@ -1431,23 +1431,29 @@ function SalesDetailView({ onBack, thisYear, months12, monthLabels, monthValues,
           <div style={{overflowX:"auto"}}>
             <table>
               <thead>
-                <tr><th>월</th><th style={{textAlign:"right"}}>주문 자동 합산</th><th style={{textAlign:"right"}}>직접 입력</th><th style={{textAlign:"right"}}>적용 매출</th><th style={{textAlign:"right"}}>비중</th></tr>
+                <tr><th>월</th><th style={{textAlign:"right"}}>📒 장부 합계</th><th style={{textAlign:"right"}}>주문 자동합산</th><th style={{textAlign:"right"}}>직접 입력</th><th style={{textAlign:"center"}}>출처</th><th style={{textAlign:"right"}}>적용 매출</th><th style={{textAlign:"right"}}>비중</th></tr>
               </thead>
               <tbody>
                 {months12.map((m, i) => {
+                  const ledger = monthlyRevLedger[m] || 0;
                   const auto = monthlyRevOrders[m] || 0;
                   const direct = monthlySales[m];
                   const applied = monthValues[i];
                   const pct = totalY > 0 ? (applied/totalY*100) : 0;
+                  const src = monthSource[i] || "none";
+                  const srcLabel = src === "direct" ? "직접 입력" : src === "ledger" ? "장부" : src === "orders" ? "주문" : "—";
+                  const srcColor = src === "ledger" ? "#6366F1" : src === "direct" ? "#475569" : "var(--text3)";
                   return (
                     <tr key={m}>
                       <td style={{fontWeight:600}}>{monthLabels[i]}</td>
+                      <td style={{textAlign:"right",fontSize:13,color:ledger>0?"#6366F1":"var(--text3)",fontWeight:ledger>0?600:400}}>{ledger>0?Math.round(ledger).toLocaleString()+"원":"—"}</td>
                       <td style={{textAlign:"right",fontSize:13,color:"var(--text2)"}}>{auto>0?Math.round(auto).toLocaleString()+"원":"—"}</td>
                       <td style={{textAlign:"right"}}>
                         <input type="number" placeholder="auto" value={direct!==undefined&&direct!==""?direct:""}
                           onChange={e=>setMonthlySales(prev=>({...prev,[m]:e.target.value===""?undefined:parseFloat(e.target.value)}))}
                           style={{height:32,fontSize:12,padding:"0 8px",textAlign:"right",width:110}}/>
                       </td>
+                      <td style={{textAlign:"center",fontSize:11,fontWeight:700,color:srcColor}}>{srcLabel}</td>
                       <td style={{textAlign:"right",fontWeight:700,fontSize:13}}>{Math.round(applied).toLocaleString()}원</td>
                       <td style={{textAlign:"right",fontSize:12,color:"var(--text2)"}}>{pct.toFixed(1)}%</td>
                     </tr>
@@ -1459,13 +1465,15 @@ function SalesDetailView({ onBack, thisYear, months12, monthLabels, monthValues,
                   <td style={{fontWeight:700,paddingTop:8}}>합계</td>
                   <td/>
                   <td/>
+                  <td/>
+                  <td/>
                   <td style={{textAlign:"right",fontWeight:800,fontSize:14,paddingTop:8}}>{Math.round(totalY).toLocaleString()}원</td>
                   <td style={{textAlign:"right",fontSize:12,color:"var(--text2)",paddingTop:8}}>100%</td>
                 </tr>
               </tfoot>
             </table>
           </div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:10}}>💡 직접 입력 값이 있으면 주문 자동 합산값을 대체합니다.</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:10}}>💡 우선순위: <b>직접 입력 → 📒 장부 합계 → 주문 자동합산</b>. 위에 있는 값이 있으면 아래 값을 덮어씁니다.</div>
         </div>
       </div>
     </div>
@@ -1684,7 +1692,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, darkMode }) {
   );
 }
 
-function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [] }) {
+function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {} }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", clientId: "", note: "", paymentDue: "", paidDate: "" });
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState(null);
@@ -1840,12 +1848,28 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const thisYear = new Date().getFullYear();
   const months12 = Array.from({length:12},(_,i) => `${thisYear}-${String(i+1).padStart(2,"0")}`);
 
-  // 월별 매출: 직접 입력 우선, 없으면 주문 기록 합산
+  // 월별 매출: 직접 입력 우선 → 장부 합계 → 주문 기록 합산
   const monthlyRevOrders = {};
   orders.forEach(o => { const m=(o.date||"").slice(0,7); monthlyRevOrders[m]=(monthlyRevOrders[m]||0)+parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
-  const monthValues = months12.map(m => {
+  // 장부(ledgers) 월별 청구합계 집계
+  const monthlyRevLedger = {};
+  Object.entries(ledgers || {}).forEach(([ym, m]) => {
+    monthlyRevLedger[ym] = (m.clients || []).reduce((s, c) => s + (parseFloat(c.total) || 0), 0);
+  });
+  // 각 월의 데이터 출처: "direct" | "ledger" | "orders" | "none"
+  const monthSource = months12.map(m => {
     const direct = monthlySales[m];
-    return (direct !== undefined && direct !== null && direct !== "") ? parseFloat(direct) : (monthlyRevOrders[m]||0);
+    if (direct !== undefined && direct !== null && direct !== "") return "direct";
+    if (monthlyRevLedger[m] && monthlyRevLedger[m] > 0) return "ledger";
+    if (monthlyRevOrders[m] && monthlyRevOrders[m] > 0) return "orders";
+    return "none";
+  });
+  const monthValues = months12.map((m, i) => {
+    const src = monthSource[i];
+    if (src === "direct") return parseFloat(monthlySales[m]);
+    if (src === "ledger") return monthlyRevLedger[m];
+    if (src === "orders") return monthlyRevOrders[m];
+    return 0;
   });
   const monthLabels = months12.map(m => m.slice(5)+"월");
   const hasAnyData = monthValues.some(v => v > 0);
@@ -1881,10 +1905,23 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       salesInst.current = new Chart(salesRef.current, {
         type:"bar",
         data:{ labels:monthLabels, datasets:[{ label:"월 매출", data:monthValues,
-          backgroundColor:monthValues.map((_,i)=>{ const m=months12[i]; return (monthlySales[m]!==undefined&&monthlySales[m]!=="")?"rgba(71,85,105,0.85)":"rgba(71,85,105,0.45)"; }),
+          backgroundColor:monthValues.map((_,i)=>{
+            const src = monthSource[i];
+            // direct (직접 입력): 진한 슬레이트, ledger (장부): 진한 인디고, orders (주문): 연한 슬레이트
+            if (src === "direct") return "rgba(71,85,105,0.85)";
+            if (src === "ledger") return "rgba(99,102,241,0.78)";
+            if (src === "orders") return "rgba(71,85,105,0.45)";
+            return "rgba(71,85,105,0.2)";
+          }),
           borderRadius:5 }] },
         options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},
-          tooltip:{callbacks:{label:ctx=>" "+Math.round(ctx.raw).toLocaleString()+"원"}}},
+          tooltip:{callbacks:{
+            label:ctx=>{
+              const src = monthSource[ctx.dataIndex];
+              const srcLabel = src === "direct" ? "직접 입력" : src === "ledger" ? "📒 장부 합계" : src === "orders" ? "주문 기록 합산" : "";
+              return [" "+Math.round(ctx.raw).toLocaleString()+"원", " 출처: "+srcLabel];
+            }
+          }}},
           scales:{ x:{grid:{color:gridCol},ticks:{color:chartText}}, y:{grid:{color:gridCol},ticks:{color:chartText,callback:v=>v>=1000000000?(v/1000000000).toFixed(1)+"조":v>=100000000?(v/100000000).toFixed(0)+"억":v>=1000000?(v/1000000).toFixed(0)+"백만":v>=1000?(v/1000).toLocaleString()+"천":v}} } }
       });
     }
@@ -1905,7 +1942,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       });
     }
     return () => { [salesInst,pieInst,marginInst].forEach(r=>{if(r.current){r.current.destroy();r.current=null;}}); };
-  }, [orders, darkMode, products.length, JSON.stringify(monthlySales), marginSorted]);
+  }, [orders, darkMode, products.length, JSON.stringify(monthlySales), JSON.stringify(monthlyRevLedger), marginSorted]);
 
   const addOrder = () => {
     if (!newOrder.productName || !newOrder.unitPrice) return;
@@ -1957,6 +1994,8 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       monthLabels={monthLabels}
       monthValues={monthValues}
       monthlyRevOrders={monthlyRevOrders}
+      monthlyRevLedger={monthlyRevLedger}
+      monthSource={monthSource}
       monthlySales={monthlySales}
       setMonthlySales={setMonthlySales}
       orders={orders}
@@ -2018,13 +2057,19 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           </div>
           {showMonthInput&&(
             <div style={{marginTop:16,borderTop:"0.5px solid var(--divider)",paddingTop:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>월별 매출 직접 입력 (원) — 입력시 주문 기록 자동합산 값 대체</div>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>월별 매출 직접 입력 (원) — 입력 시 장부 합계/주문 기록 자동값을 덮어씁니다</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
                 {months12.map(m=>{
-                  const autoVal = monthlyRevOrders[m];
+                  const ledgerVal = monthlyRevLedger[m] || 0;
+                  const orderVal = monthlyRevOrders[m] || 0;
+                  const autoVal = ledgerVal > 0 ? ledgerVal : orderVal;
+                  const autoSrc = ledgerVal > 0 ? "장부" : orderVal > 0 ? "주문" : "";
                   return (
                     <div key={m}>
-                      <div style={{fontSize:11,fontWeight:600,color:"var(--text2)",marginBottom:4,textAlign:"center"}}>{m.slice(5)}월</div>
+                      <div style={{fontSize:11,fontWeight:600,color:"var(--text2)",marginBottom:4,textAlign:"center"}}>
+                        {m.slice(5)}월
+                        {autoSrc && <span style={{fontSize:9,color:autoSrc==="장부"?"#6366F1":"var(--text3)",marginLeft:4,fontWeight:700}}>· {autoSrc}</span>}
+                      </div>
                       <input type="number" placeholder={autoVal>0?Math.round(autoVal).toLocaleString()+"원":"-"}
                         value={monthlySales[m]!==undefined&&monthlySales[m]!==""?monthlySales[m]:""}
                         onChange={e=>setMonthlySales(prev=>({...prev,[m]:e.target.value===""?undefined:parseFloat(e.target.value)}))}
@@ -2034,7 +2079,11 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                 })}
               </div>
               <div style={{display:"flex",gap:8,marginTop:10}}>
-                <div style={{fontSize:11,color:"var(--text3)"}}>💡 진한 막대 = 직접 입력, 연한 막대 = 주문 기록 자동합산</div>
+                <div style={{fontSize:11,color:"var(--text3)",display:"flex",gap:14,flexWrap:"wrap",alignItems:"center"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:5}}><span style={{width:12,height:12,borderRadius:3,background:"rgba(71,85,105,0.85)",display:"inline-block"}}/>직접 입력</span>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:5}}><span style={{width:12,height:12,borderRadius:3,background:"rgba(99,102,241,0.78)",display:"inline-block"}}/>📒 장부 합계</span>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:5}}><span style={{width:12,height:12,borderRadius:3,background:"rgba(71,85,105,0.45)",display:"inline-block"}}/>주문 자동합산</span>
+                </div>
                 <div style={{flex:1}}/>
                 <button onClick={()=>setMonthlySales({})} style={{fontSize:11,color:"#F04452",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>전체 초기화</button>
               </div>
@@ -6139,6 +6188,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             setTab={setTab}
             setActiveProdId={setActiveProdId}
             clients={clients}
+            ledgers={ledgers}
           />
         )}
 
