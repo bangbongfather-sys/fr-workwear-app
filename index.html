@@ -2739,7 +2739,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
       </div>
 
       {subTab === "ar" ? (
-        <ARDetailView ledgers={ledgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} />
+        <ARDetailView ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} />
       ) : (<>
       {/* 헤더 + 월 선택 */}
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
@@ -2993,11 +2993,28 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                                 <tbody>
                                   {expAutoEntries.map((ae, aei) => {
                                     const isUnpaid = ae.status === "미입금";
+                                    const toggleHere = () => {
+                                      setLedgers(prev => {
+                                        const next = { ...prev };
+                                        const month = next[ae.ym];
+                                        if (!month || !month.clients) return prev;
+                                        next[ae.ym] = {
+                                          ...month,
+                                          clients: month.clients.map(mc => {
+                                            if ((mc.name||"").trim() === (c.name||"").trim()) {
+                                              return { ...mc, status: isUnpaid ? "입금완료" : "미입금" };
+                                            }
+                                            return mc;
+                                          })
+                                        };
+                                        return next;
+                                      });
+                                    };
                                     return (
-                                      <tr key={"a"+aei} style={{opacity:isUnpaid?1:0.55}}>
+                                      <tr key={"a"+aei} style={{opacity:isUnpaid?1:0.65}}>
                                         <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{ae.ym}</td>
                                         <td style={{textAlign:"center"}}>
-                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isUnpaid?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isUnpaid?"#FF9500":"#00B493"}}>{isUnpaid?"⏳ 미입금":"✓ 완납"}</span>
+                                          <button onClick={toggleHere} title={isUnpaid?"입금완료로 변경":"미입금으로 되돌리기"} style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isUnpaid?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isUnpaid?"#FF9500":"#00B493",border:"none",cursor:"pointer",fontFamily:"inherit"}}>{isUnpaid?"⏳ 미입금":"✓ 완납"}</button>
                                         </td>
                                         <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isUnpaid?"#F04452":"var(--text3)",textDecoration:isUnpaid?"none":"line-through"}}>{isUnpaid?"+":""}{Math.round(ae.amount).toLocaleString()}원</td>
                                         <td style={{fontSize:12,color:"var(--text2)"}}>{ae.memo}</td>
@@ -3087,7 +3104,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
 }
 
 // 거래처별 미수금 상세 보기 (장부의 서브탭)
-function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
+function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode }) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("balance"); // balance | name | charge
   const [filterMode, setFilterMode] = useState("unpaid"); // all | unpaid | paid
@@ -3095,6 +3112,27 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
   const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
   const [editArId, setEditArId] = useState(null);
   const [editArDraft, setEditArDraft] = useState(null);
+
+  // 입금상태 토글 (장부 데이터 직접 변경 → 자동으로 모든 월에 반영)
+  const togglePaidStatus = (clientName, ym) => {
+    if (!setLedgers) return;
+    setLedgers(prev => {
+      const next = { ...prev };
+      const month = next[ym];
+      if (!month || !month.clients) return prev;
+      next[ym] = {
+        ...month,
+        clients: month.clients.map(c => {
+          if ((c.name||"").trim() === (clientName||"").trim()) {
+            const newStatus = c.status === "입금완료" ? "미입금" : "입금완료";
+            return { ...c, status: newStatus };
+          }
+          return c;
+        })
+      };
+      return next;
+    });
+  };
 
   // 거래처별 청구/입금 집계 (clientAR 기준)
   const allNames = new Set(Object.keys(clientAR || {}));
@@ -3305,17 +3343,17 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
                                     <tr key={"u"+ei}>
                                       <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{e.ym}</td>
                                       <td style={{textAlign:"center"}}>
-                                        <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(255,149,0,0.15)",color:"#FF9500"}}>⏳ 미입금</span>
+                                        <button onClick={()=>togglePaidStatus(c.name, e.ym)} title="클릭하여 입금완료로 변경 (장부에 자동 반영)" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(255,149,0,0.15)",color:"#FF9500",border:"none",cursor:"pointer",fontFamily:"inherit"}}>⏳ 미입금</button>
                                       </td>
                                       <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#F04452"}}>+{Math.round(e.amount).toLocaleString()}원</td>
                                       <td style={{fontSize:12,color:"var(--text2)"}}>{e.memo}</td>
                                     </tr>
                                   ))}
                                   {c.autoPaidList.map((e, ei) => (
-                                    <tr key={"p"+ei} style={{opacity:0.55}}>
+                                    <tr key={"p"+ei} style={{opacity:0.65}}>
                                       <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{e.ym}</td>
                                       <td style={{textAlign:"center"}}>
-                                        <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493"}}>✓ 완납</span>
+                                        <button onClick={()=>togglePaidStatus(c.name, e.ym)} title="클릭하여 미입금으로 되돌리기 (장부에 자동 반영)" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✓ 완납</button>
                                       </td>
                                       <td style={{textAlign:"right",fontSize:12,color:"var(--text3)",textDecoration:"line-through"}}>{Math.round(e.amount).toLocaleString()}원</td>
                                       <td style={{fontSize:11,color:"var(--text3)"}}>장부에서 입금완료 처리됨</td>
@@ -4228,7 +4266,8 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
 }
 
 function App() {
-  const [tab, setTab] = useState("calc");
+  const [tab, setTab] = useState(() => load("frw_tab", "calc"));
+  useEffect(() => { save("frw_tab", tab); }, [tab]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(load("frw_sidebar_collapsed", false));
   useEffect(() => { save("frw_sidebar_collapsed", sidebarCollapsed); }, [sidebarCollapsed]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
