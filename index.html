@@ -2079,7 +2079,11 @@ function App() {
   const [darkMode, setDarkMode] = useState(() => load("frw_dark", false));
   const [materials, setMaterials] = useState(() => load("frw_materials", INIT_MATERIALS));
   const [laborItems, setLaborItems] = useState(() => load("frw_labor", INIT_LABOR));
-  const [products, setProducts] = useState(() => load("frw_products", null) || INIT_PRODUCTS);
+  const [products, setProducts] = useState(() => {
+    const raw = load("frw_products", null);
+    if (!raw || !Array.isArray(raw) || raw.length === 0) return INIT_PRODUCTS;
+    try { return raw.map(migrateProduct); } catch (e) { console.error("product migration failed", e); return INIT_PRODUCTS; }
+  });
   const [activeProdId, setActiveProdId] = useState(() => {
     const saved = load("frw_products", null);
     return saved ? saved[0].id : INIT_PRODUCTS[0].id;
