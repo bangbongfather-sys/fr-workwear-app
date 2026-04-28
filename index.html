@@ -2441,25 +2441,8 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
     const key = (clientName || "").trim();
     return (clientAR[key] && clientAR[key].entries) || [];
   };
-  // 자동 미수금: 모든 월에서 status="미입금"인 청구 합계 (거래처명 기준)
-  const autoUnpaid = (clientName) => {
-    const name = (clientName || "").trim();
-    if (!name) return 0;
-    let sum = 0;
-    Object.values(ledgers || {}).forEach(m => {
-      (m.clients || []).forEach(c => {
-        if ((c.name || "").trim() === name && c.status === "미입금") {
-          sum += parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
-        }
-      });
-    });
-    return sum;
-  };
   const arBalance = (clientName) => {
-    // 자동 미수금 + 수동 청구 - 수동 입금
-    const auto = autoUnpaid(clientName);
-    const manual = getAR(clientName).reduce((s, a) => s + (a.type === "청구" ? (parseFloat(a.amount)||0) : -(parseFloat(a.amount)||0)), 0);
-    return auto + manual;
+    return getAR(clientName).reduce((s, a) => s + (a.type === "청구" ? (parseFloat(a.amount)||0) : -(parseFloat(a.amount)||0)), 0);
   };
 
   // 윈도우 전역 드래그 차단 (실수로 브라우저에서 파일 열리는 것 방지)
@@ -2918,11 +2901,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                         <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
                         <td style={{fontWeight:600,fontSize:13}}>
                           <span onClick={()=>setExpandedClientId(isExpanded?null:c.id)} style={{cursor:"pointer"}} title="클릭하여 미수금 내역 펼치기">
-                            {c.name} {(() => {
-                              const bal = arBalance(c.name);
-                              if (bal <= 0) return null;
-                              return <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(240,68,82,0.12)",color:"#F04452",marginLeft:6}}>미수 {Math.round(bal).toLocaleString()}원</span>;
-                            })()}
+                            {c.name} <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>{getAR(c.name).length>0 ? `▶ ${getAR(c.name).length}건 / 잔액 ${Math.round(arBalance(c.name)).toLocaleString()}원` : ""}</span>
                           </span>
                         </td>
                         <td style={{textAlign:"right",fontSize:13}}>{isCorp ? "—" : Math.round(c.supply||0).toLocaleString()+"원"}</td>
@@ -2946,64 +2925,17 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                           <button onClick={()=>deleteOne(c.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
                         </td>
                       </tr>
-                      {isExpanded && (() => {
-                        // 자동 미수금 항목들 (모든 월의 미입금/입금완료)
-                        const allMonthEntries = [];
-                        Object.entries(ledgers || {}).forEach(([ym, m]) => {
-                          (m.clients || []).forEach(mc => {
-                            if ((mc.name || "").trim() === c.name && (mc.status === "미입금" || mc.status === "입금완료")) {
-                              const amt = parseFloat(mc.total) || ((parseFloat(mc.supply)||0) + (parseFloat(mc.tax)||0));
-                              if (amt > 0) allMonthEntries.push({ ym, status: mc.status, amount: amt, memo: mc.memo||"" });
-                            }
-                          });
-                        });
-                        allMonthEntries.sort((a,b) => a.ym.localeCompare(b.ym));
-                        const autoSum = allMonthEntries.filter(e => e.status === "미입금").reduce((s,e) => s + e.amount, 0);
-                        const manualEntries = getAR(c.name);
-                        return (
+                      {isExpanded && (
                         <tr key={c.id+"_exp"}>
                           <td colSpan={9} style={{padding:"14px 22px",background:"var(--surface2)"}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>📒 자동 미수금 (장부 미입금 상태)</div>
-                              <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부에서 입금완료로 바꾸면 자동 차감됩니다</div>
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>📋 청구/입금 내역 (모든 월 공유)</div>
+                              <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>이 거래처의 미수금은 다른 달에서도 동일하게 표시됩니다</div>
                             </div>
-                            {allMonthEntries.length === 0 ? (
-                              <div style={{fontSize:12,color:"var(--text3)",padding:"8px 0",fontStyle:"italic"}}>이 거래처에 등록된 청구가 없습니다.</div>
+                            {getAR(c.name).length === 0 ? (
+                              <div style={{fontSize:12,color:"var(--text3)",padding:"8px 0",fontStyle:"italic"}}>등록된 내역이 없습니다. 아래에서 추가하세요.</div>
                             ) : (
                               <table style={{marginBottom:10}}>
-                                <thead><tr>
-                                  <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
-                                  <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
-                                  <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
-                                  <th style={{fontSize:11}}>메모</th>
-                                </tr></thead>
-                                <tbody>
-                                  {allMonthEntries.map((e, ei) => {
-                                    const isUnpaid = e.status === "미입금";
-                                    return (
-                                      <tr key={ei} style={{opacity:isUnpaid?1:0.6}}>
-                                        <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{e.ym}</td>
-                                        <td style={{textAlign:"center"}}>
-                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isUnpaid?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isUnpaid?"#FF9500":"#00B493"}}>{isUnpaid?"⏳ 미입금":"✓ 완납"}</span>
-                                        </td>
-                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isUnpaid?"#F04452":"var(--text3)",textDecoration:isUnpaid?"none":"line-through"}}>{isUnpaid?"+":""}{Math.round(e.amount).toLocaleString()}원</td>
-                                        <td style={{fontSize:12,color:"var(--text2)"}}>{e.memo}</td>
-                                      </tr>
-                                    );
-                                  })}
-                                  <tr style={{borderTop:"1px solid var(--divider)"}}>
-                                    <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
-                                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(autoSum).toLocaleString()}원</td>
-                                    <td/>
-                                  </tr>
-                                </tbody>
-                              </table>
-                            )}
-
-                            {/* 수동 부분입금/조정 */}
-                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginTop:14,marginBottom:6}}>✏️ 부분 입금/조정 (수동, 선택사항)</div>
-                            {manualEntries.length > 0 && (
-                              <table style={{marginBottom:8}}>
                                 <thead><tr>
                                   <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
                                   <th style={{fontSize:11}}>내역</th>
@@ -3012,7 +2944,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                                   <th style={{width:40}}></th>
                                 </tr></thead>
                                 <tbody>
-                                  {manualEntries.map(a => {
+                                  {getAR(c.name).map(a => {
                                     const isCharge = a.type === "청구";
                                     return (
                                       <tr key={a.id}>
@@ -3020,37 +2952,33 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                                           <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FF9500":"#00B493"}}>{a.type}</span>
                                         </td>
                                         <td style={{fontSize:13}}>{a.desc}</td>
-                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":""}{Math.round(a.amount||0).toLocaleString()}원</td>
                                         <td style={{fontSize:12,color:"var(--text2)"}}>{a.date}</td>
                                         <td style={{textAlign:"center"}}><button onClick={()=>deleteAR(c.name, a.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
                                       </tr>
                                     );
                                   })}
+                                  <tr style={{borderTop:"2px solid var(--divider)"}}>
+                                    <td colSpan={2} style={{fontWeight:700,paddingTop:8}}>잔액 (청구 - 입금)</td>
+                                    <td style={{textAlign:"right",fontWeight:800,fontSize:13,paddingTop:8,color:"#475569"}}>
+                                      {Math.round(arBalance(c.name)).toLocaleString()}원
+                                    </td>
+                                    <td colSpan={2}></td>
+                                  </tr>
                                 </tbody>
                               </table>
                             )}
-                            <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
+                            <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6,marginTop:8}}>
                               <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
-                                <option value="입금">입금</option><option value="청구">청구</option>
+                                <option value="청구">청구</option><option value="입금">입금</option>
                               </select>
-                              <input placeholder="예: 부분 입금 / 조정" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
+                              <input placeholder="내역 (예: 25년 12월 / 2025-12-02)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
                               <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
                               <input type="date" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:11,padding:"0 6px"}}/>
                               <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
                             </div>
-
-                            {/* 최종 잔액 */}
-                            <div style={{marginTop:14,padding:"10px 14px",background:darkMode?"rgba(240,68,82,0.08)":"rgba(240,68,82,0.04)",borderRadius:10,border:`1.5px solid ${darkMode?"rgba(240,68,82,0.3)":"rgba(240,68,82,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                              <div>
-                                <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>최종 미수금 잔액</div>
-                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>자동 미수금 + 수동 청구 - 수동 입금</div>
-                              </div>
-                              <div style={{fontSize:22,fontWeight:900,color:arBalance(c.name)>0?"#F04452":"#00B493"}}>{Math.round(arBalance(c.name)).toLocaleString()}원</div>
-                            </div>
                           </td>
                         </tr>
-                        );
-                      })()
                       )}
                     </React.Fragment>
                   );
@@ -3084,58 +3012,29 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
   const [editArId, setEditArId] = useState(null);
   const [editArDraft, setEditArDraft] = useState(null);
 
-  // === 자동 미수금 집계 (장부의 "미입금" 상태를 자동으로 미수금 처리) ===
-  // 거래처명 → { 미입금 청구 목록, 입금완료 합계, 수동 조정(clientAR) }
-  const byName = {};
-  Object.entries(ledgers || {}).forEach(([ym, m]) => {
-    (m.clients || []).forEach(c => {
-      const name = (c.name || "").trim();
-      if (!name) return;
-      if (!byName[name]) byName[name] = { name, unpaid: [], paid: [], months: new Set() };
-      byName[name].months.add(ym);
-      const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
-      if (c.status === "미입금" && amt > 0) {
-        byName[name].unpaid.push({ ym, amount: amt, supply: parseFloat(c.supply)||0, tax: parseFloat(c.tax)||0, memo: c.memo||"" });
-      } else if (c.status === "입금완료" && amt > 0) {
-        byName[name].paid.push({ ym, amount: amt });
-      }
-      // "법인 거래" 같은 상태는 무시
-    });
-  });
-  // clientAR(수동 조정)도 거래처명 추가
-  Object.keys(clientAR || {}).forEach(name => {
-    const key = (name||"").trim();
-    if (!byName[key]) byName[key] = { name: key, unpaid: [], paid: [], months: new Set() };
-  });
+  // 거래처별 청구/입금 집계 (clientAR 기준)
+  const allNames = new Set(Object.keys(clientAR || {}));
+  // 장부에 있는 거래처도 포함 (AR이 없을 수도 있지만 매출이 있으니 표시)
+  Object.values(ledgers || {}).forEach(m => (m.clients || []).forEach(c => { if (c.name) allNames.add(c.name.trim()); }));
 
-  const summary = Object.values(byName).map(c => {
-    const totalUnpaid = c.unpaid.reduce((s,e) => s + e.amount, 0);
-    const totalPaid = c.paid.reduce((s,e) => s + e.amount, 0);
-    // 수동 조정: clientAR의 청구는 +, 입금은 -
-    const manualEntries = (clientAR[c.name] && clientAR[c.name].entries) || [];
-    const manualCharge = manualEntries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
-    const manualPaid = manualEntries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
-    const balance = totalUnpaid + manualCharge - manualPaid;
-    return {
-      name: c.name,
-      unpaid: c.unpaid.sort((a,b) => a.ym.localeCompare(b.ym)),
-      paid: c.paid,
-      manualEntries,
-      totalUnpaid,
-      totalPaid,
-      manualCharge,
-      manualPaid,
-      balance,
-      charge: totalUnpaid + manualCharge, // 표시용 총 청구
-      months: Array.from(c.months).sort(),
-    };
+  const summary = Array.from(allNames).map(name => {
+    const entries = (clientAR[name] && clientAR[name].entries) || [];
+    const charge = entries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const paid = entries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const balance = charge - paid;
+    // 어느 월에 등장했는지
+    const months = [];
+    Object.entries(ledgers || {}).forEach(([ym, m]) => {
+      if ((m.clients || []).some(c => (c.name||"").trim() === name)) months.push(ym);
+    });
+    return { name, charge, paid, balance, entries, months: months.sort() };
   });
 
   const filtered = summary
     .filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase()))
     .filter(c => {
       if (filterMode === "unpaid") return c.balance > 0;
-      if (filterMode === "paid") return c.balance <= 0 && (c.charge > 0 || c.totalPaid > 0);
+      if (filterMode === "paid") return c.balance <= 0 && (c.charge > 0 || c.entries.length > 0);
       return true;
     });
 
@@ -3148,7 +3047,7 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
   const totalBalance = summary.reduce((s,c) => s + Math.max(0, c.balance), 0);
   const overdueCount = summary.filter(c => c.balance > 0).length;
   const totalCharge = summary.reduce((s,c) => s + c.charge, 0);
-  const totalPaid = summary.reduce((s,c) => s + c.totalPaid + c.manualPaid, 0);
+  const totalPaid = summary.reduce((s,c) => s + c.paid, 0);
 
   const addAR = (name) => {
     if (!arDraft.amount) { alert("금액 필수"); return; }
@@ -3267,137 +3166,80 @@ function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
                           {c.months.length === 0 ? "—" : c.months.length === 1 ? c.months[0] : `${c.months.length}개월`}
                         </td>
                         <td style={{textAlign:"right",fontSize:13}}>{c.charge>0?Math.round(c.charge).toLocaleString()+"원":"—"}</td>
-                        <td style={{textAlign:"right",fontSize:13,color:(c.totalPaid+c.manualPaid)>0?"#00B493":"var(--text3)"}}>{(c.totalPaid+c.manualPaid)>0?Math.round(c.totalPaid+c.manualPaid).toLocaleString()+"원":"—"}</td>
+                        <td style={{textAlign:"right",fontSize:13,color:c.paid>0?"#00B493":"var(--text3)"}}>{c.paid>0?Math.round(c.paid).toLocaleString()+"원":"—"}</td>
                         <td style={{textAlign:"right",fontWeight:800,fontSize:14,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</td>
                         <td style={{textAlign:"center"}}>
-                          {(c.manualEntries||[]).length > 0 && (
-                            <button onClick={(e)=>{ e.stopPropagation(); deleteAllForClient(c.name); }} title="이 거래처의 수동 조정 내역 삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}>🗑</button>
-                          )}
+                          <button onClick={(e)=>{ e.stopPropagation(); deleteAllForClient(c.name); }} title="이 거래처의 모든 내역 삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}>🗑</button>
                         </td>
                       </tr>
                       {isExpanded && (
                         <tr>
                           <td colSpan={7} style={{padding:"14px 22px",background:"var(--surface2)"}}>
-                            {/* 자동 미수금 (장부 - 미입금 상태) */}
-                            <div style={{marginBottom:14}}>
-                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-                                <span>📒 자동 미수금 (장부 미입금 상태)</span>
-                                <span style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부에서 입금완료로 바꾸면 자동 차감됩니다</span>
-                              </div>
-                              {c.unpaid.length === 0 && c.totalPaid === 0 ? (
-                                <div style={{fontSize:12,color:"var(--text3)",padding:"6px 0",fontStyle:"italic"}}>장부에 등록된 청구가 없습니다.</div>
-                              ) : (
-                                <table style={{marginBottom:6}}>
-                                  <thead><tr>
-                                    <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
-                                    <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
-                                    <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
-                                    <th style={{fontSize:11}}>메모</th>
-                                  </tr></thead>
-                                  <tbody>
-                                    {c.unpaid.map((e, ei) => (
-                                      <tr key={"u"+ei}>
-                                        <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{e.ym}</td>
-                                        <td style={{textAlign:"center"}}>
-                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(255,149,0,0.15)",color:"#FF9500"}}>⏳ 미입금</span>
-                                        </td>
-                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#F04452"}}>+{Math.round(e.amount).toLocaleString()}원</td>
-                                        <td style={{fontSize:12,color:"var(--text2)"}}>{e.memo}</td>
-                                      </tr>
-                                    ))}
-                                    {c.paid.map((e, ei) => (
-                                      <tr key={"p"+ei} style={{opacity:0.6}}>
-                                        <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{e.ym}</td>
-                                        <td style={{textAlign:"center"}}>
-                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493"}}>✓ 완납</span>
-                                        </td>
-                                        <td style={{textAlign:"right",fontSize:12,color:"var(--text3)",textDecoration:"line-through"}}>{Math.round(e.amount).toLocaleString()}원</td>
-                                        <td style={{fontSize:11,color:"var(--text3)"}}>장부에서 입금완료 처리됨</td>
-                                      </tr>
-                                    ))}
-                                    <tr style={{borderTop:"1px solid var(--divider)"}}>
-                                      <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 청구 합계</td>
-                                      <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(c.totalUnpaid).toLocaleString()}원</td>
-                                      <td/>
-                                    </tr>
-                                  </tbody>
-                                </table>
-                              )}
-                            </div>
-
-                            {/* 수동 부분입금/조정 (선택사항) */}
-                            <div>
-                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
-                                <span>✏️ 부분 입금/조정 (수동)</span>
-                                <span style={{fontSize:10,color:"var(--text3)"}}>일부 입금되었지만 장부 상태는 미입금인 경우 여기서 차감 등록</span>
-                              </div>
-                              {c.manualEntries.length > 0 && (
-                                <table style={{marginBottom:8}}>
-                                  <thead><tr>
-                                    <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
-                                    <th style={{fontSize:11}}>내역</th>
-                                    <th style={{textAlign:"right",fontSize:11,width:130}}>금액</th>
-                                    <th style={{width:110,fontSize:11}}>날짜</th>
-                                    <th style={{width:90,textAlign:"center",fontSize:11}}>관리</th>
-                                  </tr></thead>
-                                  <tbody>
-                                    {[...c.manualEntries].sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(a => {
-                                      const isCharge = a.type === "청구";
-                                      if (editArId === a.id && editArDraft) {
-                                        return (
-                                          <tr key={a.id} style={{background:"var(--surface)"}}>
-                                            <td style={{textAlign:"center"}}>
-                                              <select value={editArDraft.type} onChange={e=>setEditArDraft(d=>({...d,type:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}>
-                                                <option value="청구">청구</option><option value="입금">입금</option>
-                                              </select>
-                                            </td>
-                                            <td><input value={editArDraft.desc||""} onChange={e=>setEditArDraft(d=>({...d,desc:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px"}}/></td>
-                                            <td><input type="number" value={editArDraft.amount||""} onChange={e=>setEditArDraft(d=>({...d,amount:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
-                                            <td><input type="date" value={editArDraft.date||""} onChange={e=>setEditArDraft(d=>({...d,date:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}/></td>
-                                            <td style={{textAlign:"center"}}>
-                                              <button onClick={()=>saveEditAR(c.name)} style={{background:"#007AFF",border:"none",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 8px",marginRight:4,fontFamily:"inherit"}}>저장</button>
-                                              <button onClick={cancelEditAR} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:11,fontWeight:600,borderRadius:6,padding:"3px 7px",fontFamily:"inherit"}}>취소</button>
-                                            </td>
-                                          </tr>
-                                        );
-                                      }
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>📋 청구/입금 내역 (모든 월 공유)</div>
+                            {c.entries.length === 0 ? (
+                              <div style={{fontSize:12,color:"var(--text3)",padding:"8px 0",fontStyle:"italic"}}>등록된 내역이 없습니다.</div>
+                            ) : (
+                              <table style={{marginBottom:10}}>
+                                <thead><tr>
+                                  <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
+                                  <th style={{fontSize:11}}>내역</th>
+                                  <th style={{textAlign:"right",fontSize:11,width:130}}>금액</th>
+                                  <th style={{width:120,fontSize:11}}>날짜</th>
+                                  <th style={{width:90,textAlign:"center",fontSize:11}}>관리</th>
+                                </tr></thead>
+                                <tbody>
+                                  {[...c.entries].sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(a => {
+                                    const isCharge = a.type === "청구";
+                                    if (editArId === a.id && editArDraft) {
                                       return (
-                                        <tr key={a.id}>
+                                        <tr key={a.id} style={{background:"var(--surface)"}}>
                                           <td style={{textAlign:"center"}}>
-                                            <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FF9500":"#00B493"}}>{a.type}</span>
+                                            <select value={editArDraft.type} onChange={e=>setEditArDraft(d=>({...d,type:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}>
+                                              <option value="청구">청구</option><option value="입금">입금</option>
+                                            </select>
                                           </td>
-                                          <td style={{fontSize:13}}>{a.desc}</td>
-                                          <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
-                                          <td style={{fontSize:12,color:"var(--text2)"}}>{a.date||"—"}</td>
+                                          <td><input value={editArDraft.desc||""} onChange={e=>setEditArDraft(d=>({...d,desc:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px"}}/></td>
+                                          <td><input type="number" value={editArDraft.amount||""} onChange={e=>setEditArDraft(d=>({...d,amount:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
+                                          <td><input type="date" value={editArDraft.date||""} onChange={e=>setEditArDraft(d=>({...d,date:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}/></td>
                                           <td style={{textAlign:"center"}}>
-                                            <button onClick={()=>startEditAR(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:13,marginRight:4}}>✏️</button>
-                                            <button onClick={()=>deleteAR(c.name, a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button>
+                                            <button onClick={()=>saveEditAR(c.name)} style={{background:"#007AFF",border:"none",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 8px",marginRight:4,fontFamily:"inherit"}}>저장</button>
+                                            <button onClick={cancelEditAR} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:11,fontWeight:600,borderRadius:6,padding:"3px 7px",fontFamily:"inherit"}}>취소</button>
                                           </td>
                                         </tr>
                                       );
-                                    })}
-                                  </tbody>
-                                </table>
-                              )}
-                              {/* 새 수동 조정 추가 폼 */}
-                              <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
-                                <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
-                                  <option value="입금">입금</option><option value="청구">청구</option>
-                                </select>
-                                <input placeholder="예: 부분 입금 / 조정" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
-                                <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
-                                <input type="date" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:11,padding:"0 6px"}}/>
-                                <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
-                              </div>
-                            </div>
-
-                            {/* 최종 잔액 */}
-                            <div style={{marginTop:14,padding:"10px 14px",background:darkMode?"rgba(240,68,82,0.08)":"rgba(240,68,82,0.04)",borderRadius:10,border:`1.5px solid ${darkMode?"rgba(240,68,82,0.3)":"rgba(240,68,82,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                              <div>
-                                <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>최종 미수금 잔액</div>
-                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>= 자동 미수금({Math.round(c.totalUnpaid).toLocaleString()}) + 수동 청구({Math.round(c.manualCharge).toLocaleString()}) - 수동 입금({Math.round(c.manualPaid).toLocaleString()})</div>
-                              </div>
-                              <div style={{fontSize:22,fontWeight:900,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</div>
+                                    }
+                                    return (
+                                      <tr key={a.id}>
+                                        <td style={{textAlign:"center"}}>
+                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FF9500":"#00B493"}}>{a.type}</span>
+                                        </td>
+                                        <td style={{fontSize:13}}>{a.desc}</td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
+                                        <td style={{fontSize:12,color:"var(--text2)"}}>{a.date||"—"}</td>
+                                        <td style={{textAlign:"center"}}>
+                                          <button onClick={()=>startEditAR(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:13,marginRight:4}}>✏️</button>
+                                          <button onClick={()=>deleteAR(c.name, a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  <tr style={{borderTop:"2px solid var(--divider)"}}>
+                                    <td colSpan={2} style={{fontWeight:700,paddingTop:8}}>잔액 (청구 - 입금)</td>
+                                    <td style={{textAlign:"right",fontWeight:800,fontSize:14,paddingTop:8,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</td>
+                                    <td colSpan={2}></td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            )}
+                            {/* 새 내역 추가 폼 */}
+                            <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
+                              <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
+                                <option value="청구">청구</option><option value="입금">입금</option>
+                              </select>
+                              <input placeholder="내역 (예: 25년 12월 / 분기 정산)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
+                              <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
+                              <input type="date" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:11,padding:"0 6px"}}/>
+                              <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
                             </div>
                           </td>
                         </tr>
