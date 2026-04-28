@@ -1449,11 +1449,14 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       )}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <div className="card">
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6}}>
             <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>📈 {thisYear}년 월별 매출 추이</div>
-            <button onClick={()=>setShowMonthInput(v=>!v)} style={{fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>
-              {showMonthInput?"닫기":"✏️ 직접 입력"}
-            </button>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>setShowMonthInput(v=>!v)} style={{fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>
+                {showMonthInput?"닫기":"✏️ 직접 입력"}
+              </button>
+              {hasAnyData && <button onClick={()=>setExpandedChart("sales")} title="확대 보기" style={{width:30,height:30,fontSize:13,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>⤢</button>}
+            </div>
           </div>
           <div style={{height:200,position:"relative"}}>
             {hasAnyData?<canvas ref={salesRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>직접 입력 또는<br/>주문 기록을 추가하세요</div>}
