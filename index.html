@@ -2491,22 +2491,41 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
         const ws1 = wb.Sheets[wb.SheetNames[0]];
         const rows1 = XLSX.utils.sheet_to_json(ws1, { header: 1, defval: "" });
 
-        // 헤더 자동 감지: "거래처명" 포함하는 행 찾기
-        let headerIdx = -1, nameCol = -1, supplyCol = -1, taxCol = -1, totalCol = -1, statusCol = -1, memoCol = -1;
-        for (let i = 0; i < Math.min(rows1.length, 20); i++) {
+        // 헤더 자동 감지: 가장 많은 헤더가 매칭되는 행을 메인 테이블로 선택
+        // (TOP 10 요약 같은 부분 헤더가 먼저 잡히는 것을 방지)
+        const TARGETS = [
+          { key: "name",   re: /거래처명|업체명|회사명/ },
+          { key: "supply", re: /공급가액/ },
+          { key: "tax",    re: /^부가세/ },
+          { key: "total",  re: /청구합계|총.*청구|합계.*원/ },
+          { key: "status", re: /입금현황|상태/ },
+          { key: "memo",   re: /메모|비고|특이사항/ },
+        ];
+        let bestRow = -1, bestScore = 0, bestCols = {};
+        for (let i = 0; i < Math.min(rows1.length, 25); i++) {
           const row = rows1[i] || [];
+          const found = {};
+          let score = 0;
           for (let j = 0; j < row.length; j++) {
             const v = String(row[j]||"").trim();
-            if (/거래처명|업체명|회사명/.test(v) && nameCol < 0) { nameCol = j; headerIdx = i; }
-            if (/공급가액/.test(v) && supplyCol < 0) supplyCol = j;
-            if (/^부가세/.test(v) && taxCol < 0) taxCol = j;
-            if (/청구합계|합계.*원|총.*청구|청구.*합계/.test(v) && totalCol < 0) totalCol = j;
-            if (/입금현황|상태/.test(v) && statusCol < 0) statusCol = j;
-            if (/메모|비고/.test(v) && memoCol < 0) memoCol = j;
+            for (const t of TARGETS) {
+              if (t.re.test(v) && !(t.key in found)) { found[t.key] = j; score++; break; }
+            }
           }
-          if (nameCol >= 0) break;
+          // 최소 3개 이상 매칭 + 최대 점수 행 선택
+          if (score >= 3 && score > bestScore) {
+            bestRow = i; bestScore = score; bestCols = found;
+          }
         }
-        if (nameCol < 0) { alert("거래처명 헤더를 찾을 수 없습니다."); return; }
+        if (bestRow < 0) { alert("거래처명/공급가액/청구합계 헤더를 찾을 수 없습니다.\n메인 테이블 헤더가 한 행에 모여 있는지 확인하세요."); return; }
+        const headerIdx = bestRow;
+        const nameCol   = bestCols.name;
+        const supplyCol = (bestCols.supply ?? -1);
+        const taxCol    = (bestCols.tax ?? -1);
+        const totalCol  = (bestCols.total ?? -1);
+        const statusCol = (bestCols.status ?? -1);
+        const memoCol   = (bestCols.memo ?? -1);
+        if (nameCol < 0) { alert("거래처명 컬럼을 찾을 수 없습니다."); return; }
 
         // 년/월 자동 감지: 헤더 위쪽 텍스트에서 YYYY년 MM월 패턴 찾기
         let importedYM = selectedYM;
@@ -2525,8 +2544,12 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
         for (let i = headerIdx + 1; i < rows1.length; i++) {
           const row = rows1[i] || [];
           const nm = String(row[nameCol]||"").trim();
-          if (!nm || /^합계|^total|^소계/i.test(nm)) continue;
-          // No. 컬럼이 비어있고 거래처명이 "합계 39개..." 같은 형식이면 스킵
+          if (!nm) continue;
+          // 합계/소계/"N개 거래처" 형식의 합계 행은 스킵
+          if (/^합계|^total|^소계|^\d+개\s*거래처$|^거래처\s*합계$/i.test(nm)) continue;
+          // 같은 행의 "No." 컬럼이 "합계"이면 스킵 (메인 테이블 합계 행)
+          const noCol = nameCol - 1 >= 0 ? String(row[nameCol-1]||"").trim() : "";
+          if (/^합계$/.test(noCol)) continue;
           const supplyRaw = row[supplyCol];
           const supply = (supplyRaw === "—" || supplyRaw === "" || supplyRaw == null) ? 0 : (parseFloat(String(supplyRaw).replace(/[^\d.-]/g,"")) || 0);
           const taxRaw = row[taxCol];
