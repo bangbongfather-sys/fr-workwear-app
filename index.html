@@ -1683,31 +1683,105 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const [expandedChart, setExpandedChart] = useState(null); // "sales" | "pie" | "margin" | "kpis"
   // 전용 상세 페이지: null | "sales" | "orders"
   const [detailView, setDetailView] = useState(null);
-  // 카드 크기: { key: "S"|"M"|"L" }
-  const [cardSizes, setCardSizes] = useState(() => load("frw_card_sizes", {}));
-  useEffect(() => { save("frw_card_sizes", cardSizes); }, [cardSizes]);
-  const cycleSize = (key) => {
-    setCardSizes(prev => {
-      const cur = prev[key] || "M";
-      const next = cur === "S" ? "M" : cur === "M" ? "L" : "S";
-      return { ...prev, [key]: next };
-    });
+  // 카드 레이아웃: { key: { width: px, height: px } } — 자유 드래그 리사이즈
+  const [cardLayouts, setCardLayouts] = useState(() => load("frw_card_layouts", {}));
+  useEffect(() => { save("frw_card_layouts", cardLayouts); }, [cardLayouts]);
+  // 드래그 상태
+  const dragRef = useRef(null); // { key, startX, startY, startW, startH, mode: 'br'|'r'|'b' }
+  const [dragging, setDragging] = useState(null);
+
+  const startResize = (key, mode, defW, defH) => (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const cur = cardLayouts[key] || {};
+    const cardEl = e.currentTarget.closest(".rcard");
+    const rect = cardEl ? cardEl.getBoundingClientRect() : { width: defW, height: defH };
+    const startX = e.touches ? e.touches[0].clientX : e.clientX;
+    const startY = e.touches ? e.touches[0].clientY : e.clientY;
+    dragRef.current = {
+      key, mode,
+      startX, startY,
+      startW: cur.width || rect.width,
+      startH: cur.height || rect.height,
+    };
+    setDragging(key);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = mode === "br" ? "se-resize" : mode === "r" ? "ew-resize" : "ns-resize";
   };
-  // 그리드 span 매핑 (12-column grid)
-  const kpiSpan = (key) => { const s = cardSizes[key] || "M"; return s === "S" ? 2 : s === "L" ? 6 : 3; };
-  const chartSpan = (key) => { const s = cardSizes[key] || "M"; return s === "S" ? 4 : s === "L" ? 12 : 6; };
-  const fullSpan = (key) => { const s = cardSizes[key] || "M"; return s === "S" ? 6 : s === "L" ? 12 : 12; };
-  const sizeBtn = (key, defSize) => {
-    const cur = cardSizes[key] || defSize || "M";
-    return (
-      <div style={{display:"flex",gap:2,alignItems:"center"}}>
-        <button onClick={(e)=>{e.stopPropagation(); cycleSize(key);}} title={`크기 변경 (현재 ${cur==="S"?"작게":cur==="L"?"크게":"보통"})`}
-          style={{width:26,height:26,fontSize:11,color:"var(--text2)",background:"var(--surface2)",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>
-          {cur==="S"?"⊟":cur==="L"?"⊞":"◫"}
-        </button>
-      </div>
-    );
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!dragRef.current) return;
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      const { key, mode, startX, startY, startW, startH } = dragRef.current;
+      const dx = cx - startX;
+      const dy = cy - startY;
+      let newW = startW, newH = startH;
+      if (mode === "r" || mode === "br") newW = Math.max(140, startW + dx);
+      if (mode === "b" || mode === "br") newH = Math.max(80, startH + dy);
+      setCardLayouts(prev => ({ ...prev, [key]: { width: newW, height: newH } }));
+    };
+    const onEnd = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      setDragging(null);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onEnd);
+    window.addEventListener("touchmove", onMove, { passive: false });
+    window.addEventListener("touchend", onEnd);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onEnd);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+    };
+  }, []);
+
+  // 카드 스타일 + 리사이즈 핸들
+  const cardLayoutStyle = (key) => {
+    const l = cardLayouts[key];
+    if (!l) return {};
+    return { width: l.width + "px", height: l.height + "px", flex: "0 0 auto" };
   };
+  const resetCardSize = (key) => {
+    setCardLayouts(prev => { const next = { ...prev }; delete next[key]; return next; });
+  };
+  const ResizeHandles = ({ keyName }) => (
+    <>
+      {/* 우측 가장자리 */}
+      <div
+        onMouseDown={startResize(keyName, "r")}
+        onTouchStart={startResize(keyName, "r")}
+        style={{ position: "absolute", top: 8, bottom: 14, right: -2, width: 8, cursor: "ew-resize", zIndex: 5 }}
+      />
+      {/* 하단 가장자리 */}
+      <div
+        onMouseDown={startResize(keyName, "b")}
+        onTouchStart={startResize(keyName, "b")}
+        style={{ position: "absolute", left: 8, right: 14, bottom: -2, height: 8, cursor: "ns-resize", zIndex: 5 }}
+      />
+      {/* 우하단 코너 (메인 핸들) */}
+      <div
+        onMouseDown={startResize(keyName, "br")}
+        onTouchStart={startResize(keyName, "br")}
+        title="드래그하여 크기 조절 (더블클릭으로 초기화)"
+        onDoubleClick={(e) => { e.stopPropagation(); resetCardSize(keyName); }}
+        style={{
+          position: "absolute", right: 0, bottom: 0,
+          width: 18, height: 18, cursor: "se-resize", zIndex: 6,
+          display: "flex", alignItems: "flex-end", justifyContent: "flex-end",
+          color: dragging === keyName ? "#007AFF" : "var(--text3)",
+          fontSize: 14, lineHeight: 1, paddingRight: 2, paddingBottom: 1,
+          opacity: dragging === keyName ? 1 : 0.6,
+          transition: "opacity 0.15s, color 0.15s",
+        }}
+      >⤡</div>
+    </>
+  );
+
   // ESC로 모달/상세 닫기
   useEffect(() => {
     if (!expandedChart && !detailView) return;
@@ -1813,17 +1887,18 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
     setEditingOrderId(null); setEditOrderDraft(null);
   };
   const kpi = (key, label, val, sub, color) => {
-    const span = kpiSpan(key);
-    const size = cardSizes[key] || "M";
-    const valFontSize = size === "L" ? 32 : size === "S" ? 18 : 24;
+    const layout = cardLayouts[key];
+    // 카드 크기에 따라 폰트 자동 스케일
+    const w = layout?.width || 200;
+    const valFontSize = w >= 360 ? 32 : w >= 240 ? 26 : w >= 180 ? 22 : 18;
     return (
-      <div className="card" style={{gridColumn:`span ${span}`, minWidth:0}}>
+      <div className="card rcard" style={{ ...cardLayoutStyle(key), position: "relative", minWidth: 140, flex: layout ? "0 0 auto" : "1 1 200px", overflow: "hidden" }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,gap:6}}>
           <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,flex:1,minWidth:0}}>{label}</div>
-          {sizeBtn(key)}
         </div>
         <div style={{fontSize:valFontSize,fontWeight:800,color:color||"var(--text1)",lineHeight:1.05,wordBreak:"break-all"}}>{val}</div>
         {sub && <div style={{fontSize:12,color:"var(--text2)",marginTop:4}}>{sub}</div>}
+        <ResizeHandles keyName={key} />
       </div>
     );
   };
@@ -1851,24 +1926,35 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       darkMode={darkMode}
     />;
   }
+  // 안내 토스트 (한 번만 표시)
+  const [showResizeHint, setShowResizeHint] = useState(() => !load("frw_resize_hint_seen", false));
+  const dismissResizeHint = () => { setShowResizeHint(false); save("frw_resize_hint_seen", true); };
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(12, 1fr)",gap:12}}>
+      {showResizeHint && (
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,background:"rgba(0,122,255,0.08)",border:"1px solid rgba(0,122,255,0.2)",fontSize:13,color:"var(--text1)"}}>
+          <span style={{fontSize:16}}>💡</span>
+          <span style={{flex:1}}>각 카드의 <b>우하단 ⤡ 핸들</b>을 드래그하면 자유롭게 크기를 조절할 수 있습니다. 더블클릭하면 초기화됩니다.</span>
+          <button onClick={dismissResizeHint} style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:11,fontFamily:"inherit",color:"var(--text2)"}}>알겠어요</button>
+        </div>
+      )}
+      <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"stretch"}}>
         {kpi("kpi_year", thisYear+"년 총 매출", totalYearRevenue>0?Math.round(totalYearRevenue).toLocaleString()+"원":"—", "월별 입력 기준", "#475569")}
         {kpi("kpi_order_rev", "판매 기록 매출", totalOrderRevenue>0?Math.round(totalOrderRevenue).toLocaleString()+"원":"—", orders.length+"건 합산", null)}
         {kpi("kpi_margin", "납품가 마진율", avgMarginSell>0?avgMarginSell.toFixed(1)+"%":"—", "현재 제품 기준", avgMarginSell>=26?"#00B493":avgMarginSell>=20?"#FF9500":avgMarginSell>0?"#F04452":null)}
         {kpi("kpi_top", "최다 매출 제품", topProduct?topProduct[0]:"—", topProduct?Math.round(topProduct[1]).toLocaleString()+"원":"기록 없음", null)}
       </div>
       {orders.length > 0 && (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(12, 1fr)",gap:12}}>
+        <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"stretch"}}>
           {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"건", totalUnpaidAmt>0?"#FF9500":"#00B493")}
           {kpi("kpi_overdue", "연체 미수금", Math.round(totalOverdueAmt).toLocaleString()+"원", overdueCount>0?overdueCount+"건 연체":"연체 없음", totalOverdueAmt>0?"#F04452":"#00B493")}
           {kpi("kpi_paid", "완납 매출", Math.round(totalOrderRevenue - totalUnpaidAmt).toLocaleString()+"원", paidCount+"건 완납", "#00B493")}
           {kpi("kpi_recovery", "회수율", totalOrderRevenue>0?Math.round((totalOrderRevenue-totalUnpaidAmt)/totalOrderRevenue*100)+"%":"—", "전체 매출 대비", null)}
         </div>
       )}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(12, 1fr)",gap:16}}>
-        <div className="card" style={{gridColumn:`span ${chartSpan("sales")}`, minWidth:0}}>
+      <div style={{display:"flex",flexWrap:"wrap",gap:16,alignItems:"stretch"}}>
+        <div className="card rcard" style={{ ...cardLayoutStyle("sales"), position: "relative", minWidth: 280, flex: cardLayouts["sales"] ? "0 0 auto" : "1 1 380px", overflow: "hidden" }}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6}}>
             <div onClick={()=>setDetailView("sales")} title="클릭하여 상세 페이지 열기"
               style={{fontSize:13,fontWeight:700,color:"var(--text1)",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
@@ -1879,10 +1965,9 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                 {showMonthInput?"닫기":"✏️ 직접 입력"}
               </button>
               {hasAnyData && <button onClick={()=>setExpandedChart("sales")} title="확대 보기" style={{width:30,height:30,fontSize:13,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>⤢</button>}
-              {sizeBtn("sales")}
             </div>
           </div>
-          <div style={{height:cardSizes["sales"]==="L"?320:cardSizes["sales"]==="S"?140:200,position:"relative"}}>
+          <div style={{height:cardLayouts["sales"]?Math.max(120, cardLayouts["sales"].height - 80):200,position:"relative"}}>
             {hasAnyData?<canvas ref={salesRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>직접 입력 또는<br/>주문 기록을 추가하세요</div>}
           </div>
           {showMonthInput&&(
@@ -1909,21 +1994,22 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
               </div>
             </div>
           )}
+          <ResizeHandles keyName="sales" />
         </div>
-        <div className="card" style={{gridColumn:`span ${chartSpan("pie")}`, minWidth:0}}>
+        <div className="card rcard" style={{ ...cardLayoutStyle("pie"), position: "relative", minWidth: 240, flex: cardLayouts["pie"] ? "0 0 auto" : "1 1 320px", overflow: "hidden" }}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6}}>
             <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>🥧 제품군별 매출 비중</div>
             <div style={{display:"flex",gap:6}}>
               {prodLabels.length>0 && <button onClick={()=>setExpandedChart("pie")} title="확대 보기" style={{width:30,height:30,fontSize:13,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>⤢</button>}
-              {sizeBtn("pie")}
             </div>
           </div>
-          <div style={{height:cardSizes["pie"]==="L"?320:cardSizes["pie"]==="S"?140:200,position:"relative"}}>
+          <div style={{height:cardLayouts["pie"]?Math.max(120, cardLayouts["pie"].height - 60):200,position:"relative"}}>
             {prodLabels.length>0?<canvas ref={pieRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>주문 기록을 추가하면<br/>그래프가 표시됩니다</div>}
           </div>
+          <ResizeHandles keyName="pie" />
         </div>
       </div>
-      <div className="card">
+      <div className="card rcard" style={{ ...cardLayoutStyle("margin"), position: "relative", overflow: cardLayouts["margin"] ? "auto" : "visible" }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,gap:6,flexWrap:"wrap"}}>
           <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>📊 제품별 마진율 현황 <span style={{fontSize:11,fontWeight:400,color:"var(--text3)"}}>(납품가 대비)</span></div>
           <div style={{display:"flex",gap:6}}>
@@ -1931,7 +2017,6 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
               {marginSorted?"↕ 원래 순서":"↓ 높은순 정렬"}
             </button>
             {mLabels.length>0 && <button onClick={()=>setExpandedChart("margin")} title="확대 보기" style={{width:30,height:30,fontSize:13,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>⤢</button>}
-            {sizeBtn("margin")}
           </div>
         </div>
         <div style={{height:Math.max(140,mLabels.length*48),position:"relative"}}>
@@ -2011,8 +2096,9 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
             })}
           </div>
         </>)}
+        <ResizeHandles keyName="margin" />
       </div>
-      <div className="card">
+      <div className="card rcard" style={{ ...cardLayoutStyle("orders"), position: "relative", overflow: cardLayouts["orders"] ? "auto" : "visible" }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6,flexWrap:"wrap"}}>
           <div onClick={()=>setDetailView("orders")} title="클릭하여 상세 페이지 열기"
             style={{fontSize:15,fontWeight:700,color:"var(--text1)",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
@@ -2020,7 +2106,6 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           </div>
           <div style={{display:"flex",gap:6,alignItems:"center"}}>
             <button onClick={()=>setShowOrderForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showOrderForm?"닫기":"+ 판매 추가"}</button>
-            {sizeBtn("orders")}
           </div>
         </div>
         {showOrderForm&&(
@@ -2138,6 +2223,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
             </tbody></table>
           </div>
         )}
+        <ResizeHandles keyName="orders" />
       </div>
       {expandedChart && (
         <ChartExpandModal
