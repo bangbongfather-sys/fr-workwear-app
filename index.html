@@ -492,17 +492,22 @@ const migrateProduct = (p) => {
   // 신규 포맷 (specs 배열 있음)
   if (p.specs && Array.isArray(p.specs) && p.specs.length > 0) {
     const fixSpec = s => {
-      const ms = { ...DEFAULT_MARGINS, ...(s.margins || {}) };
-      const grades = (s.grades && Array.isArray(s.grades) && s.grades.length > 0) ? [...s.grades] : Object.keys(ms);
-      const gradeSet = new Set(grades);
-      // 누락된 기본 등급 추가
-      for (const g of GRADES) if (!gradeSet.has(g)) { grades.push(g); gradeSet.add(g); }
+      const ms = { ...(s.margins || {}) };
+      // grades 배열이 명시적으로 존재하면 그대로 사용 (사용자 의도 존중)
+      // 없으면 (구버전 데이터) 기본 ABCD로 시작
+      let grades;
+      if (s.grades && Array.isArray(s.grades) && s.grades.length > 0) {
+        grades = [...s.grades];
+      } else {
+        grades = [...GRADES];
+      }
       const margins = {};
       const priceOverrides = {};
       for (const g of grades) {
         margins[g] = ms[g] ?? DEFAULT_MARGINS[g] ?? 30;
         priceOverrides[g] = (s.priceOverrides && s.priceOverrides[g]) || "";
       }
+      const gradeSet = new Set(grades);
       return {
         id: s.id ?? uid(),
         name: s.name || "요척서",
