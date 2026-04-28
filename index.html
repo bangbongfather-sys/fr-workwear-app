@@ -927,12 +927,15 @@ const migrateProduct = (p) => {
     createdAt: Date.now(),
   };
   return {
+    ...q,  // image 등 추가 필드 보존
     id: q.id,
     name: q.name,
     specs: [spec],
     activeSpecId: spec.id,
     include: q.include === undefined ? true : q.include,
     marketPrice: q.marketPrice === undefined ? "" : q.marketPrice,
+    // 레거시 spec 필드들은 정리
+    fabrics: undefined, extras: undefined, margins: undefined, priceOverrides: undefined, selectedGrade: undefined, adminRate: undefined, grades: undefined, margin: undefined,
   };
 };
 const INIT_PRODUCTS = [newProduct("자켓"), newProduct("바지"), newProduct("조끼")];
