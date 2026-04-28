@@ -994,16 +994,20 @@ function AppleMarkdown({ text }) {
   const out = [];
   let i = 0;
   const inline = (s) => {
+    // 이미지: ![alt](url) — base64/data: URL도 지원
     // **bold**, *italic*
     const parts = [];
     let last = 0;
-    const re = /\*\*(.+?)\*\*|\*(.+?)\*/g;
+    const re = /!\[([^\]]*)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*/g;
     let m;
     let key = 0;
     while ((m = re.exec(s)) !== null) {
       if (m.index > last) parts.push(s.slice(last, m.index));
-      if (m[1]) parts.push(<strong key={key++}>{m[1]}</strong>);
-      else if (m[2]) parts.push(<em key={key++}>{m[2]}</em>);
+      if (m[2]) {
+        // 이미지
+        parts.push(<img key={key++} src={m[2]} alt={m[1]||""} style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 10, border: "1px solid var(--doc-border)", display: "block", margin: "8px 0" }} />);
+      } else if (m[3]) parts.push(<strong key={key++}>{m[3]}</strong>);
+      else if (m[4]) parts.push(<em key={key++}>{m[4]}</em>);
       last = m.index + m[0].length;
     }
     if (last < s.length) parts.push(s.slice(last));
@@ -1011,6 +1015,18 @@ function AppleMarkdown({ text }) {
   };
   while (i < lines.length) {
     const line = lines[i];
+    // 이미지 단독 라인 (전체 폭으로 표시)
+    if (/^\s*!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) {
+      const m = line.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)\s*$/);
+      if (m) {
+        out.push(<div key={i} style={{ textAlign: "center", margin: "12px 0" }}>
+          <img src={m[2]} alt={m[1]||""} style={{ maxWidth: "100%", maxHeight: 360, borderRadius: 12, border: "1px solid var(--doc-border)", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }} />
+          {m[1] && <div style={{ fontSize: 11, color: "var(--doc-text3)", marginTop: 6, fontStyle: "italic" }}>{m[1]}</div>}
+        </div>);
+        i++;
+        continue;
+      }
+    }
     if (/^# /.test(line)) { out.push(<h1 key={i}>{inline(line.replace(/^# /, ""))}</h1>); i++; continue; }
     if (/^## /.test(line)) { out.push(<h2 key={i}>{inline(line.replace(/^## /, ""))}</h2>); i++; continue; }
     if (/^### /.test(line)) { out.push(<h3 key={i}>{inline(line.replace(/^### /, ""))}</h3>); i++; continue; }
@@ -3322,6 +3338,12 @@ function App() {
       ? `| 제품명 | 수량 | 납품 단가 | 시장 소비자가 |\n|---|---|---|---|`
       : `| 제품명 | 수량 | 단가 |\n|---|---|---|`;
 
+    // 이미지가 있는 제품만 갤러리 섹션에 포함
+    const itemsWithImage = items.filter(({ p }) => p.image && typeof p.image === "string" && p.image.length > 50);
+    const gallerySection = itemsWithImage.length > 0
+      ? `\n\n---\n\n## 제품 이미지\n\n${itemsWithImage.map(({ p }) => `![${p.name}](${p.image})`).join("\n\n")}\n`
+      : "";
+
     return `# 견적서 (Quotation)
 
 **작성일** ${today}　　**견적번호** ${quoteId}　　**유효기간** 발행일로부터 30일
@@ -3340,7 +3362,7 @@ function App() {
 ${tableHeader}
 ${priceTable}
 
-**합계** ${Math.round(totalSum).toLocaleString()}원 *(부가세 별도)*
+**합계** ${Math.round(totalSum).toLocaleString()}원 *(부가세 별도)*${gallerySection}
 
 ---
 
@@ -3413,7 +3435,13 @@ ${productList}
       });
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
       const data = await res.json();
-      setQuote(data.content[0].text); setQuoteTitle(""); setTab("quote"); setQuoteSubTab("current");
+      // AI 응답에 제품 이미지 자동 부착
+      let aiText = data.content[0].text;
+      const itemsWithImage = items.filter(({ p }) => p.image && typeof p.image === "string" && p.image.length > 50);
+      if (itemsWithImage.length > 0) {
+        aiText += `\n\n---\n\n## 제품 이미지\n\n${itemsWithImage.map(({ p }) => `![${p.name}](${p.image})`).join("\n\n")}\n`;
+      }
+      setQuote(aiText); setQuoteTitle(""); setTab("quote"); setQuoteSubTab("current");
     } catch (e) { setApiError(`오류: ${e.message}`); }
     finally { setGenerating(false); }
   }, [apiKey, products, materials, laborItems]);
