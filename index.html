@@ -582,8 +582,9 @@ function computeProduct(p, materials, laborItems) {
   const grades = {};         // 적용 단가 (override 우선)
   const calcGrades = {};     // 마진율 계산값 (참조용)
   const overridden = {};     // 어느 등급이 수동 수정됐는지
-  for (const g of GRADES) {
-    const auto = beforeMargin * (1 + (margins[g] ?? DEFAULT_MARGINS[g]) / 100);
+  const gradeList = (spec.grades && spec.grades.length > 0) ? spec.grades : GRADES;
+  for (const g of gradeList) {
+    const auto = beforeMargin * (1 + (margins[g] ?? DEFAULT_MARGINS[g] ?? 30) / 100);
     calcGrades[g] = auto;
     const ov = parseFloat(overrides[g]);
     if (!isNaN(ov) && ov > 0) {
@@ -594,7 +595,7 @@ function computeProduct(p, materials, laborItems) {
       overridden[g] = false;
     }
   }
-  const sel = spec.selectedGrade || "A";
+  const sel = (spec.selectedGrade && grades[spec.selectedGrade] !== undefined) ? spec.selectedGrade : (gradeList[0] || "A");
   return {
     fCost, eCost, base, admin, beforeMargin,
     grades, calcGrades, overridden,
