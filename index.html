@@ -2371,9 +2371,10 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
   );
 }
 
-function LedgerTab({ ledgers, setLedgers, darkMode }) {
+function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  const [subTab, setSubTab] = useState("monthly"); // "monthly" | "ar"
   const [selectedYM, setSelectedYM] = useState(defaultYM);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -2385,6 +2386,15 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
   const [expandedClientId, setExpandedClientId] = useState(null);
   const [draft, setDraft] = useState({ name:"", supply:"", tax:"", total:"", status:"미입금", memo:"" });
   const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
+
+  // 거래처별 AR 헬퍼: 거래처명을 키로 사용 → 모든 월에서 공유됨
+  const getAR = (clientName) => {
+    const key = (clientName || "").trim();
+    return (clientAR[key] && clientAR[key].entries) || [];
+  };
+  const arBalance = (clientName) => {
+    return getAR(clientName).reduce((s, a) => s + (a.type === "청구" ? (parseFloat(a.amount)||0) : -(parseFloat(a.amount)||0)), 0);
+  };
 
   // 윈도우 전역 드래그 차단 (실수로 브라우저에서 파일 열리는 것 방지)
   useEffect(() => {
@@ -2466,14 +2476,35 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
     clearSelection();
   };
 
-  // 미수금 (AR) 추가/삭제
-  const addAR = (clientId) => {
+  // 미수금 (AR): 거래처명 키 기준으로 clientAR에 저장 → 모든 월에서 공유됨
+  const addAR = (clientName) => {
     if (!arDraft.amount) { alert("금액 필수"); return; }
-    updateMonth(cs => cs.map(c => c.id === clientId ? { ...c, ar: [...(c.ar||[]), { id: uid(), ...arDraft, amount: parseFloat(arDraft.amount) }] } : c));
+    const key = (clientName || "").trim();
+    if (!key) return;
+    const newEntry = { id: uid(), ...arDraft, amount: parseFloat(arDraft.amount) };
+    setClientAR(prev => {
+      const cur = prev[key] || { entries: [] };
+      return { ...prev, [key]: { ...cur, entries: [...(cur.entries||[]), newEntry] } };
+    });
     setArDraft({ type:"청구", desc:"", amount:"", date:"" });
   };
-  const deleteAR = (clientId, arId) => {
-    updateMonth(cs => cs.map(c => c.id === clientId ? { ...c, ar: (c.ar||[]).filter(a => a.id !== arId) } : c));
+  const deleteAR = (clientName, arId) => {
+    const key = (clientName || "").trim();
+    if (!key) return;
+    setClientAR(prev => {
+      const cur = prev[key];
+      if (!cur) return prev;
+      return { ...prev, [key]: { ...cur, entries: (cur.entries||[]).filter(a => a.id !== arId) } };
+    });
+  };
+  const updateAR = (clientName, arId, patch) => {
+    const key = (clientName || "").trim();
+    if (!key) return;
+    setClientAR(prev => {
+      const cur = prev[key];
+      if (!cur) return prev;
+      return { ...prev, [key]: { ...cur, entries: (cur.entries||[]).map(a => a.id === arId ? { ...a, ...patch } : a) } };
+    });
   };
 
   // 엑셀 import
@@ -2604,6 +2635,24 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {/* 서브탭 토글 */}
+      <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content" }}>
+        {[["monthly", "📒 월별 장부"], ["ar", "💰 거래처별 미수금"]].map(([id, label]) => (
+          <button key={id} onClick={() => setSubTab(id)}
+            style={{
+              padding: "10px 22px", border: "none", borderRadius: 9, cursor: "pointer", fontWeight: 700,
+              fontSize: 13, fontFamily: "inherit",
+              background: subTab === id ? (darkMode ? "rgba(99,102,241,0.18)" : "#fff") : "transparent",
+              color: subTab === id ? (darkMode ? "#A5B4FC" : "#4338CA") : "var(--text2)",
+              boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              transition: "all 0.18s",
+            }}>{label}</button>
+        ))}
+      </div>
+
+      {subTab === "ar" ? (
+        <ARDetailView ledgers={ledgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} />
+      ) : (<>
       {/* 헤더 + 월 선택 */}
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{fontSize:18,fontWeight:800,color:"var(--text1)"}}>📒 월별 매출 장부</div>
@@ -2803,7 +2852,7 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
                         <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
                         <td style={{fontWeight:600,fontSize:13}}>
                           <span onClick={()=>setExpandedClientId(isExpanded?null:c.id)} style={{cursor:"pointer"}} title="클릭하여 미수금 내역 펼치기">
-                            {c.name} <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>{(c.ar||[]).length>0 ? `▶ ${(c.ar||[]).length}건` : ""}</span>
+                            {c.name} <span style={{fontSize:10,color:"var(--text3)",marginLeft:4}}>{getAR(c.name).length>0 ? `▶ ${getAR(c.name).length}건 / 잔액 ${Math.round(arBalance(c.name)).toLocaleString()}원` : ""}</span>
                           </span>
                         </td>
                         <td style={{textAlign:"right",fontSize:13}}>{isCorp ? "—" : Math.round(c.supply||0).toLocaleString()+"원"}</td>
@@ -2830,8 +2879,11 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
                       {isExpanded && (
                         <tr key={c.id+"_exp"}>
                           <td colSpan={9} style={{padding:"14px 22px",background:"var(--surface2)"}}>
-                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>📋 청구/입금 내역 (미수금 상세)</div>
-                            {(c.ar||[]).length === 0 ? (
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>📋 청구/입금 내역 (모든 월 공유)</div>
+                              <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>이 거래처의 미수금은 다른 달에서도 동일하게 표시됩니다</div>
+                            </div>
+                            {getAR(c.name).length === 0 ? (
                               <div style={{fontSize:12,color:"var(--text3)",padding:"8px 0",fontStyle:"italic"}}>등록된 내역이 없습니다. 아래에서 추가하세요.</div>
                             ) : (
                               <table style={{marginBottom:10}}>
@@ -2843,7 +2895,7 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
                                   <th style={{width:40}}></th>
                                 </tr></thead>
                                 <tbody>
-                                  {(c.ar||[]).map(a => {
+                                  {getAR(c.name).map(a => {
                                     const isCharge = a.type === "청구";
                                     return (
                                       <tr key={a.id}>
@@ -2853,14 +2905,14 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
                                         <td style={{fontSize:13}}>{a.desc}</td>
                                         <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":""}{Math.round(a.amount||0).toLocaleString()}원</td>
                                         <td style={{fontSize:12,color:"var(--text2)"}}>{a.date}</td>
-                                        <td style={{textAlign:"center"}}><button onClick={()=>deleteAR(c.id, a.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
+                                        <td style={{textAlign:"center"}}><button onClick={()=>deleteAR(c.name, a.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
                                       </tr>
                                     );
                                   })}
                                   <tr style={{borderTop:"2px solid var(--divider)"}}>
                                     <td colSpan={2} style={{fontWeight:700,paddingTop:8}}>잔액 (청구 - 입금)</td>
                                     <td style={{textAlign:"right",fontWeight:800,fontSize:13,paddingTop:8,color:"#475569"}}>
-                                      {Math.round((c.ar||[]).reduce((s,a) => s + (a.type==="청구" ? (a.amount||0) : -(a.amount||0)), 0)).toLocaleString()}원
+                                      {Math.round(arBalance(c.name)).toLocaleString()}원
                                     </td>
                                     <td colSpan={2}></td>
                                   </tr>
@@ -2874,7 +2926,7 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
                               <input placeholder="내역 (예: 25년 12월 / 2025-12-02)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
                               <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
                               <input type="date" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:11,padding:"0 6px"}}/>
-                              <button onClick={()=>addAR(c.id)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
+                              <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
                             </div>
                           </td>
                         </tr>
@@ -2891,6 +2943,261 @@ function LedgerTab({ ledgers, setLedgers, darkMode }) {
                     <td colSpan={3}></td>
                   </tr>
                 )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      </>)}
+    </div>
+  );
+}
+
+// 거래처별 미수금 상세 보기 (장부의 서브탭)
+function ARDetailView({ ledgers, clientAR, setClientAR, darkMode }) {
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("balance"); // balance | name | charge
+  const [filterMode, setFilterMode] = useState("unpaid"); // all | unpaid | paid
+  const [expandedName, setExpandedName] = useState(null);
+  const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
+  const [editArId, setEditArId] = useState(null);
+  const [editArDraft, setEditArDraft] = useState(null);
+
+  // 거래처별 청구/입금 집계 (clientAR 기준)
+  const allNames = new Set(Object.keys(clientAR || {}));
+  // 장부에 있는 거래처도 포함 (AR이 없을 수도 있지만 매출이 있으니 표시)
+  Object.values(ledgers || {}).forEach(m => (m.clients || []).forEach(c => { if (c.name) allNames.add(c.name.trim()); }));
+
+  const summary = Array.from(allNames).map(name => {
+    const entries = (clientAR[name] && clientAR[name].entries) || [];
+    const charge = entries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const paid = entries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const balance = charge - paid;
+    // 어느 월에 등장했는지
+    const months = [];
+    Object.entries(ledgers || {}).forEach(([ym, m]) => {
+      if ((m.clients || []).some(c => (c.name||"").trim() === name)) months.push(ym);
+    });
+    return { name, charge, paid, balance, entries, months: months.sort() };
+  });
+
+  const filtered = summary
+    .filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase()))
+    .filter(c => {
+      if (filterMode === "unpaid") return c.balance > 0;
+      if (filterMode === "paid") return c.balance <= 0 && (c.charge > 0 || c.entries.length > 0);
+      return true;
+    });
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "balance") return b.balance - a.balance;
+    if (sortBy === "charge") return b.charge - a.charge;
+    return a.name.localeCompare(b.name, "ko");
+  });
+
+  const totalBalance = summary.reduce((s,c) => s + Math.max(0, c.balance), 0);
+  const overdueCount = summary.filter(c => c.balance > 0).length;
+  const totalCharge = summary.reduce((s,c) => s + c.charge, 0);
+  const totalPaid = summary.reduce((s,c) => s + c.paid, 0);
+
+  const addAR = (name) => {
+    if (!arDraft.amount) { alert("금액 필수"); return; }
+    const key = (name||"").trim();
+    if (!key) return;
+    const newE = { id: uid(), ...arDraft, amount: parseFloat(arDraft.amount) };
+    setClientAR(prev => {
+      const cur = prev[key] || { entries: [] };
+      return { ...prev, [key]: { ...cur, entries: [...(cur.entries||[]), newE] } };
+    });
+    setArDraft({ type:"청구", desc:"", amount:"", date:"" });
+  };
+  const deleteAR = (name, arId) => {
+    if (!window.confirm("이 내역을 삭제할까요?")) return;
+    setClientAR(prev => {
+      const cur = prev[name];
+      if (!cur) return prev;
+      return { ...prev, [name]: { ...cur, entries: (cur.entries||[]).filter(a => a.id !== arId) } };
+    });
+  };
+  const startEditAR = (e) => { setEditArId(e.id); setEditArDraft({ ...e }); };
+  const cancelEditAR = () => { setEditArId(null); setEditArDraft(null); };
+  const saveEditAR = (name) => {
+    if (!editArDraft || !editArDraft.amount) { alert("금액 필수"); return; }
+    setClientAR(prev => {
+      const cur = prev[name];
+      if (!cur) return prev;
+      return { ...prev, [name]: { ...cur, entries: (cur.entries||[]).map(a => a.id === editArId ? { ...editArDraft, amount: parseFloat(editArDraft.amount) } : a) } };
+    });
+    cancelEditAR();
+  };
+  const deleteAllForClient = (name) => {
+    if (!window.confirm(`${name}의 모든 미수금 내역을 삭제할까요?\n복구 불가능합니다.`)) return;
+    setClientAR(prev => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+  };
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{fontSize:18,fontWeight:800,color:"var(--text1)"}}>💰 거래처별 미수금</div>
+
+      {/* KPI */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(170px, 1fr))",gap:12}}>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>미수금 거래처</div>
+          <div style={{fontSize:24,fontWeight:800,color:overdueCount>0?"#FF9500":"#00B493"}}>{overdueCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>곳</span></div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>미수금 합계</div>
+          <div style={{fontSize:24,fontWeight:800,color:totalBalance>0?"#F04452":"#00B493"}}>{Math.round(totalBalance).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 청구 누적</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#475569"}}>{Math.round(totalCharge).toLocaleString()}<span style={{fontSize:12,fontWeight:600,marginLeft:2}}>원</span></div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 입금 누적</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#00B493"}}>{Math.round(totalPaid).toLocaleString()}<span style={{fontSize:12,fontWeight:600,marginLeft:2}}>원</span></div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>회수율</div>
+          <div style={{fontSize:24,fontWeight:800,color:"var(--text1)"}}>{totalCharge>0?Math.round(totalPaid/totalCharge*100):0}<span style={{fontSize:14,fontWeight:600}}>%</span></div>
+        </div>
+      </div>
+
+      {/* 필터 */}
+      <div className="card">
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+          <input placeholder="🔍 거래처명 검색" value={search} onChange={e=>setSearch(e.target.value)} style={{height:40,fontSize:13,flex:"1 1 220px",minWidth:160}}/>
+          <select value={filterMode} onChange={e=>setFilterMode(e.target.value)} style={{height:40,fontSize:13,width:140}}>
+            <option value="unpaid">미수금만</option>
+            <option value="paid">완납/잔액0만</option>
+            <option value="all">전체</option>
+          </select>
+          <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{height:40,fontSize:13,width:140}}>
+            <option value="balance">잔액 큰 순</option>
+            <option value="charge">청구액 큰 순</option>
+            <option value="name">이름순</option>
+          </select>
+        </div>
+      </div>
+
+      {/* 거래처 목록 */}
+      <div className="card" style={{padding:0,overflow:"hidden"}}>
+        {sorted.length === 0 ? (
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>
+            {Object.keys(clientAR).length === 0 ? <>등록된 미수금 내역이 없습니다.<br/>월별 장부에서 거래처 ▶를 펼쳐 미수금 내역을 추가하세요.</> : "조건에 맞는 거래처가 없습니다."}
+          </div>
+        ) : (
+          <div style={{overflowX:"auto"}}>
+            <table>
+              <thead><tr>
+                <th style={{width:38,textAlign:"center"}}>No.</th>
+                <th>거래처명</th>
+                <th style={{textAlign:"center",width:90}}>등장 월</th>
+                <th style={{textAlign:"right"}}>총 청구</th>
+                <th style={{textAlign:"right"}}>총 입금</th>
+                <th style={{textAlign:"right"}}>잔액 (미수금)</th>
+                <th style={{textAlign:"center",width:80}}>관리</th>
+              </tr></thead>
+              <tbody>
+                {sorted.map((c, idx) => {
+                  const isExpanded = expandedName === c.name;
+                  const balanceColor = c.balance > 0 ? "#F04452" : c.balance < 0 ? "#00B493" : "var(--text2)";
+                  return (
+                    <React.Fragment key={c.name}>
+                      <tr style={{cursor:"pointer",background: isExpanded ? (darkMode?"rgba(99,102,241,0.08)":"rgba(99,102,241,0.04)") : "transparent"}} onClick={()=>setExpandedName(isExpanded?null:c.name)}>
+                        <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
+                        <td style={{fontWeight:600,fontSize:13}}>
+                          {isExpanded?"▼ ":"▶ "}{c.name}
+                        </td>
+                        <td style={{textAlign:"center",fontSize:11,color:"var(--text2)"}}>
+                          {c.months.length === 0 ? "—" : c.months.length === 1 ? c.months[0] : `${c.months.length}개월`}
+                        </td>
+                        <td style={{textAlign:"right",fontSize:13}}>{c.charge>0?Math.round(c.charge).toLocaleString()+"원":"—"}</td>
+                        <td style={{textAlign:"right",fontSize:13,color:c.paid>0?"#00B493":"var(--text3)"}}>{c.paid>0?Math.round(c.paid).toLocaleString()+"원":"—"}</td>
+                        <td style={{textAlign:"right",fontWeight:800,fontSize:14,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</td>
+                        <td style={{textAlign:"center"}}>
+                          <button onClick={(e)=>{ e.stopPropagation(); deleteAllForClient(c.name); }} title="이 거래처의 모든 내역 삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}>🗑</button>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={7} style={{padding:"14px 22px",background:"var(--surface2)"}}>
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>📋 청구/입금 내역 (모든 월 공유)</div>
+                            {c.entries.length === 0 ? (
+                              <div style={{fontSize:12,color:"var(--text3)",padding:"8px 0",fontStyle:"italic"}}>등록된 내역이 없습니다.</div>
+                            ) : (
+                              <table style={{marginBottom:10}}>
+                                <thead><tr>
+                                  <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
+                                  <th style={{fontSize:11}}>내역</th>
+                                  <th style={{textAlign:"right",fontSize:11,width:130}}>금액</th>
+                                  <th style={{width:120,fontSize:11}}>날짜</th>
+                                  <th style={{width:90,textAlign:"center",fontSize:11}}>관리</th>
+                                </tr></thead>
+                                <tbody>
+                                  {[...c.entries].sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(a => {
+                                    const isCharge = a.type === "청구";
+                                    if (editArId === a.id && editArDraft) {
+                                      return (
+                                        <tr key={a.id} style={{background:"var(--surface)"}}>
+                                          <td style={{textAlign:"center"}}>
+                                            <select value={editArDraft.type} onChange={e=>setEditArDraft(d=>({...d,type:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}>
+                                              <option value="청구">청구</option><option value="입금">입금</option>
+                                            </select>
+                                          </td>
+                                          <td><input value={editArDraft.desc||""} onChange={e=>setEditArDraft(d=>({...d,desc:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px"}}/></td>
+                                          <td><input type="number" value={editArDraft.amount||""} onChange={e=>setEditArDraft(d=>({...d,amount:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
+                                          <td><input type="date" value={editArDraft.date||""} onChange={e=>setEditArDraft(d=>({...d,date:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}/></td>
+                                          <td style={{textAlign:"center"}}>
+                                            <button onClick={()=>saveEditAR(c.name)} style={{background:"#007AFF",border:"none",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 8px",marginRight:4,fontFamily:"inherit"}}>저장</button>
+                                            <button onClick={cancelEditAR} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:11,fontWeight:600,borderRadius:6,padding:"3px 7px",fontFamily:"inherit"}}>취소</button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    }
+                                    return (
+                                      <tr key={a.id}>
+                                        <td style={{textAlign:"center"}}>
+                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FF9500":"#00B493"}}>{a.type}</span>
+                                        </td>
+                                        <td style={{fontSize:13}}>{a.desc}</td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
+                                        <td style={{fontSize:12,color:"var(--text2)"}}>{a.date||"—"}</td>
+                                        <td style={{textAlign:"center"}}>
+                                          <button onClick={()=>startEditAR(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:13,marginRight:4}}>✏️</button>
+                                          <button onClick={()=>deleteAR(c.name, a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                  <tr style={{borderTop:"2px solid var(--divider)"}}>
+                                    <td colSpan={2} style={{fontWeight:700,paddingTop:8}}>잔액 (청구 - 입금)</td>
+                                    <td style={{textAlign:"right",fontWeight:800,fontSize:14,paddingTop:8,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</td>
+                                    <td colSpan={2}></td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            )}
+                            {/* 새 내역 추가 폼 */}
+                            <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
+                              <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
+                                <option value="청구">청구</option><option value="입금">입금</option>
+                              </select>
+                              <input placeholder="내역 (예: 25년 12월 / 분기 정산)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
+                              <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px",textAlign:"right"}}/>
+                              <input type="date" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:11,padding:"0 6px"}}/>
+                              <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:34,fontSize:12}}>+ 추가</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -3762,6 +4069,31 @@ function App() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [bids, setBids] = useState(() => load("frw_bids", []));
   const [ledgers, setLedgers] = useState(() => load("frw_ledgers", {}));
+  // 거래처별 미수금: 거래처명을 키로, 청구/입금 내역 배열을 값으로 저장 → 모든 월에서 공유
+  const [clientAR, setClientAR] = useState(() => load("frw_client_ar", {}));
+  // 첫 로드 시 기존 월별 ar 데이터를 clientAR로 자동 병합 (중복 제거)
+  const arMigrated = useRef(false);
+  useEffect(() => {
+    if (arMigrated.current) return;
+    if (Object.keys(clientAR).length > 0) { arMigrated.current = true; return; }
+    if (!ledgers || Object.keys(ledgers).length === 0) return;
+    const merged = {};
+    Object.values(ledgers).forEach(month => {
+      (month.clients || []).forEach(c => {
+        const key = (c.name || "").trim();
+        if (!key || !c.ar || c.ar.length === 0) return;
+        if (!merged[key]) merged[key] = { entries: [] };
+        c.ar.forEach(a => {
+          const sig = `${a.type}|${a.amount}|${a.desc}|${a.date||""}`;
+          if (!merged[key].entries.some(x => `${x.type}|${x.amount}|${x.desc}|${x.date||""}` === sig)) {
+            merged[key].entries.push({ ...a, id: a.id || (Date.now() + Math.random()) });
+          }
+        });
+      });
+    });
+    if (Object.keys(merged).length > 0) setClientAR(merged);
+    arMigrated.current = true;
+  }, [ledgers]);
   const [suppliers, setSuppliers] = useState(() => load("frw_suppliers", []));
   const [purchaseOrders, setPurchaseOrders] = useState(() => load("frw_purchase_orders", []));
   const [poSubTab, setPoSubTab] = useState("current"); // "current" | "history"
@@ -3837,6 +4169,7 @@ function App() {
     if (d.clients) setClients(d.clients);
     if (d.bids) setBids(d.bids);
     if (d.ledgers) setLedgers(d.ledgers);
+    if (d.clientAR) setClientAR(d.clientAR);
     if (d.suppliers) setSuppliers(d.suppliers);
     if (d.purchaseOrders) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
@@ -3862,15 +4195,15 @@ function App() {
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
-    save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers);
+    save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers]);
+  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR]);
 
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
@@ -5819,7 +6152,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           />
         )}
         {tab === "ledger" && (
-          <LedgerTab ledgers={ledgers} setLedgers={setLedgers} darkMode={darkMode} />
+          <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} />
         )}
         {tab === "clients" && (
           <ClientsTab
