@@ -4116,13 +4116,304 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   );
 }
 
-function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) {
+function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubTabs = [], setPurchaseSubTabs, darkMode }) {
+  // 매입 서브탭: "all" (전체) | supplier name | "summary" (총합계)
+  const [activeSubTab, setActiveSubTab] = useState("all");
+  const [showAddTabForm, setShowAddTabForm] = useState(false);
+  const [newTabName, setNewTabName] = useState("");
+  const totalSumRef = useRef(null); const totalSumInst = useRef(null);
+  const monthlyTrendRef = useRef(null); const monthlyTrendInst = useRef(null);
+  const matPieRef = useRef(null); const matPieInst = useRef(null);
+
+  const addSubTab = () => {
+    const nm = newTabName.trim();
+    if (!nm) { alert("거래처명을 입력하세요"); return; }
+    if (purchaseSubTabs.some(t => t.name === nm)) { alert("이미 있는 거래처입니다"); return; }
+    setPurchaseSubTabs(prev => [...prev, { id: uid(), name: nm }]);
+    setActiveSubTab(nm);
+    setNewTabName("");
+    setShowAddTabForm(false);
+  };
+  const removeSubTab = (name) => {
+    if (!window.confirm(`"${name}" 거래처 탭을 삭제할까요?\n(매입 데이터는 유지됩니다)`)) return;
+    setPurchaseSubTabs(prev => prev.filter(t => t.name !== name));
+    if (activeSubTab === name) setActiveSubTab("all");
+  };
+
+  // 총합계 차트 (subTab === "summary"일 때만 그리기)
+  const chartText = darkMode ? "rgba(235,235,245,0.55)" : "rgba(60,60,67,0.55)";
+  const gridCol = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
+  useEffect(() => {
+    if (activeSubTab !== "summary") return;
+    if (typeof Chart === "undefined") return;
+    // 거래처별 매입 합계
+    const supSums = {};
+    fabricIntakes.forEach(r => {
+      const sup = (r.supplier||"").trim() || "(미지정)";
+      const amt = parseFloat(r.unitPrice||0) * parseFloat(r.qty||0);
+      supSums[sup] = (supSums[sup]||0) + amt;
+    });
+    const supEntries = Object.entries(supSums).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    if (totalSumRef.current && supEntries.length > 0) {
+      if (totalSumInst.current) totalSumInst.current.destroy();
+      totalSumInst.current = new Chart(totalSumRef.current, {
+        type: "bar",
+        data: { labels: supEntries.map(x=>x[0]), datasets: [{ label: "매입액", data: supEntries.map(x=>x[1]),
+          backgroundColor: supEntries.map((_,i)=>{ const colors=["#6366F1","#8B5CF6","#EC4899","#F43F5E","#F59E0B","#10B981","#06B6D4","#3B82F6","#A855F7","#EF4444"]; return colors[i%colors.length]; }),
+          borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { color: gridCol }, ticks: { color: chartText, callback: v=>v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000?(v/10000).toFixed(0)+"만":v } }, y: { grid: { display: false }, ticks: { color: chartText, font: { size: 12 } } } } }
+      });
+    }
+    // 월별 매입 추이 (12개월)
+    const months = [];
+    const now = new Date();
+    for (let i=11; i>=0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+    }
+    const monthSums = months.map(ym => fabricIntakes.filter(r => (r.date||"").startsWith(ym)).reduce((s,r) => s + parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0));
+    if (monthlyTrendRef.current) {
+      if (monthlyTrendInst.current) monthlyTrendInst.current.destroy();
+      monthlyTrendInst.current = new Chart(monthlyTrendRef.current, {
+        type: "line",
+        data: { labels: months.map(m=>m.slice(2,4)+"/"+m.slice(5)), datasets: [{ label: "월 매입액", data: monthSums,
+          borderColor: "#6366F1", backgroundColor: "rgba(99,102,241,0.15)", borderWidth: 2.5, tension: 0.3, fill: true, pointRadius: 4, pointBackgroundColor: "#6366F1" }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { color: gridCol }, ticks: { color: chartText } }, y: { grid: { color: gridCol }, ticks: { color: chartText, callback: v=>v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000?(v/10000).toFixed(0)+"만":v } } } }
+      });
+    }
+    // 원단별 매입 비중 (top 8)
+    const matSums = {};
+    fabricIntakes.forEach(r => {
+      const m = (r.materialName||"").trim() || "(미지정)";
+      const amt = parseFloat(r.unitPrice||0) * parseFloat(r.qty||0);
+      matSums[m] = (matSums[m]||0) + amt;
+    });
+    const matEntries = Object.entries(matSums).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    if (matPieRef.current && matEntries.length > 0) {
+      if (matPieInst.current) matPieInst.current.destroy();
+      matPieInst.current = new Chart(matPieRef.current, {
+        type: "doughnut",
+        data: { labels: matEntries.map(x=>x[0].length>20?x[0].slice(0,20)+"…":x[0]), datasets: [{ data: matEntries.map(x=>x[1]),
+          backgroundColor: ["#6366F1","#8B5CF6","#EC4899","#F43F5E","#F59E0B","#10B981","#06B6D4","#3B82F6"] }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "right", labels: { color: chartText, font: { size: 11 }, padding: 8, boxWidth: 12 } },
+            tooltip: { callbacks: { label: ctx => " " + ctx.label + ": " + Math.round(ctx.raw).toLocaleString() + "원" } } } }
+      });
+    }
+    return () => { [totalSumInst, monthlyTrendInst, matPieInst].forEach(r => { if (r.current) { r.current.destroy(); r.current = null; } }); };
+  }, [activeSubTab, fabricIntakes, darkMode]);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* 서브탭 바 */}
+      <div className="no-print" style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",padding:6,background:"var(--surface2)",borderRadius:12}}>
+        <button onClick={()=>setActiveSubTab("all")} style={{
+          padding:"9px 18px",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",
+          background:activeSubTab==="all"?(darkMode?"rgba(99,102,241,0.18)":"#fff"):"transparent",
+          color:activeSubTab==="all"?(darkMode?"#A5B4FC":"#4338CA"):"var(--text2)",
+          boxShadow:activeSubTab==="all"?"0 1px 3px rgba(0,0,0,0.08)":"none",
+        }}>📦 전체</button>
+        {purchaseSubTabs.map(t => (
+          <div key={t.id} style={{display:"inline-flex",alignItems:"center"}}>
+            <button onClick={()=>setActiveSubTab(t.name)} style={{
+              padding:"9px 14px 9px 18px",border:"none",borderRadius:"9px 0 0 9px",cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",
+              background:activeSubTab===t.name?(darkMode?"rgba(99,102,241,0.18)":"#fff"):"transparent",
+              color:activeSubTab===t.name?(darkMode?"#A5B4FC":"#4338CA"):"var(--text2)",
+              boxShadow:activeSubTab===t.name?"0 1px 3px rgba(0,0,0,0.08)":"none",
+            }}>🏭 {t.name}</button>
+            <button onClick={(e)=>{e.stopPropagation();removeSubTab(t.name);}} title="탭 삭제" style={{
+              padding:"9px 8px",border:"none",borderRadius:"0 9px 9px 0",cursor:"pointer",fontSize:11,fontFamily:"inherit",
+              background:activeSubTab===t.name?(darkMode?"rgba(99,102,241,0.18)":"#fff"):"transparent",
+              color:"#F04452",boxShadow:activeSubTab===t.name?"0 1px 3px rgba(0,0,0,0.08)":"none",
+            }}>✕</button>
+          </div>
+        ))}
+        {showAddTabForm ? (
+          <div style={{display:"inline-flex",alignItems:"center",gap:4,background:"#fff",borderRadius:9,padding:"3px"}}>
+            <input autoFocus placeholder="거래처명 입력" value={newTabName} onChange={e=>setNewTabName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addSubTab();if(e.key==="Escape"){setShowAddTabForm(false);setNewTabName("");}}}
+              style={{height:34,fontSize:13,padding:"0 10px",border:"none",outline:"none",minWidth:140,color:"#191F28"}}/>
+            <button onClick={addSubTab} style={{padding:"6px 12px",border:"none",borderRadius:7,background:"#6366F1",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>추가</button>
+            <button onClick={()=>{setShowAddTabForm(false);setNewTabName("");}} style={{padding:"6px 8px",border:"none",background:"none",color:"#888",fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          </div>
+        ) : (
+          <button onClick={()=>setShowAddTabForm(true)} title="거래처별 탭 추가" style={{
+            padding:"9px 14px",border:"1.5px dashed var(--divider)",borderRadius:9,cursor:"pointer",fontWeight:600,fontSize:12,fontFamily:"inherit",
+            background:"transparent",color:"var(--text2)",
+          }}>+ 거래처 탭 추가</button>
+        )}
+        <div style={{flex:1}}/>
+        <button onClick={()=>setActiveSubTab("summary")} style={{
+          padding:"9px 18px",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",
+          background:activeSubTab==="summary"?"linear-gradient(135deg,#6366F1,#8B5CF6)":"transparent",
+          color:activeSubTab==="summary"?"#fff":"var(--text2)",
+          boxShadow:activeSubTab==="summary"?"0 2px 8px rgba(99,102,241,0.32)":"none",
+        }}>📊 매입 총합계</button>
+      </div>
+
+      {activeSubTab === "summary"
+        ? <PurchaseSummaryView fabricIntakes={fabricIntakes} totalSumRef={totalSumRef} monthlyTrendRef={monthlyTrendRef} matPieRef={matPieRef} darkMode={darkMode} />
+        : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} darkMode={darkMode} filterSupplier={activeSubTab === "all" ? "" : activeSubTab} />
+      }
+    </div>
+  );
+}
+
+// 매입 총합계 뷰
+function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matPieRef, darkMode }) {
+  const totalAmount = fabricIntakes.reduce((s,r) => s + parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
+  const totalQty = fabricIntakes.reduce((s,r) => s + parseFloat(r.qty||0), 0);
+  const supSet = new Set(fabricIntakes.map(r => (r.supplier||"").trim()).filter(Boolean));
+  const matSet = new Set(fabricIntakes.map(r => (r.materialName||"").trim()).filter(Boolean));
+  const recordCount = fabricIntakes.length;
+  const avgPerRecord = recordCount > 0 ? totalAmount / recordCount : 0;
+
+  // 거래처별 매입 합계 (테이블용)
+  const supSums = {};
+  fabricIntakes.forEach(r => {
+    const sup = (r.supplier||"").trim() || "(미지정)";
+    const amt = parseFloat(r.unitPrice||0) * parseFloat(r.qty||0);
+    if (!supSums[sup]) supSums[sup] = { amount: 0, count: 0, qty: 0 };
+    supSums[sup].amount += amt;
+    supSums[sup].count += 1;
+    supSums[sup].qty += parseFloat(r.qty||0);
+  });
+  const supList = Object.entries(supSums).sort((a,b) => b[1].amount - a[1].amount);
+
+  // 이번달 / 지난달
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const lastMonth = (() => {
+    const d = new Date(now.getFullYear(), now.getMonth()-1, 1);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  })();
+  const thisMoAmt = fabricIntakes.filter(r => (r.date||"").startsWith(thisMonth)).reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
+  const lastMoAmt = fabricIntakes.filter(r => (r.date||"").startsWith(lastMonth)).reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
+  const moDiff = lastMoAmt > 0 ? ((thisMoAmt - lastMoAmt) / lastMoAmt * 100) : 0;
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* KPI */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 매입액</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#6366F1"}}>{Math.round(totalAmount).toLocaleString()}<span style={{fontSize:13,marginLeft:2,color:"var(--text2)"}}>원</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{recordCount}건 누적</div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>이번달 매입</div>
+          <div style={{fontSize:24,fontWeight:800,color:"var(--text1)"}}>{Math.round(thisMoAmt).toLocaleString()}<span style={{fontSize:13,marginLeft:2,color:"var(--text2)"}}>원</span></div>
+          <div style={{fontSize:11,marginTop:3,color:moDiff>=0?"#F04452":"#00B493",fontWeight:700}}>{lastMoAmt>0?(moDiff>=0?"▲ +":"▼ ")+Math.abs(moDiff).toFixed(1)+"% (전월 대비)":"전월 데이터 없음"}</div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>거래처 수</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#10B981"}}>{supSet.size}<span style={{fontSize:13,marginLeft:4,color:"var(--text2)"}}>곳</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>원단 {matSet.size}종류</div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 입고량</div>
+          <div style={{fontSize:24,fontWeight:800,color:"var(--text1)"}}>{Math.round(totalQty).toLocaleString()}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>건당 평균 {Math.round(avgPerRecord).toLocaleString()}원</div>
+        </div>
+      </div>
+
+      {/* 그래프 1 — 거래처별 매입 (Top 10) + 원단별 비중 */}
+      <div style={{display:"grid",gridTemplateColumns:"3fr 2fr",gap:16}}>
+        <div className="card">
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>🏭 거래처별 매입 합계 (Top 10)</div>
+          <div style={{height:Math.max(280, Math.min(supList.length, 10) * 36),position:"relative"}}>
+            {supList.length>0?<canvas ref={totalSumRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13}}>매입 데이터 없음</div>}
+          </div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>🥧 원단별 매입 비중 (Top 8)</div>
+          <div style={{height:280,position:"relative"}}>
+            {fabricIntakes.length>0?<canvas ref={matPieRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13}}>매입 데이터 없음</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* 그래프 2 — 월별 매입 추이 */}
+      <div className="card">
+        <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📈 최근 12개월 매입 추이</div>
+        <div style={{height:240,position:"relative"}}>
+          {fabricIntakes.length>0?<canvas ref={monthlyTrendRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13}}>매입 데이터 없음</div>}
+        </div>
+      </div>
+
+      {/* 거래처별 상세 표 */}
+      <div className="card">
+        <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📋 거래처별 매입 상세</div>
+        {supList.length === 0 ? (
+          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14}}>등록된 매입 내역이 없습니다.</div>
+        ) : (
+          <div style={{overflowX:"auto"}}>
+            <table>
+              <thead><tr>
+                <th style={{width:50,textAlign:"center"}}>순위</th>
+                <th>거래처</th>
+                <th style={{textAlign:"right"}}>매입액</th>
+                <th style={{textAlign:"right",width:120}}>비중</th>
+                <th style={{textAlign:"right"}}>건수</th>
+                <th style={{textAlign:"right"}}>총 입고량</th>
+                <th style={{textAlign:"right"}}>평균 단가</th>
+              </tr></thead>
+              <tbody>
+                {supList.map(([sup, info], idx) => {
+                  const pct = totalAmount > 0 ? (info.amount/totalAmount*100) : 0;
+                  const avgPrice = info.qty > 0 ? info.amount/info.qty : 0;
+                  return (
+                    <tr key={sup}>
+                      <td style={{textAlign:"center",fontSize:12,fontWeight:700,color:"var(--text2)"}}>{idx+1}</td>
+                      <td style={{fontSize:13,fontWeight:600}}>{sup}</td>
+                      <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:"#6366F1"}}>{Math.round(info.amount).toLocaleString()}원</td>
+                      <td style={{textAlign:"right",fontSize:12,color:"var(--text2)"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"flex-end"}}>
+                          <div style={{width:60,height:6,background:"var(--divider)",borderRadius:3,overflow:"hidden"}}>
+                            <div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:"#6366F1",borderRadius:3}}/>
+                          </div>
+                          <span style={{minWidth:42,textAlign:"right"}}>{pct.toFixed(1)}%</span>
+                        </div>
+                      </td>
+                      <td style={{textAlign:"right",fontSize:13}}>{info.count}건</td>
+                      <td style={{textAlign:"right",fontSize:13}}>{Math.round(info.qty).toLocaleString()}</td>
+                      <td style={{textAlign:"right",fontSize:13,color:"var(--text2)"}}>{Math.round(avgPrice).toLocaleString()}원</td>
+                    </tr>
+                  );
+                })}
+                <tr style={{borderTop:"2px solid var(--divider)",background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}}>
+                  <td colSpan={2} style={{fontWeight:800,fontSize:14,padding:"10px 8px"}}>합계 ({supList.length}곳)</td>
+                  <td style={{textAlign:"right",fontWeight:900,fontSize:15,padding:"10px 8px",color:"#6366F1"}}>{Math.round(totalAmount).toLocaleString()}원</td>
+                  <td style={{textAlign:"right",fontSize:12,padding:"10px 8px"}}>100%</td>
+                  <td style={{textAlign:"right",fontWeight:700,fontSize:13,padding:"10px 8px"}}>{recordCount}건</td>
+                  <td style={{textAlign:"right",fontWeight:700,fontSize:13,padding:"10px 8px"}}>{Math.round(totalQty).toLocaleString()}</td>
+                  <td/>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 매입 목록 뷰 (필터 가능: 전체 또는 특정 거래처)
+function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode, filterSupplier }) {
   const STATUSES = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
   const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
   const [filterMonth, setFilterMonth] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [newI, setNewI] = useState({ date:new Date().toISOString().slice(0,10), materialName:"", customMaterial:"", supplier:"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", inspector:"", note:"" });
+  const [newI, setNewI] = useState({ date:new Date().toISOString().slice(0,10), materialName:"", customMaterial:"", supplier:filterSupplier||"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", inspector:"", note:"" });
+  useEffect(() => { setNewI(p => ({ ...p, supplier: filterSupplier || p.supplier })); }, [filterSupplier]);
+  // 거래처 탭일 때는 해당 거래처의 매입만 보여주기 (부분 매칭)
+  const supplierFiltered = filterSupplier
+    ? fabricIntakes.filter(r => (r.supplier||"").trim().includes(filterSupplier) || filterSupplier.includes((r.supplier||"").trim()))
+    : fabricIntakes;
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
@@ -4153,11 +4444,11 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) 
   };
 
   const thisMonth = new Date().toISOString().slice(0,7);
-  const pendingCnt = fabricIntakes.filter(r=>["주문완료","운송중","검수중"].includes(r.status)).length;
-  const totalVal = fabricIntakes.reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0),0);
-  const thisMoComp = fabricIntakes.filter(r=>r.date?.startsWith(thisMonth)&&["입고완료","검수완료"].includes(r.status)).length;
+  const pendingCnt = supplierFiltered.filter(r=>["주문완료","운송중","검수중"].includes(r.status)).length;
+  const totalVal = supplierFiltered.reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0),0);
+  const thisMoComp = supplierFiltered.filter(r=>r.date?.startsWith(thisMonth)&&["입고완료","검수완료"].includes(r.status)).length;
 
-  const filtered = fabricIntakes.filter(r => {
+  const filtered = supplierFiltered.filter(r => {
     if (filterMonth && !r.date?.startsWith(filterMonth)) return false;
     if (filterStatus && r.status !== filterStatus) return false;
     return true;
@@ -4181,7 +4472,7 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) 
       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
         {statCard("이번달 입고완료", thisMoComp+"건", "#475569")}
         {statCard("처리 대기", pendingCnt+"건", pendingCnt>0?"#FF9500":"#00B493")}
-        {statCard("총 입고 기록", fabricIntakes.length+"건", null)}
+        {statCard("총 입고 기록", supplierFiltered.length+"건", null)}
         {statCard("총 원단 가액", Math.round(totalVal).toLocaleString()+"원", null)}
       </div>
       <div className="card">
@@ -4981,6 +5272,8 @@ function App() {
   const [ledgers, setLedgers] = useState(() => load("frw_ledgers", {}));
   // 거래처별 미수금: 거래처명을 키로, 청구/입금 내역 배열을 값으로 저장 → 모든 월에서 공유
   const [clientAR, setClientAR] = useState(() => load("frw_client_ar", {}));
+  // 매입 거래처별 서브탭
+  const [purchaseSubTabs, setPurchaseSubTabs] = useState(() => load("frw_purchase_subtabs", []));
   // 자금 운용
   const [accounts, setAccounts] = useState(() => load("frw_accounts", []));
   const [investments, setInvestments] = useState(() => load("frw_investments", []));
@@ -5089,6 +5382,7 @@ function App() {
     if (d.investments) setInvestments(d.investments);
     if (d.cashFlows) setCashFlows(d.cashFlows);
     if (d.scheduledExpenses) setScheduledExpenses(d.scheduledExpenses);
+    if (d.purchaseSubTabs) setPurchaseSubTabs(d.purchaseSubTabs);
     if (d.suppliers) setSuppliers(d.suppliers);
     if (d.purchaseOrders) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
@@ -5115,15 +5409,15 @@ function App() {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR);
-    save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses);
+    save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses]);
+  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs]);
 
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
@@ -5679,7 +5973,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(99,102,241,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["purchase", "발주 관리", "◨"], ["dashboard", "경영 대시보드", "◉"], ["ledger", "장부", "▤"], ["treasury", "자금 운용", "₩"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"], ["suppliers", "공급처 관리", "◧"], ["bids", "입찰 캘린더", "◊"], ["mail", "메일", "✉"], ["news", "뉴스", "◑"]];
+  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["purchase", "발주 관리", "◨"], ["dashboard", "경영 대시보드", "◉"], ["ledger", "장부", "▤"], ["treasury", "자금 운용", "₩"], ["inventory", "매입 현황", "≋"], ["clients", "거래처별 단가", "◐"], ["suppliers", "공급처 관리", "◧"], ["bids", "입찰 캘린더", "◊"], ["mail", "메일", "✉"], ["news", "뉴스", "◑"]];
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -7069,6 +7363,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             fabricIntakes={fabricIntakes}
             setFabricIntakes={setFabricIntakes}
             materials={materials}
+            purchaseSubTabs={purchaseSubTabs}
+            setPurchaseSubTabs={setPurchaseSubTabs}
             darkMode={darkMode}
           />
         )}
