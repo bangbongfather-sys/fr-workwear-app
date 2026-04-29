@@ -1710,6 +1710,8 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const [expandedChart, setExpandedChart] = useState(null); // "sales" | "pie" | "margin" | "kpis"
   // 전용 상세 페이지: null | "sales" | "orders"
   const [detailView, setDetailView] = useState(null);
+  // 안내 토스트 (한 번만 표시) — 모든 conditional return 이전에 선언 필수 (Hooks 규칙)
+  const [showResizeHint, setShowResizeHint] = useState(() => !load("frw_resize_hint_seen", false));
   // 카드 레이아웃: { key: { width: px, height: px } } — 자유 드래그 리사이즈
   const [cardLayouts, setCardLayouts] = useState(() => load("frw_card_layouts", {}));
   useEffect(() => { save("frw_card_layouts", cardLayouts); }, [cardLayouts]);
@@ -2014,8 +2016,6 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       darkMode={darkMode}
     />;
   }
-  // 안내 토스트 (한 번만 표시)
-  const [showResizeHint, setShowResizeHint] = useState(() => !load("frw_resize_hint_seen", false));
   const dismissResizeHint = () => { setShowResizeHint(false); save("frw_resize_hint_seen", true); };
 
   return (
