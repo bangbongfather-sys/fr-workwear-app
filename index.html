@@ -3452,6 +3452,670 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode }) 
   );
 }
 
+function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashFlows, setCashFlows, scheduledExpenses, setScheduledExpenses, ledgers, clientAR, orders, darkMode }) {
+  const [subTab, setSubTab] = useState("dashboard"); // dashboard | accounts | investments | ar | schedule
+  const [showAcctForm, setShowAcctForm] = useState(false);
+  const [acctDraft, setAcctDraft] = useState({ name:"", bank:"", balance:"", color:"#6366F1", memo:"" });
+  const [editAcctId, setEditAcctId] = useState(null);
+  const [editAcctDraft, setEditAcctDraft] = useState(null);
+  const [showInvForm, setShowInvForm] = useState(false);
+  const [invDraft, setInvDraft] = useState({ type:"예금", name:"", principal:"", currentValue:"", startDate:"", maturityDate:"", expectedRate:"", memo:"" });
+  const [editInvId, setEditInvId] = useState(null);
+  const [editInvDraft, setEditInvDraft] = useState(null);
+  const [showCfForm, setShowCfForm] = useState(false);
+  const [cfDraft, setCfDraft] = useState({ accountId:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
+  const [showSchedForm, setShowSchedForm] = useState(false);
+  const [schedDraft, setSchedDraft] = useState({ name:"", amount:"", category:"임대료", dueDay:"10", memo:"" });
+
+  const pieRef = useRef(null); const pieInst = useRef(null);
+  const flowRef = useRef(null); const flowInst = useRef(null);
+  const accBarRef = useRef(null); const accBarInst = useRef(null);
+
+  const chartText = darkMode ? "rgba(235,235,245,0.55)" : "rgba(60,60,67,0.55)";
+  const gridCol = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)";
+
+  // ── 계산 영역 ──
+  const totalBank = accounts.reduce((s, a) => s + (parseFloat(a.balance)||0), 0);
+  const totalInvestment = investments.reduce((s, i) => s + (parseFloat(i.currentValue)||parseFloat(i.principal)||0), 0);
+  const totalInvestmentPrincipal = investments.reduce((s, i) => s + (parseFloat(i.principal)||0), 0);
+  const investmentReturn = totalInvestment - totalInvestmentPrincipal;
+  const investmentRoi = totalInvestmentPrincipal > 0 ? (investmentReturn / totalInvestmentPrincipal * 100) : 0;
+
+  // 미수금 (장부 + 수동)
+  const arByClient = {};
+  Object.values(ledgers || {}).forEach(m => {
+    (m.clients || []).forEach(c => {
+      if (!c.name || c.status !== "미입금") return;
+      const name = c.name.trim();
+      const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+      if (amt <= 0) return;
+      arByClient[name] = (arByClient[name] || 0) + amt;
+    });
+  });
+  Object.entries(clientAR || {}).forEach(([name, data]) => {
+    const entries = (data && data.entries) || [];
+    const charge = entries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const paid = entries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const delta = charge - paid;
+    if (delta !== 0) arByClient[name] = (arByClient[name] || 0) + delta;
+  });
+  const totalAR = Object.values(arByClient).reduce((s,v) => s + Math.max(0, v), 0);
+  const arList = Object.entries(arByClient).filter(([,v]) => v > 0).map(([name, balance]) => ({ name, balance })).sort((a,b) => b.balance - a.balance);
+
+  // 자산 총계
+  const totalAssets = totalBank + totalInvestment + totalAR;
+
+  // 월별 정기 지출 합계 (운영비 추정)
+  const monthlyFixedExpense = scheduledExpenses.reduce((s, e) => s + (parseFloat(e.amount)||0), 0);
+  // 최근 60일 cashFlows에서 출금 평균
+  const today = new Date();
+  const sixtyDaysAgo = new Date(today.getTime() - 60*86400000);
+  const recentOut = cashFlows.filter(cf => cf.type === "출금" && cf.date && new Date(cf.date) >= sixtyDaysAgo).reduce((s,cf) => s + (parseFloat(cf.amount)||0), 0);
+  const monthlyAvgExpense = (recentOut / 2) + monthlyFixedExpense; // 60일 합 / 2 = 월평균
+  const runwayDays = monthlyAvgExpense > 0 ? Math.round((totalBank / monthlyAvgExpense) * 30) : 999;
+
+  // 재무 건전성 스코어 (0~100)
+  const score = (() => {
+    let s = 50;
+    // 현금 비율 (현금/자산)
+    const cashRatio = totalAssets > 0 ? totalBank/totalAssets : 0;
+    if (cashRatio > 0.2) s += 10; else if (cashRatio < 0.05) s -= 10;
+    // Runway
+    if (runwayDays > 180) s += 15; else if (runwayDays > 90) s += 5; else if (runwayDays < 30) s -= 20; else if (runwayDays < 60) s -= 10;
+    // 미수금:현금 비율
+    const arToCash = totalBank > 0 ? totalAR/totalBank : 99;
+    if (arToCash > 3) s -= 15; else if (arToCash > 1.5) s -= 5;
+    // 투자 수익률
+    if (investmentRoi > 5) s += 5;
+    if (investmentRoi < -5) s -= 5;
+    return Math.max(0, Math.min(100, Math.round(s)));
+  })();
+  const scoreColor = score >= 75 ? "#00B493" : score >= 50 ? "#FF9500" : "#F04452";
+  const scoreLabel = score >= 80 ? "매우 건전" : score >= 65 ? "건전" : score >= 50 ? "주의" : score >= 30 ? "위험" : "심각";
+
+  // 위험 알림
+  const alerts = [];
+  if (runwayDays < 60 && monthlyAvgExpense > 0) alerts.push({ level: "danger", msg: `현금 가용 기간 ${runwayDays}일. 60일 미만 - 자금 확보 필요` });
+  if (totalBank < monthlyFixedExpense * 3 && monthlyFixedExpense > 0) alerts.push({ level: "warn", msg: `통장 잔액이 3개월 운영비 미달 (권장: ${Math.round(monthlyFixedExpense*3).toLocaleString()}원 이상)` });
+  if (totalAR > totalBank * 2 && totalBank > 0) alerts.push({ level: "warn", msg: `미수금이 통장 잔액의 ${Math.round(totalAR/totalBank*10)/10}배 - 회수 집중 필요` });
+  arList.forEach(a => {
+    if (a.balance > 50000000) alerts.push({ level: "info", msg: `${a.name}: ${Math.round(a.balance).toLocaleString()}원 미수 (집중 관리)` });
+  });
+
+  // 차트들
+  useEffect(() => {
+    if (typeof Chart === "undefined") return;
+    // 자산 구성 도넛
+    if (pieRef.current) {
+      if (pieInst.current) pieInst.current.destroy();
+      const pieData = [
+        { l: "💰 현금/통장", v: totalBank, c: "#10B981" },
+        { l: "📈 투자자산", v: totalInvestment, c: "#6366F1" },
+        { l: "📋 미수금", v: totalAR, c: "#F59E0B" },
+      ].filter(x => x.v > 0);
+      pieInst.current = new Chart(pieRef.current, {
+        type: "doughnut",
+        data: { labels: pieData.map(x=>x.l), datasets: [{ data: pieData.map(x=>x.v), backgroundColor: pieData.map(x=>x.c) }] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "right", labels: { color: chartText, font: { size: 12 }, padding: 10 } },
+            tooltip: { callbacks: { label: ctx => " " + ctx.label + ": " + Math.round(ctx.raw).toLocaleString() + "원 (" + (ctx.raw/totalAssets*100).toFixed(1) + "%)" } } } }
+      });
+    }
+    // 통장별 잔액 막대
+    if (accBarRef.current && accounts.length > 0) {
+      if (accBarInst.current) accBarInst.current.destroy();
+      accBarInst.current = new Chart(accBarRef.current, {
+        type: "bar",
+        data: { labels: accounts.map(a=>a.name), datasets: [{ label: "잔액", data: accounts.map(a=>parseFloat(a.balance)||0),
+          backgroundColor: accounts.map(a=>a.color||"#6366F1"), borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { color: gridCol }, ticks: { color: chartText, callback: v => v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000?(v/10000).toFixed(0)+"만":v } }, y: { grid: { display: false }, ticks: { color: chartText } } } }
+      });
+    }
+    // 월별 현금흐름 (최근 6개월)
+    if (flowRef.current) {
+      if (flowInst.current) flowInst.current.destroy();
+      const months = [];
+      const now = new Date();
+      for (let i=5; i>=0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
+        months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+      }
+      const inSums = months.map(ym => cashFlows.filter(cf => cf.type==="입금" && (cf.date||"").startsWith(ym)).reduce((s,cf)=>s+(parseFloat(cf.amount)||0),0));
+      const outSums = months.map(ym => cashFlows.filter(cf => cf.type==="출금" && (cf.date||"").startsWith(ym)).reduce((s,cf)=>s+(parseFloat(cf.amount)||0),0));
+      flowInst.current = new Chart(flowRef.current, {
+        type: "bar",
+        data: { labels: months.map(m => m.slice(5)+"월"),
+          datasets: [
+            { label: "입금", data: inSums, backgroundColor: "rgba(16,185,129,0.78)", borderRadius: 5 },
+            { label: "출금", data: outSums, backgroundColor: "rgba(239,68,68,0.78)", borderRadius: 5 },
+          ] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { labels: { color: chartText } }, tooltip: { callbacks: { label: ctx => " " + ctx.dataset.label + ": " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { color: gridCol }, ticks: { color: chartText } }, y: { grid: { color: gridCol }, ticks: { color: chartText, callback: v=>v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000?(v/10000).toFixed(0)+"만":v } } } }
+      });
+    }
+    return () => { [pieInst, accBarInst, flowInst].forEach(r => { if (r.current) { r.current.destroy(); r.current=null; } }); };
+  }, [accounts, investments, cashFlows, ledgers, clientAR, darkMode]);
+
+  // ── 액션 ──
+  const addAcct = () => {
+    if (!acctDraft.name.trim()) { alert("계좌명 필수"); return; }
+    setAccounts(prev => [...prev, { id: uid(), ...acctDraft, balance: parseFloat(acctDraft.balance)||0, createdAt: Date.now() }]);
+    setAcctDraft({ name:"", bank:"", balance:"", color:"#6366F1", memo:"" });
+    setShowAcctForm(false);
+  };
+  const startEditAcct = (a) => { setEditAcctId(a.id); setEditAcctDraft({...a, balance: String(a.balance)}); };
+  const saveEditAcct = () => {
+    setAccounts(prev => prev.map(a => a.id === editAcctId ? { ...editAcctDraft, balance: parseFloat(editAcctDraft.balance)||0 } : a));
+    setEditAcctId(null); setEditAcctDraft(null);
+  };
+  const deleteAcct = (id) => { if (window.confirm("이 계좌를 삭제할까요?")) setAccounts(prev => prev.filter(a => a.id !== id)); };
+
+  const addInv = () => {
+    if (!invDraft.name.trim()) { alert("투자명 필수"); return; }
+    setInvestments(prev => [...prev, { id: uid(), ...invDraft, principal: parseFloat(invDraft.principal)||0, currentValue: parseFloat(invDraft.currentValue)||parseFloat(invDraft.principal)||0, expectedRate: parseFloat(invDraft.expectedRate)||0 }]);
+    setInvDraft({ type:"예금", name:"", principal:"", currentValue:"", startDate:"", maturityDate:"", expectedRate:"", memo:"" });
+    setShowInvForm(false);
+  };
+  const startEditInv = (i) => { setEditInvId(i.id); setEditInvDraft({...i, principal: String(i.principal), currentValue: String(i.currentValue), expectedRate: String(i.expectedRate)}); };
+  const saveEditInv = () => {
+    setInvestments(prev => prev.map(i => i.id === editInvId ? { ...editInvDraft, principal: parseFloat(editInvDraft.principal)||0, currentValue: parseFloat(editInvDraft.currentValue)||0, expectedRate: parseFloat(editInvDraft.expectedRate)||0 } : i));
+    setEditInvId(null); setEditInvDraft(null);
+  };
+  const deleteInv = (id) => { if (window.confirm("삭제할까요?")) setInvestments(prev => prev.filter(i => i.id !== id)); };
+
+  const addCf = () => {
+    if (!cfDraft.amount || !cfDraft.accountId) { alert("계좌 선택 + 금액 필수"); return; }
+    const amt = parseFloat(cfDraft.amount)||0;
+    setCashFlows(prev => [...prev, { id: uid(), ...cfDraft, amount: amt }]);
+    // 계좌 잔액도 자동 업데이트
+    setAccounts(prev => prev.map(a => a.id === cfDraft.accountId ? { ...a, balance: (parseFloat(a.balance)||0) + (cfDraft.type === "입금" ? amt : -amt) } : a));
+    setCfDraft({ accountId:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
+    setShowCfForm(false);
+  };
+  const deleteCf = (id) => {
+    if (!window.confirm("이 거래내역을 삭제할까요? (계좌 잔액은 자동 보정되지 않습니다)")) return;
+    setCashFlows(prev => prev.filter(c => c.id !== id));
+  };
+
+  const addSched = () => {
+    if (!schedDraft.name.trim() || !schedDraft.amount) { alert("이름 + 금액 필수"); return; }
+    setScheduledExpenses(prev => [...prev, { id: uid(), ...schedDraft, amount: parseFloat(schedDraft.amount)||0, dueDay: parseInt(schedDraft.dueDay)||10 }]);
+    setSchedDraft({ name:"", amount:"", category:"임대료", dueDay:"10", memo:"" });
+    setShowSchedForm(false);
+  };
+  const deleteSched = (id) => { if (window.confirm("삭제할까요?")) setScheduledExpenses(prev => prev.filter(s => s.id !== id)); };
+
+  const fmt = (n) => Math.round(n||0).toLocaleString();
+  const subTabBtnStyle = (id) => ({
+    padding: "10px 20px", border: "none", borderRadius: 9, cursor: "pointer", fontWeight: 700,
+    fontSize: 13, fontFamily: "inherit",
+    background: subTab === id ? (darkMode ? "rgba(99,102,241,0.18)" : "#fff") : "transparent",
+    color: subTab === id ? (darkMode ? "#A5B4FC" : "#4338CA") : "var(--text2)",
+    boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+    transition: "all 0.18s",
+  });
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {/* 서브탭 */}
+      <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content", flexWrap: "wrap" }}>
+        <button onClick={()=>setSubTab("dashboard")} style={subTabBtnStyle("dashboard")}>📊 자금 대시보드</button>
+        <button onClick={()=>setSubTab("accounts")} style={subTabBtnStyle("accounts")}>🏦 통장 관리</button>
+        <button onClick={()=>setSubTab("investments")} style={subTabBtnStyle("investments")}>📈 투자 현황</button>
+        <button onClick={()=>setSubTab("ar")} style={subTabBtnStyle("ar")}>📋 미수금 회수</button>
+        <button onClick={()=>setSubTab("schedule")} style={subTabBtnStyle("schedule")}>📅 정기 지출</button>
+      </div>
+
+      {/* 1) 대시보드 */}
+      {subTab === "dashboard" && (<>
+        {/* KPI */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 자산</div>
+            <div style={{fontSize:24,fontWeight:800,color:"var(--text1)"}}>{fmt(totalAssets)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>현금+투자+미수</div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>💰 가용 현금</div>
+            <div style={{fontSize:24,fontWeight:800,color:"#10B981"}}>{fmt(totalBank)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>{accounts.length}개 통장</div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>📈 투자자산</div>
+            <div style={{fontSize:24,fontWeight:800,color:"#6366F1"}}>{fmt(totalInvestment)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div style={{fontSize:10,color:investmentRoi>=0?"#00B493":"#F04452",marginTop:3,fontWeight:700}}>{investmentRoi>=0?"+":""}{investmentRoi.toFixed(1)}% ({investmentReturn>=0?"+":""}{fmt(investmentReturn)}원)</div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>📋 미수금</div>
+            <div style={{fontSize:24,fontWeight:800,color:"#F59E0B"}}>{fmt(totalAR)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>{arList.length}개 거래처 (장부 자동연동)</div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>⏱ Runway (현금가용)</div>
+            <div style={{fontSize:24,fontWeight:800,color:runwayDays>180?"#00B493":runwayDays>60?"#FF9500":"#F04452"}}>{runwayDays>=999?"∞":runwayDays}<span style={{fontSize:13,marginLeft:2}}>일</span></div>
+            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>월평균 지출 {fmt(monthlyAvgExpense)}원</div>
+          </div>
+        </div>
+
+        {/* 재무 건전성 스코어 */}
+        <div className="card" style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
+          <div style={{position:"relative",width:120,height:120,flexShrink:0}}>
+            <svg viewBox="0 0 100 100" style={{width:"100%",height:"100%"}}>
+              <circle cx="50" cy="50" r="42" fill="none" stroke={darkMode?"#2C2C2E":"#E5E8EB"} strokeWidth="8"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke={scoreColor} strokeWidth="8" strokeDasharray={`${score*2.64} 264`} strokeDashoffset="0" transform="rotate(-90 50 50)" strokeLinecap="round"/>
+              <text x="50" y="50" textAnchor="middle" dominantBaseline="middle" fontSize="22" fontWeight="800" fill="var(--text1)">{score}</text>
+              <text x="50" y="68" textAnchor="middle" fontSize="10" fill="var(--text3)" fontWeight="600">점</text>
+            </svg>
+          </div>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>재무 건전성 스코어</div>
+            <div style={{fontSize:22,fontWeight:800,color:scoreColor,marginBottom:6}}>{scoreLabel}</div>
+            <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
+              현금비율 {totalAssets>0?Math.round(totalBank/totalAssets*100):0}% · Runway {runwayDays>=999?"∞":runwayDays+"일"} · 미수/현금 {totalBank>0?(totalAR/totalBank).toFixed(1)+"배":"—"}
+            </div>
+          </div>
+          {/* 알림 */}
+          {alerts.length > 0 && (
+            <div style={{flex:1.5,minWidth:280}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>⚠ 위험 알림 / 인사이트</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {alerts.slice(0,5).map((a,i) => (
+                  <div key={i} style={{padding:"8px 12px",borderRadius:8,fontSize:12,
+                    background: a.level==="danger"?"rgba(240,68,82,0.1)":a.level==="warn"?"rgba(255,149,0,0.1)":"rgba(0,122,255,0.08)",
+                    color: a.level==="danger"?"#F04452":a.level==="warn"?"#FF9500":"#007AFF",
+                    border:`1px solid ${a.level==="danger"?"rgba(240,68,82,0.3)":a.level==="warn"?"rgba(255,149,0,0.3)":"rgba(0,122,255,0.2)"}`,
+                    fontWeight:600,
+                  }}>{a.level==="danger"?"🚨 ":a.level==="warn"?"⚠ ":"💡 "}{a.msg}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 그래프 */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:16}}>
+          <div className="card">
+            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>🥧 자산 구성</div>
+            <div style={{height:240,position:"relative"}}>
+              {totalAssets>0?<canvas ref={pieRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>통장/투자/미수금<br/>데이터를 추가하세요</div>}
+            </div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📊 최근 6개월 현금흐름</div>
+            <div style={{height:240,position:"relative"}}>
+              {cashFlows.length>0?<canvas ref={flowRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>통장 거래내역을 추가하세요<br/>(통장 관리 탭에서)</div>}
+            </div>
+          </div>
+        </div>
+      </>)}
+
+      {/* 2) 통장 관리 */}
+      {subTab === "accounts" && (<>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+            <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>🏦 통장/계좌 관리</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowCfForm(v=>!v)} style={{padding:"8px 14px",fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>{showCfForm?"닫기":"+ 거래 입력"}</button>
+              <button onClick={()=>setShowAcctForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showAcctForm?"닫기":"+ 계좌 추가"}</button>
+            </div>
+          </div>
+
+          {/* 계좌 추가 폼 */}
+          {showAcctForm && (
+            <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 150px 60px",gap:8,marginBottom:8}}>
+                <input placeholder="계좌명 * (예: 주거래통장)" value={acctDraft.name} onChange={e=>setAcctDraft(d=>({...d,name:e.target.value}))}/>
+                <input placeholder="은행명 (예: 국민)" value={acctDraft.bank} onChange={e=>setAcctDraft(d=>({...d,bank:e.target.value}))}/>
+                <input type="number" placeholder="현재 잔액" value={acctDraft.balance} onChange={e=>setAcctDraft(d=>({...d,balance:e.target.value}))}/>
+                <input type="color" value={acctDraft.color} onChange={e=>setAcctDraft(d=>({...d,color:e.target.value}))} style={{height:44,padding:4,cursor:"pointer"}}/>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <input placeholder="메모" value={acctDraft.memo} onChange={e=>setAcctDraft(d=>({...d,memo:e.target.value}))} style={{flex:1}}/>
+                <button onClick={addAcct} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>등록</button>
+              </div>
+            </div>
+          )}
+
+          {/* 거래 입력 폼 */}
+          {showCfForm && (
+            <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 100px 130px 130px 1fr auto",gap:8}}>
+                <select value={cfDraft.accountId} onChange={e=>setCfDraft(d=>({...d,accountId:e.target.value}))} style={{height:44}}>
+                  <option value="">계좌 선택 *</option>
+                  {accounts.map(a=><option key={a.id} value={a.id}>{a.name} ({a.bank})</option>)}
+                </select>
+                <select value={cfDraft.type} onChange={e=>setCfDraft(d=>({...d,type:e.target.value}))} style={{height:44}}>
+                  <option value="입금">입금</option><option value="출금">출금</option>
+                </select>
+                <input type="number" placeholder="금액 *" value={cfDraft.amount} onChange={e=>setCfDraft(d=>({...d,amount:e.target.value}))}/>
+                <input type="date" value={cfDraft.date} onChange={e=>setCfDraft(d=>({...d,date:e.target.value}))}/>
+                <input placeholder="분류/메모" value={cfDraft.category} onChange={e=>setCfDraft(d=>({...d,category:e.target.value}))}/>
+                <button onClick={addCf} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>저장</button>
+              </div>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>저장 시 선택한 계좌 잔액이 자동 가감됩니다.</div>
+            </div>
+          )}
+
+          {/* 통장 카드 그리드 */}
+          {accounts.length === 0 ? (
+            <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>등록된 통장이 없습니다.<br/>+ 계좌 추가 버튼으로 시작하세요</div>
+          ) : (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))",gap:12,marginBottom:14}}>
+              {accounts.map(a => {
+                const isEditing = editAcctId === a.id;
+                if (isEditing && editAcctDraft) {
+                  return (
+                    <div key={a.id} className="card" style={{borderLeft:`4px solid ${editAcctDraft.color||"#6366F1"}`}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr",gap:6}}>
+                        <input placeholder="계좌명" value={editAcctDraft.name} onChange={e=>setEditAcctDraft(d=>({...d,name:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px"}}/>
+                        <input placeholder="은행" value={editAcctDraft.bank} onChange={e=>setEditAcctDraft(d=>({...d,bank:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px"}}/>
+                        <input type="number" value={editAcctDraft.balance} onChange={e=>setEditAcctDraft(d=>({...d,balance:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/>
+                        <input type="color" value={editAcctDraft.color} onChange={e=>setEditAcctDraft(d=>({...d,color:e.target.value}))} style={{height:34,padding:2}}/>
+                        <input placeholder="메모" value={editAcctDraft.memo||""} onChange={e=>setEditAcctDraft(d=>({...d,memo:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
+                        <div style={{display:"flex",gap:4}}>
+                          <button onClick={saveEditAcct} className="btn-primary" style={{flex:1,padding:"6px",fontSize:12}}>저장</button>
+                          <button onClick={()=>{setEditAcctId(null);setEditAcctDraft(null);}} style={{flex:1,padding:"6px",fontSize:12,border:"1px solid var(--border)",background:"none",borderRadius:8,fontFamily:"inherit"}}>취소</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={a.id} className="card" style={{borderLeft:`4px solid ${a.color||"#6366F1"}`,position:"relative"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                      <div>
+                        <div style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>{a.bank||"—"}</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"var(--text1)"}}>{a.name}</div>
+                      </div>
+                      <div style={{display:"flex",gap:4}}>
+                        <button onClick={()=>startEditAcct(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:13}}>✏️</button>
+                        <button onClick={()=>deleteAcct(a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button>
+                      </div>
+                    </div>
+                    <div style={{fontSize:22,fontWeight:800,color:a.color||"#6366F1",letterSpacing:-0.3}}>{fmt(a.balance)}<span style={{fontSize:12,marginLeft:2,color:"var(--text2)"}}>원</span></div>
+                    {a.memo && <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>{a.memo}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 그래프 */}
+          {accounts.length > 0 && (
+            <div style={{height:Math.max(140, accounts.length*40),position:"relative",marginTop:8}}>
+              <canvas ref={accBarRef}/>
+            </div>
+          )}
+        </div>
+
+        {/* 거래내역 */}
+        {cashFlows.length > 0 && (
+          <div className="card">
+            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📒 거래 내역 (최근 30건)</div>
+            <div style={{overflowX:"auto"}}>
+              <table>
+                <thead><tr>
+                  <th style={{width:100}}>날짜</th><th style={{width:60,textAlign:"center"}}>구분</th>
+                  <th>계좌</th><th>분류/메모</th>
+                  <th style={{textAlign:"right"}}>금액</th>
+                  <th style={{width:40,textAlign:"center"}}>관리</th>
+                </tr></thead>
+                <tbody>
+                  {[...cashFlows].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,30).map(cf => {
+                    const acc = accounts.find(a=>a.id===cf.accountId);
+                    const isIn = cf.type === "입금";
+                    return (
+                      <tr key={cf.id}>
+                        <td style={{fontSize:12,color:"var(--text2)"}}>{cf.date}</td>
+                        <td style={{textAlign:"center"}}>
+                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isIn?"rgba(16,185,129,0.15)":"rgba(239,68,68,0.15)",color:isIn?"#10B981":"#EF4444"}}>{cf.type}</span>
+                        </td>
+                        <td style={{fontSize:13,fontWeight:600}}>{acc?acc.name:"(삭제됨)"}</td>
+                        <td style={{fontSize:12,color:"var(--text2)"}}>{cf.category}{cf.memo?` · ${cf.memo}`:""}</td>
+                        <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:isIn?"#10B981":"#EF4444"}}>{isIn?"+":"-"}{fmt(cf.amount)}원</td>
+                        <td style={{textAlign:"center"}}><button onClick={()=>deleteCf(cf.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </>)}
+
+      {/* 3) 투자 현황 */}
+      {subTab === "investments" && (<>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📈 투자 포트폴리오</div>
+            <button onClick={()=>setShowInvForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showInvForm?"닫기":"+ 투자 추가"}</button>
+          </div>
+
+          {/* KPI */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:12,marginBottom:14}}>
+            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>총 평가액</div>
+              <div style={{fontSize:20,fontWeight:800,color:"#6366F1"}}>{fmt(totalInvestment)}<span style={{fontSize:11,marginLeft:2}}>원</span></div>
+            </div>
+            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>원금 합계</div>
+              <div style={{fontSize:20,fontWeight:800,color:"var(--text1)"}}>{fmt(totalInvestmentPrincipal)}<span style={{fontSize:11,marginLeft:2}}>원</span></div>
+            </div>
+            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>평가손익</div>
+              <div style={{fontSize:20,fontWeight:800,color:investmentReturn>=0?"#00B493":"#F04452"}}>{investmentReturn>=0?"+":""}{fmt(investmentReturn)}원</div>
+            </div>
+            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>수익률</div>
+              <div style={{fontSize:20,fontWeight:800,color:investmentRoi>=0?"#00B493":"#F04452"}}>{investmentRoi>=0?"+":""}{investmentRoi.toFixed(2)}%</div>
+            </div>
+          </div>
+
+          {/* 추가 폼 */}
+          {showInvForm && (
+            <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"100px 1fr 130px 130px",gap:8,marginBottom:8}}>
+                <select value={invDraft.type} onChange={e=>setInvDraft(d=>({...d,type:e.target.value}))} style={{height:44}}>
+                  <option>예금</option><option>적금</option><option>주식</option><option>펀드</option><option>채권</option><option>부동산</option><option>가상자산</option><option>기타</option>
+                </select>
+                <input placeholder="투자명 * (예: 신한정기예금)" value={invDraft.name} onChange={e=>setInvDraft(d=>({...d,name:e.target.value}))}/>
+                <input type="number" placeholder="원금 (원)" value={invDraft.principal} onChange={e=>setInvDraft(d=>({...d,principal:e.target.value}))}/>
+                <input type="number" placeholder="현재 평가액" value={invDraft.currentValue} onChange={e=>setInvDraft(d=>({...d,currentValue:e.target.value}))}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"130px 130px 100px 1fr auto",gap:8}}>
+                <input type="date" value={invDraft.startDate} onChange={e=>setInvDraft(d=>({...d,startDate:e.target.value}))} title="시작일"/>
+                <input type="date" value={invDraft.maturityDate} onChange={e=>setInvDraft(d=>({...d,maturityDate:e.target.value}))} title="만기일"/>
+                <input type="number" placeholder="기대수익률%" value={invDraft.expectedRate} onChange={e=>setInvDraft(d=>({...d,expectedRate:e.target.value}))}/>
+                <input placeholder="메모" value={invDraft.memo} onChange={e=>setInvDraft(d=>({...d,memo:e.target.value}))}/>
+                <button onClick={addInv} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>등록</button>
+              </div>
+            </div>
+          )}
+
+          {/* 투자 테이블 */}
+          {investments.length === 0 ? (
+            <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>등록된 투자가 없습니다.<br/>+ 투자 추가 버튼으로 시작하세요</div>
+          ) : (
+            <div style={{overflowX:"auto"}}>
+              <table>
+                <thead><tr>
+                  <th style={{width:80}}>유형</th><th>투자명</th>
+                  <th style={{textAlign:"right"}}>원금</th>
+                  <th style={{textAlign:"right"}}>평가액</th>
+                  <th style={{textAlign:"right"}}>손익</th>
+                  <th style={{textAlign:"right",width:80}}>수익률</th>
+                  <th>만기</th>
+                  <th>메모</th>
+                  <th style={{textAlign:"center",width:80}}>관리</th>
+                </tr></thead>
+                <tbody>
+                  {investments.map(inv => {
+                    const isEditing = editInvId === inv.id;
+                    if (isEditing && editInvDraft) {
+                      return (
+                        <tr key={inv.id} style={{background:"var(--surface2)"}}>
+                          <td><select value={editInvDraft.type} onChange={e=>setEditInvDraft(d=>({...d,type:e.target.value}))} style={{height:32,fontSize:12,padding:"0 6px"}}>
+                            <option>예금</option><option>적금</option><option>주식</option><option>펀드</option><option>채권</option><option>부동산</option><option>가상자산</option><option>기타</option>
+                          </select></td>
+                          <td><input value={editInvDraft.name} onChange={e=>setEditInvDraft(d=>({...d,name:e.target.value}))} style={{height:32,fontSize:13,padding:"0 8px"}}/></td>
+                          <td><input type="number" value={editInvDraft.principal} onChange={e=>setEditInvDraft(d=>({...d,principal:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",textAlign:"right",width:110}}/></td>
+                          <td><input type="number" value={editInvDraft.currentValue} onChange={e=>setEditInvDraft(d=>({...d,currentValue:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",textAlign:"right",width:110}}/></td>
+                          <td/><td/><td><input type="date" value={editInvDraft.maturityDate||""} onChange={e=>setEditInvDraft(d=>({...d,maturityDate:e.target.value}))} style={{height:32,fontSize:11,padding:"0 6px"}}/></td>
+                          <td><input value={editInvDraft.memo||""} onChange={e=>setEditInvDraft(d=>({...d,memo:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px"}}/></td>
+                          <td style={{textAlign:"center"}}>
+                            <button onClick={saveEditInv} style={{background:"#007AFF",border:"none",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 8px",marginRight:4,fontFamily:"inherit"}}>저장</button>
+                            <button onClick={()=>{setEditInvId(null);setEditInvDraft(null);}} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:11,borderRadius:6,padding:"3px 7px",fontFamily:"inherit"}}>취소</button>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const principal = parseFloat(inv.principal)||0;
+                    const cv = parseFloat(inv.currentValue)||principal;
+                    const ret = cv - principal;
+                    const roi = principal>0?(ret/principal*100):0;
+                    return (
+                      <tr key={inv.id}>
+                        <td><span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(99,102,241,0.15)",color:"#6366F1"}}>{inv.type}</span></td>
+                        <td style={{fontSize:13,fontWeight:600}}>{inv.name}</td>
+                        <td style={{textAlign:"right",fontSize:13}}>{fmt(principal)}원</td>
+                        <td style={{textAlign:"right",fontSize:13,fontWeight:700}}>{fmt(cv)}원</td>
+                        <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:ret>=0?"#00B493":"#F04452"}}>{ret>=0?"+":""}{fmt(ret)}원</td>
+                        <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:ret>=0?"#00B493":"#F04452"}}>{ret>=0?"+":""}{roi.toFixed(2)}%</td>
+                        <td style={{fontSize:12,color:"var(--text2)"}}>{inv.maturityDate||"—"}</td>
+                        <td style={{fontSize:12,color:"var(--text2)"}}>{inv.memo}</td>
+                        <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                          <button onClick={()=>startEditInv(inv)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:14,marginRight:4}}>✏️</button>
+                          <button onClick={()=>deleteInv(inv.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </>)}
+
+      {/* 4) 미수금 회수 (장부 자동 연동) */}
+      {subTab === "ar" && (<>
+        <div className="card">
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+            <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📋 거래처별 미수금 (장부 자동 연동)</div>
+            <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부의 미입금 + 수동 조정 합산</span>
+          </div>
+          {arList.length === 0 ? (
+            <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>현재 미수금이 없습니다.<br/>장부에서 거래처 미입금 등록 시 자동 표시됩니다.</div>
+          ) : (
+            <div style={{overflowX:"auto"}}>
+              <table>
+                <thead><tr>
+                  <th style={{width:50,textAlign:"center"}}>순위</th>
+                  <th>거래처명</th>
+                  <th style={{textAlign:"right"}}>미수금 잔액</th>
+                  <th style={{textAlign:"right",width:120}}>비중</th>
+                  <th style={{width:200}}>회수 우선순위</th>
+                </tr></thead>
+                <tbody>
+                  {arList.map((c, idx) => {
+                    const pct = totalAR>0?(c.balance/totalAR*100):0;
+                    const priority = c.balance > 50000000 ? "🔴 최우선" : c.balance > 10000000 ? "🟠 우선" : c.balance > 1000000 ? "🟡 일반" : "🟢 소액";
+                    return (
+                      <tr key={c.name}>
+                        <td style={{textAlign:"center",fontSize:12,fontWeight:700,color:"var(--text2)"}}>{idx+1}</td>
+                        <td style={{fontSize:14,fontWeight:600,color:"var(--text1)"}}>{c.name}</td>
+                        <td style={{textAlign:"right",fontSize:14,fontWeight:800,color:"#F04452"}}>{fmt(c.balance)}원</td>
+                        <td style={{textAlign:"right",fontSize:13,color:"var(--text2)"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"flex-end"}}>
+                            <div style={{width:50,height:6,background:"var(--divider)",borderRadius:3,overflow:"hidden"}}>
+                              <div style={{width:`${Math.min(pct,100)}%`,height:"100%",background:"#F59E0B",borderRadius:3}}/>
+                            </div>
+                            <span style={{minWidth:42,textAlign:"right"}}>{pct.toFixed(1)}%</span>
+                          </div>
+                        </td>
+                        <td style={{fontSize:12,fontWeight:600}}>{priority}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{borderTop:"2px solid var(--divider)",background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}}>
+                    <td colSpan={2} style={{fontWeight:800,fontSize:14,padding:"10px 8px"}}>합계 ({arList.length}곳)</td>
+                    <td style={{textAlign:"right",fontWeight:900,fontSize:16,padding:"10px 8px",color:"#F04452"}}>{fmt(totalAR)}원</td>
+                    <td colSpan={2}/>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </>)}
+
+      {/* 5) 정기 지출 */}
+      {subTab === "schedule" && (<>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📅 매월 정기 지출 (운영비)</div>
+            <button onClick={()=>setShowSchedForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showSchedForm?"닫기":"+ 정기 지출 추가"}</button>
+          </div>
+          {showSchedForm && (
+            <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 130px 130px 100px 1fr auto",gap:8}}>
+                <input placeholder="이름 * (예: 사무실 임대료)" value={schedDraft.name} onChange={e=>setSchedDraft(d=>({...d,name:e.target.value}))}/>
+                <select value={schedDraft.category} onChange={e=>setSchedDraft(d=>({...d,category:e.target.value}))} style={{height:44}}>
+                  <option>임대료</option><option>인건비</option><option>통신비</option><option>보험료</option><option>대출이자</option><option>리스</option><option>구독료</option><option>관리비</option><option>기타</option>
+                </select>
+                <input type="number" placeholder="금액 *" value={schedDraft.amount} onChange={e=>setSchedDraft(d=>({...d,amount:e.target.value}))}/>
+                <input type="number" placeholder="결제일" value={schedDraft.dueDay} onChange={e=>setSchedDraft(d=>({...d,dueDay:e.target.value}))} title="매월 며칠"/>
+                <input placeholder="메모" value={schedDraft.memo} onChange={e=>setSchedDraft(d=>({...d,memo:e.target.value}))}/>
+                <button onClick={addSched} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>등록</button>
+              </div>
+            </div>
+          )}
+          {scheduledExpenses.length === 0 ? (
+            <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>등록된 정기 지출이 없습니다.<br/>매월 빠지지 않는 비용을 등록하면 운영비 자동 계산에 사용됩니다</div>
+          ) : (
+            <>
+              <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase"}}>월 운영비 합계</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>매월 자동 발생 고정비</div>
+                </div>
+                <div style={{fontSize:24,fontWeight:800,color:"#FF9500"}}>{fmt(monthlyFixedExpense)}<span style={{fontSize:13,marginLeft:2}}>원/월</span></div>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <table>
+                  <thead><tr>
+                    <th>이름</th><th style={{width:100}}>분류</th>
+                    <th style={{textAlign:"right"}}>금액</th>
+                    <th style={{textAlign:"center",width:80}}>결제일</th>
+                    <th>메모</th>
+                    <th style={{textAlign:"center",width:50}}>관리</th>
+                  </tr></thead>
+                  <tbody>
+                    {scheduledExpenses.map(s => (
+                      <tr key={s.id}>
+                        <td style={{fontWeight:600}}>{s.name}</td>
+                        <td><span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"var(--surface2)",color:"var(--text2)"}}>{s.category}</span></td>
+                        <td style={{textAlign:"right",fontWeight:700,color:"#FF9500"}}>{fmt(s.amount)}원</td>
+                        <td style={{textAlign:"center",fontSize:13}}>매월 {s.dueDay}일</td>
+                        <td style={{fontSize:12,color:"var(--text2)"}}>{s.memo}</td>
+                        <td style={{textAlign:"center"}}><button onClick={()=>deleteSched(s.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function InventoryTab({ fabricIntakes, setFabricIntakes, materials, darkMode }) {
   const STATUSES = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
   const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
@@ -4317,6 +4981,11 @@ function App() {
   const [ledgers, setLedgers] = useState(() => load("frw_ledgers", {}));
   // 거래처별 미수금: 거래처명을 키로, 청구/입금 내역 배열을 값으로 저장 → 모든 월에서 공유
   const [clientAR, setClientAR] = useState(() => load("frw_client_ar", {}));
+  // 자금 운용
+  const [accounts, setAccounts] = useState(() => load("frw_accounts", []));
+  const [investments, setInvestments] = useState(() => load("frw_investments", []));
+  const [cashFlows, setCashFlows] = useState(() => load("frw_cashflows", []));
+  const [scheduledExpenses, setScheduledExpenses] = useState(() => load("frw_scheduled_expenses", []));
   // 첫 로드 시 기존 월별 ar 데이터를 clientAR로 자동 병합 (중복 제거)
   const arMigrated = useRef(false);
   useEffect(() => {
@@ -4416,6 +5085,10 @@ function App() {
     if (d.bids) setBids(d.bids);
     if (d.ledgers) setLedgers(d.ledgers);
     if (d.clientAR) setClientAR(d.clientAR);
+    if (d.accounts) setAccounts(d.accounts);
+    if (d.investments) setInvestments(d.investments);
+    if (d.cashFlows) setCashFlows(d.cashFlows);
+    if (d.scheduledExpenses) setScheduledExpenses(d.scheduledExpenses);
     if (d.suppliers) setSuppliers(d.suppliers);
     if (d.purchaseOrders) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
     if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
@@ -4442,14 +5115,15 @@ function App() {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", products); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR);
+    save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses);
     if (!initialized.current) return;
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR })
+      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses })
         .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR]);
+  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses]);
 
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
@@ -5005,7 +5679,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(99,102,241,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["purchase", "발주 관리", "◨"], ["dashboard", "경영 대시보드", "◉"], ["ledger", "장부", "▤"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"], ["suppliers", "공급처 관리", "◧"], ["bids", "입찰 캘린더", "◊"], ["mail", "메일", "✉"], ["news", "뉴스", "◑"]];
+  const TABS = [["pricedb", "단가표", "◈"], ["calc", "단가 계산기", "⊞"], ["quote", "견적 관리", "◻"], ["purchase", "발주 관리", "◨"], ["dashboard", "경영 대시보드", "◉"], ["ledger", "장부", "▤"], ["treasury", "자금 운용", "₩"], ["inventory", "원단 입고현황", "≋"], ["clients", "거래처별 단가", "◐"], ["suppliers", "공급처 관리", "◧"], ["bids", "입찰 캘린더", "◊"], ["mail", "메일", "✉"], ["news", "뉴스", "◑"]];
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -6400,6 +7074,16 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         )}
         {tab === "ledger" && (
           <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} />
+        )}
+        {tab === "treasury" && (
+          <TreasuryTab
+            accounts={accounts} setAccounts={setAccounts}
+            investments={investments} setInvestments={setInvestments}
+            cashFlows={cashFlows} setCashFlows={setCashFlows}
+            scheduledExpenses={scheduledExpenses} setScheduledExpenses={setScheduledExpenses}
+            ledgers={ledgers} clientAR={clientAR} orders={orders}
+            darkMode={darkMode}
+          />
         )}
         {tab === "clients" && (
           <ClientsTab
