@@ -2562,7 +2562,12 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
   };
 
   const togglePaid = (id) => {
-    updateMonth(cs => cs.map(c => c.id === id ? { ...c, status: c.status === "입금완료" ? "미입금" : "입금완료" } : c));
+    const cur = monthClients.find(c => c.id === id);
+    if (!cur) return;
+    const newStatus = cur.status === "입금완료" ? "미입금" : "입금완료";
+    const amt = Math.round(parseFloat(cur.total)||0).toLocaleString();
+    if (!window.confirm(`[${selectedYM}] "${cur.name||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${cur.status}" → "${newStatus}" 로 변경하시겠습니까?`)) return;
+    updateMonth(cs => cs.map(c => c.id === id ? { ...c, status: newStatus } : c));
   };
 
   const startEdit = (c) => { setEditId(c.id); setEditDraft({ ...c }); };
