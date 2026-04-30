@@ -6131,6 +6131,7 @@ ${productList}
   // ── 발주서 (Purchase Order) ──
   const buildPOMarkdown = (draft) => {
     const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
+    const orderDateDisplay = draft.orderDate ? new Date(draft.orderDate).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" }) : today;
     const poNum = `PO-${Date.now().toString(36).toUpperCase().slice(-6)}`;
     const items = (draft.items || []).filter(it => (it.name || "").trim() && Number(it.qty) > 0);
     const subtotal = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
@@ -6140,7 +6141,7 @@ ${productList}
     const itemsTable = items.length === 0 ? "_품목이 없습니다_" : `| 품목 | 규격/단위 | 수량 | 단가 | 금액 |\n|------|----------|-----:|-----:|-----:|\n${items.map(it => `| ${it.name} | ${it.unit || "-"} | ${Number(it.qty).toLocaleString()} | ${Number(it.unitPrice||0).toLocaleString()}원 | ${Math.round((Number(it.qty)||0)*(Number(it.unitPrice)||0)).toLocaleString()}원 |`).join("\n")}`;
     return `# 발주서 (Purchase Order)
 
-**발주 번호** ${poNum}  ·  **작성일** ${today}  ·  **납기일** ${draft.deliveryDate || "협의"}
+**발주 번호** ${poNum}  ·  **발주일자** ${orderDateDisplay}  ·  **납기일** ${draft.deliveryDate || "협의"}
 
 ---
 
@@ -6228,7 +6229,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     const title = (poDraft.title || "").trim() || `${sup.name || "공급처"} - ${items.map(it => it.name).slice(0, 2).join(", ")}${items.length > 2 ? " 외" : ""}`;
     const entry = {
       id: uid(), title, dateStr, timeStr, savedAt: now.getTime(),
-      supplier: sup, items, photos: poDraft.photos || [], deliveryDate: poDraft.deliveryDate || "",
+      supplier: sup, items, photos: poDraft.photos || [], orderDate: poDraft.orderDate || "", deliveryDate: poDraft.deliveryDate || "",
       paymentTerms: poDraft.paymentTerms || "", deliveryPlace: poDraft.deliveryPlace || "",
       memo: poDraft.memo || "", body: poDraft.body, poStyle, totalAmount: subtotal + tax,
     };
@@ -6253,6 +6254,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" },
       items: [{ id: uid(), kind: "custom", name: "", unit: "yard", qty: "", unitPrice: "", note: "" }],
       photos: [],
+      orderDate: new Date().toISOString().slice(0,10),
       deliveryDate: "", paymentTerms: "", deliveryPlace: "", memo: "", body: "",
     });
     save("frw_po_draft", null);
@@ -6297,13 +6299,18 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
         if (colName === -1 || colQty === -1) { alert("필수 컬럼(품명, 수량)을 찾지 못했습니다."); return; }
 
-        // 공급처 정보 자동 추출 (헤더 위쪽 행에서)
+        // 공급처 + 날짜 정보 자동 추출 (헤더 위쪽 행에서)
         let supplierUpdate = null;
         const upper = rows.slice(0, headerIdx).map(r => r.join(" "));
         const upperText = upper.join("\n");
         const supMatch = upperText.match(/(?:공급처|업체|거래처)\s*[:：]?\s*([^\s]{2,30})/);
         const phoneMatch = upperText.match(/(\d{2,4}-\d{3,4}-\d{4})/);
-        const dateMatch = upperText.match(/납기[일\s]*[:：]?\s*(\d{4}[-./]\d{1,2}[-./]\d{1,2})/);
+        // 납기일 (납기/도착/배송)
+        const deliveryMatch = upperText.match(/(?:납기|도착|배송|delivery)[일\s]*[:：]?\s*(\d{4}[-./]\d{1,2}[-./]\d{1,2})/i);
+        // 발주일자 (발주일/주문일/작성일)
+        const orderMatch = upperText.match(/(?:발주[일자]*|주문[일자]*|작성[일자]*|order\s*date|po\s*date)\s*[:：]?\s*(\d{4}[-./]\d{1,2}[-./]\d{1,2})/i);
+        // 우선순위 없는 일반 날짜 (위 둘 다 못찾으면 첫 번째 날짜를 발주일로 사용)
+        const anyDateMatch = (!orderMatch && !deliveryMatch) ? upperText.match(/(\d{4}[-./]\d{1,2}[-./]\d{1,2})/) : null;
         if (supMatch) {
           supplierUpdate = { ...(poDraft && poDraft.supplier || {}), name: supMatch[1] };
           if (phoneMatch) supplierUpdate.phone = phoneMatch[1];
@@ -6334,13 +6341,21 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           ? window.confirm(`엑셀에서 ${newItems.length}건의 품목을 가져왔습니다.\n\n확인: 기존 품목 모두 교체\n취소: 기존 품목 끝에 추가`)
           : true;
 
-        const dateUpdate = dateMatch ? { deliveryDate: dateMatch[1].replace(/[./]/g, "-") } : {};
+        const dateUpdate = {};
+        const normalize = d => d.replace(/[./]/g, "-").replace(/-(\d)(?=-|$)/g, "-0$1");
+        if (orderMatch) dateUpdate.orderDate = normalize(orderMatch[1]);
+        else if (anyDateMatch) dateUpdate.orderDate = normalize(anyDateMatch[1]);
+        if (deliveryMatch) dateUpdate.deliveryDate = normalize(deliveryMatch[1]);
         setPoDraft(prev => {
-          const base = prev || { title: "", supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" }, items: [], photos: [], deliveryDate: "", paymentTerms: "", deliveryPlace: "", memo: "", body: "" };
+          const base = prev || { title: "", supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" }, items: [], photos: [], orderDate: "", deliveryDate: "", paymentTerms: "", deliveryPlace: "", memo: "", body: "" };
           const items = replaceConfirm ? newItems : [...(base.items || []).filter(it => (it.name||"").trim() || it.qty), ...newItems];
           return { ...base, items, ...(supplierUpdate ? { supplier: supplierUpdate } : {}), ...dateUpdate, body: "" };
         });
-        alert(`✅ ${newItems.length}건 입력 완료${supplierUpdate ? `\n공급처: ${supplierUpdate.name}`:""}${dateMatch?`\n납기: ${dateMatch[1]}`:""}`);
+        const dateMsg = [
+          dateUpdate.orderDate ? `발주일: ${dateUpdate.orderDate}` : "",
+          dateUpdate.deliveryDate ? `납기: ${dateUpdate.deliveryDate}` : ""
+        ].filter(Boolean).join(" / ");
+        alert(`✅ ${newItems.length}건 입력 완료${supplierUpdate ? `\n공급처: ${supplierUpdate.name}`:""}${dateMsg?`\n${dateMsg}`:""}`);
       } catch (err) {
         console.error("[Excel Import]", err);
         alert("엑셀 파싱 오류: " + err.message);
@@ -8027,7 +8042,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   </div>
                   <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(236,102,8,0.06)", border: "1px dashed rgba(236,102,8,0.30)", fontSize: 12, color: "var(--text2)", display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 16 }}>📋</span>
-                    <span>엑셀 파일을 이 영역에 <b>드래그&amp;드롭</b>하면 품목을 자동 입력합니다 — 인식 컬럼: <b>품명/품목명, 수량, 단가, 단위, 비고</b> · 상단에 <b>공급처 / 납기일 / 전화</b>도 자동 인식</span>
+                    <span>엑셀 파일을 이 영역에 <b>드래그&amp;드롭</b>하면 품목을 자동 입력합니다 — 인식 컬럼: <b>품명/품목명, 수량, 단가, 단위, 비고</b> · 상단에 <b>공급처 / 발주일자 / 납기일 / 전화</b>도 자동 인식</span>
                   </div>
 
                   {(poDraft.items || []).length === 0 ? (
@@ -8185,7 +8200,11 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   <div className="section-header">
                     <span className="section-header-title">거래 조건 <span className="section-sub">— Terms</span></span>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 14 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 14 }}>
+                    <div>
+                      <label className="po-label">발주일자 <span style={{ color: "var(--text3)", fontWeight: 500, marginLeft: 4 }}>(과거 이력 등록 가능)</span></label>
+                      <input type="date" value={poDraft.orderDate || ""} onChange={e => setPoDraft({ ...poDraft, orderDate: e.target.value })} />
+                    </div>
                     <div>
                       <label className="po-label">납기일</label>
                       <input type="date" value={poDraft.deliveryDate || ""} onChange={e => setPoDraft({ ...poDraft, deliveryDate: e.target.value })} />
