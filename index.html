@@ -7708,12 +7708,15 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </div>
 
                 {/* 거래처 입력 — 등급 자동 적용 */}
-                <div style={{ marginBottom: 12 }}>
+                <div style={{ marginBottom: 12, position: "relative" }}>
                   <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.text2, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" }}>거래처 <span style={{ color: T.empty, fontWeight: 500, textTransform: "none", marginLeft: 4 }}>— 선택 시 등급 자동 적용</span></label>
-                  <input type="text" value={quoteClient} list="quotegen-clients-list"
+                  <input type="text" value={quoteClient} autoComplete="off"
+                    onFocus={() => setQuoteClientOpen("builder")}
+                    onBlur={() => setTimeout(() => setQuoteClientOpen(p => p === "builder" ? null : p), 180)}
                     onChange={e => {
                       const v = e.target.value;
                       setQuoteClient(v);
+                      setQuoteClientOpen("builder");
                       const matched = clients.find(c => (c.name || "").trim() === v.trim());
                       if (matched) {
                         setProducts(ps => ps.map(p => {
@@ -7723,9 +7726,37 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       }
                     }}
                     placeholder="거래처명 입력 (예: ○○주식회사)" style={{ height: 44, marginBottom: 6 }} />
-                  <datalist id="quotegen-clients-list">
-                    {clients.map(c => <option key={c.id} value={c.name}>{c.grade}등급 {c.note ? "· " + c.note : ""}</option>)}
-                  </datalist>
+                  {quoteClientOpen === "builder" && (() => {
+                    const q = quoteClient.trim().toLowerCase();
+                    const list = clients.filter(c => !q || (c.name||"").toLowerCase().includes(q));
+                    if (list.length === 0) return null;
+                    return (
+                      <div onMouseDown={e => e.preventDefault()}
+                        style={{ position: "absolute", top: "calc(100% - 6px)", left: 0, right: 0, zIndex: 50, maxHeight: 260, overflowY: "auto", background: T.surface, border: `1.5px solid ${T.divider}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+                        {list.map(c => {
+                          const gc = { A: "#EC6608", B: "#10B981", C: "#F59E0B", D: "#EF4444" }[c.grade] || "#EC6608";
+                          return (
+                            <div key={c.id}
+                              onClick={() => {
+                                setQuoteClient(c.name);
+                                setQuoteClientOpen(null);
+                                setProducts(ps => ps.map(p => {
+                                  if (!p.specs || !Array.isArray(p.specs)) return p;
+                                  return { ...p, specs: p.specs.map(s => s.id === p.activeSpecId ? { ...s, selectedGrade: c.grade } : s) };
+                                }));
+                              }}
+                              style={{ padding: "10px 12px", cursor: "pointer", borderBottom: `1px solid ${T.divider}`, display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.text }}
+                              onMouseEnter={e => { e.currentTarget.style.background = T.surface2; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 999, background: gc, color: "#fff", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{c.grade}</span>
+                              <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                              {c.note && <span style={{ fontSize: 11, color: T.text2, flexShrink: 0 }}>· {c.note}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                   {(() => {
                     const matched = clients.find(c => (c.name || "").trim() === quoteClient.trim());
                     if (!matched) return quoteClient.trim() ? (
