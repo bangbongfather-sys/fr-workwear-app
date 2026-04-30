@@ -2980,7 +2980,8 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                   const isPaid = c.status === "입금완료";
                   const isCorp = c.status === "법인 거래";
                   const isSelected = selectedIds.has(c.id);
-                  const rowBg = isSelected ? (darkMode?"rgba(236,102,8,0.10)":"rgba(236,102,8,0.06)") : (isPaid ? (darkMode?"rgba(0,180,147,0.06)":"rgba(0,180,147,0.04)") : "transparent");
+                  const rowBg = isSelected ? (darkMode?"rgba(236,102,8,0.10)":"rgba(236,102,8,0.06)") : (isPaid ? (darkMode?"rgba(0,180,147,0.18)":"rgba(0,180,147,0.13)") : "transparent");
+                  const rowBorderLeft = isPaid ? "4px solid #00B493" : "4px solid transparent";
                   // 펼친 패널용 데이터 (펼쳐진 거래처만 계산)
                   const expAutoEntries = isExpanded ? autoUnpaidEntries(c.name) : [];
                   const expAutoSum = expAutoEntries.filter(e => e.status === "미입금").reduce((s,e) => s + e.amount, 0);
@@ -2989,28 +2990,30 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                   const expBalance = clientBal;
                   return (
                     <React.Fragment key={c.id}>
-                      <tr style={{background:rowBg}}>
+                      <tr style={{background:rowBg, borderLeft: rowBorderLeft, transition: "background 0.2s"}}>
                         <td style={{textAlign:"center"}}>
-                          <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(c.id)} style={{width:18,height:18,accentColor:"#475569",cursor:"pointer"}}/>
+                          <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(c.id)} style={{width:18,height:18,accentColor:isPaid?"#00B493":"#475569",cursor:"pointer"}}/>
                         </td>
                         <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
-                        <td style={{fontWeight:600,fontSize:13}}>
-                          <span onClick={()=>setExpandedClientId(isExpanded?null:c.id)} style={{cursor:"pointer"}} title="클릭하여 미수금 내역 펼치기">
+                        <td style={{fontWeight:600,fontSize:13,color:isPaid?"#00B493":"inherit"}}>
+                          <span onClick={()=>setExpandedClientId(isExpanded?null:c.id)} style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6}} title="클릭하여 미수금 내역 펼치기">
+                            {isPaid && <span style={{fontSize:14,color:"#00B493"}}>✓</span>}
                             {c.name}
-                            {clientBal > 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(240,68,82,0.12)",color:"#F04452",marginLeft:6}}>미수 {Math.round(clientBal).toLocaleString()}원</span>}
-                            {clientBal < 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.12)",color:"#00B493",marginLeft:6}}>선납 {Math.round(Math.abs(clientBal)).toLocaleString()}원</span>}
+                            {clientBal > 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(240,68,82,0.12)",color:"#F04452",marginLeft:0}}>미수 {Math.round(clientBal).toLocaleString()}원</span>}
+                            {clientBal < 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.12)",color:"#00B493",marginLeft:0}}>선납 {Math.round(Math.abs(clientBal)).toLocaleString()}원</span>}
                           </span>
                         </td>
-                        <td style={{textAlign:"right",fontSize:13}}>{isCorp ? "—" : Math.round(c.supply||0).toLocaleString()+"원"}</td>
-                        <td style={{textAlign:"right",fontSize:13,color:"var(--text2)"}}>{isCorp ? "—" : Math.round(c.tax||0).toLocaleString()+"원"}</td>
-                        <td style={{textAlign:"right",fontWeight:700,fontSize:13}}>{isCorp ? "—" : Math.round(c.total||0).toLocaleString()+"원"}</td>
+                        <td style={{textAlign:"right",fontSize:13,color:isPaid?"#00B493":"inherit"}}>{isCorp ? "—" : Math.round(c.supply||0).toLocaleString()+"원"}</td>
+                        <td style={{textAlign:"right",fontSize:13,color:isPaid?"rgba(0,180,147,0.85)":"var(--text2)"}}>{isCorp ? "—" : Math.round(c.tax||0).toLocaleString()+"원"}</td>
+                        <td style={{textAlign:"right",fontWeight:700,fontSize:13,color:isPaid?"#00B493":"inherit"}}>{isCorp ? "—" : Math.round(c.total||0).toLocaleString()+"원"}</td>
                         <td style={{textAlign:"center"}}>
                           <button onClick={()=>togglePaid(c.id)} disabled={isCorp}
                             style={{
-                              padding:"4px 10px",borderRadius:100,border:"none",
+                              padding:"5px 12px",borderRadius:100,border:"none",
                               fontSize:11,fontWeight:700,cursor:isCorp?"default":"pointer",fontFamily:"inherit",
-                              background: isCorp ? "rgba(118,118,128,0.15)" : isPaid ? "rgba(0,180,147,0.18)" : "rgba(255,149,0,0.18)",
-                              color: isCorp ? "var(--text3)" : isPaid ? "#00B493" : "#FF9500",
+                              background: isCorp ? "rgba(118,118,128,0.15)" : isPaid ? "linear-gradient(135deg, #00B493, #009B7E)" : "rgba(255,149,0,0.18)",
+                              color: isCorp ? "var(--text3)" : isPaid ? "#FFFFFF" : "#FF9500",
+                              boxShadow: isPaid ? "0 2px 8px rgba(0,180,147,0.32)" : "none",
                             }}>
                             {isCorp ? "법인" : isPaid ? "✓ 입금완료" : "⏳ 미입금"}
                           </button>
@@ -4175,13 +4178,18 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
 }
 
 function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubTabs = [], setPurchaseSubTabs, darkMode }) {
-  // 매입 서브탭: "all" (전체) | supplier name | "summary" (총합계)
-  const [activeSubTab, setActiveSubTab] = useState("all");
+  // 매입 서브탭: "dashboard" (종합 대시보드) | "all" (전체) | supplier name | "summary" (총합계)
+  const [activeSubTab, setActiveSubTab] = useState("dashboard");
   const [showAddTabForm, setShowAddTabForm] = useState(false);
   const [newTabName, setNewTabName] = useState("");
   const totalSumRef = useRef(null); const totalSumInst = useRef(null);
   const monthlyTrendRef = useRef(null); const monthlyTrendInst = useRef(null);
   const matPieRef = useRef(null); const matPieInst = useRef(null);
+  // 대시보드 차트 refs
+  const dashStatusRef = useRef(null); const dashStatusInst = useRef(null);
+  const dashMonthlyRef = useRef(null); const dashMonthlyInst = useRef(null);
+  const dashSupTopRef = useRef(null); const dashSupTopInst = useRef(null);
+  const dashItemTopRef = useRef(null); const dashItemTopInst = useRef(null);
 
   const addSubTab = () => {
     const nm = newTabName.trim();
@@ -4265,10 +4273,96 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
     return () => { [totalSumInst, monthlyTrendInst, matPieInst].forEach(r => { if (r.current) { r.current.destroy(); r.current = null; } }); };
   }, [activeSubTab, fabricIntakes, darkMode]);
 
+  // 종합 대시보드 차트
+  useEffect(() => {
+    if (activeSubTab !== "dashboard") return;
+    if (typeof Chart === "undefined") return;
+    const STATUSES_LIST = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
+    const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
+
+    // 1) 상태별 도넛
+    const statusCounts = {};
+    fabricIntakes.forEach(r => { const s = r.status || "주문완료"; statusCounts[s] = (statusCounts[s]||0) + 1; });
+    const statusEntries = STATUSES_LIST.filter(s => statusCounts[s] > 0).map(s => [s, statusCounts[s]]);
+    if (dashStatusRef.current) {
+      if (dashStatusInst.current) dashStatusInst.current.destroy();
+      if (statusEntries.length > 0) {
+        dashStatusInst.current = new Chart(dashStatusRef.current, {
+          type: "doughnut",
+          data: { labels: statusEntries.map(x=>x[0]), datasets: [{ data: statusEntries.map(x=>x[1]), backgroundColor: statusEntries.map(x=>SC[x[0]]||"#8B95A1"), borderWidth: 0 }] },
+          options: { responsive: true, maintainAspectRatio: false, cutout: "62%",
+            plugins: { legend: { position: "right", labels: { color: chartText, font: { size: 11 }, padding: 8, boxWidth: 12 } },
+              tooltip: { callbacks: { label: ctx => " " + ctx.label + ": " + ctx.raw + "건" } } } }
+        });
+      }
+    }
+
+    // 2) 월별 매입 (12개월) — 공급가/VAT 포함 두 데이터셋
+    const months = [];
+    const now = new Date();
+    for (let i=11; i>=0; i--) { const d = new Date(now.getFullYear(), now.getMonth()-i, 1); months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`); }
+    const monthSums = months.map(ym => fabricIntakes.filter(r => (r.date||"").startsWith(ym)).reduce((s,r) => s + parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0));
+    if (dashMonthlyRef.current) {
+      if (dashMonthlyInst.current) dashMonthlyInst.current.destroy();
+      dashMonthlyInst.current = new Chart(dashMonthlyRef.current, {
+        type: "bar",
+        data: { labels: months.map(m=>m.slice(2,4)+"/"+m.slice(5)), datasets: [
+          { label: "공급가", data: monthSums, backgroundColor: "rgba(236,102,8,0.85)", borderRadius: 6 },
+          { label: "VAT 포함", data: monthSums.map(v=>v*1.1), backgroundColor: "rgba(216,88,0,0.35)", borderRadius: 6 }
+        ] },
+        options: { responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "top", labels: { color: chartText, font: { size: 11 }, boxWidth: 12 } },
+            tooltip: { callbacks: { label: ctx => " " + ctx.dataset.label + ": " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { display: false }, ticks: { color: chartText } },
+            y: { grid: { color: gridCol }, ticks: { color: chartText, callback: v=>v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000?(v/10000).toFixed(0)+"만":v } } } }
+      });
+    }
+
+    // 3) Top 5 거래처
+    const supSums = {};
+    fabricIntakes.forEach(r => { const sup = (r.supplier||"").trim() || "(미지정)"; const amt = parseFloat(r.unitPrice||0)*parseFloat(r.qty||0); supSums[sup] = (supSums[sup]||0) + amt; });
+    const topSup = Object.entries(supSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    if (dashSupTopRef.current && topSup.length > 0) {
+      if (dashSupTopInst.current) dashSupTopInst.current.destroy();
+      dashSupTopInst.current = new Chart(dashSupTopRef.current, {
+        type: "bar",
+        data: { labels: topSup.map(x=>x[0]), datasets: [{ label: "매입액", data: topSup.map(x=>x[1]), backgroundColor: ["#EC6608","#D85800","#B84800","#FFB07A","#FFE9D6"], borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { color: gridCol }, ticks: { color: chartText, callback: v=>v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000?(v/10000).toFixed(0)+"만":v } },
+            y: { grid: { display: false }, ticks: { color: chartText, font: { size: 11 } } } } }
+      });
+    }
+
+    // 4) Top 5 품목
+    const matSums = {};
+    fabricIntakes.forEach(r => { const m = (r.materialName||"").trim() || "(미지정)"; const amt = parseFloat(r.unitPrice||0)*parseFloat(r.qty||0); matSums[m] = (matSums[m]||0) + amt; });
+    const topItem = Object.entries(matSums).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    if (dashItemTopRef.current && topItem.length > 0) {
+      if (dashItemTopInst.current) dashItemTopInst.current.destroy();
+      dashItemTopInst.current = new Chart(dashItemTopRef.current, {
+        type: "bar",
+        data: { labels: topItem.map(x=>x[0].length>18?x[0].slice(0,18)+"…":x[0]), datasets: [{ label: "매입액", data: topItem.map(x=>x[1]), backgroundColor: ["#6366F1","#8B5CF6","#EC4899","#F59E0B","#10B981"], borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, indexAxis: "y",
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => " " + Math.round(ctx.raw).toLocaleString() + "원" } } },
+          scales: { x: { grid: { color: gridCol }, ticks: { color: chartText, callback: v=>v>=100000000?(v/100000000).toFixed(1)+"억":v>=10000?(v/10000).toFixed(0)+"만":v } },
+            y: { grid: { display: false }, ticks: { color: chartText, font: { size: 11 } } } } }
+      });
+    }
+
+    return () => { [dashStatusInst, dashMonthlyInst, dashSupTopInst, dashItemTopInst].forEach(r => { if (r.current) { r.current.destroy(); r.current = null; } }); };
+  }, [activeSubTab, fabricIntakes, darkMode]);
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {/* 서브탭 바 */}
       <div className="no-print" style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",padding:6,background:"var(--surface2)",borderRadius:12}}>
+        <button onClick={()=>setActiveSubTab("dashboard")} style={{
+          padding:"9px 18px",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",
+          background:activeSubTab==="dashboard"?"linear-gradient(135deg,#EC6608,#D85800)":"transparent",
+          color:activeSubTab==="dashboard"?"#fff":"var(--text2)",
+          boxShadow:activeSubTab==="dashboard"?"0 2px 8px rgba(236,102,8,0.32)":"none",
+        }}>🎯 종합 대시보드</button>
         <button onClick={()=>setActiveSubTab("all")} style={{
           padding:"9px 18px",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",
           background:activeSubTab==="all"?(darkMode?"rgba(236,102,8,0.18)":"#fff"):"transparent",
@@ -4312,10 +4406,161 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
         }}>📊 매입 총합계</button>
       </div>
 
-      {activeSubTab === "summary"
-        ? <PurchaseSummaryView fabricIntakes={fabricIntakes} totalSumRef={totalSumRef} monthlyTrendRef={monthlyTrendRef} matPieRef={matPieRef} darkMode={darkMode} />
-        : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} darkMode={darkMode} filterSupplier={activeSubTab === "all" ? "" : activeSubTab} />
+      {activeSubTab === "dashboard"
+        ? <PurchaseDashboardView fabricIntakes={fabricIntakes} dashStatusRef={dashStatusRef} dashMonthlyRef={dashMonthlyRef} dashSupTopRef={dashSupTopRef} dashItemTopRef={dashItemTopRef} darkMode={darkMode} setActiveSubTab={setActiveSubTab} />
+        : activeSubTab === "summary"
+          ? <PurchaseSummaryView fabricIntakes={fabricIntakes} totalSumRef={totalSumRef} monthlyTrendRef={monthlyTrendRef} matPieRef={matPieRef} darkMode={darkMode} />
+          : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} darkMode={darkMode} filterSupplier={activeSubTab === "all" ? "" : activeSubTab} />
       }
+    </div>
+  );
+}
+
+// 매입 종합 대시보드 (첫 번째 서브탭)
+function PurchaseDashboardView({ fabricIntakes, dashStatusRef, dashMonthlyRef, dashSupTopRef, dashItemTopRef, darkMode, setActiveSubTab }) {
+  const totalAmount = fabricIntakes.reduce((s,r) => s + parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
+  const totalQty = fabricIntakes.reduce((s,r) => s + parseFloat(r.qty||0), 0);
+  const recordCount = fabricIntakes.length;
+  const supSet = new Set(fabricIntakes.map(r => (r.supplier||"").trim()).filter(Boolean));
+  const matSet = new Set(fabricIntakes.map(r => (r.materialName||"").trim()).filter(Boolean));
+
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+  const lastMonthD = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const lastMonth = `${lastMonthD.getFullYear()}-${String(lastMonthD.getMonth()+1).padStart(2,"0")}`;
+  const thisYearStr = String(now.getFullYear());
+
+  const thisMoAmt = fabricIntakes.filter(r => (r.date||"").startsWith(thisMonth)).reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
+  const lastMoAmt = fabricIntakes.filter(r => (r.date||"").startsWith(lastMonth)).reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
+  const thisYearAmt = fabricIntakes.filter(r => (r.date||"").startsWith(thisYearStr)).reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
+  const moDiff = lastMoAmt > 0 ? ((thisMoAmt - lastMoAmt) / lastMoAmt * 100) : 0;
+
+  const pendingCnt = fabricIntakes.filter(r=>["주문완료","운송중","검수중"].includes(r.status)).length;
+  const completedCnt = fabricIntakes.filter(r=>["입고완료","검수완료"].includes(r.status)).length;
+  const returnCnt = fabricIntakes.filter(r=>r.status==="반품").length;
+
+  // 최근 매입 5건
+  const recent = [...fabricIntakes].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0,5);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* 헤더 인사 */}
+      <div className="card" style={{background:"linear-gradient(135deg, rgba(236,102,8,0.08) 0%, rgba(236,102,8,0.02) 100%)",border:"1px solid rgba(236,102,8,0.18)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+          <div style={{width:48,height:48,borderRadius:12,background:"linear-gradient(135deg,#EC6608,#D85800)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:22,boxShadow:"0 4px 12px rgba(236,102,8,0.32)"}}>🎯</div>
+          <div style={{flex:1,minWidth:200}}>
+            <div style={{fontSize:18,fontWeight:800,color:"var(--text1)",letterSpacing:-0.3}}>매입 종합 대시보드</div>
+            <div style={{fontSize:12,color:"var(--text2)",marginTop:2}}>원단·임가공·소모품 등 모든 매입 내역의 핵심 지표를 한눈에</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:11,color:"var(--text3)",fontWeight:700,letterSpacing:0.5,textTransform:"uppercase"}}>이번달 매입 (공급가)</div>
+            <div style={{fontSize:22,fontWeight:900,color:"#EC6608",letterSpacing:-0.5}}>{Math.round(thisMoAmt).toLocaleString()}<span style={{fontSize:13,fontWeight:600,color:"var(--text2)",marginLeft:2}}>원</span></div>
+            <div style={{fontSize:11,marginTop:2,color:moDiff>=0?"#F04452":"#00B493",fontWeight:700}}>{lastMoAmt>0?(moDiff>=0?"▲ +":"▼ ")+Math.abs(moDiff).toFixed(1)+"% 전월대비":"전월 데이터 없음"}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI 그리드 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(170px, 1fr))",gap:12}}>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 매입 (공급가)</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#EC6608"}}>{Math.round(totalAmount).toLocaleString()}<span style={{fontSize:12,marginLeft:2,color:"var(--text2)"}}>원</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{recordCount}건 누적</div>
+        </div>
+        <div className="card" style={{borderColor:"rgba(236,102,8,0.30)",background:"rgba(236,102,8,0.04)"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>VAT 포함 총액</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#D85800"}}>{Math.round(totalAmount*1.1).toLocaleString()}<span style={{fontSize:12,marginLeft:2,color:"var(--text2)"}}>원</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>VAT {Math.round(totalAmount*0.1).toLocaleString()}원</div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{thisYearStr}년 누계</div>
+          <div style={{fontSize:22,fontWeight:800,color:"var(--text1)"}}>{Math.round(thisYearAmt).toLocaleString()}<span style={{fontSize:12,marginLeft:2,color:"var(--text2)"}}>원</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>VAT 포함 {Math.round(thisYearAmt*1.1).toLocaleString()}원</div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>처리 대기</div>
+          <div style={{fontSize:22,fontWeight:800,color:pendingCnt>0?"#FF9500":"#00B493"}}>{pendingCnt}<span style={{fontSize:12,marginLeft:2,color:"var(--text2)"}}>건</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>완료 {completedCnt}건 · 반품 {returnCnt}건</div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>거래처</div>
+          <div style={{fontSize:22,fontWeight:800,color:"#10B981"}}>{supSet.size}<span style={{fontSize:12,marginLeft:4,color:"var(--text2)"}}>곳</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>품목 {matSet.size}종류</div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 매입 수량</div>
+          <div style={{fontSize:22,fontWeight:800,color:"var(--text1)"}}>{Math.round(totalQty).toLocaleString()}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>건당 평균 {recordCount>0?Math.round(totalAmount/recordCount).toLocaleString():0}원</div>
+        </div>
+      </div>
+
+      {/* 차트 행 1: 상태별 + 월별 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:16}}>
+        <div className="card">
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📊 매입 상태 분포</div>
+          <div style={{height:240,position:"relative"}}>
+            {recordCount>0?<canvas ref={dashStatusRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13}}>매입 데이터 없음</div>}
+          </div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>📈 최근 12개월 매입 (공급가 / VAT 포함)</div>
+          <div style={{height:240,position:"relative"}}>
+            {recordCount>0?<canvas ref={dashMonthlyRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13}}>매입 데이터 없음</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* 차트 행 2: Top 거래처 + Top 품목 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>🏭 Top 5 거래처</div>
+            <button onClick={()=>setActiveSubTab("summary")} style={{fontSize:11,color:"#EC6608",background:"none",border:"none",cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>전체 보기 →</button>
+          </div>
+          <div style={{height:220,position:"relative"}}>
+            {recordCount>0?<canvas ref={dashSupTopRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13}}>매입 데이터 없음</div>}
+          </div>
+        </div>
+        <div className="card">
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}>🧵 Top 5 품목</div>
+          <div style={{height:220,position:"relative"}}>
+            {recordCount>0?<canvas ref={dashItemTopRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13}}>매입 데이터 없음</div>}
+          </div>
+        </div>
+      </div>
+
+      {/* 최근 매입 */}
+      <div className="card">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>🕒 최근 매입 5건</div>
+          <button onClick={()=>setActiveSubTab("all")} style={{fontSize:11,color:"#EC6608",background:"none",border:"none",cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>전체 매입 →</button>
+        </div>
+        {recent.length === 0 ? (
+          <div style={{textAlign:"center",padding:"30px 16px",color:"var(--text3)",fontSize:13}}>매입 기록이 없습니다.</div>
+        ) : (
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {recent.map(r => {
+              const total = parseFloat(r.unitPrice||0)*parseFloat(r.qty||0);
+              const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
+              const sc = SC[r.status]||"#8B95A1";
+              return (
+                <div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:"var(--surface2)",border:"1px solid var(--divider)"}}>
+                  <div style={{fontSize:11,color:"var(--text3)",fontWeight:600,minWidth:80}}>{r.date}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.materialName||"(품목 미지정)"}</div>
+                    <div style={{fontSize:11,color:"var(--text2)",marginTop:1}}>{r.supplier||"(거래처 미지정)"} · {parseFloat(r.qty||0).toLocaleString()} {r.unit}</div>
+                  </div>
+                  <span style={{padding:"3px 8px",borderRadius:100,fontSize:10,fontWeight:700,background:sc+"22",color:sc,whiteSpace:"nowrap"}}>{r.status}</span>
+                  <div style={{textAlign:"right",minWidth:120}}>
+                    <div style={{fontSize:13,fontWeight:700,color:"#EC6608"}}>{Math.round(total).toLocaleString()}원</div>
+                    <div style={{fontSize:10,color:"var(--text3)"}}>VAT {Math.round(total*1.1).toLocaleString()}원</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -4357,22 +4602,28 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
       {/* KPI */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
         <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 매입액</div>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 매입 가액 (공급가)</div>
           <div style={{fontSize:24,fontWeight:800,color:"#EC6608"}}>{Math.round(totalAmount).toLocaleString()}<span style={{fontSize:13,marginLeft:2,color:"var(--text2)"}}>원</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{recordCount}건 누적</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{recordCount}건 누적 · 부가세 별도</div>
+        </div>
+        <div className="card" style={{borderColor:"rgba(236,102,8,0.25)",background:"rgba(236,102,8,0.04)"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>부가세 포함 총액</div>
+          <div style={{fontSize:24,fontWeight:800,color:"#D85800"}}>{Math.round(totalAmount*1.1).toLocaleString()}<span style={{fontSize:13,marginLeft:2,color:"var(--text2)"}}>원</span></div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>VAT {Math.round(totalAmount*0.1).toLocaleString()}원</div>
         </div>
         <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>이번달 매입</div>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>이번달 매입 (공급가)</div>
           <div style={{fontSize:24,fontWeight:800,color:"var(--text1)"}}>{Math.round(thisMoAmt).toLocaleString()}<span style={{fontSize:13,marginLeft:2,color:"var(--text2)"}}>원</span></div>
           <div style={{fontSize:11,marginTop:3,color:moDiff>=0?"#F04452":"#00B493",fontWeight:700}}>{lastMoAmt>0?(moDiff>=0?"▲ +":"▼ ")+Math.abs(moDiff).toFixed(1)+"% (전월 대비)":"전월 데이터 없음"}</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>VAT 포함 {Math.round(thisMoAmt*1.1).toLocaleString()}원</div>
         </div>
         <div className="card">
           <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>거래처 수</div>
           <div style={{fontSize:24,fontWeight:800,color:"#10B981"}}>{supSet.size}<span style={{fontSize:13,marginLeft:4,color:"var(--text2)"}}>곳</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>원단 {matSet.size}종류</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>품목 {matSet.size}종류</div>
         </div>
         <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 입고량</div>
+          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 매입 수량</div>
           <div style={{fontSize:24,fontWeight:800,color:"var(--text1)"}}>{Math.round(totalQty).toLocaleString()}</div>
           <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>건당 평균 {Math.round(avgPerRecord).toLocaleString()}원</div>
         </div>
@@ -4413,10 +4664,11 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
               <thead><tr>
                 <th style={{width:50,textAlign:"center"}}>순위</th>
                 <th>거래처</th>
-                <th style={{textAlign:"right"}}>매입액</th>
+                <th style={{textAlign:"right"}}>공급가</th>
+                <th style={{textAlign:"right"}}>VAT 포함</th>
                 <th style={{textAlign:"right",width:120}}>비중</th>
                 <th style={{textAlign:"right"}}>건수</th>
-                <th style={{textAlign:"right"}}>총 입고량</th>
+                <th style={{textAlign:"right"}}>총 매입량</th>
                 <th style={{textAlign:"right"}}>평균 단가</th>
               </tr></thead>
               <tbody>
@@ -4428,6 +4680,7 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
                       <td style={{textAlign:"center",fontSize:12,fontWeight:700,color:"var(--text2)"}}>{idx+1}</td>
                       <td style={{fontSize:13,fontWeight:600}}>{sup}</td>
                       <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:"#EC6608"}}>{Math.round(info.amount).toLocaleString()}원</td>
+                      <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#D85800"}}>{Math.round(info.amount*1.1).toLocaleString()}원</td>
                       <td style={{textAlign:"right",fontSize:12,color:"var(--text2)"}}>
                         <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"flex-end"}}>
                           <div style={{width:60,height:6,background:"var(--divider)",borderRadius:3,overflow:"hidden"}}>
@@ -4445,6 +4698,7 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
                 <tr style={{borderTop:"2px solid var(--divider)",background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}}>
                   <td colSpan={2} style={{fontWeight:800,fontSize:14,padding:"10px 8px"}}>합계 ({supList.length}곳)</td>
                   <td style={{textAlign:"right",fontWeight:900,fontSize:15,padding:"10px 8px",color:"#EC6608"}}>{Math.round(totalAmount).toLocaleString()}원</td>
+                  <td style={{textAlign:"right",fontWeight:900,fontSize:15,padding:"10px 8px",color:"#D85800"}}>{Math.round(totalAmount*1.1).toLocaleString()}원</td>
                   <td style={{textAlign:"right",fontSize:12,padding:"10px 8px"}}>100%</td>
                   <td style={{textAlign:"right",fontWeight:700,fontSize:13,padding:"10px 8px"}}>{recordCount}건</td>
                   <td style={{textAlign:"right",fontWeight:700,fontSize:13,padding:"10px 8px"}}>{Math.round(totalQty).toLocaleString()}</td>
@@ -4530,8 +4784,9 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
       <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
         {statCard("이번달 입고완료", thisMoComp+"건", "#475569")}
         {statCard("처리 대기", pendingCnt+"건", pendingCnt>0?"#FF9500":"#00B493")}
-        {statCard("총 입고 기록", supplierFiltered.length+"건", null)}
-        {statCard("총 원단 가액", Math.round(totalVal).toLocaleString()+"원", null)}
+        {statCard("총 매입 기록", supplierFiltered.length+"건", null)}
+        {statCard("총 매입 가액", Math.round(totalVal).toLocaleString()+"원", null)}
+        {statCard("부가세포함 금액", Math.round(totalVal*1.1).toLocaleString()+"원", "#EC6608")}
       </div>
       <div className="card">
         <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:16}}>
@@ -4569,22 +4824,22 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
         )}
         {showForm&&(
           <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>신규 입고 등록</div>
+            <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>신규 매입 등록</div>
             <div style={{display:"grid",gridTemplateColumns:"130px 1fr 1fr",gap:8,marginBottom:8}}>
               <input type="date" value={newI.date} onChange={e=>setNewI(p=>({...p,date:e.target.value}))}/>
               <select value={newI.materialName} onChange={e=>setNewI(p=>({...p,materialName:e.target.value}))} style={{height:44}}>
-                <option value="">원단 선택...</option>
+                <option value="">품목 선택... (원단/임가공/기타)</option>
                 {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
-                <option value="__custom__">직접 입력</option>
+                <option value="__custom__">직접 입력 (임가공/기타)</option>
               </select>
               {newI.materialName==="__custom__"
-                ?<input placeholder="원단명 직접 입력" value={newI.customMaterial} onChange={e=>setNewI(p=>({...p,customMaterial:e.target.value}))}/>
+                ?<input placeholder="품목명 직접 입력 (예: 봉제 임가공, 컨설팅 등)" value={newI.customMaterial} onChange={e=>setNewI(p=>({...p,customMaterial:e.target.value}))}/>
                 :<input placeholder="공급업체명 *" value={newI.supplier} onChange={e=>setNewI(p=>({...p,supplier:e.target.value}))}/>}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 80px 100px 110px 120px",gap:8,marginBottom:8}}>
               {newI.materialName==="__custom__"
                 ?<input placeholder="공급업체명 *" value={newI.supplier} onChange={e=>setNewI(p=>({...p,supplier:e.target.value}))}/>
-                :<div style={{display:"flex",alignItems:"center",paddingLeft:8,fontSize:13,color:"var(--text2)"}}>{newI.materialName||"원단을 선택하세요"}</div>}
+                :<div style={{display:"flex",alignItems:"center",paddingLeft:8,fontSize:13,color:"var(--text2)"}}>{newI.materialName||"품목을 선택하세요"}</div>}
               <input type="number" placeholder="수량 *" value={newI.qty} onChange={e=>setNewI(p=>({...p,qty:e.target.value}))}/>
               <select value={newI.unit} onChange={e=>setNewI(p=>({...p,unit:e.target.value}))} style={{height:44}}>
                 <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
@@ -4603,7 +4858,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
         )}
         {filtered.length===0?(
           <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>
-            {fabricIntakes.length===0?"원단 입고 기록이 없습니다\n위 버튼으로 입고를 등록하세요":"조건에 맞는 기록이 없습니다"}
+            {fabricIntakes.length===0?"매입 기록이 없습니다\n위 버튼으로 매입을 등록하세요":"조건에 맞는 기록이 없습니다"}
           </div>
         ):(
           <div style={{overflowX:"auto"}}>
@@ -4629,9 +4884,9 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
                   );
                 })()}
               </th>
-              <th>입고일</th><th>원단명</th><th>공급업체</th>
+              <th>매입일</th><th>품목명</th><th>공급업체</th>
               <th style={{textAlign:"right"}}>수량</th><th style={{textAlign:"right"}}>단가</th>
-              <th style={{textAlign:"right"}}>금액</th><th style={{textAlign:"center"}}>상태</th>
+              <th style={{textAlign:"right"}}>공급가</th><th style={{textAlign:"right"}}>VAT 포함</th><th style={{textAlign:"center"}}>상태</th>
               <th>담당자</th><th>비고</th><th style={{textAlign:"center", minWidth: 110}}>관리</th>
             </tr></thead>
             <tbody>
@@ -4662,7 +4917,8 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
                         </div>
                       </td>
                       <td><input type="number" value={editDraft.unitPrice||""} onChange={e=>setEditDraft(d=>({...d,unitPrice:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
-                      <td style={{textAlign:"right",fontWeight:700,fontSize:13,whiteSpace:"nowrap"}}>{editTotal>0?Math.round(editTotal).toLocaleString()+"원":"—"}</td>
+                      <td style={{textAlign:"right",fontWeight:700,fontSize:13,whiteSpace:"nowrap",color:"#EC6608"}}>{editTotal>0?Math.round(editTotal).toLocaleString()+"원":"—"}</td>
+                      <td style={{textAlign:"right",fontWeight:600,fontSize:13,whiteSpace:"nowrap",color:"#D85800"}}>{editTotal>0?Math.round(editTotal*1.1).toLocaleString()+"원":"—"}</td>
                       <td style={{textAlign:"center"}}>
                         <select value={editDraft.status||"주문완료"} onChange={e=>setEditDraft(d=>({...d,status:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
                           {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
@@ -4690,7 +4946,8 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
                   <td style={{fontSize:13}}>{r.supplier}</td>
                   <td style={{textAlign:"right",fontSize:13}}>{parseFloat(r.qty||0).toLocaleString()} {r.unit}</td>
                   <td style={{textAlign:"right",fontSize:13}}>{parseFloat(r.unitPrice||0).toLocaleString()}원</td>
-                  <td style={{textAlign:"right",fontWeight:600,fontSize:13}}>{total>0?Math.round(total).toLocaleString()+"원":"—"}</td>
+                  <td style={{textAlign:"right",fontWeight:700,fontSize:13,color:"#EC6608"}}>{total>0?Math.round(total).toLocaleString()+"원":"—"}</td>
+                  <td style={{textAlign:"right",fontWeight:600,fontSize:13,color:"#D85800"}}>{total>0?Math.round(total*1.1).toLocaleString()+"원":"—"}</td>
                   <td style={{textAlign:"center"}}><span style={{display:"inline-block",padding:"3px 9px",borderRadius:100,fontSize:11,fontWeight:700,background:sc+"22",color:sc,whiteSpace:"nowrap"}}>{r.status}</span></td>
                   <td style={{fontSize:13,color:"var(--text2)"}}>{r.inspector}</td>
                   <td style={{fontSize:12,color:"var(--text2)"}}>{r.note}</td>
