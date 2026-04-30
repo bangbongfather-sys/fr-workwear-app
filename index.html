@@ -3042,6 +3042,9 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                                   {expAutoEntries.map((ae, aei) => {
                                     const isUnpaid = ae.status === "미입금";
                                     const toggleHere = () => {
+                                      const newStatus = isUnpaid ? "입금완료" : "미입금";
+                                      const amt = Math.round(ae.amount||0).toLocaleString();
+                                      if (!window.confirm(`[${ae.ym}] "${c.name||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${ae.status}" → "${newStatus}" 로 변경하시겠습니까?`)) return;
                                       setLedgers(prev => {
                                         const next = { ...prev };
                                         const month = next[ae.ym];
