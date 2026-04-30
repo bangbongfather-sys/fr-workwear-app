@@ -2788,13 +2788,25 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
           <div style={{fontSize:24,fontWeight:800,color:"#475569"}}>{Math.round(totalBilled).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
           <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>공급가액 {Math.round(totalSupply).toLocaleString()}원 + 부가세 {Math.round(totalTax).toLocaleString()}원</div>
         </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>입금완료</div>
+        <div className="card"
+          onClick={()=>setStatusFilter(statusFilter==="입금완료"?"":"입금완료")}
+          title={statusFilter==="입금완료"?"클릭하여 필터 해제":"클릭하여 입금완료 거래처만 보기"}
+          style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="입금완료"?"2px solid #00B493":undefined,boxShadow:statusFilter==="입금완료"?"0 4px 14px rgba(0,180,147,0.22)":undefined}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>입금완료</div>
+            {statusFilter==="입금완료" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.18)",color:"#00B493"}}>✓ 필터중</span>}
+          </div>
           <div style={{fontSize:24,fontWeight:800,color:"#00B493"}}>{paidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
           <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(paidAmt).toLocaleString()}원</div>
         </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>미입금</div>
+        <div className="card"
+          onClick={()=>setStatusFilter(statusFilter==="미입금"?"":"미입금")}
+          title={statusFilter==="미입금"?"클릭하여 필터 해제":"클릭하여 미입금 거래처만 보기"}
+          style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="미입금"?"2px solid #FF9500":undefined,boxShadow:statusFilter==="미입금"?"0 4px 14px rgba(255,149,0,0.22)":undefined}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>미입금</div>
+            {statusFilter==="미입금" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(255,149,0,0.18)",color:"#FF9500"}}>✓ 필터중</span>}
+          </div>
           <div style={{fontSize:24,fontWeight:800,color:unpaidCount>0?"#FF9500":"#00B493"}}>{unpaidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
           <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(unpaidAmt).toLocaleString()}원</div>
         </div>
