@@ -5639,6 +5639,9 @@ function App() {
   useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
   const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
   const [viewingPO, setViewingPO] = useState(null);
+  const [poHistorySearch, setPoHistorySearch] = useState("");
+  const [poHistorySupFilter, setPoHistorySupFilter] = useState("");
+  const [poHistorySort, setPoHistorySort] = useState("date_desc"); // date_desc | date_asc | amount_desc | supplier
   const [poGenerating, setPoGenerating] = useState(false);
   const [poApiError, setPoApiError] = useState("");
   const [fabricIntakes, setFabricIntakes] = useState(() => load("frw_intakes", []));
@@ -6502,22 +6505,21 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         overflow: "hidden",
         zIndex: 99,
       }}>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", padding: "12px 12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? "펼치기" : "접기"} style={{
-              width: 28, height: 28, border: "none", borderRadius: 8,
-              background: "rgba(255,255,255,0.06)", cursor: "pointer", color: "#B4BAC4",
-              fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.12)"}
-            onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
-            >{sidebarCollapsed ? "›" : "‹"}</button>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", padding: sidebarCollapsed ? "10px 8px" : "10px 10px", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "relative", justifyContent: "center", minHeight: 48 }}>
+          <button onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? "펼치기" : "접기"} style={{
+            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+            width: 24, height: 24, border: "none", borderRadius: 6,
+            background: "rgba(255,255,255,0.06)", cursor: "pointer", color: "#B4BAC4",
+            fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            transition: "background 0.15s", zIndex: 2,
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.12)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
+          >{sidebarCollapsed ? "›" : "‹"}</button>
           {!sidebarCollapsed && (
-            <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, padding: "4px 0" }}>
-              <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAVRSURBVFhHxZdrTFtlGMfPOTDMBkzqZBRY0lEkwMYuTDNHCVNuYqFjG9CWU0qhFMXScdpx3ZiyWdnC4twyIxoyNfHDjG5+WoyfNPOSaHSbt6BnH1wcjlEupbT0Bmz0b94qhh1j2ORM/8mT9n3f//s8v5ye91KKugcBYDCQuErYL5oaGxsvGAwGvqamJhw6nY5nWfYnq9VaQcYBrJg/nfZGyE79MtdF8cEOmg/sp3k/R/PeZpp3N9H8lInmnfUMP65n+NFqhndoGH54L8PfKGf4oVKGv1FE8UPa5Cu4efVhYX0CcM1kMqG+vj4cBoMBWq2WhPf48eNpxBM8WyGff1kahJ0CDtHAARpoZxCy0bi9j8ZsE43gMwwC9Qy8tQw8OgZTGgauvQyc5QxcT1O4rk1G6PrPicL6lMlkGqyrq4Nerw+HTqdDRUUFVCoV1Gr1ZQCRxHfrvEGJvjjc7qIQaKMRsDLwWmh4mmhMmWhMGhk49QzGWAYODYObFQyGyxn8VsZguJjCdU2yD78OSoX1/xFAqVSipKSEfD+94J179dFOHInEbBuFoJWG30Jh+lkK7gYKrnoKkzUUxqspcQBKS0uRn58fDr1eX73gn+1L/QD2lUBnFOY7ojHXGosZLgYBSyz8z62G2xgNh1okgIKCAuTk5CAvL8/LcVz4fXA4HNGhgccUgZfSFYH+pxSBgUpFoH+3wtNfqfD0axUuLnWfm6UxIiZAdnY2du7c+X0oFHpAOF8oZxW13acTGWDr1q3IyspCYWHhGeF8oSZ0EflesQHIE0hPT0dmZiZZHbXCHIt13wBIcZlMhtTUVB/LshnCPAsSDaCsrOxvACkpKUhISIBcLv+W7JDCXESiAFRVVd1mWdZRVFSEHTt23AEglUohkUiwceOmt4W5iEQB0Gg084cPH96jUql+yM3NvQMgMVGK6NjViIqJA6cpbhbmEwWAhNls3tzRYU0vLi66tQAgT0mBJD4RTLQEB7dRCFgfgv9U5eOL8y0boKamJnwY7dq1q4CMG41Gs0KhQGZGBtask4efwFnlCqA9Are61l3yv2tJWpxPFACNRkNWQf6CR1lW9mZKxhbkZKzDd/oI4GAUgkc2vEPGxu1PqFydG97C5YHwS3lfAAaBqPY92VcCNhp4Phb+F7P2kX7vsTwb2uPgsq3/asE7UR1RIDoAUejTosxQn+yS98SThaTt60w8iYNx8B3a0E/ajrbtKeOcPG1MF5m7bAC1Wk32gDyhl2j6fWN8sFv6OXri4e/LbSJ9zqNFFUGzJDRuWX9+TL9qi2c5hxEBYFkWHMf9dQQvlq938wtz3WucUydV20jbe+CRl9ASDb9l7UdjF8/FjFg3KQP6yH8PQJZgbW0tent7O4ReotCXr6x0f/GhZOrU7rjgAdln6I7HVPfmo2TMZS8p9zSuGZ2sXuZ9gHza7fb9Qu9iebpkX8/aYmc8p1RK0vZ2bTwSaIiBR0thZLk3orsCOJGvGH3dKHddu/ygrzPjk3ljJJykuFqEO+HdABB5Pz6TMN0m84SMFMZZGqNaJnwdGxUDoKenZ0kAXHwtxt0qOx8y/XEbFg2ArASbzbYkABEGB6Pc+2VXZwxUGIAUX/ZPcC8ARL73urb4mtfOuP+8ko9q6P8WgGjiWEntjHElJjTUvQE0NDRcMxqN4b9kJAgE2Qc4jusUepfSKJfWh/pITGspTFVScO2m4FRRmCymMKRORIi/csfJGVZra+sFq9XKWyyWcJjNZr6lpYXv6empE3qXEgB60pZ+ztuczDsakvgRQxI/rE/iHVopf8O06RsM/SgRzvlf9DvFLnsMZsJ2JwAAAABJRU5ErkJggg==" alt="NJ SAFETY" className="nj-sidebar-logo" style={{ width: 32, height: 32, objectFit: "contain", flexShrink: 0 }} />
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#E5E8ED", letterSpacing: 0.2, whiteSpace: "nowrap" }}>NJ SAFETY</div>
+            <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAVRSURBVFhHxZdrTFtlGMfPOTDMBkzqZBRY0lEkwMYuTDNHCVNuYqFjG9CWU0qhFMXScdpx3ZiyWdnC4twyIxoyNfHDjG5+WoyfNPOSaHSbt6BnH1wcjlEupbT0Bmz0b94qhh1j2ORM/8mT9n3f//s8v5ye91KKugcBYDCQuErYL5oaGxsvGAwGvqamJhw6nY5nWfYnq9VaQcYBrJg/nfZGyE79MtdF8cEOmg/sp3k/R/PeZpp3N9H8lInmnfUMP65n+NFqhndoGH54L8PfKGf4oVKGv1FE8UPa5Cu4efVhYX0CcM1kMqG+vj4cBoMBWq2WhPf48eNpxBM8WyGff1kahJ0CDtHAARpoZxCy0bi9j8ZsE43gMwwC9Qy8tQw8OgZTGgauvQyc5QxcT1O4rk1G6PrPicL6lMlkGqyrq4Nerw+HTqdDRUUFVCoV1Gr1ZQCRxHfrvEGJvjjc7qIQaKMRsDLwWmh4mmhMmWhMGhk49QzGWAYODYObFQyGyxn8VsZguJjCdU2yD78OSoX1/xFAqVSipKSEfD+94J179dFOHInEbBuFoJWG30Jh+lkK7gYKrnoKkzUUxqspcQBKS0uRn58fDr1eX73gn+1L/QD2lUBnFOY7ojHXGosZLgYBSyz8z62G2xgNh1okgIKCAuTk5CAvL8/LcVz4fXA4HNGhgccUgZfSFYH+pxSBgUpFoH+3wtNfqfD0axUuLnWfm6UxIiZAdnY2du7c+X0oFHpAOF8oZxW13acTGWDr1q3IyspCYWHhGeF8oSZ0EflesQHIE0hPT0dmZiZZHbXCHIt13wBIcZlMhtTUVB/LshnCPAsSDaCsrOxvACkpKUhISIBcLv+W7JDCXESiAFRVVd1mWdZRVFSEHTt23AEglUohkUiwceOmt4W5iEQB0Gg084cPH96jUql+yM3NvQMgMVGK6NjViIqJA6cpbhbmEwWAhNls3tzRYU0vLi66tQAgT0mBJD4RTLQEB7dRCFgfgv9U5eOL8y0boKamJnwY7dq1q4CMG41Gs0KhQGZGBtask4efwFnlCqA9Are61l3yv2tJWpxPFACNRkNWQf6CR1lW9mZKxhbkZKzDd/oI4GAUgkc2vEPGxu1PqFydG97C5YHwS3lfAAaBqPY92VcCNhp4Phb+F7P2kX7vsTwb2uPgsq3/asE7UR1RIDoAUejTosxQn+yS98SThaTt60w8iYNx8B3a0E/ajrbtKeOcPG1MF5m7bAC1Wk32gDyhl2j6fWN8sFv6OXri4e/LbSJ9zqNFFUGzJDRuWX9+TL9qi2c5hxEBYFkWHMf9dQQvlq938wtz3WucUydV20jbe+CRl9ASDb9l7UdjF8/FjFg3KQP6yH8PQJZgbW0tent7O4ReotCXr6x0f/GhZOrU7rjgAdln6I7HVPfmo2TMZS8p9zSuGZ2sXuZ9gHza7fb9Qu9iebpkX8/aYmc8p1RK0vZ2bTwSaIiBR0thZLk3orsCOJGvGH3dKHddu/ygrzPjk3ljJJykuFqEO+HdABB5Pz6TMN0m84SMFMZZGqNaJnwdGxUDoKenZ0kAXHwtxt0qOx8y/XEbFg2ArASbzbYkABEGB6Pc+2VXZwxUGIAUX/ZPcC8ARL73urb4mtfOuP+8ko9q6P8WgGjiWEntjHElJjTUvQE0NDRcMxqN4b9kJAgE2Qc4jusUepfSKJfWh/pITGspTFVScO2m4FRRmCymMKRORIi/csfJGVZra+sFq9XKWyyWcJjNZr6lpYXv6empE3qXEgB60pZ+ztuczDsakvgRQxI/rE/iHVopf8O06RsM/SgRzvlf9DvFLnsMZsJ2JwAAAABJRU5ErkJggg==" alt="NJ SAFETY" className="nj-sidebar-logo" style={{ width: 26, height: 26, objectFit: "contain", flexShrink: 0 }} />
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#E5E8ED", letterSpacing: 0.2, whiteSpace: "nowrap" }}>NJ SAFETY</div>
             </div>
           )}
         </div>
@@ -8342,31 +8344,157 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </>
             ) : (
               <>
-                <div style={{ fontSize: 18, fontWeight: 800, color: T.text, marginBottom: 20 }}>발주 이력 ({purchaseOrders.length})</div>
-                {purchaseOrders.length === 0 ? (
-                  <div className="card" style={{ padding: 64, textAlign: "center" }}>
-                    <div style={{ fontSize: 48, marginBottom: 16 }}>🗂️</div>
-                    <div style={{ fontSize: 17, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>저장된 발주서가 없습니다</div>
-                    <div style={{ fontSize: 14, color: T.empty }}>발주서를 작성하고 저장하면 이곳에 누적됩니다</div>
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
-                    {purchaseOrders.map(po => (
-                      <div key={po.id} className="card" style={{ cursor: "pointer", transition: "all 0.15s" }} onClick={() => setViewingPO(po)}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 14, fontWeight: 800, color: T.text, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title}</div>
-                            <div style={{ fontSize: 12, color: T.text2 }}>{po.dateStr} {po.timeStr}</div>
-                          </div>
-                          <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}>✕</button>
-                        </div>
-                        <div style={{ fontSize: 12, color: T.text2, marginBottom: 6 }}>🏭 {po.supplier?.name || "—"}</div>
-                        <div style={{ fontSize: 12, color: T.text2, marginBottom: 6 }}>📋 품목 {po.items?.length || 0}건{po.photos?.length > 0 ? ` · 📷 ${po.photos.length}장` : ""}</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: NAVY }}>합계 {Number(po.totalAmount || 0).toLocaleString()}원</div>
+                {(() => {
+                  // 정렬·필터 키
+                  const getDate = po => po.orderDate || po.dateStr?.replaceAll(".", "-") || "";
+                  // 검색·거래처 필터 적용
+                  const q = poHistorySearch.trim().toLowerCase();
+                  const filtered = purchaseOrders.filter(po => {
+                    if (poHistorySupFilter && (po.supplier?.name || "") !== poHistorySupFilter) return false;
+                    if (!q) return true;
+                    return (po.title || "").toLowerCase().includes(q)
+                      || (po.supplier?.name || "").toLowerCase().includes(q)
+                      || (po.supplier?.contact || "").toLowerCase().includes(q)
+                      || (po.items || []).some(it => (it.name || "").toLowerCase().includes(q))
+                      || (po.memo || "").toLowerCase().includes(q);
+                  });
+                  // 정렬
+                  const sorted = [...filtered].sort((a, b) => {
+                    if (poHistorySort === "date_asc") return getDate(a).localeCompare(getDate(b));
+                    if (poHistorySort === "amount_desc") return (Number(b.totalAmount)||0) - (Number(a.totalAmount)||0);
+                    if (poHistorySort === "supplier") return (a.supplier?.name || "").localeCompare(b.supplier?.name || "");
+                    return getDate(b).localeCompare(getDate(a)); // date_desc 기본
+                  });
+                  // 거래처별 합계 (전체 기준, 필터 무관)
+                  const supplierTotals = {};
+                  purchaseOrders.forEach(po => {
+                    const name = po.supplier?.name || "(미지정)";
+                    if (!supplierTotals[name]) supplierTotals[name] = { count: 0, amount: 0 };
+                    supplierTotals[name].count += 1;
+                    supplierTotals[name].amount += Number(po.totalAmount) || 0;
+                  });
+                  const supList = Object.entries(supplierTotals).sort((a, b) => b[1].amount - a[1].amount);
+                  const grandTotal = purchaseOrders.reduce((s, po) => s + (Number(po.totalAmount) || 0), 0);
+                  const filteredTotal = filtered.reduce((s, po) => s + (Number(po.totalAmount) || 0), 0);
+
+                  return (
+                    <>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>발주 이력 ({purchaseOrders.length})</div>
+                        <div style={{ fontSize: 12, color: T.text2 }}>전체 합계 <span style={{ fontWeight: 800, color: NAVY, fontSize: 14 }}>{grandTotal.toLocaleString()}원</span></div>
                       </div>
-                    ))}
-                  </div>
-                )}
+
+                      {purchaseOrders.length === 0 ? (
+                        <div className="card" style={{ padding: 64, textAlign: "center" }}>
+                          <div style={{ fontSize: 48, marginBottom: 16 }}>🗂️</div>
+                          <div style={{ fontSize: 17, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>저장된 발주서가 없습니다</div>
+                          <div style={{ fontSize: 14, color: T.empty }}>발주서를 작성하고 저장하면 이곳에 누적됩니다</div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* 거래처별 합계 카드 */}
+                          <div className="card" style={{ marginBottom: 16 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                              <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>🏭 거래처별 발주 합계 ({supList.length}곳)</div>
+                              {poHistorySupFilter && (
+                                <button onClick={() => setPoHistorySupFilter("")} style={{ padding: "5px 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>필터 해제</button>
+                              )}
+                            </div>
+                            <div className="chip-scroll" style={{ gap: 8 }}>
+                              {supList.map(([name, info]) => {
+                                const active = poHistorySupFilter === name;
+                                return (
+                                  <button key={name} onClick={() => setPoHistorySupFilter(active ? "" : name)}
+                                    style={{
+                                      flexShrink: 0, padding: "10px 16px", borderRadius: 12, fontFamily: "inherit",
+                                      background: active ? "linear-gradient(135deg, #EC6608, #D85800)" : "var(--surface2)",
+                                      color: active ? "#fff" : "var(--text1)",
+                                      border: active ? "none" : "1px solid var(--divider)",
+                                      cursor: "pointer", textAlign: "left",
+                                      boxShadow: active ? "0 4px 14px rgba(236,102,8,0.32)" : "none",
+                                      minWidth: 180,
+                                    }}>
+                                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, opacity: active ? 0.9 : 1 }}>🏭 {name}</div>
+                                    <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: -0.3 }}>{Number(info.amount).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 600, marginLeft: 2, opacity: 0.85 }}>원</span></div>
+                                    <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>{info.count}건 · 평균 {Math.round(info.amount/info.count).toLocaleString()}원</div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 검색 + 정렬 */}
+                          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+                            <div style={{ position: "relative", flex: 1, minWidth: 240 }}>
+                              <input value={poHistorySearch} onChange={e => setPoHistorySearch(e.target.value)}
+                                placeholder={"🔍 거래처·품목·메모 검색" + (poHistorySupFilter ? ` (현재 필터: ${poHistorySupFilter})` : "")}
+                                style={{ width: "100%", height: 42, paddingLeft: 14, fontSize: 13 }} />
+                              {poHistorySearch && (
+                                <button onClick={() => setPoHistorySearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", width: 22, height: 22, borderRadius: 11, border: "none", background: "var(--divider)", color: "var(--text2)", cursor: "pointer", fontSize: 12 }}>×</button>
+                              )}
+                            </div>
+                            <select value={poHistorySort} onChange={e => setPoHistorySort(e.target.value)} style={{ height: 42, width: 160, fontSize: 13 }}>
+                              <option value="date_desc">📅 최신순</option>
+                              <option value="date_asc">📅 오래된순</option>
+                              <option value="amount_desc">💰 금액 높은순</option>
+                              <option value="supplier">🏭 거래처명순</option>
+                            </select>
+                          </div>
+
+                          {sorted.length === 0 ? (
+                            <div className="card" style={{ padding: 40, textAlign: "center", color: T.text3, fontSize: 14 }}>조건에 맞는 발주가 없습니다</div>
+                          ) : (
+                            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                              {/* 목록 헤더 */}
+                              <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 1.2fr 100px 160px 50px", gap: 12, padding: "10px 16px", background: "var(--surface2)", borderBottom: `1px solid ${T.divider}`, fontSize: 11, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                <div>발주일자</div>
+                                <div>거래처</div>
+                                <div>품목 / 제목</div>
+                                <div style={{ textAlign: "right" }}>품목수</div>
+                                <div style={{ textAlign: "right" }}>합계</div>
+                                <div></div>
+                              </div>
+                              {/* 목록 행 */}
+                              {sorted.map((po, idx) => {
+                                const dateDisplay = po.orderDate || po.dateStr || "—";
+                                const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${po.items.length - 2}` : "");
+                                return (
+                                  <div key={po.id}
+                                    onClick={() => setViewingPO(po)}
+                                    style={{
+                                      display: "grid", gridTemplateColumns: "120px 1fr 1.2fr 100px 160px 50px", gap: 12,
+                                      padding: "12px 16px", borderBottom: idx < sorted.length - 1 ? `1px solid ${T.divider}` : "none",
+                                      cursor: "pointer", alignItems: "center",
+                                      transition: "background 0.12s",
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                  >
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text2, fontVariantNumeric: "tabular-nums" }}>{dateDisplay}</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>🏭 {po.supplier?.name || "—"}</div>
+                                    <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"}</div>
+                                    <div style={{ fontSize: 12, color: T.text2, textAlign: "right" }}>{(po.items || []).length}건{po.photos?.length > 0 ? ` · 📷${po.photos.length}` : ""}</div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: NAVY, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(po.totalAmount || 0).toLocaleString()}원</div>
+                                    <div style={{ textAlign: "center" }}>
+                                      <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}>✕</button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {/* 필터 결과 합계 */}
+                              {(poHistorySupFilter || poHistorySearch) && (
+                                <div style={{ padding: "12px 16px", background: "rgba(236,102,8,0.04)", borderTop: `1px solid ${T.divider}`, fontSize: 13, fontWeight: 700, color: T.text, display: "flex", justifyContent: "space-between" }}>
+                                  <span>필터 결과 ({sorted.length}건)</span>
+                                  <span style={{ color: NAVY, fontSize: 15, fontWeight: 800 }}>{filteredTotal.toLocaleString()}원</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </>
             )}
           </div>
