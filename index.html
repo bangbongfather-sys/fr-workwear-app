@@ -2562,7 +2562,12 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
   };
 
   const togglePaid = (id) => {
-    updateMonth(cs => cs.map(c => c.id === id ? { ...c, status: c.status === "입금완료" ? "미입금" : "입금완료" } : c));
+    const cur = monthClients.find(c => c.id === id);
+    if (!cur) return;
+    const newStatus = cur.status === "입금완료" ? "미입금" : "입금완료";
+    const amt = Math.round(parseFloat(cur.total)||0).toLocaleString();
+    if (!window.confirm(`[${selectedYM}] "${cur.name||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${cur.status}" → "${newStatus}" 로 변경하시겠습니까?`)) return;
+    updateMonth(cs => cs.map(c => c.id === id ? { ...c, status: newStatus } : c));
   };
 
   const startEdit = (c) => { setEditId(c.id); setEditDraft({ ...c }); };
@@ -3037,6 +3042,9 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }
                                   {expAutoEntries.map((ae, aei) => {
                                     const isUnpaid = ae.status === "미입금";
                                     const toggleHere = () => {
+                                      const newStatus = isUnpaid ? "입금완료" : "미입금";
+                                      const amt = Math.round(ae.amount||0).toLocaleString();
+                                      if (!window.confirm(`[${ae.ym}] "${c.name||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${ae.status}" → "${newStatus}" 로 변경하시겠습니까?`)) return;
                                       setLedgers(prev => {
                                         const next = { ...prev };
                                         const month = next[ae.ym];
@@ -3159,15 +3167,20 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode }) 
   // 입금상태 토글 (장부 데이터 직접 변경 → 자동으로 모든 월에 반영)
   const togglePaidStatus = (clientName, ym) => {
     if (!setLedgers) return;
+    const month = (ledgers || {})[ym];
+    const target = month && (month.clients || []).find(c => (c.name||"").trim() === (clientName||"").trim());
+    if (!target) return;
+    const newStatus = target.status === "입금완료" ? "미입금" : "입금완료";
+    const amt = Math.round(parseFloat(target.total)||0).toLocaleString();
+    if (!window.confirm(`[${ym}] "${clientName||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${target.status}" → "${newStatus}" 로 변경하시겠습니까?`)) return;
     setLedgers(prev => {
       const next = { ...prev };
-      const month = next[ym];
-      if (!month || !month.clients) return prev;
+      const m = next[ym];
+      if (!m || !m.clients) return prev;
       next[ym] = {
-        ...month,
-        clients: month.clients.map(c => {
+        ...m,
+        clients: m.clients.map(c => {
           if ((c.name||"").trim() === (clientName||"").trim()) {
-            const newStatus = c.status === "입금완료" ? "미입금" : "입금완료";
             return { ...c, status: newStatus };
           }
           return c;
