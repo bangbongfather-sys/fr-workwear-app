@@ -6683,87 +6683,6 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             {/* 왼쪽 */}
             <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
 
-              {/* 거래처 선택 — 등록된 거래처 선택 시 단가 등급 자동 적용 */}
-              {(() => {
-                const matchedClient = clients.find(c => (c.name || "").trim() === quoteClient.trim());
-                const gradeColors = { A: "#EC6608", B: "#10B981", C: "#F59E0B", D: "#EF4444" };
-                const gc = matchedClient ? (gradeColors[matchedClient.grade] || "#EC6608") : null;
-                return (
-                  <div className="card" style={{ background: matchedClient ? "linear-gradient(135deg, rgba(236,102,8,0.06) 0%, rgba(236,102,8,0.01) 100%)" : "var(--surface)", borderColor: matchedClient ? "rgba(236,102,8,0.25)" : "var(--border)" }}>
-                    <div className="section-header">
-                      <span className="section-header-title">거래처 선택 <span className="section-sub">— Client</span></span>
-                      <span className="info-pill">{clients.length}개 등록됨</span>
-                    </div>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <input type="text" value={quoteClient} list="calc-clients-list"
-                        onChange={e => {
-                          const v = e.target.value;
-                          setQuoteClient(v);
-                          const matched = clients.find(c => (c.name || "").trim() === v.trim());
-                          if (matched) {
-                            // 모든 포함 제품의 활성 스펙에 거래처 등급 자동 적용
-                            setProducts(ps => ps.map(p => {
-                              if (!p.specs || !Array.isArray(p.specs)) return p;
-                              return {
-                                ...p,
-                                specs: p.specs.map(s =>
-                                  s.id === p.activeSpecId ? { ...s, selectedGrade: matched.grade } : s
-                                )
-                              };
-                            }));
-                          }
-                        }}
-                        placeholder="거래처명 입력 또는 선택 (예: ○○주식회사)"
-                        style={{ flex: 1, minWidth: 240, height: 44 }} />
-                      <datalist id="calc-clients-list">
-                        {clients.map(c => <option key={c.id} value={c.name}>{c.grade}등급 {c.note ? "· " + c.note : ""}</option>)}
-                      </datalist>
-                      {quoteClient.trim() && (
-                        <button onClick={() => setQuoteClient("")}
-                          style={{ padding: "8px 14px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>지우기</button>
-                      )}
-                    </div>
-                    {/* 빠른 선택 칩 */}
-                    {clients.length > 0 && !matchedClient && (
-                      <div className="chip-scroll" style={{ marginTop: 12 }}>
-                        {clients.slice(0, 12).map(c => (
-                          <button key={c.id}
-                            className="prod-chip"
-                            onClick={() => {
-                              setQuoteClient(c.name);
-                              setProducts(ps => ps.map(p => {
-                                if (!p.specs || !Array.isArray(p.specs)) return p;
-                                return { ...p, specs: p.specs.map(s => s.id === p.activeSpecId ? { ...s, selectedGrade: c.grade } : s) };
-                              }));
-                            }}
-                            style={{ flexShrink: 0 }}
-                          >
-                            <span style={{ display: "inline-block", padding: "1px 6px", borderRadius: 6, background: (gradeColors[c.grade]||"#888") + "22", color: gradeColors[c.grade]||"#888", fontSize: 10, fontWeight: 800, marginRight: 6 }}>{c.grade}</span>
-                            🏢 {c.name}
-                          </button>
-                        ))}
-                        {clients.length > 12 && (
-                          <span style={{ alignSelf: "center", fontSize: 11, color: "var(--text3)", padding: "0 8px", flexShrink: 0 }}>외 {clients.length - 12}곳…</span>
-                        )}
-                      </div>
-                    )}
-                    {matchedClient && (
-                      <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: gc + "12", border: `1px solid ${gc}40`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: gc, color: "#fff", fontSize: 11, fontWeight: 800, letterSpacing: 0.3 }}>{matchedClient.grade}등급</span>
-                        <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{matchedClient.name}</span>
-                        <span style={{ fontSize: 12, color: gc, fontWeight: 600 }}>✓ 단가 등급이 모든 제품에 자동 적용되었습니다</span>
-                        {matchedClient.note && <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: "auto" }}>📝 {matchedClient.note}</span>}
-                      </div>
-                    )}
-                    {!matchedClient && quoteClient.trim() && (
-                      <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "rgba(255,149,0,0.08)", border: "1px solid rgba(255,149,0,0.20)", fontSize: 12, color: "var(--text2)" }}>
-                        💡 신규 거래처입니다. 「거래처별 단가」 탭에서 등록하면 다음부터 자동 등급 적용됩니다.
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
               {/* 제품 선택 */}
               <div className="card">
                 <div className="section-header">
@@ -7400,6 +7319,42 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 <div className="section-header" style={{ marginBottom: 14 }}>
                   <span className="section-header-title">견적서 생성</span>
                 </div>
+
+                {/* 거래처 입력 — 등급 자동 적용 */}
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.text2, marginBottom: 6, letterSpacing: 0.3, textTransform: "uppercase" }}>거래처 <span style={{ color: T.empty, fontWeight: 500, textTransform: "none", marginLeft: 4 }}>— 선택 시 등급 자동 적용</span></label>
+                  <input type="text" value={quoteClient} list="quotegen-clients-list"
+                    onChange={e => {
+                      const v = e.target.value;
+                      setQuoteClient(v);
+                      const matched = clients.find(c => (c.name || "").trim() === v.trim());
+                      if (matched) {
+                        setProducts(ps => ps.map(p => {
+                          if (!p.specs || !Array.isArray(p.specs)) return p;
+                          return { ...p, specs: p.specs.map(s => s.id === p.activeSpecId ? { ...s, selectedGrade: matched.grade } : s) };
+                        }));
+                      }
+                    }}
+                    placeholder="거래처명 입력 (예: ○○주식회사)" style={{ height: 44, marginBottom: 6 }} />
+                  <datalist id="quotegen-clients-list">
+                    {clients.map(c => <option key={c.id} value={c.name}>{c.grade}등급 {c.note ? "· " + c.note : ""}</option>)}
+                  </datalist>
+                  {(() => {
+                    const matched = clients.find(c => (c.name || "").trim() === quoteClient.trim());
+                    if (!matched) return quoteClient.trim() ? (
+                      <div style={{ fontSize: 11, color: "#FF9500", padding: "4px 0" }}>💡 신규 거래처 — 「거래처별 단가」 탭에서 등록하면 자동 등급 적용</div>
+                    ) : null;
+                    const gradeColors = { A: "#EC6608", B: "#10B981", C: "#F59E0B", D: "#EF4444" };
+                    const gc = gradeColors[matched.grade] || "#EC6608";
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 999, background: gc, color: "#fff", fontSize: 10, fontWeight: 800, letterSpacing: 0.3 }}>{matched.grade}등급</span>
+                        <span style={{ fontSize: 11, color: gc, fontWeight: 600 }}>✓ 단가 자동 적용됨</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 <div style={{ fontSize: 13, color: T.text2, marginBottom: 12 }}>
                   API 키 없이도 즉시 생성됩니다. 키 입력 시 AI가 더 풍부하게 작성합니다.
                 </div>
