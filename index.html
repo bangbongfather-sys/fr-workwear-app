@@ -1709,7 +1709,11 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, darkMode }) {
                       <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                         <button onClick={()=>togglePaid(o.id)} title={isPaid?"결제 취소":"완납 처리"} style={{background:"none",border:"none",cursor:"pointer",color:isPaid?"#FF9500":"#00B493",fontSize:14,marginRight:4}}>{isPaid?"↩":"💰"}</button>
                         <button onClick={()=>startEdit(o)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}>✏️</button>
-                        <button onClick={()=>{ if(confirm("이 판매 기록을 삭제할까요?")) setOrders(prev=>prev.filter(x=>x.id!==o.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                        <button onClick={()=>{
+                      if(!window.confirm(`이 판매 기록을 삭제할까요?\n\n${o.date} · ${o.productName} · ${Math.round(total).toLocaleString()}원`)) return;
+                      if(!window.confirm(`⚠️ 한 번 더 확인합니다.\n\n삭제 후 복구 불가능합니다. 정말 진행하시겠습니까?`)) return;
+                      setOrders(prev=>prev.filter(x=>x.id!==o.id));
+                    }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
                       </td>
                     </tr>
                   );
@@ -1725,6 +1729,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, darkMode }) {
 
 function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {}, clientAR = {} }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", clientId: "", note: "", paymentDue: "", paidDate: "" });
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState(null);
   const [editOrderDraft, setEditOrderDraft] = useState(null);
@@ -2250,7 +2255,16 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
             style={{fontSize:15,fontWeight:700,color:"var(--text1)",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
             📋 제품별 판매 현황 <span style={{fontSize:13,color:"var(--text3)",fontWeight:500}}>›</span>
           </div>
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+            {orders.length > 0 && (
+              <button onClick={() => {
+                if (!window.confirm(`전체 판매 기록 ${orders.length}건을 삭제할까요?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+                if (!window.confirm(`⚠️ 한 번 더 확인합니다.\n\n전체 ${orders.length}건 삭제 후 복구 불가능합니다.\n정말 진행하시겠습니까?`)) return;
+                setOrders([]); setSelectedOrderIds(new Set());
+              }}
+                style={{padding:"8px 12px",fontSize:12,fontWeight:700,color:"#F04452",background:"transparent",border:"1.5px solid rgba(240,68,82,0.4)",borderRadius:10,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}
+                title="전체 삭제 (확인 2회)">🗑 전체 삭제</button>
+            )}
             <button onClick={()=>setShowOrderForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showOrderForm?"닫기":"+ 판매 추가"}</button>
           </div>
         </div>
@@ -2290,9 +2304,47 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         )}
         {orders.length===0?(
           <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>아직 판매 기록이 없습니다<br/>위 버튼으로 판매 내역을 추가하면 매출 지표가 쌓입니다</div>
-        ):(
+        ):(<>
+          {selectedOrderIds.size > 0 && (
+            <div style={{
+              marginBottom: 12, padding: "10px 14px", borderRadius: 12,
+              background: darkMode ? "rgba(236,102,8,0.16)" : "rgba(236,102,8,0.08)",
+              border: `1.5px solid ${darkMode ? "rgba(236,102,8,0.45)" : "rgba(236,102,8,0.30)"}`,
+              display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+            }}>
+              <span style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>✓ {selectedOrderIds.size}건 선택됨</span>
+              <div style={{flex:1}}/>
+              <button onClick={()=>setSelectedOrderIds(new Set())}
+                style={{padding:"7px 12px",fontSize:12,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1.5px solid var(--divider)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>선택 해제</button>
+              <button onClick={() => {
+                const cnt = selectedOrderIds.size;
+                if (!window.confirm(`선택한 ${cnt}건의 판매 기록을 삭제할까요?`)) return;
+                if (!window.confirm(`⚠️ 한 번 더 확인합니다.\n\n${cnt}건 삭제 후 복구 불가능합니다.\n정말 진행하시겠습니까?`)) return;
+                setOrders(prev => prev.filter(x => !selectedOrderIds.has(x.id)));
+                setSelectedOrderIds(new Set());
+              }}
+                style={{padding:"7px 14px",fontSize:12,fontWeight:700,color:"#fff",background:"linear-gradient(135deg, #EF4444, #DC2626)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",boxShadow:"0 2px 8px rgba(239,68,68,0.32)"}}>🗑 선택 삭제 ({selectedOrderIds.size})</button>
+            </div>
+          )}
           <div style={{overflowX:"auto"}}>
             <table><thead><tr>
+              <th style={{width:40,textAlign:"center"}}>
+                {(() => {
+                  const ids = orders.map(o=>o.id);
+                  const all = ids.length>0 && ids.every(id => selectedOrderIds.has(id));
+                  const some = ids.some(id => selectedOrderIds.has(id));
+                  return (
+                    <input type="checkbox" checked={all}
+                      ref={el=>{ if (el) el.indeterminate = !all && some; }}
+                      onChange={e=>{
+                        if (e.target.checked) setSelectedOrderIds(new Set(ids));
+                        else setSelectedOrderIds(new Set());
+                      }}
+                      title={all?"전체 해제":"전체 선택"}
+                      style={{width:16,height:16,accentColor:"#EC6608",cursor:"pointer"}} />
+                  );
+                })()}
+              </th>
               <th>날짜</th><th>제품명</th><th style={{textAlign:"right"}}>수량</th>
               <th style={{textAlign:"right"}}>단가</th><th style={{textAlign:"right"}}>합계</th>
               <th>거래처</th><th style={{textAlign:"center"}}>결제</th><th>비고</th><th style={{textAlign:"center",minWidth:130}}>관리</th>
@@ -2303,6 +2355,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                 if (isEditing && editOrderDraft) {
                   const editTotal = parseFloat(editOrderDraft.unitPrice||0) * parseInt(editOrderDraft.qty||1);
                   return (<tr key={o.id} style={{background:"var(--surface2)"}}>
+                    <td style={{textAlign:"center"}}><input type="checkbox" disabled style={{width:16,height:16,opacity:0.4}}/></td>
                     <td><input type="date" value={editOrderDraft.date||""} onChange={e=>setEditOrderDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/></td>
                     <td><input value={editOrderDraft.productName||""} onChange={e=>setEditOrderDraft(d=>({...d,productName:e.target.value}))} placeholder="제품명 *" style={{height:34,fontSize:13,padding:"0 8px"}}/></td>
                     <td><input type="number" value={editOrderDraft.qty||""} onChange={e=>setEditOrderDraft(d=>({...d,qty:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/></td>
@@ -2340,7 +2393,15 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                   const today=new Date().toISOString().slice(0,10);
                   setOrders(prev=>prev.map(x=>x.id===o.id?{...x, paidDate: isPaid?"":today}:x));
                 };
-                return (<tr key={o.id} style={{background:rowBg}}>
+                const isSel = selectedOrderIds.has(o.id);
+                return (<tr key={o.id} style={{background: isSel ? (darkMode?"rgba(236,102,8,0.10)":"rgba(236,102,8,0.06)") : rowBg}}>
+                  <td style={{textAlign:"center"}}>
+                    <input type="checkbox" checked={isSel} onChange={()=>{
+                      const next = new Set(selectedOrderIds);
+                      if (next.has(o.id)) next.delete(o.id); else next.add(o.id);
+                      setSelectedOrderIds(next);
+                    }} style={{width:16,height:16,accentColor:"#EC6608",cursor:"pointer"}}/>
+                  </td>
                   <td style={{whiteSpace:"nowrap",fontSize:13}}>{o.date}</td>
                   <td style={{fontWeight:600}}>{o.productName}</td>
                   <td style={{textAlign:"right"}}>{parseInt(o.qty||1).toLocaleString()}</td>
@@ -2362,13 +2423,17 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                   <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                     <button onClick={togglePaid} title={isPaid?"결제 취소":"완납 처리"} style={{background:"none",border:"none",cursor:"pointer",color:isPaid?"#FF9500":"#00B493",fontSize:14,marginRight:4}}>{isPaid?"↩":"💰"}</button>
                     <button onClick={()=>startEditOrder(o)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}>✏️</button>
-                    <button onClick={()=>{ if(confirm("이 판매 기록을 삭제할까요?")) setOrders(prev=>prev.filter(x=>x.id!==o.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                    <button onClick={()=>{
+                      if(!window.confirm(`이 판매 기록을 삭제할까요?\n\n${o.date} · ${o.productName} · ${Math.round(total).toLocaleString()}원`)) return;
+                      if(!window.confirm(`⚠️ 한 번 더 확인합니다.\n\n삭제 후 복구 불가능합니다. 정말 진행하시겠습니까?`)) return;
+                      setOrders(prev=>prev.filter(x=>x.id!==o.id));
+                    }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
                   </td>
                 </tr>);
               })}
             </tbody></table>
           </div>
-        )}
+        </>)}
         <ResizeHandles keyName="orders" />
       </div>
       {expandedChart && (
