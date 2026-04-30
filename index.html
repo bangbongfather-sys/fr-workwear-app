@@ -1695,7 +1695,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, darkMode }) {
   );
 }
 
-function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {} }) {
+function DashboardTab({ products, setProducts, materials, laborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {}, clientAR = {} }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", clientId: "", note: "", paymentDue: "", paidDate: "" });
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState(null);
@@ -1962,11 +1962,31 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   };
   // 미수금 계산
   const todayStr = new Date().toISOString().slice(0,10);
-  const totalUnpaidAmt = orders.filter(o => !o.paidDate).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
   const totalOverdueAmt = orders.filter(o => !o.paidDate && o.paymentDue && o.paymentDue < todayStr).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
   const overdueCount = orders.filter(o => !o.paidDate && o.paymentDue && o.paymentDue < todayStr).length;
   const paidCount = orders.filter(o => !!o.paidDate).length;
-  const unpaidCount = orders.filter(o => !o.paidDate).length;
+  // 총 미수금: 장부탭 - 거래처별 미수금의 "미수금 합계"와 동일한 계산식
+  // (자동 미수금: 장부의 "미입금" 청구 + 수동 청구 - 수동 입금, 양수만 합산)
+  const arNames = new Set(Object.keys(clientAR || {}));
+  Object.values(ledgers || {}).forEach(m => (m.clients || []).forEach(c => { if (c.name) arNames.add(c.name.trim()); }));
+  let totalUnpaidAmt = 0;
+  let unpaidCount = 0;
+  arNames.forEach(name => {
+    const manualEntries = (clientAR[name] && clientAR[name].entries) || [];
+    const manualCharge = manualEntries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const manualPaid = manualEntries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    let autoUnpaidSum = 0;
+    Object.values(ledgers || {}).forEach(m => {
+      (m && m.clients || []).forEach(c => {
+        if ((c.name || "").trim() !== name) return;
+        const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+        if (amt <= 0) return;
+        if (c.status === "미입금") autoUnpaidSum += amt;
+      });
+    });
+    const balance = autoUnpaidSum + manualCharge - manualPaid;
+    if (balance > 0) { totalUnpaidAmt += balance; unpaidCount += 1; }
+  });
   const startEditOrder = (o) => { setEditingOrderId(o.id); setEditOrderDraft({ ...o }); };
   const cancelEditOrder = () => { setEditingOrderId(null); setEditOrderDraft(null); };
   const saveEditOrder = () => {
@@ -2035,7 +2055,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       </div>
       {orders.length > 0 && (
         <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"stretch"}}>
-          {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"건", totalUnpaidAmt>0?"#FF9500":"#00B493")}
+          {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"곳 (장부 자동연동)", totalUnpaidAmt>0?"#FF9500":"#00B493")}
           {kpi("kpi_overdue", "연체 미수금", Math.round(totalOverdueAmt).toLocaleString()+"원", overdueCount>0?overdueCount+"건 연체":"연체 없음", totalOverdueAmt>0?"#F04452":"#00B493")}
           {kpi("kpi_paid", "완납 매출", Math.round(totalOrderRevenue - totalUnpaidAmt).toLocaleString()+"원", paidCount+"건 완납", "#00B493")}
           {kpi("kpi_recovery", "회수율", totalOrderRevenue>0?Math.round((totalOrderRevenue-totalUnpaidAmt)/totalOrderRevenue*100)+"%":"—", "전체 매출 대비", null)}
@@ -7354,6 +7374,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             setActiveProdId={setActiveProdId}
             clients={clients}
             ledgers={ledgers}
+            clientAR={clientAR}
           />
         )}
 
