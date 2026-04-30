@@ -7567,45 +7567,53 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     .filter(p => p.include !== false)
                     .map(p => ({ p, c: computeProduct(p, materials, laborItems) }))
                     .filter(({ c }) => c.base > 0);
-                  if (withData.length === 0) return null;
+                  const hasData = withData.length > 0;
                   // 사용자가 직접 설정한 등급별 마진율의 평균
-                  const avgM = withData.reduce((sum, { p, c }) => {
+                  const avgM = hasData ? withData.reduce((sum, { p, c }) => {
                     const sel = c.selectedGrade || "A";
                     const sp = getActiveSpec(p) || {};
                     const m = (sp.margins || DEFAULT_MARGINS)[sel] ?? DEFAULT_MARGINS[sel];
                     return sum + m;
-                  }, 0) / withData.length;
+                  }, 0) / withData.length : 0;
                   // 납품가 대비 실질 마진율 평균
-                  const avgMSell = withData.reduce((sum, { c }) => {
+                  const avgMSell = hasData ? withData.reduce((sum, { c }) => {
                     if (!c.finalPrice) return sum;
                     return sum + ((c.finalPrice - c.beforeMargin) / c.finalPrice * 100);
-                  }, 0) / withData.length;
-                  const totalRev = withData.reduce((s, { c }) => s + c.finalPrice, 0);
-                  const totalCost = withData.reduce((s, { c }) => s + c.beforeMargin, 0);
-                  const mColor = avgM >= 35 ? "#00B493" : avgM >= 25 ? "#FF9500" : "#F04452";
-                  const mColorSell = avgMSell >= 26 ? "#00B493" : avgMSell >= 20 ? "#FF9500" : "#F04452";
+                  }, 0) / withData.length : 0;
+                  const totalRev = hasData ? withData.reduce((s, { c }) => s + c.finalPrice, 0) : 0;
+                  const totalCost = hasData ? withData.reduce((s, { c }) => s + c.beforeMargin, 0) : 0;
+                  const mColor = !hasData ? "var(--text3)" : avgM >= 35 ? "#00B493" : avgM >= 25 ? "#FF9500" : "#F04452";
+                  const mColorSell = !hasData ? "var(--text3)" : avgMSell >= 26 ? "#00B493" : avgMSell >= 20 ? "#FF9500" : "#F04452";
                   return (
-                    <div style={{ marginTop: 12, padding: "12px 14px", background: "var(--surface2)", borderRadius: 12, border: "0.5px solid var(--border)" }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 10 }}>견적 요약</div>
+                    <div style={{ marginTop: 12, padding: "14px 16px", background: hasData ? "linear-gradient(135deg, rgba(236,102,8,0.06) 0%, rgba(236,102,8,0.01) 100%)" : "var(--surface2)", borderRadius: 12, border: hasData ? "1px solid rgba(236,102,8,0.20)" : "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.8 }}>📊 견적 요약</div>
+                        {hasData && <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>{withData.length}개 제품 포함</div>}
+                      </div>
+                      {!hasData && (
+                        <div style={{ fontSize: 12, color: "var(--text3)", padding: "10px 0", textAlign: "center" }}>
+                          체크된 제품이 없거나 원가 데이터가 없습니다 — 단가 계산기에서 제품 원가를 입력하고 위에서 체크해주세요
+                        </div>
+                      )}
                       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                         <div style={{ flex: 1, minWidth: 80 }}>
                           <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>평균 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(설정값 기준)</span></div>
-                          <div style={{ fontSize: 24, fontWeight: 800, color: mColor, lineHeight: 1 }}>{avgM.toFixed(1)}<span style={{ fontSize: 14 }}>%</span></div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: mColor, lineHeight: 1 }}>{hasData ? avgM.toFixed(1) : "—"}<span style={{ fontSize: 14 }}>%</span></div>
                         </div>
                         <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
                         <div style={{ flex: 1, minWidth: 80 }}>
                           <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>납품가 마진율 <span style={{ fontSize: 10, color: "var(--text3)" }}>(납품가 대비)</span></div>
-                          <div style={{ fontSize: 24, fontWeight: 800, color: mColorSell, lineHeight: 1 }}>{avgMSell.toFixed(1)}<span style={{ fontSize: 14 }}>%</span></div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: mColorSell, lineHeight: 1 }}>{hasData ? avgMSell.toFixed(1) : "—"}<span style={{ fontSize: 14 }}>%</span></div>
                         </div>
                         <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
                         <div style={{ flex: 1.5, minWidth: 100 }}>
                           <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>총 견적금액</div>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)" }}>{Math.round(totalRev).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--text2)" }}>원</span></div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)" }}>{hasData ? Math.round(totalRev).toLocaleString() : "—"}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--text2)" }}>원</span></div>
                         </div>
                         <div style={{ width: 1, background: "var(--divider)", alignSelf: "stretch" }} />
                         <div style={{ flex: 1.5, minWidth: 100 }}>
                           <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 2 }}>총 원가</div>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)" }}>{Math.round(totalCost).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--text2)" }}>원</span></div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)" }}>{hasData ? Math.round(totalCost).toLocaleString() : "—"}<span style={{ fontSize: 11, fontWeight: 400, color: "var(--text2)" }}>원</span></div>
                         </div>
                       </div>
                     </div>
