@@ -7841,29 +7841,63 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: T.text2, whiteSpace: "nowrap", width: 60, textAlign: "right" }}>견적 대상</div>
-                    <input type="text" value={quoteClient} list="quote-clients-list"
-                      onChange={e => {
-                        const v = e.target.value;
-                        setQuoteClient(v);
-                        const matched = clients.find(c => (c.name || "").trim() === v.trim());
-                        if (matched) {
-                          setProducts(ps => ps.map(p => {
-                            if (!p.include) return p;
-                            if (!p.specs || !Array.isArray(p.specs)) return p;
-                            return {
-                              ...p,
-                              specs: p.specs.map(s =>
-                                s.id === p.activeSpecId ? { ...s, selectedGrade: matched.grade } : s
-                              )
-                            };
-                          }));
-                        }
-                      }}
-                      placeholder="거래처명 (예: ○○주식회사) — 등록 거래처 선택 시 등급 자동 적용"
-                      style={{ flex: 1, minWidth: 0 }} />
-                    <datalist id="quote-clients-list">
-                      {clients.map(c => <option key={c.id} value={c.name}>{c.grade}등급 {c.note ? "· " + c.note : ""}</option>)}
-                    </datalist>
+                    <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                      <input type="text" value={quoteClient} autoComplete="off"
+                        onFocus={() => setQuoteClientOpen("current")}
+                        onBlur={() => setTimeout(() => setQuoteClientOpen(p => p === "current" ? null : p), 180)}
+                        onChange={e => {
+                          const v = e.target.value;
+                          setQuoteClient(v);
+                          setQuoteClientOpen("current");
+                          const matched = clients.find(c => (c.name || "").trim() === v.trim());
+                          if (matched) {
+                            setProducts(ps => ps.map(p => {
+                              if (!p.include) return p;
+                              if (!p.specs || !Array.isArray(p.specs)) return p;
+                              return {
+                                ...p,
+                                specs: p.specs.map(s =>
+                                  s.id === p.activeSpecId ? { ...s, selectedGrade: matched.grade } : s
+                                )
+                              };
+                            }));
+                          }
+                        }}
+                        placeholder="거래처명 (예: ○○주식회사) — 등록 거래처 선택 시 등급 자동 적용"
+                        style={{ width: "100%" }} />
+                      {quoteClientOpen === "current" && (() => {
+                        const q = quoteClient.trim().toLowerCase();
+                        const list = clients.filter(c => !q || (c.name||"").toLowerCase().includes(q));
+                        if (list.length === 0) return null;
+                        return (
+                          <div onMouseDown={e => e.preventDefault()}
+                            style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50, maxHeight: 260, overflowY: "auto", background: T.surface, border: `1.5px solid ${T.divider}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+                            {list.map(c => {
+                              const gc = { A: "#EC6608", B: "#10B981", C: "#F59E0B", D: "#EF4444" }[c.grade] || "#EC6608";
+                              return (
+                                <div key={c.id}
+                                  onClick={() => {
+                                    setQuoteClient(c.name);
+                                    setQuoteClientOpen(null);
+                                    setProducts(ps => ps.map(p => {
+                                      if (!p.include) return p;
+                                      if (!p.specs || !Array.isArray(p.specs)) return p;
+                                      return { ...p, specs: p.specs.map(s => s.id === p.activeSpecId ? { ...s, selectedGrade: c.grade } : s) };
+                                    }));
+                                  }}
+                                  style={{ padding: "10px 12px", cursor: "pointer", borderBottom: `1px solid ${T.divider}`, display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: T.text }}
+                                  onMouseEnter={e => { e.currentTarget.style.background = T.surface2; }}
+                                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
+                                  <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: 999, background: gc, color: "#fff", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{c.grade}</span>
+                                  <span style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                                  {c.note && <span style={{ fontSize: 11, color: T.text2, flexShrink: 0 }}>· {c.note}</span>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                   {(() => {
                     const matched = clients.find(c => (c.name || "").trim() === quoteClient.trim());
