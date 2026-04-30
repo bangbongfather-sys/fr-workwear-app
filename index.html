@@ -1962,11 +1962,31 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   };
   // 미수금 계산
   const todayStr = new Date().toISOString().slice(0,10);
-  const totalUnpaidAmt = orders.filter(o => !o.paidDate).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
   const totalOverdueAmt = orders.filter(o => !o.paidDate && o.paymentDue && o.paymentDue < todayStr).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
   const overdueCount = orders.filter(o => !o.paidDate && o.paymentDue && o.paymentDue < todayStr).length;
   const paidCount = orders.filter(o => !!o.paidDate).length;
-  const unpaidCount = orders.filter(o => !o.paidDate).length;
+  // 총 미수금: 장부탭 - 거래처별 미수금의 "미수금 합계"와 동일한 계산식
+  // (자동 미수금: 장부의 "미입금" 청구 + 수동 청구 - 수동 입금, 양수만 합산)
+  const arNames = new Set(Object.keys(clientAR || {}));
+  Object.values(ledgers || {}).forEach(m => (m.clients || []).forEach(c => { if (c.name) arNames.add(c.name.trim()); }));
+  let totalUnpaidAmt = 0;
+  let unpaidCount = 0;
+  arNames.forEach(name => {
+    const manualEntries = (clientAR[name] && clientAR[name].entries) || [];
+    const manualCharge = manualEntries.filter(a => a.type === "청구").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const manualPaid = manualEntries.filter(a => a.type === "입금").reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    let autoUnpaidSum = 0;
+    Object.values(ledgers || {}).forEach(m => {
+      (m && m.clients || []).forEach(c => {
+        if ((c.name || "").trim() !== name) return;
+        const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+        if (amt <= 0) return;
+        if (c.status === "미입금") autoUnpaidSum += amt;
+      });
+    });
+    const balance = autoUnpaidSum + manualCharge - manualPaid;
+    if (balance > 0) { totalUnpaidAmt += balance; unpaidCount += 1; }
+  });
   const startEditOrder = (o) => { setEditingOrderId(o.id); setEditOrderDraft({ ...o }); };
   const cancelEditOrder = () => { setEditingOrderId(null); setEditOrderDraft(null); };
   const saveEditOrder = () => {
