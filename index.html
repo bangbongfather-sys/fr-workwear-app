@@ -1758,6 +1758,29 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   // 드래그 상태
   const dragRef = useRef(null); // { key, startX, startY, startW, startH, mode: 'br'|'r'|'b' }
   const [dragging, setDragging] = useState(null);
+  // 정렬 기준선 (드래그 중인 카드 외 다른 카드들의 가장자리)
+  const [alignGuides, setAlignGuides] = useState({ vLines: [], hLines: [], dragRect: null });
+  useEffect(() => {
+    if (!dragging) { setAlignGuides({ vLines: [], hLines: [], dragRect: null }); return; }
+    const recompute = () => {
+      const cards = Array.from(document.querySelectorAll(".rcard"));
+      const vSet = new Set(); const hSet = new Set();
+      let dragRect = null;
+      cards.forEach(el => {
+        const r = el.getBoundingClientRect();
+        if (el.dataset.cardKey === dragging) { dragRect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; return; }
+        vSet.add(Math.round(r.left));
+        vSet.add(Math.round(r.right));
+        hSet.add(Math.round(r.top));
+        hSet.add(Math.round(r.bottom));
+      });
+      setAlignGuides({ vLines: [...vSet], hLines: [...hSet], dragRect });
+    };
+    recompute();
+    // 드래그 중에는 카드 크기가 계속 변하므로 자주 재계산
+    const interval = setInterval(recompute, 50);
+    return () => clearInterval(interval);
+  }, [dragging]);
 
   // 8방향 모드: tl, t, tr, l, r, bl, b, br
   const cursorFor = (mode) => ({
@@ -2041,7 +2064,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
     const w = layout?.width || 200;
     const valFontSize = w >= 360 ? 32 : w >= 240 ? 26 : w >= 180 ? 22 : 18;
     return (
-      <div className="card rcard kpi-card" style={{ ...cardLayoutStyle(key), position: "relative", minWidth: 140, flex: layout ? "0 0 auto" : "1 1 200px", overflow: "hidden" }}>
+      <div className="card rcard kpi-card" data-card-key={key} style={{ ...cardLayoutStyle(key), position: "relative", minWidth: 140, flex: layout ? "0 0 auto" : "1 1 200px", overflow: "hidden" }}>
         <button onClick={() => hideKPI(key, label)} title="이 카드 숨기기" className="kpi-hide-btn no-print"
           style={{
             position: "absolute", top: 8, right: 8, width: 22, height: 22, borderRadius: 11,
@@ -2090,6 +2113,35 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       <style>{`.kpi-card:hover .kpi-hide-btn { opacity: 1 !important; }`}</style>
+      {/* 리사이즈 중 정렬 기준선 오버레이 */}
+      {dragging && (
+        <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 4 }}>
+          {alignGuides.vLines.map((x, i) => {
+            const dr = alignGuides.dragRect;
+            const isAligned = dr && (Math.abs(dr.left - x) < 4 || Math.abs(dr.right - x) < 4);
+            return (
+              <div key={"v"+i} style={{
+                position: "absolute", left: x, top: 0, bottom: 0, width: 0,
+                borderLeft: isAligned ? "2px solid #EC6608" : "1px dashed rgba(0,122,255,0.45)",
+                boxShadow: isAligned ? "0 0 8px rgba(236,102,8,0.55)" : "none",
+                transition: "border-color 0.08s",
+              }}/>
+            );
+          })}
+          {alignGuides.hLines.map((y, i) => {
+            const dr = alignGuides.dragRect;
+            const isAligned = dr && (Math.abs(dr.top - y) < 4 || Math.abs(dr.bottom - y) < 4);
+            return (
+              <div key={"h"+i} style={{
+                position: "absolute", top: y, left: 0, right: 0, height: 0,
+                borderTop: isAligned ? "2px solid #EC6608" : "1px dashed rgba(0,122,255,0.45)",
+                boxShadow: isAligned ? "0 0 8px rgba(236,102,8,0.55)" : "none",
+                transition: "border-color 0.08s",
+              }}/>
+            );
+          })}
+        </div>
+      )}
       {showResizeHint && (
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,background:"rgba(0,122,255,0.08)",border:"1px solid rgba(0,122,255,0.2)",fontSize:13,color:"var(--text1)"}}>
           <span style={{fontSize:16}}>💡</span>
@@ -2120,7 +2172,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         </div>
       )}
       <div style={{display:"flex",flexWrap:"wrap",gap:16,alignItems:"stretch"}}>
-        <div className="card rcard" style={{ ...cardLayoutStyle("sales"), position: "relative", minWidth: 280, flex: cardLayouts["sales"] ? "0 0 auto" : "1 1 380px", overflow: "hidden" }}>
+        <div className="card rcard" data-card-key="sales" style={{ ...cardLayoutStyle("sales"), position: "relative", minWidth: 280, flex: cardLayouts["sales"] ? "0 0 auto" : "1 1 380px", overflow: "hidden" }}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6}}>
             <div onClick={()=>setDetailView("sales")} title="클릭하여 상세 페이지 열기"
               style={{fontSize:13,fontWeight:700,color:"var(--text1)",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
@@ -2172,7 +2224,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           )}
           <ResizeHandles keyName="sales" />
         </div>
-        <div className="card rcard" style={{ ...cardLayoutStyle("pie"), position: "relative", minWidth: 240, flex: cardLayouts["pie"] ? "0 0 auto" : "1 1 320px", overflow: "hidden" }}>
+        <div className="card rcard" data-card-key="pie" style={{ ...cardLayoutStyle("pie"), position: "relative", minWidth: 240, flex: cardLayouts["pie"] ? "0 0 auto" : "1 1 320px", overflow: "hidden" }}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6}}>
             <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>🥧 제품군별 매출 비중</div>
             <div style={{display:"flex",gap:6}}>
@@ -2185,7 +2237,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           <ResizeHandles keyName="pie" />
         </div>
       </div>
-      <div className="card rcard" style={{ ...cardLayoutStyle("margin"), position: "relative", overflow: cardLayouts["margin"] ? "auto" : "visible" }}>
+      <div className="card rcard" data-card-key="margin" style={{ ...cardLayoutStyle("margin"), position: "relative", overflow: cardLayouts["margin"] ? "auto" : "visible" }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,gap:6,flexWrap:"wrap"}}>
           <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>📊 제품별 마진율 현황 <span style={{fontSize:11,fontWeight:400,color:"var(--text3)"}}>(납품가 대비)</span></div>
           <div style={{display:"flex",gap:6}}>
@@ -2274,7 +2326,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         </>)}
         <ResizeHandles keyName="margin" />
       </div>
-      <div className="card rcard" style={{ ...cardLayoutStyle("orders"), position: "relative", overflow: cardLayouts["orders"] ? "auto" : "visible" }}>
+      <div className="card rcard" data-card-key="orders" style={{ ...cardLayoutStyle("orders"), position: "relative", overflow: cardLayouts["orders"] ? "auto" : "visible" }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6,flexWrap:"wrap"}}>
           <div onClick={()=>setDetailView("orders")} title="클릭하여 상세 페이지 열기"
             style={{fontSize:15,fontWeight:700,color:"var(--text1)",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
