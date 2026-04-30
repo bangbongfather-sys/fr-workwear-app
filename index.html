@@ -3167,15 +3167,20 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode }) 
   // 입금상태 토글 (장부 데이터 직접 변경 → 자동으로 모든 월에 반영)
   const togglePaidStatus = (clientName, ym) => {
     if (!setLedgers) return;
+    const month = (ledgers || {})[ym];
+    const target = month && (month.clients || []).find(c => (c.name||"").trim() === (clientName||"").trim());
+    if (!target) return;
+    const newStatus = target.status === "입금완료" ? "미입금" : "입금완료";
+    const amt = Math.round(parseFloat(target.total)||0).toLocaleString();
+    if (!window.confirm(`[${ym}] "${clientName||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${target.status}" → "${newStatus}" 로 변경하시겠습니까?`)) return;
     setLedgers(prev => {
       const next = { ...prev };
-      const month = next[ym];
-      if (!month || !month.clients) return prev;
+      const m = next[ym];
+      if (!m || !m.clients) return prev;
       next[ym] = {
-        ...month,
-        clients: month.clients.map(c => {
+        ...m,
+        clients: m.clients.map(c => {
           if ((c.name||"").trim() === (clientName||"").trim()) {
-            const newStatus = c.status === "입금완료" ? "미입금" : "입금완료";
             return { ...c, status: newStatus };
           }
           return c;
