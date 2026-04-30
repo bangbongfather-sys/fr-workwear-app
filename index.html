@@ -4079,10 +4079,55 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
 
       {/* 4) 미수금 회수 (장부 자동 연동) */}
       {subTab === "ar" && (<>
+        {/* 미수금 요약 KPI */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12,marginBottom:16}}>
+          <div className="card" style={{borderColor:"rgba(240,68,82,0.30)",background:"linear-gradient(135deg, rgba(240,68,82,0.08) 0%, rgba(240,68,82,0.02) 100%)"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 미수금</div>
+            <div style={{fontSize:26,fontWeight:900,color:"#F04452",letterSpacing:-0.5,lineHeight:1.1}}>{fmt(totalAR)}<span style={{fontSize:13,fontWeight:600,color:"var(--text2)",marginLeft:2}}>원</span></div>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>회수 대상 {arList.length}곳</div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>평균 미수금</div>
+            <div style={{fontSize:22,fontWeight:800,color:"var(--text1)"}}>{arList.length>0?fmt(Math.round(totalAR/arList.length)):"0"}<span style={{fontSize:12,fontWeight:600,color:"var(--text2)",marginLeft:2}}>원</span></div>
+            <div style={{fontSize:11,color:"var(--text3)",marginTop:4}}>거래처당 평균</div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>최대 미수 거래처</div>
+            <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{arList[0]?.name || "—"}</div>
+            <div style={{fontSize:14,fontWeight:800,color:"#F04452",marginTop:2}}>{arList[0]?fmt(arList[0].balance):"0"}<span style={{fontSize:11,fontWeight:600,color:"var(--text2)",marginLeft:2}}>원</span></div>
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>회수 우선순위</div>
+            <div style={{display:"flex",flexDirection:"column",gap:3,fontSize:11}}>
+              {(() => {
+                const cnt = { red:0, orange:0, yellow:0, green:0 };
+                arList.forEach(c => {
+                  if (c.balance > 50000000) cnt.red++;
+                  else if (c.balance > 10000000) cnt.orange++;
+                  else if (c.balance > 1000000) cnt.yellow++;
+                  else cnt.green++;
+                });
+                return (
+                  <>
+                    {cnt.red > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#F04452",fontWeight:700}}><span>🔴 최우선 (5천만+)</span><span>{cnt.red}건</span></div>}
+                    {cnt.orange > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#FF9500",fontWeight:700}}><span>🟠 우선 (1천만+)</span><span>{cnt.orange}건</span></div>}
+                    {cnt.yellow > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#FFB800",fontWeight:600}}><span>🟡 일반 (1백만+)</span><span>{cnt.yellow}건</span></div>}
+                    {cnt.green > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#00B493",fontWeight:600}}><span>🟢 소액</span><span>{cnt.green}건</span></div>}
+                    {arList.length === 0 && <div style={{color:"var(--text3)"}}>미수금 없음</div>}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+
         <div className="card">
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
-            <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📋 거래처별 미수금 (장부 자동 연동)</div>
-            <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부의 미입금 + 수동 조정 합산</span>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>📋 거래처별 미수금 (장부 자동 연동)</div>
+              <span style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부의 미입금 + 수동 조정 합산</span>
+            </div>
+            <div style={{fontSize:13,color:"var(--text2)"}}>총 합계 <span style={{fontSize:16,fontWeight:900,color:"#F04452",marginLeft:6}}>{fmt(totalAR)}원</span></div>
           </div>
           {arList.length === 0 ? (
             <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>현재 미수금이 없습니다.<br/>장부에서 거래처 미입금 등록 시 자동 표시됩니다.</div>
