@@ -3842,10 +3842,10 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           {/* 계좌 추가 폼 */}
           {showAcctForm && (
             <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 150px 60px",gap:8,marginBottom:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 220px 60px",gap:8,marginBottom:8}}>
                 <input placeholder="계좌명 * (예: 주거래통장)" value={acctDraft.name} onChange={e=>setAcctDraft(d=>({...d,name:e.target.value}))}/>
                 <input placeholder="은행명 (예: 국민)" value={acctDraft.bank} onChange={e=>setAcctDraft(d=>({...d,bank:e.target.value}))}/>
-                <input type="number" placeholder="현재 잔액" value={acctDraft.balance} onChange={e=>setAcctDraft(d=>({...d,balance:e.target.value}))}/>
+                <input type="number" placeholder="현재 잔액 (원)" value={acctDraft.balance} onChange={e=>setAcctDraft(d=>({...d,balance:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
                 <input type="color" value={acctDraft.color} onChange={e=>setAcctDraft(d=>({...d,color:e.target.value}))} style={{height:44,padding:4,cursor:"pointer"}}/>
               </div>
               <div style={{display:"flex",gap:8}}>
@@ -3858,7 +3858,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           {/* 거래 입력 폼 */}
           {showCfForm && (
             <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 100px 130px 130px 1fr auto",gap:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 100px 220px 140px 1fr auto",gap:8}}>
                 <select value={cfDraft.accountId} onChange={e=>setCfDraft(d=>({...d,accountId:e.target.value}))} style={{height:44}}>
                   <option value="">계좌 선택 *</option>
                   {accounts.map(a=><option key={a.id} value={a.id}>{a.name} ({a.bank})</option>)}
@@ -3866,7 +3866,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                 <select value={cfDraft.type} onChange={e=>setCfDraft(d=>({...d,type:e.target.value}))} style={{height:44}}>
                   <option value="입금">입금</option><option value="출금">출금</option>
                 </select>
-                <input type="number" placeholder="금액 *" value={cfDraft.amount} onChange={e=>setCfDraft(d=>({...d,amount:e.target.value}))}/>
+                <input type="number" placeholder="금액 (원) *" value={cfDraft.amount} onChange={e=>setCfDraft(d=>({...d,amount:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
                 <input type="date" value={cfDraft.date} onChange={e=>setCfDraft(d=>({...d,date:e.target.value}))}/>
                 <input placeholder="분류/메모" value={cfDraft.category} onChange={e=>setCfDraft(d=>({...d,category:e.target.value}))}/>
                 <button onClick={addCf} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>저장</button>
@@ -3994,13 +3994,13 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           {/* 추가 폼 */}
           {showInvForm && (
             <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"100px 1fr 130px 130px",gap:8,marginBottom:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"100px 1fr 200px 200px",gap:8,marginBottom:8}}>
                 <select value={invDraft.type} onChange={e=>setInvDraft(d=>({...d,type:e.target.value}))} style={{height:44}}>
                   <option>예금</option><option>적금</option><option>주식</option><option>펀드</option><option>채권</option><option>부동산</option><option>가상자산</option><option>기타</option>
                 </select>
                 <input placeholder="투자명 * (예: 신한정기예금)" value={invDraft.name} onChange={e=>setInvDraft(d=>({...d,name:e.target.value}))}/>
-                <input type="number" placeholder="원금 (원)" value={invDraft.principal} onChange={e=>setInvDraft(d=>({...d,principal:e.target.value}))}/>
-                <input type="number" placeholder="현재 평가액" value={invDraft.currentValue} onChange={e=>setInvDraft(d=>({...d,currentValue:e.target.value}))}/>
+                <input type="number" placeholder="원금 (원)" value={invDraft.principal} onChange={e=>setInvDraft(d=>({...d,principal:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
+                <input type="number" placeholder="현재 평가액 (원)" value={invDraft.currentValue} onChange={e=>setInvDraft(d=>({...d,currentValue:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"130px 130px 100px 1fr auto",gap:8}}>
                 <input type="date" value={invDraft.startDate} onChange={e=>setInvDraft(d=>({...d,startDate:e.target.value}))} title="시작일"/>
@@ -4138,12 +4138,12 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           </div>
           {showSchedForm && (
             <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 130px 130px 100px 1fr auto",gap:8}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 130px 220px 100px 1fr auto",gap:8}}>
                 <input placeholder="이름 * (예: 사무실 임대료)" value={schedDraft.name} onChange={e=>setSchedDraft(d=>({...d,name:e.target.value}))}/>
                 <select value={schedDraft.category} onChange={e=>setSchedDraft(d=>({...d,category:e.target.value}))} style={{height:44}}>
                   <option>임대료</option><option>인건비</option><option>통신비</option><option>보험료</option><option>대출이자</option><option>리스</option><option>구독료</option><option>관리비</option><option>기타</option>
                 </select>
-                <input type="number" placeholder="금액 *" value={schedDraft.amount} onChange={e=>setSchedDraft(d=>({...d,amount:e.target.value}))}/>
+                <input type="number" placeholder="금액 (원) *" value={schedDraft.amount} onChange={e=>setSchedDraft(d=>({...d,amount:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
                 <input type="number" placeholder="결제일" value={schedDraft.dueDay} onChange={e=>setSchedDraft(d=>({...d,dueDay:e.target.value}))} title="매월 며칠"/>
                 <input placeholder="메모" value={schedDraft.memo} onChange={e=>setSchedDraft(d=>({...d,memo:e.target.value}))}/>
                 <button onClick={addSched} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>등록</button>
