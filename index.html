@@ -24,8 +24,8 @@
       --nj-orange: #EC6608; --nj-orange-600: #D85800; --nj-orange-700: #B84800;
       --nj-orange-100: #FFE9D6; --nj-orange-50: #FFF4EC;
 
-      /* Surfaces (light) */
-      --bg: #F7F8FA; --surface: #ffffff; --surface2: #F1F2F6;
+      /* Surfaces (light) — warm cream canvas */
+      --bg: #F7F5F0; --surface: #ffffff; --surface2: #FAF8F3;
       --border: #E5E8ED; --divider: #EFF1F4;
       --text1: #14171D; --text2: #5A6270; --text3: #828A98;
       --input-bg: #F1F2F6; --input-color: #14171D; --placeholder: #828A98;
@@ -6066,29 +6066,32 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       <aside className={`app-sidebar no-print${mobileSidebarOpen ? " mobile-open" : ""}`} style={{
         width: sidebarCollapsed ? 68 : 232,
         flexShrink: 0,
-        background: darkMode ? "rgba(17,17,25,0.72)" : "rgba(255,255,255,0.62)",
-        backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)",
-        borderRight: "1px solid var(--header-border)",
-        position: "sticky", top: 0, height: "100vh",
+        background: "linear-gradient(180deg, #14171D 0%, #1F232B 100%)",
+        border: "1px solid rgba(255,255,255,0.04)",
+        borderRadius: 16,
+        margin: 12, marginRight: 0,
+        position: "sticky", top: 12, height: "calc(100vh - 24px)",
         display: "flex", flexDirection: "column",
         transition: "width 0.25s cubic-bezier(0.4,0,0.2,1)",
+        boxShadow: "0 12px 32px rgba(15,17,21,0.10)",
+        overflow: "hidden",
         zIndex: 99,
       }}>
-        <div style={{ display: "flex", alignItems: "center", padding: sidebarCollapsed ? "16px 12px" : "16px 18px", borderBottom: "1px solid var(--divider)", justifyContent: sidebarCollapsed ? "center" : "space-between", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", padding: sidebarCollapsed ? "20px 12px 16px" : "20px 18px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", justifyContent: sidebarCollapsed ? "center" : "space-between", gap: 10 }}>
           {!sidebarCollapsed && (
             <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
               <div style={{ width: 32, height: 32, borderRadius: 9, background: "linear-gradient(135deg, #EC6608, #D85800)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 13, letterSpacing: 0.5, boxShadow: "0 4px 12px rgba(236,102,8,0.4)", flexShrink: 0 }}>NJ</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: -0.2 }}>NJ SAFETY</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#E5E8ED", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: -0.2 }}>NJ SAFETY</div>
             </div>
           )}
           <button onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? "펼치기" : "접기"} style={{
             width: 28, height: 28, border: "none", borderRadius: 8,
-            background: "var(--surface2)", cursor: "pointer", color: "var(--text2)",
+            background: "rgba(255,255,255,0.06)", cursor: "pointer", color: "#B4BAC4",
             fontSize: 14, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
             transition: "background 0.15s",
           }}
-          onMouseEnter={e => e.currentTarget.style.background = "var(--chip-hover-bg)"}
-          onMouseLeave={e => e.currentTarget.style.background = "var(--surface2)"}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.12)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
           >{sidebarCollapsed ? "›" : "‹"}</button>
         </div>
         <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
@@ -6099,16 +6102,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 display: "flex", alignItems: "center", gap: 12,
                 width: "100%", padding: sidebarCollapsed ? "11px 0" : "10px 14px",
                 border: "none", borderRadius: 10,
-                background: active ? "linear-gradient(135deg, rgba(236,102,8,0.16), rgba(139,92,246,0.16))" : "transparent",
-                color: active ? ACCENT : "var(--text2)",
+                background: active ? "linear-gradient(135deg, rgba(236,102,8,0.20) 0%, rgba(236,102,8,0.08) 100%)" : "transparent",
+                boxShadow: active ? "inset 0 0 0 1px rgba(236,102,8,0.25)" : "none",
+                color: active ? "#FFFFFF" : "#B4BAC4",
                 cursor: "pointer", fontFamily: "inherit", fontSize: 13,
                 fontWeight: active ? 600 : 500, letterSpacing: -0.1,
                 transition: "background 0.15s, color 0.15s",
                 justifyContent: sidebarCollapsed ? "center" : "flex-start",
                 position: "relative", textAlign: "left",
               }}
-              onMouseEnter={e => { if (!active) e.currentTarget.style.background = "var(--surface2)"; }}
-              onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+              onMouseEnter={e => { if (!active) { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#E5E8ED"; } }}
+              onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#B4BAC4"; } }}
               >
                 {active && !sidebarCollapsed && <span style={{ position: "absolute", left: -8, top: 8, bottom: 8, width: 3, borderRadius: 3, background: "linear-gradient(180deg, #EC6608, #D85800)" }}/>}
                 <span style={{ fontSize: 15, opacity: active ? 1 : 0.7, flexShrink: 0, width: 18, display: "inline-flex", justifyContent: "center" }}>{icon}</span>
