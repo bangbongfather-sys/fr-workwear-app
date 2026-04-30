@@ -13,43 +13,54 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+
   <style>
+    /* NJ SAFETY — Design Theme Preview (NJ Orange + Charcoal Ink) */
     :root {
-      --bg: #F4F4F9; --surface: #ffffff; --surface2: rgba(99,102,241,0.04);
-      --border: rgba(99,102,241,0.12); --divider: #EBEBF5;
-      --text1: #0F0F1A; --text2: rgba(15,15,26,0.52); --text3: rgba(15,15,26,0.28);
-      --input-bg: rgba(99,102,241,0.06); --input-color: #0F0F1A; --placeholder: rgba(15,15,26,0.28);
-      --row-bg: rgba(99,102,241,0.03); --row-border: rgba(99,102,241,0.09);
-      --th-bg: rgba(99,102,241,0.05); --td-border: rgba(15,15,26,0.07);
-      --header-bg: rgba(255,255,255,0.82); --header-border: rgba(99,102,241,0.13);
-      --chip-bg: #EDEDF8; --chip-color: #6B7280; --chip-hover-bg: #E0E0F5; --chip-hover-color: #4F46E5;
-      --ghost-bg: #fff; --ghost-color: #4F46E5; --ghost-border: rgba(99,102,241,0.22); --empty-color: #C4C4D4;
-      --doc-bg: #fff; --doc-text: #1d1d1f; --doc-text2: #424245; --doc-text3: #6e6e73;
-      --doc-border: #d2d2d7; --doc-row-border: #e8e8ed; --doc-hover: #fafafa;
-      --doc-last: #1d1d1f; --doc-footer: #86868b;
+      /* Brand */
+      --nj-orange: #EC6608; --nj-orange-600: #D85800; --nj-orange-700: #B84800;
+      --nj-orange-100: #FFE9D6; --nj-orange-50: #FFF4EC;
+
+      /* Surfaces (light) */
+      --bg: #F7F8FA; --surface: #ffffff; --surface2: #F1F2F6;
+      --border: #E5E8ED; --divider: #EFF1F4;
+      --text1: #14171D; --text2: #5A6270; --text3: #828A98;
+      --input-bg: #F1F2F6; --input-color: #14171D; --placeholder: #828A98;
+      --row-bg: rgba(236,102,8,0.03); --row-border: rgba(236,102,8,0.09);
+      --th-bg: rgba(236,102,8,0.05); --td-border: rgba(20,23,29,0.07);
+      --header-bg: rgba(255,255,255,0.82); --header-border: rgba(236,102,8,0.13);
+      --chip-bg: #FFE9D6; --chip-color: #5A6270; --chip-hover-bg: #FFD4B0; --chip-hover-color: #B84800;
+      --ghost-bg: #fff; --ghost-color: #D85800; --ghost-border: rgba(236,102,8,0.22); --empty-color: #B4BAC4;
+      --doc-bg: #fff; --doc-text: #14171D; --doc-text2: #404652; --doc-text3: #5A6270;
+      --doc-border: #D7DBE2; --doc-row-border: #E5E8ED; --doc-hover: #F7F8FA;
+      --doc-last: #14171D; --doc-footer: #828A98;
     }
     body.dark {
-      --bg: #09090F; --surface: #111119; --surface2: rgba(129,140,248,0.07);
-      --border: rgba(129,140,248,0.14); --divider: rgba(129,140,248,0.1);
-      --text1: #EEEEFF; --text2: rgba(238,238,255,0.52); --text3: rgba(238,238,255,0.26);
-      --input-bg: rgba(129,140,248,0.1); --input-color: #EEEEFF; --placeholder: rgba(238,238,255,0.26);
-      --row-bg: rgba(129,140,248,0.05); --row-border: rgba(129,140,248,0.1);
-      --th-bg: rgba(129,140,248,0.08); --td-border: rgba(238,238,255,0.07);
-      --header-bg: rgba(9,9,15,0.82); --header-border: rgba(129,140,248,0.16);
-      --chip-bg: #1A1A2E; --chip-color: rgba(238,238,255,0.48); --chip-hover-bg: #22223A; --chip-hover-color: #818CF8;
-      --ghost-bg: #1A1A2E; --ghost-color: #818CF8; --ghost-border: rgba(129,140,248,0.22); --empty-color: rgba(238,238,255,0.24);
-      --doc-bg: #111119; --doc-text: #F0F0FF; --doc-text2: rgba(238,238,255,0.76); --doc-text3: rgba(238,238,255,0.45);
-      --doc-border: rgba(129,140,248,0.16); --doc-row-border: rgba(129,140,248,0.08);
-      --doc-hover: rgba(129,140,248,0.04); --doc-last: rgba(238,238,255,0.38); --doc-footer: rgba(238,238,255,0.36);
+      --bg: #0F1115; --surface: #181B22; --surface2: #1F232B;
+      --border: #2A2F38; --divider: #353B47;
+      --text1: #EFF1F4; --text2: #B4BAC4; --text3: #828A98;
+      --input-bg: #1F232B; --input-color: #EFF1F4; --placeholder: #828A98;
+      --row-bg: rgba(236,102,8,0.06); --row-border: rgba(236,102,8,0.14);
+      --th-bg: rgba(236,102,8,0.10); --td-border: rgba(239,241,244,0.07);
+      --header-bg: rgba(15,17,21,0.82); --header-border: rgba(236,102,8,0.20);
+      --chip-bg: #2A2F38; --chip-color: #B4BAC4; --chip-hover-bg: #404652; --chip-hover-color: #FFE9D6;
+      --ghost-bg: #1F232B; --ghost-color: #FFE9D6; --ghost-border: rgba(236,102,8,0.30); --empty-color: rgba(239,241,244,0.24);
+      --doc-bg: #181B22; --doc-text: #EFF1F4; --doc-text2: rgba(239,241,244,0.76); --doc-text3: #B4BAC4;
+      --doc-border: #2A2F38; --doc-row-border: rgba(239,241,244,0.08);
+      --doc-hover: rgba(236,102,8,0.04); --doc-last: rgba(239,241,244,0.86); --doc-footer: #828A98;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'Apple SD Gothic Neo', sans-serif;
+      font-family: 'Pretendard Variable', 'Pretendard', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
       background: var(--bg);
       color: var(--text1);
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      font-feature-settings: "tnum" 1, "ss01" 1;
       transition: background 0.25s, color 0.25s;
     }
     input[type=text], input[type=number], input[type=password], input[type=date], input[type=month], input[type=email], input[type=tel], input[type=url], input[type=search], input:not([type]), select {
@@ -80,7 +91,7 @@
     }
     input:focus, select:focus, textarea:focus {
       outline: none;
-      box-shadow: 0 0 0 3px rgba(99,102,241,0.3);
+      box-shadow: 0 0 0 3px rgba(236,102,8,0.28);
     }
     input::placeholder, textarea::placeholder { color: var(--placeholder); }
     body.dark input[type=date], body.dark input[type=month] { color-scheme: dark; }
@@ -108,20 +119,20 @@
       transition: background 0.2s, box-shadow 0.2s;
     }
     .card:hover {
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05), 0 8px 28px rgba(99,102,241,0.11);
+      box-shadow: 0 2px 4px rgba(15,17,21,0.05), 0 8px 28px rgba(236,102,8,0.11);
     }
 
     /* ─── 버튼 ─── */
     .btn-primary {
-      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+      background: linear-gradient(135deg, #EC6608 0%, #D85800 100%);
       color: #fff; border: none; border-radius: 11px;
       cursor: pointer; font-weight: 600; padding: 12px 22px;
       font-family: inherit; font-size: 14px;
-      box-shadow: 0 2px 10px rgba(99,102,241,0.38);
+      box-shadow: 0 2px 10px rgba(236,102,8,0.38);
       transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
     }
-    .btn-primary:hover { opacity: 0.92; box-shadow: 0 4px 18px rgba(99,102,241,0.45); }
-    .btn-primary:active { transform: scale(0.97); box-shadow: 0 1px 6px rgba(99,102,241,0.3); }
+    .btn-primary:hover { opacity: 0.92; box-shadow: 0 4px 18px rgba(236,102,8,0.45); }
+    .btn-primary:active { transform: scale(0.97); box-shadow: 0 1px 6px rgba(236,102,8,0.3); }
     .btn-orange {
       background: linear-gradient(135deg, #F59E0B 0%, #EF4444 100%);
       color: #fff; border: none; border-radius: 11px;
