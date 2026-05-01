@@ -9371,6 +9371,26 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
   const handleFiles = async (fileList) => {
     if (!fileList || fileList.length === 0) return;
     const arr = Array.from(fileList);
+    if (driveConnected) {
+      setDriveBusy(true); setDriveError("");
+      try {
+        const sub = subtabs.find(s => s.id === activeSub);
+        const folderId = await ensureSubFolder(activeSub, sub.name);
+        for (const file of arr) {
+          const meta = { name: file.name, parents: [folderId] };
+          const boundary = "frw_b_" + Math.random().toString(36).slice(2);
+          const head = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${boundary}\r\nContent-Type: ${file.type || "application/octet-stream"}\r\n\r\n`;
+          const tail = `\r\n--${boundary}--`;
+          const body = new Blob([head, file, tail], { type: `multipart/related; boundary=${boundary}` });
+          await driveApi("upload/drive/v3/files?uploadType=multipart", {
+            method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body,
+          });
+        }
+        await loadDriveSubtab(activeSub, sub.name);
+      } catch (e) { alert("Drive 업로드 실패: " + e.message); setDriveError(e.message); }
+      finally { setDriveBusy(false); }
+      return;
+    }
     const oversized = arr.filter(f => f.size > 8 * 1024 * 1024);
     if (oversized.length > 0) {
       if (!window.confirm(`${oversized.length}개 파일이 8MB를 초과합니다.\n브라우저 저장 공간이 빠르게 찰 수 있습니다.\n계속 진행하시겠습니까?`)) return;
@@ -9394,14 +9414,35 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
       return { ...prev, items: { ...(prev.items || {}), [activeSub]: [...newFiles, ...list] } };
     });
   };
-  const deleteFile = (id) => {
-    if (!window.confirm("파일을 삭제하시겠습니까?")) return;
+  const deleteFile = async (id) => {
+    if (!window.confirm(driveConnected ? "파일을 삭제하시겠습니까? (Google Drive에서도 영구 삭제됩니다)" : "파일을 삭제하시겠습니까?")) return;
+    if (driveConnected) {
+      setDriveBusy(true);
+      try {
+        await driveApi(`drive/v3/files/${id}`, { method: "DELETE" });
+        const sub = subtabs.find(s => s.id === activeSub);
+        if (sub) await loadDriveSubtab(activeSub, sub.name);
+      } catch (e) { alert("Drive 삭제 실패: " + e.message); }
+      finally { setDriveBusy(false); }
+      return;
+    }
     setCompanyFiles(prev => {
       const list = (prev.items || {})[activeSub] || [];
       return { ...prev, items: { ...(prev.items || {}), [activeSub]: list.filter(f => f.id !== id) } };
     });
   };
-  const downloadFile = (f) => {
+  const downloadFile = async (f) => {
+    if (driveConnected && f.driveId) {
+      try {
+        const r = await driveApi(`drive/v3/files/${f.driveId}?alt=media`);
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = f.name;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch (e) { alert("Drive 다운로드 실패: " + e.message); }
+      return;
+    }
     const a = document.createElement("a");
     a.href = f.dataUrl; a.download = f.name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
