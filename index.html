@@ -9331,7 +9331,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
     }
   }, [driveConnected, activeSub]);
 
-  // Drive 연결 시 카테고리 자동 동기화 (Drive 폴더 → 서브탭)
+  // Drive 연결 시 카테고리 자동 동기화 — Drive 폴더 목록을 진실의 출처로 사용
   React.useEffect(() => {
     if (!driveConnected) return;
     (async () => {
@@ -9341,33 +9341,19 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
         const r = await driveApi(`drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&pageSize=200&orderBy=createdTime`);
         const data = await r.json();
         const driveFolders = data.files || [];
-        if (driveFolders.length === 0) return;
-        const updatedFolderIds = { ...driveSubFolderIds };
-        setCompanyFiles(prev => {
-          const subs = [...(prev.subtabs || [])];
-          const byName = new Map(subs.map(s => [s.name, s]));
-          let changed = false;
-          for (const f of driveFolders) {
-            if (byName.has(f.name)) {
-              const sub = byName.get(f.name);
-              if (updatedFolderIds[sub.id] !== f.id) {
-                updatedFolderIds[sub.id] = f.id;
-                changed = true;
-              }
-            } else {
-              const newId = "drv_" + f.id;
-              subs.push({ id: newId, name: f.name });
-              updatedFolderIds[newId] = f.id;
-              changed = true;
-            }
+        // Drive에 폴더가 하나라도 있으면 그 목록으로 서브탭 전체 교체 (이름 통일)
+        if (driveFolders.length > 0) {
+          const newSubtabs = driveFolders.map(f => ({ id: "drv_" + f.id, name: f.name }));
+          const newFolderIds = {};
+          driveFolders.forEach(f => { newFolderIds["drv_" + f.id] = f.id; });
+          setCompanyFiles(prev => ({ ...prev, subtabs: newSubtabs, items: prev.items || {} }));
+          setDriveSubFolderIds(newFolderIds);
+          localStorage.setItem("frw_drive_subfolders", JSON.stringify(newFolderIds));
+          // 활성 서브탭이 사라졌으면 첫 번째로 이동
+          if (!newSubtabs.find(s => s.id === activeSub)) {
+            setActiveSub(newSubtabs[0].id);
           }
-          if (changed) {
-            return { ...prev, subtabs: subs, items: prev.items || {} };
-          }
-          return prev;
-        });
-        setDriveSubFolderIds(updatedFolderIds);
-        localStorage.setItem("frw_drive_subfolders", JSON.stringify(updatedFolderIds));
+        }
       } catch (e) { console.error("Drive subtab sync failed:", e); }
     })();
   }, [driveConnected]);
