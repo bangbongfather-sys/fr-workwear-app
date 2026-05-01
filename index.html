@@ -9315,24 +9315,31 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, darkMode, T }) {
               : "검색 결과가 없습니다."}
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
-            {filtered.map(f => {
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {filtered.map((f, idx) => {
               const isImg = (f.type || "").startsWith("image/");
+              const isPdf = (f.type || "").includes("pdf") || /\.pdf$/i.test(f.name);
+              const canPrev = isImg || isPdf;
               return (
-                <div key={f.id} style={{ background: T.surface2, borderRadius: 12, padding: 12, border: `1px solid ${T.divider}`, display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                    {isImg ? (
-                      <img src={f.dataUrl} alt={f.name} style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, flexShrink: 0, background: T.surface }} />
-                    ) : (
-                      <div style={{ width: 44, height: 44, borderRadius: 8, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{fileIcon(f)}</div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div title={f.name} style={{ fontSize: 13, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
-                      <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{fmtSize(f.size)} · {new Date(f.uploadedAt).toLocaleDateString("ko-KR")}</div>
-                    </div>
+                <div key={f.id} onClick={() => canPrev && setPreviewFile(f)}
+                  style={{ background: T.surface2, borderRadius: 10, padding: "10px 12px", border: `1px solid ${T.divider}`, display: "flex", alignItems: "center", gap: 12, minWidth: 0, cursor: canPrev ? "pointer" : "default", transition: "background 0.12s" }}
+                  onMouseEnter={e => { if (canPrev) e.currentTarget.style.background = darkMode ? "rgba(0,122,255,0.10)" : "rgba(0,122,255,0.05)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = T.surface2; }}>
+                  <div style={{ fontSize: 11, color: T.text2, fontWeight: 600, width: 24, textAlign: "right", flexShrink: 0 }}>{idx + 1}</div>
+                  {isImg ? (
+                    <img src={f.dataUrl} alt={f.name} style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, flexShrink: 0, background: T.surface, border: `1px solid ${T.divider}` }} />
+                  ) : (
+                    <div style={{ width: 44, height: 44, borderRadius: 8, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0, border: `1px solid ${T.divider}` }}>{fileIcon(f)}</div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div title={f.name} style={{ fontSize: 13, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+                    <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{fmtSize(f.size)} · {new Date(f.uploadedAt).toLocaleDateString("ko-KR")}{canPrev && <span style={{ marginLeft: 8, color: "#007AFF" }}>· 클릭하여 미리보기</span>}</div>
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => downloadFile(f)} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: "#007AFF", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>⬇ 다운로드</button>
+                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                    {canPrev && (
+                      <button onClick={() => setPreviewFile(f)} title="미리보기" style={{ padding: "7px 10px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: "#007AFF", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>👁</button>
+                    )}
+                    <button onClick={() => downloadFile(f)} title="다운로드" style={{ padding: "7px 12px", borderRadius: 8, border: "none", background: "#007AFF", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>⬇</button>
                     <button onClick={() => renameFile(f)} title="이름 변경" style={{ padding: "7px 10px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✏</button>
                     <button onClick={() => deleteFile(f.id)} title="삭제" style={{ padding: "7px 10px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: "#F04452", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
                   </div>
@@ -9342,6 +9349,41 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, darkMode, T }) {
           </div>
         )}
       </div>
+
+      {/* 미리보기 모달 */}
+      {previewFile && (() => {
+        const f = previewFile;
+        const isImg = (f.type || "").startsWith("image/");
+        const isPdf = (f.type || "").includes("pdf") || /\.pdf$/i.test(f.name);
+        return (
+          <div onClick={() => setPreviewFile(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: T.surface, borderRadius: 14, width: "min(1100px, 100%)", maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: `1px solid ${T.divider}` }}>
+                <div style={{ fontSize: 20 }}>{fileIcon(f)}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div title={f.name} style={{ fontSize: 14, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+                  <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{fmtSize(f.size)} · {new Date(f.uploadedAt).toLocaleDateString("ko-KR")}</div>
+                </div>
+                <button onClick={() => downloadFile(f)} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#007AFF", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>⬇ 다운로드</button>
+                <button onClick={() => setPreviewFile(null)} style={{ padding: "8px 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+              </div>
+              <div style={{ flex: 1, overflow: "auto", background: darkMode ? "#0A0A12" : "#F4F4F9", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300 }}>
+                {isImg && <img src={f.dataUrl} alt={f.name} style={{ maxWidth: "100%", maxHeight: "82vh", objectFit: "contain" }} />}
+                {isPdf && <iframe src={f.dataUrl} title={f.name} style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />}
+                {!isImg && !isPdf && (
+                  <div style={{ textAlign: "center", padding: 40, color: T.text2 }}>
+                    <div style={{ fontSize: 48, marginBottom: 12 }}>{fileIcon(f)}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>이 형식은 미리보기를 지원하지 않습니다</div>
+                    <div style={{ fontSize: 12 }}>다운로드하여 확인해 주세요.</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
