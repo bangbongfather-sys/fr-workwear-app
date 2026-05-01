@@ -697,6 +697,24 @@
 </head>
 <body>
 <div id="root"></div>
+<div id="frw-err-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:99999; background:#F04452; color:#fff; padding:14px 18px; font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; white-space:pre-wrap; max-height:50vh; overflow:auto; box-shadow:0 4px 16px rgba(0,0,0,0.3);"></div>
+<script>
+(function(){
+  function showErr(msg){
+    var el = document.getElementById('frw-err-banner');
+    if (!el) return;
+    el.style.display = 'block';
+    el.textContent = (el.textContent ? el.textContent + '\n\n' : '') + msg;
+  }
+  window.addEventListener('error', function(e){
+    showErr('⚠️ JS Error: ' + (e.message || 'unknown') + '\nat ' + (e.filename || '') + ':' + (e.lineno || '') + ':' + (e.colno || '') + (e.error && e.error.stack ? '\n' + e.error.stack : ''));
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    var r = e.reason;
+    showErr('⚠️ Promise rejection: ' + (r && r.message ? r.message : String(r)) + (r && r.stack ? '\n' + r.stack : ''));
+  });
+})();
+</script>
 
 <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
