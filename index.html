@@ -9699,14 +9699,24 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
                 <button onClick={() => setPreviewFile(null)} style={{ padding: "8px 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
               </div>
               <div style={{ flex: 1, overflow: "auto", background: darkMode ? "#0A0A12" : "#F4F4F9", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300 }}>
-                {isImg && <img src={f.dataUrl} alt={f.name} style={{ maxWidth: "100%", maxHeight: "82vh", objectFit: "contain" }} />}
-                {isPdf && <iframe src={f.dataUrl} title={f.name} style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />}
-                {!isImg && !isPdf && (
-                  <div style={{ textAlign: "center", padding: 40, color: T.text2 }}>
-                    <div style={{ fontSize: 48, marginBottom: 12 }}>{fileIcon(f)}</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>이 형식은 미리보기를 지원하지 않습니다</div>
-                    <div style={{ fontSize: 12 }}>다운로드하여 확인해 주세요.</div>
-                  </div>
+                {f.driveId ? (
+                  <iframe src={`https://drive.google.com/file/d/${f.driveId}/preview`} title={f.name} allow="autoplay" style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />
+                ) : (
+                  <>
+                    {isImg && <img src={f.dataUrl} alt={f.name} style={{ maxWidth: "100%", maxHeight: "82vh", objectFit: "contain" }} />}
+                    {isPdf && <iframe src={f.dataUrl} title={f.name} style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />}
+                    {!isImg && !isPdf && (
+                      <div style={{ textAlign: "center", padding: 40, color: T.text2 }}>
+                        <div style={{ fontSize: 48, marginBottom: 12 }}>{fileIcon(f)}</div>
+                        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>이 형식은 미리보기를 지원하지 않습니다</div>
+                        <div style={{ fontSize: 12 }}>다운로드하여 확인해 주세요.</div>
+                      </div>
+                    )}
+                  </>
+                )}
+                {/* placeholder to keep JSX valid for prior fragment */}
+                {false && (
+                  <div></div>
                 )}
               </div>
             </div>
