@@ -5821,8 +5821,35 @@ function App() {
   const [globalSearch, setGlobalSearch] = useState("");
   const [bids, setBids] = useState(() => load("frw_bids", []));
   const [ledgers, setLedgers] = useState(() => load("frw_ledgers", {}));
-  const [companyFiles, setCompanyFiles] = useState(() => load("frw_company_files", { subtabs: [{ id: "general", name: "일반" }], items: { general: [] } }));
-  useEffect(() => { save("frw_company_files", companyFiles); }, [companyFiles]);
+  const [companyFiles, setCompanyFiles] = useState({ subtabs: [{ id: "general", name: "일반" }], items: { general: [] } });
+  const [companyFilesLoaded, setCompanyFilesLoaded] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const idbData = await idbGet("frw_company_files");
+        if (idbData && idbData.subtabs) {
+          setCompanyFiles(idbData);
+        } else {
+          const lsData = load("frw_company_files", null);
+          if (lsData && lsData.subtabs) {
+            setCompanyFiles(lsData);
+            try { await idbSet("frw_company_files", lsData); } catch {}
+          }
+        }
+      } catch (e) {
+        console.error("IDB load failed:", e);
+      } finally {
+        setCompanyFilesLoaded(true);
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!companyFilesLoaded) return;
+    idbSet("frw_company_files", companyFiles).catch(err => {
+      console.error("IDB save failed:", err);
+      alert("⚠️ 파일 저장에 실패했습니다.\n중요 파일은 다운로드로 백업해 주세요.\n\n" + (err && err.message ? err.message : ""));
+    });
+  }, [companyFiles, companyFilesLoaded]);
   // 거래처별 미수금: 거래처명을 키로, 청구/입금 내역 배열을 값으로 저장 → 모든 월에서 공유
   const [clientAR, setClientAR] = useState(() => load("frw_client_ar", {}));
   // 매입 거래처별 서브탭
