@@ -617,10 +617,29 @@
       .calc-grid { grid-template-columns: 1fr !important; }
       /* 테이블 가로 스크롤 가능하게 */
       .card table { min-width: 480px; }
-      .card { padding: 16px !important; overflow-x: auto; }
+      .card { padding: 16px !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      /* 셀 안 텍스트가 세로로 쌓이지 않도록 — 항상 가로 한 줄 유지 */
+      th, td { white-space: nowrap; }
+      /* 단, 메모/긴 본문 같은 셀은 wrap 허용 */
+      td.allow-wrap, th.allow-wrap, .wrap-cell { white-space: normal !important; }
+      /* 가로 스크롤 가능 영역에 시각적 힌트 (그라데이션) */
+      .card { background-image: linear-gradient(to right, var(--surface), var(--surface)), linear-gradient(to right, var(--surface), var(--surface)), linear-gradient(to right, rgba(0,0,0,0.08), rgba(0,0,0,0)), linear-gradient(to left, rgba(0,0,0,0.08), rgba(0,0,0,0)); background-position: left center, right center, left center, right center; background-repeat: no-repeat; background-size: 16px 100%, 16px 100%, 8px 100%, 8px 100%; background-attachment: local, local, scroll, scroll; }
+      /* 하위 탭/카테고리 바도 가로 스크롤 */
+      .scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; flex-wrap: nowrap !important; padding-bottom: 4px; }
+      .scroll-x > * { flex-shrink: 0; }
+      /* flex-wrap으로 줄바꿈되던 폼 행을 가로 스크롤로 */
+      .row-scroll-x { flex-wrap: nowrap !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+      .row-scroll-x > * { flex-shrink: 0; }
       /* 헤더 간소화 */
       .header-title { font-size: 16px !important; }
       .header-sub { display: none; }
+    }
+
+    /* 모바일 스크롤바 살짝 보이게 */
+    @media (max-width: 768px) {
+      .card::-webkit-scrollbar, .scroll-x::-webkit-scrollbar, .row-scroll-x::-webkit-scrollbar { height: 6px; }
+      .card::-webkit-scrollbar-thumb, .scroll-x::-webkit-scrollbar-thumb, .row-scroll-x::-webkit-scrollbar-thumb { background: rgba(0,122,255,0.35); border-radius: 3px; }
+      .card::-webkit-scrollbar-track, .scroll-x::-webkit-scrollbar-track, .row-scroll-x::-webkit-scrollbar-track { background: transparent; }
     }
 
     /* ─── 작은 모바일 (480px 이하 - iPhone 등) ─── */
