@@ -9374,13 +9374,35 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
     return (b / 1024 / 1024).toFixed(2) + " MB";
   };
 
-  const addSubtab = () => {
+  const addSubtab = async () => {
     const name = window.prompt("새 카테고리 이름을 입력하세요");
     if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+    if (driveConnected) {
+      try {
+        const rootId = await ensureRootFolder();
+        const r = await driveApi("drive/v3/files", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: trimmed, mimeType: "application/vnd.google-apps.folder", parents: [rootId] }),
+        });
+        const folder = await r.json();
+        const newId = "drv_" + folder.id;
+        setCompanyFiles(prev => ({
+          ...prev,
+          subtabs: [...(prev.subtabs || []), { id: newId, name: trimmed }],
+          items: { ...(prev.items || {}), [newId]: [] },
+        }));
+        const next = { ...driveSubFolderIds, [newId]: folder.id };
+        setDriveSubFolderIds(next);
+        localStorage.setItem("frw_drive_subfolders", JSON.stringify(next));
+        setActiveSub(newId);
+      } catch (e) { alert("카테고리 생성 실패: " + e.message); }
+      return;
+    }
     const id = "sub_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
     setCompanyFiles(prev => ({
       ...prev,
-      subtabs: [...(prev.subtabs || []), { id, name: name.trim() }],
+      subtabs: [...(prev.subtabs || []), { id, name: trimmed }],
       items: { ...(prev.items || {}), [id]: [] },
     }));
     setActiveSub(id);
