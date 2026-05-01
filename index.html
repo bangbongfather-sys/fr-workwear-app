@@ -9331,16 +9331,16 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
     }
   }, [driveConnected, activeSub]);
 
-  if (!loaded) {
-    return <div className="card" style={{ textAlign: "center", padding: "60px 20px", color: T.text2, fontSize: 14 }}>📂 파일 불러오는 중...</div>;
-  }
-  const items = driveConnected ? driveItems : localItems;
-
+  const items = loaded ? (driveConnected ? driveItems : localItems) : {};
   const totalBytes = React.useMemo(() => {
     let n = 0;
     Object.values(items).forEach(arr => (arr || []).forEach(f => { n += (f.size || 0); }));
     return n;
   }, [items]);
+
+  if (!loaded) {
+    return <div className="card" style={{ textAlign: "center", padding: "60px 20px", color: T.text2, fontSize: 14 }}>📂 파일 불러오는 중...</div>;
+  }
   const fmtSize = (b) => {
     if (b < 1024) return b + " B";
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
