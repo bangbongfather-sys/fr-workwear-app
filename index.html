@@ -9447,9 +9447,22 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
     a.href = f.dataUrl; a.download = f.name;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
-  const renameFile = (f) => {
+  const renameFile = async (f) => {
     const v = window.prompt("새 파일명을 입력하세요", f.name);
     if (!v || !v.trim()) return;
+    if (driveConnected && f.driveId) {
+      setDriveBusy(true);
+      try {
+        await driveApi(`drive/v3/files/${f.driveId}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: v.trim() }),
+        });
+        const sub = subtabs.find(s => s.id === activeSub);
+        if (sub) await loadDriveSubtab(activeSub, sub.name);
+      } catch (e) { alert("이름 변경 실패: " + e.message); }
+      finally { setDriveBusy(false); }
+      return;
+    }
     setCompanyFiles(prev => {
       const list = (prev.items || {})[activeSub] || [];
       return { ...prev, items: { ...(prev.items || {}), [activeSub]: list.map(x => x.id === f.id ? { ...x, name: v.trim() } : x) } };
@@ -9463,6 +9476,25 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
   };
   const shareFile = async (f) => {
     try {
+      // Drive 모드: 공유 링크 생성 (anyone with link, viewer)
+      if (driveConnected && f.driveId) {
+        try {
+          await driveApi(`drive/v3/files/${f.driveId}/permissions`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role: "reader", type: "anyone" }),
+          });
+        } catch (e) { /* 이미 있으면 무시 */ }
+        const r = await driveApi(`drive/v3/files/${f.driveId}?fields=webViewLink`);
+        const link = (await r.json()).webViewLink;
+        if (navigator.share) {
+          try { await navigator.share({ title: f.name, text: f.name, url: link }); return; }
+          catch (e) { if (e.name === "AbortError") return; }
+        }
+        try { await navigator.clipboard.writeText(link); alert("📋 공유 링크가 클립보드에 복사되었습니다.\n\n" + link); }
+        catch { window.prompt("공유 링크를 복사하세요:", link); }
+        return;
+      }
+      // 로컬 모드: 파일 자체 공유 (Web Share API)
       const file = await dataUrlToFile(f.dataUrl, f.name, f.type);
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: f.name, text: f.name });
