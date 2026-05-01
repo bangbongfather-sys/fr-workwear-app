@@ -714,6 +714,39 @@ function load(key, fallback) {
 function save(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
+
+// IndexedDB (대용량 저장: 회사 필요 파일 등)
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("frw_db", 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("kv", "readonly");
+      const req = tx.objectStore("kv").get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch { return undefined; }
+}
+async function idbSet(key, value) {
+  const db = await idbOpen();
+  return await new Promise((resolve, reject) => {
+    const tx = db.transaction("kv", "readwrite");
+    const req = tx.objectStore("kv").put(value, key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
 async function cloudLoad() {
   const r = await fetch(FB_URL);
   if (!r.ok) throw new Error("load failed");
