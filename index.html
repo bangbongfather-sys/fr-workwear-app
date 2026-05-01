@@ -9158,7 +9158,10 @@ function NewsTab({ darkMode }) {
 }
 
 // ─── 회사 필요 파일 탭 ───
-function CompanyFilesTab({ companyFiles, setCompanyFiles, darkMode, T }) {
+function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMode, T }) {
+  if (!loaded) {
+    return <div className="card" style={{ textAlign: "center", padding: "60px 20px", color: T.text2, fontSize: 14 }}>📂 파일 불러오는 중...</div>;
+  }
   const subtabs = companyFiles.subtabs || [];
   const items = companyFiles.items || {};
   const [activeSub, setActiveSub] = React.useState(() => subtabs[0]?.id || "general");
