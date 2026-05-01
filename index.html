@@ -9232,6 +9232,32 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
       .then(r => r.ok ? r.json() : null).then(p => p && setDriveProfile(p)).catch(() => {});
   }, [driveConnected]);
 
+  // 자동 토큰 갱신 — 만료 5분 전 또는 만료된 상태면 조용히 새 토큰 요청
+  React.useEffect(() => {
+    if (!driveToken || !driveTokenClientRef.current) return;
+    const refreshNow = () => {
+      try { driveTokenClientRef.current.requestAccessToken({ prompt: "" }); } catch (e) {}
+    };
+    const msUntilRefresh = driveToken.expires_at - Date.now() - 5 * 60 * 1000;
+    if (msUntilRefresh <= 0) {
+      refreshNow();
+      return;
+    }
+    const tid = setTimeout(refreshNow, msUntilRefresh);
+    return () => clearTimeout(tid);
+  }, [driveToken]);
+
+  // 페이지 복귀 시(탭 전환 후 돌아옴) 토큰 만료 체크
+  React.useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && driveToken && Date.now() >= driveToken.expires_at - 30000) {
+        try { driveTokenClientRef.current?.requestAccessToken({ prompt: "" }); } catch (e) {}
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [driveToken]);
+
   const driveSignIn = () => {
     setDriveError("");
     if (!driveTokenClientRef.current) { setDriveError("Google 로그인 라이브러리 로딩 중..."); return; }
