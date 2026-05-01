@@ -9097,6 +9097,254 @@ function NewsTab({ darkMode }) {
   );
 }
 
+// ─── 회사 필요 파일 탭 ───
+function CompanyFilesTab({ companyFiles, setCompanyFiles, darkMode, T }) {
+  const subtabs = companyFiles.subtabs || [];
+  const items = companyFiles.items || {};
+  const [activeSub, setActiveSub] = React.useState(() => subtabs[0]?.id || "general");
+  const [renamingId, setRenamingId] = React.useState(null);
+  const [renameValue, setRenameValue] = React.useState("");
+  const [dragActive, setDragActive] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const fileInputRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!subtabs.find(s => s.id === activeSub) && subtabs[0]) setActiveSub(subtabs[0].id);
+  }, [companyFiles]);
+
+  const totalBytes = React.useMemo(() => {
+    let n = 0;
+    Object.values(items).forEach(arr => (arr || []).forEach(f => { n += (f.size || 0); }));
+    return n;
+  }, [items]);
+  const fmtSize = (b) => {
+    if (b < 1024) return b + " B";
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
+    return (b / 1024 / 1024).toFixed(2) + " MB";
+  };
+
+  const addSubtab = () => {
+    const name = window.prompt("새 카테고리 이름을 입력하세요");
+    if (!name || !name.trim()) return;
+    const id = "sub_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+    setCompanyFiles(prev => ({
+      ...prev,
+      subtabs: [...(prev.subtabs || []), { id, name: name.trim() }],
+      items: { ...(prev.items || {}), [id]: [] },
+    }));
+    setActiveSub(id);
+  };
+  const startRenameSubtab = (s) => { setRenamingId(s.id); setRenameValue(s.name); };
+  const commitRenameSubtab = () => {
+    if (!renamingId) return;
+    const v = renameValue.trim();
+    if (!v) { setRenamingId(null); return; }
+    setCompanyFiles(prev => ({
+      ...prev,
+      subtabs: (prev.subtabs || []).map(s => s.id === renamingId ? { ...s, name: v } : s),
+    }));
+    setRenamingId(null);
+  };
+  const deleteSubtab = (s) => {
+    if (subtabs.length <= 1) { alert("최소 1개의 카테고리는 유지되어야 합니다."); return; }
+    const cnt = (items[s.id] || []).length;
+    if (!window.confirm(`"${s.name}" 카테고리를 삭제하시겠습니까?${cnt > 0 ? `\n포함된 파일 ${cnt}개도 함께 삭제됩니다.` : ""}`)) return;
+    setCompanyFiles(prev => {
+      const nextItems = { ...(prev.items || {}) };
+      delete nextItems[s.id];
+      return { ...prev, subtabs: (prev.subtabs || []).filter(x => x.id !== s.id), items: nextItems };
+    });
+  };
+
+  const readFileAsDataURL = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+  const handleFiles = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    const arr = Array.from(fileList);
+    const oversized = arr.filter(f => f.size > 8 * 1024 * 1024);
+    if (oversized.length > 0) {
+      if (!window.confirm(`${oversized.length}개 파일이 8MB를 초과합니다.\n브라우저 저장 공간이 빠르게 찰 수 있습니다.\n계속 진행하시겠습니까?`)) return;
+    }
+    const newFiles = [];
+    for (const f of arr) {
+      try {
+        const dataUrl = await readFileAsDataURL(f);
+        newFiles.push({
+          id: "f_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+          name: f.name, type: f.type || "", size: f.size || 0,
+          dataUrl, uploadedAt: Date.now(),
+        });
+      } catch (e) {
+        alert(`"${f.name}" 파일을 읽지 못했습니다.`);
+      }
+    }
+    if (newFiles.length === 0) return;
+    setCompanyFiles(prev => {
+      const list = (prev.items || {})[activeSub] || [];
+      return { ...prev, items: { ...(prev.items || {}), [activeSub]: [...newFiles, ...list] } };
+    });
+  };
+  const deleteFile = (id) => {
+    if (!window.confirm("파일을 삭제하시겠습니까?")) return;
+    setCompanyFiles(prev => {
+      const list = (prev.items || {})[activeSub] || [];
+      return { ...prev, items: { ...(prev.items || {}), [activeSub]: list.filter(f => f.id !== id) } };
+    });
+  };
+  const downloadFile = (f) => {
+    const a = document.createElement("a");
+    a.href = f.dataUrl; a.download = f.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+  const renameFile = (f) => {
+    const v = window.prompt("새 파일명을 입력하세요", f.name);
+    if (!v || !v.trim()) return;
+    setCompanyFiles(prev => {
+      const list = (prev.items || {})[activeSub] || [];
+      return { ...prev, items: { ...(prev.items || {}), [activeSub]: list.map(x => x.id === f.id ? { ...x, name: v.trim() } : x) } };
+    });
+  };
+
+  const fileIcon = (f) => {
+    const t = (f.type || "").toLowerCase();
+    if (t.startsWith("image/")) return "🖼";
+    if (t.includes("pdf")) return "📕";
+    if (t.includes("sheet") || t.includes("excel") || /\.xlsx?$/i.test(f.name)) return "📊";
+    if (t.includes("word") || /\.docx?$/i.test(f.name)) return "📄";
+    if (t.includes("zip") || /\.(zip|7z|rar)$/i.test(f.name)) return "🗜";
+    if (t.startsWith("video/")) return "🎬";
+    if (t.startsWith("audio/")) return "🎵";
+    return "📎";
+  };
+
+  const currentList = items[activeSub] || [];
+  const filtered = search.trim() ? currentList.filter(f => f.name.toLowerCase().includes(search.trim().toLowerCase())) : currentList;
+  const sizeLimit = 4.5 * 1024 * 1024;
+  const sizeWarn = totalBytes > sizeLimit;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>📎 회사 필요 파일</div>
+            <div style={{ fontSize: 12, color: T.text2, marginTop: 4 }}>카테고리별로 파일을 보관하세요. 견적서·계약서·양식·이미지 등 무엇이든 OK.</div>
+          </div>
+          <div style={{ fontSize: 11, color: sizeWarn ? "#FF9500" : T.text2, fontWeight: 600 }}>
+            전체 사용량 {fmtSize(totalBytes)}{sizeWarn && " · ⚠️ 브라우저 저장공간 한계 근접"}
+          </div>
+        </div>
+
+        {/* 서브탭 (카테고리) */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", paddingBottom: 12, borderBottom: `1px solid ${T.divider}` }}>
+          {subtabs.map(s => {
+            const active = s.id === activeSub;
+            const isRen = renamingId === s.id;
+            const cnt = (items[s.id] || []).length;
+            if (isRen) {
+              return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 6px", borderRadius: 8, background: T.surface2, border: `1.5px solid #007AFF` }}>
+                  <input value={renameValue} onChange={e => setRenameValue(e.target.value)} autoFocus
+                    onKeyDown={e => { if (e.key === "Enter") commitRenameSubtab(); if (e.key === "Escape") setRenamingId(null); }}
+                    style={{ height: 28, fontSize: 12, padding: "0 6px", width: 120 }} />
+                  <button onClick={commitRenameSubtab} style={{ background: "#007AFF", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>저장</button>
+                  <button onClick={() => setRenamingId(null)} style={{ background: "none", border: "none", color: T.text2, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                </div>
+              );
+            }
+            return (
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 2, padding: "6px 4px 6px 12px", borderRadius: 999, background: active ? "#007AFF" : T.surface2, border: `1.5px solid ${active ? "#007AFF" : T.divider}`, transition: "all 0.15s" }}>
+                <button onClick={() => setActiveSub(s.id)}
+                  style={{ background: "none", border: "none", color: active ? "#fff" : T.text, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+                  {s.name} <span style={{ fontSize: 11, fontWeight: 500, opacity: 0.75, marginLeft: 4 }}>{cnt}</span>
+                </button>
+                <button onClick={() => startRenameSubtab(s)} title="이름 변경" style={{ background: "none", border: "none", color: active ? "rgba(255,255,255,0.85)" : T.text2, cursor: "pointer", fontSize: 11, padding: "2px 4px", fontFamily: "inherit" }}>✏</button>
+                <button onClick={() => deleteSubtab(s)} title="삭제" style={{ background: "none", border: "none", color: active ? "rgba(255,255,255,0.85)" : T.text2, cursor: "pointer", fontSize: 12, padding: "2px 6px 2px 2px", fontFamily: "inherit" }}>×</button>
+              </div>
+            );
+          })}
+          <button onClick={addSubtab} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 999, background: "transparent", border: `1.5px dashed ${T.divider}`, color: T.text2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ 카테고리</button>
+        </div>
+
+        {/* 업로드 영역 */}
+        <div style={{ marginTop: 14 }}>
+          <input type="file" ref={fileInputRef} multiple style={{ display: "none" }}
+            onChange={e => { handleFiles(e.target.files); e.target.value = ""; }} />
+          <div
+            onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); if (!dragActive) setDragActive(true); }}
+            onDragLeave={e => { e.preventDefault(); e.stopPropagation(); if (!e.currentTarget.contains(e.relatedTarget)) setDragActive(false); }}
+            onDrop={e => { e.preventDefault(); e.stopPropagation(); setDragActive(false); handleFiles(e.dataTransfer?.files); }}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8,
+              padding: "22px 14px", borderRadius: 14,
+              border: dragActive ? "2.5px dashed #007AFF" : `2px dashed ${T.divider}`,
+              background: dragActive ? (darkMode ? "rgba(0,122,255,0.16)" : "rgba(0,122,255,0.06)") : T.surface2,
+              cursor: "pointer", transition: "all 0.15s",
+            }}>
+            <div style={{ fontSize: 28, lineHeight: 1 }}>{dragActive ? "📥" : "📂"}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: dragActive ? "#007AFF" : T.text }}>
+              {dragActive ? "여기에 놓으세요" : "파일 첨부 (드래그 또는 클릭)"}
+            </div>
+            <div style={{ fontSize: 11, color: T.text2 }}>여러 파일 동시 업로드 가능 · 모든 형식 지원</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 파일 목록 */}
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>
+            📁 {subtabs.find(s => s.id === activeSub)?.name || "—"}
+            <span style={{ fontSize: 12, fontWeight: 600, color: T.text2, marginLeft: 8 }}>({currentList.length}개)</span>
+          </div>
+          <div style={{ flex: 1 }} />
+          <input placeholder="🔍 파일명 검색" value={search} onChange={e => setSearch(e.target.value)}
+            style={{ height: 36, fontSize: 12, width: 200, maxWidth: "100%" }} />
+        </div>
+        {filtered.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px 20px", color: T.text2, fontSize: 13, lineHeight: 1.7 }}>
+            {currentList.length === 0
+              ? <>이 카테고리에 등록된 파일이 없습니다.<br />위에서 파일을 첨부하세요.</>
+              : "검색 결과가 없습니다."}
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+            {filtered.map(f => {
+              const isImg = (f.type || "").startsWith("image/");
+              return (
+                <div key={f.id} style={{ background: T.surface2, borderRadius: 12, padding: 12, border: `1px solid ${T.divider}`, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                    {isImg ? (
+                      <img src={f.dataUrl} alt={f.name} style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, flexShrink: 0, background: T.surface }} />
+                    ) : (
+                      <div style={{ width: 44, height: 44, borderRadius: 8, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{fileIcon(f)}</div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div title={f.name} style={{ fontSize: 13, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+                      <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{fmtSize(f.size)} · {new Date(f.uploadedAt).toLocaleDateString("ko-KR")}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => downloadFile(f)} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "none", background: "#007AFF", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>⬇ 다운로드</button>
+                    <button onClick={() => renameFile(f)} title="이름 변경" style={{ padding: "7px 10px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✏</button>
+                    <button onClick={() => deleteFile(f.id)} title="삭제" style={{ padding: "7px 10px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: "#F04452", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Gmail 메일 탭 ───
 function MailTab({ darkMode, clients = [] }) {
   const [token, setToken] = React.useState(() => {
