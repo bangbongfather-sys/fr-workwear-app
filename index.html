@@ -9161,11 +9161,8 @@ function NewsTab({ darkMode }) {
 
 // ─── 회사 필요 파일 탭 ───
 function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMode, T }) {
-  if (!loaded) {
-    return <div className="card" style={{ textAlign: "center", padding: "60px 20px", color: T.text2, fontSize: 14 }}>📂 파일 불러오는 중...</div>;
-  }
   const subtabs = companyFiles.subtabs || [];
-  const items = companyFiles.items || {};
+  const localItems = companyFiles.items || {};
   const [activeSub, setActiveSub] = React.useState(() => subtabs[0]?.id || "general");
   const [renamingId, setRenamingId] = React.useState(null);
   const [renameValue, setRenameValue] = React.useState("");
@@ -9174,9 +9171,152 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
   const [previewFile, setPreviewFile] = React.useState(null);
   const fileInputRef = React.useRef(null);
 
+  // ── Google Drive 연동 ──
+  const [driveToken, setDriveToken] = React.useState(() => {
+    try { const t = JSON.parse(sessionStorage.getItem("frw_drive_token") || "null"); return (t && t.expires_at && Date.now() < t.expires_at - 30000) ? t : null; } catch { return null; }
+  });
+  const [driveProfile, setDriveProfile] = React.useState(null);
+  const [driveBusy, setDriveBusy] = React.useState(false);
+  const [driveError, setDriveError] = React.useState("");
+  const [driveRootId, setDriveRootId] = React.useState(() => localStorage.getItem("frw_drive_root_id"));
+  const [driveSubFolderIds, setDriveSubFolderIds] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem("frw_drive_subfolders") || "{}"); } catch { return {}; }
+  });
+  const [driveItems, setDriveItems] = React.useState({});
+  const driveTokenClientRef = React.useRef(null);
+  const driveConnected = !!(driveToken && driveToken.access_token && Date.now() < driveToken.expires_at - 30000);
+
+  React.useEffect(() => {
+    const tryInit = () => {
+      if (window.google?.accounts?.oauth2 && !driveTokenClientRef.current) {
+        driveTokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+          client_id: GMAIL_CLIENT_ID, scope: DRIVE_SCOPES,
+          callback: (resp) => {
+            if (resp.error) { setDriveError("로그인 실패: " + resp.error); return; }
+            const t = { access_token: resp.access_token, expires_at: Date.now() + (parseInt(resp.expires_in || 3600) * 1000) };
+            setDriveToken(t); sessionStorage.setItem("frw_drive_token", JSON.stringify(t)); setDriveError("");
+          },
+          error_callback: (err) => setDriveError("로그인 오류: " + (err.message || JSON.stringify(err))),
+        });
+      }
+    };
+    tryInit();
+    if (!driveTokenClientRef.current) {
+      const id = setInterval(() => { tryInit(); if (driveTokenClientRef.current) clearInterval(id); }, 200);
+      return () => clearInterval(id);
+    }
+  }, []);
+
+  // 프로필 로드
+  React.useEffect(() => {
+    if (!driveConnected || driveProfile) return;
+    fetch("https://www.googleapis.com/oauth2/v2/userinfo", { headers: { Authorization: `Bearer ${driveToken.access_token}` } })
+      .then(r => r.ok ? r.json() : null).then(p => p && setDriveProfile(p)).catch(() => {});
+  }, [driveConnected]);
+
+  const driveSignIn = () => {
+    setDriveError("");
+    if (!driveTokenClientRef.current) { setDriveError("Google 로그인 라이브러리 로딩 중..."); return; }
+    driveTokenClientRef.current.requestAccessToken({ prompt: driveToken ? "" : "consent" });
+  };
+  const driveSignOut = () => {
+    if (driveToken && window.google?.accounts?.oauth2) window.google.accounts.oauth2.revoke(driveToken.access_token, () => {});
+    sessionStorage.removeItem("frw_drive_token");
+    setDriveToken(null); setDriveProfile(null); setDriveItems({});
+  };
+
+  const driveApi = async (path, opts = {}) => {
+    if (!driveConnected) throw new Error("Drive 미연결");
+    const url = path.startsWith("http") ? path : `https://www.googleapis.com/${path}`;
+    const r = await fetch(url, { ...opts, headers: { ...opts.headers, Authorization: `Bearer ${driveToken.access_token}` } });
+    if (!r.ok) {
+      if (r.status === 401) { driveSignOut(); throw new Error("Drive 인증 만료 — 다시 연결해 주세요"); }
+      const txt = await r.text().catch(() => "");
+      throw new Error(`Drive API ${r.status}: ${txt.slice(0, 200)}`);
+    }
+    return r;
+  };
+
+  const ensureRootFolder = async () => {
+    if (driveRootId) {
+      try {
+        const r = await driveApi(`drive/v3/files/${driveRootId}?fields=id,trashed`);
+        const d = await r.json();
+        if (d.id && !d.trashed) return driveRootId;
+      } catch {}
+    }
+    const q = `name='${DRIVE_ROOT_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    const r = await driveApi(`drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
+    const data = await r.json();
+    let id = data.files?.[0]?.id;
+    if (!id) {
+      const r2 = await driveApi("drive/v3/files", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: DRIVE_ROOT_NAME, mimeType: "application/vnd.google-apps.folder" }),
+      });
+      id = (await r2.json()).id;
+    }
+    setDriveRootId(id); localStorage.setItem("frw_drive_root_id", id);
+    return id;
+  };
+
+  const ensureSubFolder = async (subtabId, subtabName) => {
+    if (driveSubFolderIds[subtabId]) {
+      try {
+        const r = await driveApi(`drive/v3/files/${driveSubFolderIds[subtabId]}?fields=id,trashed,name`);
+        const d = await r.json();
+        if (d.id && !d.trashed) return driveSubFolderIds[subtabId];
+      } catch {}
+    }
+    const rootId = await ensureRootFolder();
+    const safeName = subtabName.replace(/'/g, "\\'");
+    const q = `'${rootId}' in parents and name='${safeName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    const r = await driveApi(`drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
+    const data = await r.json();
+    let id = data.files?.[0]?.id;
+    if (!id) {
+      const r2 = await driveApi("drive/v3/files", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: subtabName, mimeType: "application/vnd.google-apps.folder", parents: [rootId] }),
+      });
+      id = (await r2.json()).id;
+    }
+    const next = { ...driveSubFolderIds, [subtabId]: id };
+    setDriveSubFolderIds(next); localStorage.setItem("frw_drive_subfolders", JSON.stringify(next));
+    return id;
+  };
+
+  const loadDriveSubtab = async (subtabId, subtabName) => {
+    setDriveBusy(true); setDriveError("");
+    try {
+      const folderId = await ensureSubFolder(subtabId, subtabName);
+      const r = await driveApi(`drive/v3/files?q=%27${folderId}%27%20in%20parents%20and%20trashed=false&fields=files(id,name,mimeType,size,modifiedTime,webViewLink,thumbnailLink)&orderBy=modifiedTime desc&pageSize=1000`);
+      const data = await r.json();
+      const files = (data.files || []).map(f => ({
+        id: f.id, name: f.name, type: f.mimeType || "", size: parseInt(f.size || 0),
+        uploadedAt: f.modifiedTime ? new Date(f.modifiedTime).getTime() : Date.now(),
+        driveId: f.id, webViewLink: f.webViewLink, thumbnailLink: f.thumbnailLink,
+      }));
+      setDriveItems(prev => ({ ...prev, [subtabId]: files }));
+    } catch (e) { setDriveError(e.message || String(e)); }
+    finally { setDriveBusy(false); }
+  };
+
   React.useEffect(() => {
     if (!subtabs.find(s => s.id === activeSub) && subtabs[0]) setActiveSub(subtabs[0].id);
   }, [companyFiles]);
+
+  React.useEffect(() => {
+    if (driveConnected && activeSub) {
+      const s = subtabs.find(x => x.id === activeSub);
+      if (s) loadDriveSubtab(activeSub, s.name);
+    }
+  }, [driveConnected, activeSub]);
+
+  if (!loaded) {
+    return <div className="card" style={{ textAlign: "center", padding: "60px 20px", color: T.text2, fontSize: 14 }}>📂 파일 불러오는 중...</div>;
+  }
+  const items = driveConnected ? driveItems : localItems;
 
   const totalBytes = React.useMemo(() => {
     let n = 0;
