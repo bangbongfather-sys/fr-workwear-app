@@ -9537,12 +9537,34 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>📎 회사 필요 파일</div>
-            <div style={{ fontSize: 12, color: T.text2, marginTop: 4 }}>카테고리별로 파일을 보관하세요. 견적서·계약서·양식·이미지 등 무엇이든 OK.</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>📎 회사 필요 파일{driveConnected && <span style={{ fontSize: 11, marginLeft: 10, padding: "3px 10px", borderRadius: 999, background: "#10B981", color: "#fff", fontWeight: 700, verticalAlign: "middle" }}>☁️ Drive 연동</span>}</div>
+            <div style={{ fontSize: 12, color: T.text2, marginTop: 4 }}>{driveConnected ? `Google Drive 「${DRIVE_ROOT_NAME}」 폴더에 영구 저장 · 어디서든 동기화` : "카테고리별로 파일을 보관하세요. 우측 「Drive 연동」으로 전환하면 무제한 저장."}</div>
           </div>
-          <div style={{ fontSize: 11, color: sizeWarn ? "#FF9500" : T.text2, fontWeight: 600 }}>
-            전체 사용량 {fmtSize(totalBytes)}{sizeWarn && " · ⚠️ 브라우저 저장공간 한계 근접"}
+          {!driveConnected ? (
+            <div style={{ fontSize: 11, color: sizeWarn ? "#FF9500" : T.text2, fontWeight: 600 }}>
+              로컬 사용량 {fmtSize(totalBytes)}{sizeWarn && " · ⚠️ 한계 근접"}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: T.text2, fontWeight: 600, textAlign: "right" }}>
+              {driveProfile && <div>👤 {driveProfile.name || driveProfile.email}</div>}
+              {driveBusy && <div style={{ color: "#007AFF", marginTop: 2 }}>⏳ Drive 작업 중...</div>}
+            </div>
+          )}
+        </div>
+
+        {/* Google Drive 연동 바 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, marginBottom: 14, background: driveConnected ? (darkMode ? "rgba(16,185,129,0.10)" : "rgba(16,185,129,0.06)") : T.surface2, border: `1.5px solid ${driveConnected ? "rgba(16,185,129,0.35)" : T.divider}`, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 22 }}>{driveConnected ? "✅" : "☁️"}</div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{driveConnected ? "Google Drive 연결됨" : "Google Drive에 연결하면 무제한 저장 · 디바이스 동기화 · 공유 링크 생성"}</div>
+            {driveError && <div style={{ fontSize: 11, color: "#F04452", marginTop: 4 }}>⚠️ {driveError}</div>}
+            {!driveConnected && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>연결 시 Drive 안에 「{DRIVE_ROOT_NAME}」 폴더가 자동 생성되고, 카테고리별 하위 폴더로 정리됩니다.</div>}
           </div>
+          {driveConnected ? (
+            <button onClick={driveSignOut} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>연결 해제</button>
+          ) : (
+            <button onClick={driveSignIn} style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: "#10B981", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>🔗 Google Drive 연결</button>
+          )}
         </div>
 
         {/* 서브탭 (카테고리) */}
