@@ -9210,6 +9210,33 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, darkMode, T }) {
     });
   };
 
+  const dataUrlToFile = async (dataUrl, filename, mimeType) => {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    return new File([blob], filename, { type: mimeType || blob.type || "application/octet-stream" });
+  };
+  const shareFile = async (f) => {
+    try {
+      const file = await dataUrlToFile(f.dataUrl, f.name, f.type);
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: f.name, text: f.name });
+        return;
+      }
+      if (navigator.share) {
+        await navigator.share({ title: f.name, text: `${f.name} 파일을 공유합니다.` });
+        return;
+      }
+      const subject = encodeURIComponent(`[파일 공유] ${f.name}`);
+      const body = encodeURIComponent(`${f.name}\n(${fmtSize(f.size)})\n\n첨부파일은 다운로드 후 메일에 직접 첨부해 주세요.`);
+      if (window.confirm("이 브라우저는 직접 파일 공유를 지원하지 않습니다.\n파일을 다운로드한 뒤 메일 앱을 여시겠습니까?")) {
+        downloadFile(f);
+        window.location.href = `mailto:?subject=${subject}&body=${body}`;
+      }
+    } catch (e) {
+      if (e && e.name !== "AbortError") alert("공유에 실패했습니다: " + (e.message || e));
+    }
+  };
+
   const fileIcon = (f) => {
     const t = (f.type || "").toLowerCase();
     if (t.startsWith("image/")) return "🖼";
