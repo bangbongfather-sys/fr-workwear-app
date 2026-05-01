@@ -9341,7 +9341,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
     setActiveSub(id);
   };
   const startRenameSubtab = (s) => { setRenamingId(s.id); setRenameValue(s.name); };
-  const commitRenameSubtab = () => {
+  const commitRenameSubtab = async () => {
     if (!renamingId) return;
     const v = renameValue.trim();
     if (!v) { setRenamingId(null); return; }
@@ -9349,12 +9349,29 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
       ...prev,
       subtabs: (prev.subtabs || []).map(s => s.id === renamingId ? { ...s, name: v } : s),
     }));
+    if (driveConnected && driveSubFolderIds[renamingId]) {
+      try {
+        await driveApi(`drive/v3/files/${driveSubFolderIds[renamingId]}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: v }),
+        });
+      } catch (e) { /* 무시 */ }
+    }
     setRenamingId(null);
   };
-  const deleteSubtab = (s) => {
+  const deleteSubtab = async (s) => {
     if (subtabs.length <= 1) { alert("최소 1개의 카테고리는 유지되어야 합니다."); return; }
     const cnt = (items[s.id] || []).length;
-    if (!window.confirm(`"${s.name}" 카테고리를 삭제하시겠습니까?${cnt > 0 ? `\n포함된 파일 ${cnt}개도 함께 삭제됩니다.` : ""}`)) return;
+    const driveNote = driveConnected ? "\n⚠️ Google Drive 폴더와 그 안의 파일도 함께 삭제됩니다." : "";
+    if (!window.confirm(`"${s.name}" 카테고리를 삭제하시겠습니까?${cnt > 0 ? `\n포함된 파일 ${cnt}개도 함께 삭제됩니다.` : ""}${driveNote}`)) return;
+    if (driveConnected && driveSubFolderIds[s.id]) {
+      try { await driveApi(`drive/v3/files/${driveSubFolderIds[s.id]}`, { method: "DELETE" }); } catch (e) {}
+    }
+    if (driveConnected) {
+      const next = { ...driveSubFolderIds }; delete next[s.id];
+      setDriveSubFolderIds(next); localStorage.setItem("frw_drive_subfolders", JSON.stringify(next));
+      setDriveItems(prev => { const n = { ...prev }; delete n[s.id]; return n; });
+    }
     setCompanyFiles(prev => {
       const nextItems = { ...(prev.items || {}) };
       delete nextItems[s.id];
