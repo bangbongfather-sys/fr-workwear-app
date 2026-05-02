@@ -4363,10 +4363,17 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                   {arList.map((c, idx) => {
                     const pct = totalAR>0?(c.balance/totalAR*100):0;
                     const priority = c.balance > 50000000 ? "🔴 최우선" : c.balance > 10000000 ? "🟠 우선" : c.balance > 1000000 ? "🟡 일반" : "🟢 소액";
+                    const goToLedger = () => {
+                      if (setLedgerFocusClient) setLedgerFocusClient(c.name);
+                      if (setTab) setTab("ledger");
+                    };
                     return (
-                      <tr key={c.name}>
+                      <tr key={c.name} onClick={goToLedger} style={{cursor:"pointer",transition:"background 0.12s"}}
+                        onMouseEnter={e => { e.currentTarget.style.background = darkMode ? "rgba(0,122,255,0.08)" : "rgba(0,122,255,0.04)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                        title="클릭하면 장부의 거래처별 미수금으로 이동">
                         <td style={{textAlign:"center",fontSize:12,fontWeight:700,color:"var(--text2)"}}>{idx+1}</td>
-                        <td style={{fontSize:14,fontWeight:600,color:"var(--text1)"}}>{c.name}</td>
+                        <td style={{fontSize:14,fontWeight:600,color:"#007AFF",textDecoration:"underline",textUnderlineOffset:2}}>{c.name} <span style={{fontSize:10,marginLeft:4,opacity:0.7}}>↗</span></td>
                         <td style={{textAlign:"right",fontSize:14,fontWeight:800,color:"#F04452"}}>{fmt(c.balance)}원</td>
                         <td style={{textAlign:"right",fontSize:13,color:"var(--text2)"}}>
                           <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"flex-end"}}>
