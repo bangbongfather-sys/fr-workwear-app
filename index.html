@@ -3541,6 +3541,11 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
   const overdueCount = summary.filter(c => c.balance > 0).length;
   const totalCharge = summary.reduce((s,c) => s + c.charge, 0);
   const totalPaid = summary.reduce((s,c) => s + c.paid, 0);
+  // 체크된 거래처 합산
+  const selectedSummary = summary.filter(c => selectedNames.has(c.name));
+  const selBalance = selectedSummary.reduce((s,c) => s + c.balance, 0);
+  const selCharge = selectedSummary.reduce((s,c) => s + c.charge, 0);
+  const selPaid = selectedSummary.reduce((s,c) => s + c.paid, 0);
 
   const addAR = (name) => {
     if (!arDraft.amount) { alert("금액 필수"); return; }
