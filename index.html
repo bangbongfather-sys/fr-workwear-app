@@ -3671,7 +3671,10 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                   const balanceColor = c.balance > 0 ? "#F04452" : c.balance < 0 ? "#00B493" : "var(--text2)";
                   return (
                     <React.Fragment key={c.name}>
-                      <tr data-ar-client={c.name} style={{cursor:"pointer",background: isExpanded ? (darkMode?"rgba(236,102,8,0.08)":"rgba(236,102,8,0.04)") : "transparent"}} onClick={()=>setExpandedName(isExpanded?null:c.name)}>
+                      <tr data-ar-client={c.name} style={{cursor:"pointer",background: isExpanded ? (darkMode?"rgba(236,102,8,0.08)":"rgba(236,102,8,0.04)") : (selectedNames.has(c.name) ? (darkMode?"rgba(99,102,241,0.10)":"rgba(99,102,241,0.06)") : "transparent")}} onClick={()=>setExpandedName(isExpanded?null:c.name)}>
+                        <td style={{textAlign:"center"}} onClick={e => e.stopPropagation()}>
+                          <input type="checkbox" checked={selectedNames.has(c.name)} onChange={() => toggleSelectName(c.name)} style={{width:18,height:18,accentColor:"#475569",cursor:"pointer"}}/>
+                        </td>
                         <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
                         <td style={{fontWeight:600,fontSize:13}}>
                           {isExpanded?"▼ ":"▶ "}{c.name}
