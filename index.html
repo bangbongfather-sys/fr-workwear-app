@@ -2689,10 +2689,14 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
   );
 }
 
-function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode }) {
+function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, focusClient, clearFocus }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
   const [subTab, setSubTab] = useState("monthly"); // "monthly" | "ar"
+  // 외부에서 거래처를 지정해 들어온 경우: AR 서브탭으로 전환
+  useEffect(() => {
+    if (focusClient) setSubTab("ar");
+  }, [focusClient]);
   const [selectedYM, setSelectedYM] = useState(defaultYM);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
