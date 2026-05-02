@@ -3019,6 +3019,31 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
       {/* 헤더 + 월 선택 */}
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{fontSize:18,fontWeight:800,color:"var(--text1)"}}>📒 월별 매출 장부</div>
+        {(() => {
+          const shiftMonth = (delta) => {
+            const [y, m] = selectedYM.split("-").map(Number);
+            const d = new Date(y, m - 1 + delta, 1);
+            const ny = d.getFullYear();
+            const nm = String(d.getMonth() + 1).padStart(2, "0");
+            setSelectedYM(`${ny}-${nm}`);
+          };
+          const arrowStyle = {
+            width: 38, height: 38, borderRadius: 10, border: "1.5px solid var(--divider)",
+            background: "var(--surface)", color: "var(--text1)", fontSize: 16, fontWeight: 700,
+            cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center",
+            justifyContent: "center", transition: "all 0.15s",
+          };
+          return (
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <button onClick={() => shiftMonth(-1)} title="이전 달" style={arrowStyle}
+                onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "#007AFF"; e.currentTarget.style.color = "#007AFF"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--divider)"; e.currentTarget.style.color = "var(--text1)"; }}>‹</button>
+              <button onClick={() => shiftMonth(1)} title="다음 달" style={arrowStyle}
+                onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "#007AFF"; e.currentTarget.style.color = "#007AFF"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--divider)"; e.currentTarget.style.color = "var(--text1)"; }}>›</button>
+            </div>
+          );
+        })()}
         <input type="month" value={selectedYM} onChange={e=>setSelectedYM(e.target.value)} style={{height:38,fontSize:13,width:150}}/>
         {allMonths.length > 0 && (
           <select value={selectedYM} onChange={e=>setSelectedYM(e.target.value)} style={{height:38,fontSize:13,minWidth:140}}>
