@@ -3427,6 +3427,15 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
   const [sortBy, setSortBy] = useState("balance"); // balance | name | charge
   const [filterMode, setFilterMode] = useState("unpaid"); // all | unpaid | paid
   const [expandedName, setExpandedName] = useState(null);
+  const [selectedNames, setSelectedNames] = useState(() => new Set());
+  const toggleSelectName = (name) => {
+    setSelectedNames(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedNames(new Set());
   // 외부에서 지정된 거래처가 있으면 자동 펼침 + 검색 + 스크롤
   useEffect(() => {
     if (focusClient) {
