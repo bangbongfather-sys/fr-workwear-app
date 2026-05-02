@@ -2839,6 +2839,216 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
     clearSelection();
   };
 
+  // ── 엑셀/PDF 다운로드 ──
+  const exportLedgerExcel = (ym, clients) => {
+    if (!clients || clients.length === 0) { alert("내보낼 데이터가 없습니다."); return; }
+    const [yr, mo] = ym.split("-").map(Number);
+    const title = `${yr}년 ${mo}월 장부`;
+    const totalSupply = clients.reduce((s,c)=>s+(parseFloat(c.supply)||0),0);
+    const totalTax = clients.reduce((s,c)=>s+(parseFloat(c.tax)||0),0);
+    const totalAmt = clients.reduce((s,c)=>s+(parseFloat(c.total)||0),0);
+    const paidAmt = clients.filter(c=>c.status==="입금완료").reduce((s,c)=>s+(parseFloat(c.total)||0),0);
+    const unpaidAmt = clients.filter(c=>c.status==="미입금").reduce((s,c)=>s+(parseFloat(c.total)||0),0);
+
+    const headerStyle = { font:{bold:true,color:{rgb:"FFFFFF"},sz:12}, fill:{fgColor:{rgb:"1E293B"}}, alignment:{horizontal:"center",vertical:"center"}, border:{top:{style:"thin",color:{rgb:"94A3B8"}},bottom:{style:"thin",color:{rgb:"94A3B8"}},left:{style:"thin",color:{rgb:"94A3B8"}},right:{style:"thin",color:{rgb:"94A3B8"}}} };
+    const titleStyle = { font:{bold:true,sz:16}, alignment:{horizontal:"center",vertical:"center"} };
+    const baseBorder = { top:{style:"thin",color:{rgb:"E5E7EB"}}, bottom:{style:"thin",color:{rgb:"E5E7EB"}}, left:{style:"thin",color:{rgb:"E5E7EB"}}, right:{style:"thin",color:{rgb:"E5E7EB"}} };
+    const numStyle = { alignment:{horizontal:"right"}, numFmt:'#,##0"원"', border: baseBorder };
+    const cellStyle = { alignment:{horizontal:"left",vertical:"center"}, border: baseBorder };
+    const cellCenter = { alignment:{horizontal:"center",vertical:"center"}, border: baseBorder, font:{bold:true} };
+    const paidFill = { fill:{fgColor:{rgb:"D1FAE5"}}, font:{color:{rgb:"065F46"},bold:true} };
+    const unpaidFill = { fill:{fgColor:{rgb:"FEF3C7"}}, font:{color:{rgb:"92400E"},bold:true} };
+    const corpFill = { fill:{fgColor:{rgb:"E5E7EB"}}, font:{color:{rgb:"475569"}} };
+
+    const aoa = [
+      [title, "", "", "", "", "", ""],
+      [],
+      ["No.", "거래처명", "공급가액", "부가세", "청구합계", "입금현황", "메모"],
+      ...clients.map((c, i) => [
+        i+1,
+        c.name || "",
+        c.status === "법인 거래" ? "—" : (Math.round(parseFloat(c.supply)||0)),
+        c.status === "법인 거래" ? "—" : (Math.round(parseFloat(c.tax)||0)),
+        c.status === "법인 거래" ? "—" : (Math.round(parseFloat(c.total)||0)),
+        c.status || "미입금",
+        c.memo || "",
+      ]),
+      [],
+      ["", "합계", Math.round(totalSupply), Math.round(totalTax), Math.round(totalAmt), "", ""],
+      ["", "입금완료", "", "", Math.round(paidAmt), "", ""],
+      ["", "미입금", "", "", Math.round(unpaidAmt), "", ""],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{wch:6},{wch:24},{wch:14},{wch:12},{wch:14},{wch:12},{wch:30}];
+    ws["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:6} }];
+
+    // 제목 셀
+    if (ws["A1"]) ws["A1"].s = titleStyle;
+    // 헤더 행 (3번 행, 0-indexed 2)
+    ["A","B","C","D","E","F","G"].forEach(col => {
+      const cell = ws[col+"3"];
+      if (cell) cell.s = headerStyle;
+    });
+    // 데이터 행
+    clients.forEach((c, i) => {
+      const row = i + 4;
+      const isPaid = c.status === "입금완료";
+      const isUnpaid = c.status === "미입금";
+      const isCorp = c.status === "법인 거래";
+      const fill = isPaid ? paidFill : isUnpaid ? unpaidFill : isCorp ? corpFill : {};
+      const merged = { ...cellStyle, ...fill };
+      const mergedNum = { ...numStyle, ...fill };
+      const mergedCenter = { ...cellCenter, ...fill };
+      if (ws["A"+row]) ws["A"+row].s = mergedCenter;
+      if (ws["B"+row]) ws["B"+row].s = merged;
+      if (ws["C"+row]) ws["C"+row].s = mergedNum;
+      if (ws["D"+row]) ws["D"+row].s = mergedNum;
+      if (ws["E"+row]) ws["E"+row].s = mergedNum;
+      if (ws["F"+row]) ws["F"+row].s = mergedCenter;
+      if (ws["G"+row]) ws["G"+row].s = merged;
+    });
+    // 합계 행 강조
+    const sumRow = clients.length + 5;
+    ["A","B","C","D","E","F","G"].forEach(col => {
+      const cell = ws[col+sumRow];
+      if (cell) cell.s = { font:{bold:true,sz:13}, fill:{fgColor:{rgb:"475569"}}, font:{color:{rgb:"FFFFFF"},bold:true,sz:13}, alignment:{horizontal:col==="B"?"left":"right"}, numFmt: ["C","D","E"].includes(col) ? '#,##0"원"' : undefined, border: baseBorder };
+    });
+    // 입금완료/미입금 합계 행
+    const paidSumRow = sumRow + 1, unpaidSumRow = sumRow + 2;
+    ["A","B","C","D","E","F","G"].forEach(col => {
+      if (ws[col+paidSumRow]) ws[col+paidSumRow].s = { ...paidFill, alignment:{horizontal:col==="B"?"left":"right"}, numFmt:'#,##0"원"', border: baseBorder, font:{bold:true,color:{rgb:"065F46"}} };
+      if (ws[col+unpaidSumRow]) ws[col+unpaidSumRow].s = { ...unpaidFill, alignment:{horizontal:col==="B"?"left":"right"}, numFmt:'#,##0"원"', border: baseBorder, font:{bold:true,color:{rgb:"92400E"}} };
+    });
+    ws["!rows"] = [{hpx:32}];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `${yr}년${String(mo).padStart(2,"0")}월`);
+    XLSX.writeFile(wb, `장부_${yr}년${String(mo).padStart(2,"0")}월.xlsx`);
+  };
+
+  const exportLedgerPDF = async (ym, clients) => {
+    if (!clients || clients.length === 0) { alert("내보낼 데이터가 없습니다."); return; }
+    const [yr, mo] = ym.split("-").map(Number);
+    const totalSupply = clients.reduce((s,c)=>s+(parseFloat(c.supply)||0),0);
+    const totalTax = clients.reduce((s,c)=>s+(parseFloat(c.tax)||0),0);
+    const totalAmt = clients.reduce((s,c)=>s+(parseFloat(c.total)||0),0);
+    const paidAmt = clients.filter(c=>c.status==="입금완료").reduce((s,c)=>s+(parseFloat(c.total)||0),0);
+    const unpaidAmt = clients.filter(c=>c.status==="미입금").reduce((s,c)=>s+(parseFloat(c.total)||0),0);
+    const fmt = n => Math.round(n||0).toLocaleString();
+
+    const html = `
+      <div id="frw-ledger-pdf" style="font-family:'Pretendard Variable','Pretendard','Apple SD Gothic Neo',-apple-system,BlinkMacSystemFont,sans-serif; padding:32px; background:#fff; color:#0F0F1A; width:1080px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #1E293B;padding-bottom:16px;margin-bottom:24px;">
+          <div>
+            <div style="font-size:13px;color:#64748B;font-weight:600;letter-spacing:0.5px;">MONTHLY SALES LEDGER</div>
+            <div style="font-size:30px;font-weight:900;letter-spacing:-0.5px;margin-top:4px;">${yr}년 ${mo}월 매출 장부</div>
+          </div>
+          <div style="font-size:12px;color:#64748B;text-align:right;">
+            <div>출력일: ${new Date().toLocaleDateString("ko-KR")}</div>
+            <div>총 ${clients.length}건</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
+          <div style="padding:14px 16px;border-radius:12px;background:#F8FAFC;border:1px solid #E2E8F0;">
+            <div style="font-size:11px;color:#64748B;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">총 청구</div>
+            <div style="font-size:18px;font-weight:800;margin-top:4px;color:#1E293B;">${fmt(totalAmt)}원</div>
+          </div>
+          <div style="padding:14px 16px;border-radius:12px;background:#D1FAE5;border:1px solid #A7F3D0;">
+            <div style="font-size:11px;color:#065F46;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">입금완료</div>
+            <div style="font-size:18px;font-weight:800;margin-top:4px;color:#065F46;">${fmt(paidAmt)}원</div>
+          </div>
+          <div style="padding:14px 16px;border-radius:12px;background:#FEF3C7;border:1px solid #FDE68A;">
+            <div style="font-size:11px;color:#92400E;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">미입금</div>
+            <div style="font-size:18px;font-weight:800;margin-top:4px;color:#92400E;">${fmt(unpaidAmt)}원</div>
+          </div>
+          <div style="padding:14px 16px;border-radius:12px;background:#F1F5F9;border:1px solid #CBD5E1;">
+            <div style="font-size:11px;color:#475569;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">회수율</div>
+            <div style="font-size:18px;font-weight:800;margin-top:4px;color:#1E293B;">${totalAmt>0?Math.round(paidAmt/totalAmt*100):0}%</div>
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead>
+            <tr style="background:#1E293B;color:#fff;">
+              <th style="padding:10px 8px;text-align:center;width:38px;">No.</th>
+              <th style="padding:10px 12px;text-align:left;">거래처명</th>
+              <th style="padding:10px 8px;text-align:right;width:110px;">공급가액</th>
+              <th style="padding:10px 8px;text-align:right;width:90px;">부가세</th>
+              <th style="padding:10px 8px;text-align:right;width:120px;">청구합계</th>
+              <th style="padding:10px 8px;text-align:center;width:90px;">입금현황</th>
+              <th style="padding:10px 12px;text-align:left;">메모</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${clients.map((c, i) => {
+              const isPaid = c.status === "입금완료";
+              const isUnpaid = c.status === "미입금";
+              const isCorp = c.status === "법인 거래";
+              const bg = isPaid ? "background:#D1FAE5;" : isUnpaid ? "background:#FEF3C7;" : isCorp ? "background:#E5E7EB;" : "";
+              const statusBg = isPaid ? "background:#10B981;color:#fff;" : isUnpaid ? "background:#F59E0B;color:#fff;" : isCorp ? "background:#94A3B8;color:#fff;" : "";
+              return `<tr style="border-bottom:1px solid #E2E8F0;${bg}">
+                <td style="padding:9px 8px;text-align:center;color:#64748B;">${i+1}</td>
+                <td style="padding:9px 12px;font-weight:700;">${(c.name||"").replace(/</g,"&lt;")}</td>
+                <td style="padding:9px 8px;text-align:right;">${isCorp?"—":fmt(c.supply)+"원"}</td>
+                <td style="padding:9px 8px;text-align:right;color:#475569;">${isCorp?"—":fmt(c.tax)+"원"}</td>
+                <td style="padding:9px 8px;text-align:right;font-weight:800;">${isCorp?"—":fmt(c.total)+"원"}</td>
+                <td style="padding:9px 8px;text-align:center;"><span style="display:inline-block;padding:3px 10px;border-radius:99px;font-size:10px;font-weight:800;${statusBg}">${isCorp?"법인":isPaid?"✓ 입금완료":"⏳ 미입금"}</span></td>
+                <td style="padding:9px 12px;color:#475569;font-size:11px;">${(c.memo||"").replace(/</g,"&lt;")}</td>
+              </tr>`;
+            }).join("")}
+            <tr style="background:#1E293B;color:#fff;font-weight:800;">
+              <td colspan="2" style="padding:12px 12px;">합계 (${clients.length}곳)</td>
+              <td style="padding:12px 8px;text-align:right;">${fmt(totalSupply)}원</td>
+              <td style="padding:12px 8px;text-align:right;">${fmt(totalTax)}원</td>
+              <td style="padding:12px 8px;text-align:right;font-size:14px;">${fmt(totalAmt)}원</td>
+              <td colspan="2"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    const container = document.createElement("div");
+    container.style.cssText = "position:fixed;left:-10000px;top:0;";
+    container.innerHTML = html;
+    document.body.appendChild(container);
+    try {
+      const target = container.querySelector("#frw-ledger-pdf");
+      const canvas = await window.html2canvas(target, { scale: 2, backgroundColor: "#fff", useCORS: true });
+      const img = canvas.toDataURL("image/png");
+      const pdf = new window.jspdf.jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pdfW = pdf.internal.pageSize.getWidth();
+      const pdfH = pdf.internal.pageSize.getHeight();
+      const ratio = canvas.width / canvas.height;
+      const margin = 8;
+      let imgW = pdfW - margin*2;
+      let imgH = imgW / ratio;
+      if (imgH > pdfH - margin*2) {
+        // 한 페이지 못 들어가면 여러 페이지로 분할
+        const pageHpx = (canvas.width / ratio) * ((pdfH - margin*2) / imgW);
+        let yPx = 0;
+        while (yPx < canvas.height) {
+          const pageCanvas = document.createElement("canvas");
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = Math.min(pageHpx, canvas.height - yPx);
+          const ctx = pageCanvas.getContext("2d");
+          ctx.fillStyle = "#fff"; ctx.fillRect(0,0,pageCanvas.width,pageCanvas.height);
+          ctx.drawImage(canvas, 0, yPx, canvas.width, pageCanvas.height, 0, 0, canvas.width, pageCanvas.height);
+          const pageImg = pageCanvas.toDataURL("image/png");
+          if (yPx > 0) pdf.addPage();
+          pdf.addImage(pageImg, "PNG", margin, margin, imgW, (pageCanvas.height / canvas.width) * imgW);
+          yPx += pageHpx;
+        }
+      } else {
+        pdf.addImage(img, "PNG", margin, margin, imgW, imgH);
+      }
+      pdf.save(`장부_${yr}년${String(mo).padStart(2,"0")}월.pdf`);
+    } catch (e) {
+      alert("PDF 생성 실패: " + (e.message || e));
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
   // 미수금 (AR): 거래처명 키 기준으로 clientAR에 저장 → 모든 월에서 공유됨
   const addAR = (clientName) => {
     if (!arDraft.amount) { alert("금액 필수"); return; }
