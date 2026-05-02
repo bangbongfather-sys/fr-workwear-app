@@ -3034,21 +3034,33 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
             cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center",
             justifyContent: "center", transition: "all 0.15s",
           };
+          const openPicker = () => {
+            const el = document.getElementById("frw-ledger-month-picker");
+            if (el && typeof el.showPicker === "function") {
+              try { el.showPicker(); return; } catch (e) {}
+            }
+            if (el) el.click();
+          };
           return (
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,position:"relative"}}>
               <button onClick={() => shiftMonth(-1)} title="이전 달" style={arrowStyle}
                 onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "#007AFF"; e.currentTarget.style.color = "#007AFF"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--divider)"; e.currentTarget.style.color = "var(--text1)"; }}>‹</button>
-              <div style={{minWidth:130,textAlign:"center",fontSize:16,fontWeight:800,color:"var(--text1)",padding:"8px 14px",borderRadius:10,background:"var(--surface2)",border:"1.5px solid var(--divider)",letterSpacing:-0.3}}>
-                {yr}년 {mo}월
-              </div>
+              <button onClick={openPicker} title="달력으로 다른 달 선택"
+                style={{minWidth:140,textAlign:"center",fontSize:16,fontWeight:800,color:"var(--text1)",padding:"8px 16px",borderRadius:10,background:"var(--surface2)",border:"1.5px solid var(--divider)",letterSpacing:-0.3,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",justifyContent:"center",gap:6,height:40,transition:"all 0.15s"}}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "#007AFF"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--divider)"; }}>
+                <span>{yr}년 {mo}월</span>
+                <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>📅</span>
+              </button>
               <button onClick={() => shiftMonth(1)} title="다음 달" style={arrowStyle}
                 onMouseEnter={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "#007AFF"; e.currentTarget.style.color = "#007AFF"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "var(--divider)"; e.currentTarget.style.color = "var(--text1)"; }}>›</button>
+              <input id="frw-ledger-month-picker" type="month" value={selectedYM} onChange={e=>setSelectedYM(e.target.value)}
+                style={{position:"absolute",opacity:0,pointerEvents:"none",width:1,height:1,bottom:0,left:"50%"}} aria-hidden="true" tabIndex={-1}/>
             </div>
           );
         })()}
-        <input type="month" value={selectedYM} onChange={e=>setSelectedYM(e.target.value)} style={{height:38,fontSize:13,width:150}} title="달력으로 선택"/>
         {allMonths.length > 0 && (
           <select value={selectedYM} onChange={e=>setSelectedYM(e.target.value)} style={{height:38,fontSize:13,minWidth:140}}>
             <option value={selectedYM}>{selectedYM} ({monthClients.length}건)</option>
