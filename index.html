@@ -3641,6 +3641,22 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
           <div style={{overflowX:"auto"}}>
             <table>
               <thead><tr>
+                <th style={{width:36,textAlign:"center",padding:"10px 4px"}}>
+                  {(() => {
+                    const visNames = sorted.map(c => c.name);
+                    const allSel = visNames.length > 0 && visNames.every(n => selectedNames.has(n));
+                    const someSel = visNames.some(n => selectedNames.has(n));
+                    return (
+                      <input type="checkbox" checked={allSel}
+                        ref={el => { if (el) el.indeterminate = !allSel && someSel; }}
+                        onChange={e => {
+                          if (e.target.checked) setSelectedNames(prev => { const n = new Set(prev); visNames.forEach(name => n.add(name)); return n; });
+                          else setSelectedNames(prev => { const n = new Set(prev); visNames.forEach(name => n.delete(name)); return n; });
+                        }}
+                        style={{width:18,height:18,accentColor:"#475569",cursor:"pointer"}}/>
+                    );
+                  })()}
+                </th>
                 <th style={{width:38,textAlign:"center"}}>No.</th>
                 <th>거래처명</th>
                 <th style={{textAlign:"center",width:90}}>등장 월</th>
