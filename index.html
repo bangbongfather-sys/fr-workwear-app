@@ -3397,11 +3397,24 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
 }
 
 // 거래처별 미수금 상세 보기 (장부의 서브탭)
-function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode }) {
+function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, focusClient, clearFocus }) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("balance"); // balance | name | charge
   const [filterMode, setFilterMode] = useState("unpaid"); // all | unpaid | paid
   const [expandedName, setExpandedName] = useState(null);
+  // 외부에서 지정된 거래처가 있으면 자동 펼침 + 검색 + 스크롤
+  useEffect(() => {
+    if (focusClient) {
+      setSearch("");
+      setFilterMode("all");
+      setExpandedName(focusClient);
+      setTimeout(() => {
+        const el = document.querySelector(`[data-ar-client="${CSS.escape(focusClient)}"]`);
+        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 100);
+      if (clearFocus) setTimeout(() => clearFocus(), 800);
+    }
+  }, [focusClient]);
   const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
   const [editArId, setEditArId] = useState(null);
   const [editArDraft, setEditArDraft] = useState(null);
