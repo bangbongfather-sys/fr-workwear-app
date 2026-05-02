@@ -3631,6 +3631,33 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
         </div>
       </div>
 
+      {/* 선택 합산 바 */}
+      {selectedNames.size > 0 && (
+        <div className="card" style={{padding:"14px 18px",background:darkMode?"rgba(99,102,241,0.12)":"rgba(99,102,241,0.06)",border:`1.5px solid ${darkMode?"rgba(99,102,241,0.35)":"rgba(99,102,241,0.28)"}`}}>
+          <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:30,height:30,borderRadius:8,background:"#6366F1",color:"#fff",fontSize:14,fontWeight:800}}>{selectedNames.size}</span>
+              <span style={{fontSize:14,fontWeight:700,color:"var(--text1)"}}>곳 선택됨</span>
+            </div>
+            <div style={{flex:1,display:"flex",gap:18,flexWrap:"wrap",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>합산 청구</div>
+                <div style={{fontSize:15,fontWeight:800,color:"var(--text1)",marginTop:2}}>{Math.round(selCharge).toLocaleString()}원</div>
+              </div>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>합산 입금</div>
+                <div style={{fontSize:15,fontWeight:800,color:"#00B493",marginTop:2}}>{Math.round(selPaid).toLocaleString()}원</div>
+              </div>
+              <div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>합산 잔액 (미수금)</div>
+                <div style={{fontSize:18,fontWeight:900,color:selBalance>0?"#F04452":selBalance<0?"#00B493":"var(--text2)",marginTop:2}}>{Math.round(selBalance).toLocaleString()}원</div>
+              </div>
+            </div>
+            <button onClick={clearSelection} style={{padding:"8px 14px",fontSize:12,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1.5px solid var(--divider)",borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>선택 해제</button>
+          </div>
+        </div>
+      )}
+
       {/* 거래처 목록 */}
       <div className="card" style={{padding:0,overflow:"hidden"}}>
         {sorted.length === 0 ? (
