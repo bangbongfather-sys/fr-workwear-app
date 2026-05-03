@@ -9624,6 +9624,60 @@ function NewsTab({ darkMode }) {
 }
 
 // ─── 회사 필요 파일 탭 ───
+// ─── Drive 파일 미리보기 (OAuth로 컨텐츠 fetch → blob URL) ───
+function DrivePreviewInner({ file, driveApi, T, fileIcon }) {
+  const [blobUrl, setBlobUrl] = React.useState(null);
+  const [err, setErr] = React.useState("");
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    let revoked = false;
+    let url = null;
+    setLoading(true); setErr(""); setBlobUrl(null);
+    (async () => {
+      try {
+        const r = await driveApi(`drive/v3/files/${file.driveId}?alt=media`);
+        const blob = await r.blob();
+        url = URL.createObjectURL(blob);
+        if (!revoked) setBlobUrl(url);
+      } catch (e) {
+        if (!revoked) setErr(e.message || String(e));
+      } finally {
+        if (!revoked) setLoading(false);
+      }
+    })();
+    return () => { revoked = true; if (url) setTimeout(() => URL.revokeObjectURL(url), 100); };
+  }, [file.driveId]);
+
+  const t = (file.type || "").toLowerCase();
+  const isImg = t.startsWith("image/");
+  const isPdf = t.includes("pdf") || /\.pdf$/i.test(file.name);
+  const isText = t.startsWith("text/") || /\.(txt|md|csv|json)$/i.test(file.name);
+
+  if (loading) {
+    return <div style={{ textAlign: "center", padding: 40, color: T.text2, display:"inline-flex", alignItems:"center", gap:8 }}><Icon name="refresh" size={16} style={{animation:"spin 1.4s linear infinite"}}/>미리보기 불러오는 중...</div>;
+  }
+  if (err) {
+    return (
+      <div style={{ textAlign: "center", padding: 40, color: T.text2 }}>
+        <div style={{ color: "#F04452", fontSize: 14, fontWeight: 700, marginBottom: 6 }}>미리보기 실패</div>
+        <div style={{ fontSize: 12 }}>{err}</div>
+        <div style={{ fontSize: 12, marginTop: 10 }}>다운로드 후 확인해 주세요.</div>
+      </div>
+    );
+  }
+  if (!blobUrl) return null;
+  if (isImg) return <img src={blobUrl} alt={file.name} style={{ maxWidth: "100%", maxHeight: "82vh", objectFit: "contain" }} />;
+  if (isPdf) return <iframe src={blobUrl} title={file.name} style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />;
+  if (isText) return <iframe src={blobUrl} title={file.name} style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />;
+  return (
+    <div style={{ textAlign: "center", padding: 40, color: T.text2 }}>
+      <div style={{ display:"inline-flex", marginBottom: 12 }}>{fileIcon(file)}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>이 형식은 미리보기를 지원하지 않습니다</div>
+      <div style={{ fontSize: 12 }}>다운로드하여 확인해 주세요.</div>
+    </div>
+  );
+}
+
 function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMode, T }) {
   const subtabs = companyFiles.subtabs || [];
   const localItems = companyFiles.items || {};
