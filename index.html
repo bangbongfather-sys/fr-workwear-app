@@ -9658,7 +9658,13 @@ function DrivePreviewInner({ file, driveApi, T, fileIcon }) {
     (async () => {
       try {
         const r = await driveApi(`drive/v3/files/${file.driveId}?alt=media`);
-        const blob = await r.blob();
+        let blob = await r.blob();
+        // 정확한 MIME 타입으로 새 Blob 생성 (브라우저가 PDF 뷰어를 제대로 띄우게 함)
+        const t = (file.type || "").toLowerCase();
+        const isPdfFile = t.includes("pdf") || /\.pdf$/i.test(file.name);
+        if (isPdfFile && blob.type !== "application/pdf") {
+          blob = new Blob([blob], { type: "application/pdf" });
+        }
         url = URL.createObjectURL(blob);
         if (!revoked) setBlobUrl(url);
       } catch (e) {
