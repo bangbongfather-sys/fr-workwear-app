@@ -2308,20 +2308,14 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         const thisMonthSales = (monthlyRevLedger[thisYM] || 0) || (monthlyRevOrders[thisYM] || 0);
         const cashTotal = (accounts || []).reduce((s,a) => s + (parseFloat(a.balance)||0), 0);
         const cashCount = (accounts || []).filter(a => (parseFloat(a.balance)||0) !== 0).length;
-        const thisMonthPurchase = (fabricIntakes || []).reduce((s,f) => {
-          const d = (f.date || "").slice(0,7);
-          if (d !== thisYM) return s;
-          return s + (parseFloat(f.unitPrice||0) * parseFloat(f.qty||0));
-        }, 0);
-        const monthlySchedTotal = (scheduledExpenses || []).reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
-        const estimatedProfit = thisMonthSales - thisMonthPurchase - monthlySchedTotal;
-        const profitMargin = thisMonthSales > 0 ? (estimatedProfit / thisMonthSales * 100) : 0;
+        // 추정 순이익 = 연매출 × 평균 제품 마진율
+        const estimatedProfit = totalYearRevenue * (avgMarginSell / 100);
         return (
           <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"stretch"}}>
             {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"곳 (장부 자동연동)", totalUnpaidAmt>0?"#FF9500":"#00B493")}
             {kpi("kpi_this_month", "이번 달 매출", thisMonthSales>0?Math.round(thisMonthSales).toLocaleString()+"원":"—", `${now.getFullYear()}년 ${now.getMonth()+1}월`, thisMonthSales>0?"#007AFF":null)}
             {kpi("kpi_cash", "현금 잔고", Math.round(cashTotal).toLocaleString()+"원", cashCount>0?cashCount+"개 계좌 합계":"등록된 계좌 없음", cashTotal>0?"#10B981":null)}
-            {kpi("kpi_profit", "추정 순이익", thisMonthSales>0?Math.round(estimatedProfit).toLocaleString()+"원":"—", thisMonthSales>0?`매출-매입-운영비 · 마진 ${profitMargin.toFixed(1)}%`:"이번 달 매출 입력 필요", thisMonthSales>0?(estimatedProfit>0?"#10B981":"#F04452"):null)}
+            {kpi("kpi_profit", "추정 순이익", (totalYearRevenue>0 && avgMarginSell>0)?Math.round(estimatedProfit).toLocaleString()+"원":"—", (totalYearRevenue>0 && avgMarginSell>0)?`${thisYear}년 매출 ${Math.round(totalYearRevenue/10000).toLocaleString()}만원 × 평균 마진 ${avgMarginSell.toFixed(1)}%`:"연매출 또는 제품 마진 입력 필요", (totalYearRevenue>0 && avgMarginSell>0)?(estimatedProfit>0?"#10B981":"#F04452"):null)}
           </div>
         );
       })()}
