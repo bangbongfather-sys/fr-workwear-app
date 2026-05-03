@@ -2239,11 +2239,28 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         {kpi("kpi_margin", "납품가 마진율", avgMarginSell>0?avgMarginSell.toFixed(1)+"%":"—", "현재 제품 기준", avgMarginSell>=26?"#00B493":avgMarginSell>=20?"#FF9500":avgMarginSell>0?"#F04452":null)}
         {kpi("kpi_top", "최다 매출 제품", topProduct?topProduct[0]:"—", topProduct?Math.round(topProduct[1]).toLocaleString()+"원":"기록 없음", null)}
       </div>
-      {orders.length > 0 && (
-        <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"stretch"}}>
-          {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"곳 (장부 자동연동)", totalUnpaidAmt>0?"#FF9500":"#00B493")}
-        </div>
-      )}
+      {(() => {
+        const now = new Date();
+        const thisYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+        const thisMonthSales = (monthlyRevLedger[thisYM] || 0) || (monthlyRevOrders[thisYM] || 0);
+        const cashTotal = (accounts || []).reduce((s,a) => s + (parseFloat(a.balance)||0), 0);
+        const cashCount = (accounts || []).filter(a => (parseFloat(a.balance)||0) !== 0).length;
+        const thisMonthPurchase = (fabricIntakes || []).reduce((s,f) => {
+          const d = (f.date || "").slice(0,7);
+          if (d !== thisYM) return s;
+          const amt = (parseFloat(f.amount) || ((parseFloat(f.price)||0) * (parseFloat(f.qty)||0)));
+          return s + amt;
+        }, 0);
+        const purchaseCount = (fabricIntakes || []).filter(f => (f.date||"").slice(0,7) === thisYM).length;
+        return (
+          <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"stretch"}}>
+            {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"곳 (장부 자동연동)", totalUnpaidAmt>0?"#FF9500":"#00B493")}
+            {kpi("kpi_this_month", "이번 달 매출", thisMonthSales>0?Math.round(thisMonthSales).toLocaleString()+"원":"—", `${now.getFullYear()}년 ${now.getMonth()+1}월`, thisMonthSales>0?"#007AFF":null)}
+            {kpi("kpi_cash", "현금 잔고", Math.round(cashTotal).toLocaleString()+"원", cashCount>0?cashCount+"개 계좌 합계":"등록된 계좌 없음", cashTotal>0?"#10B981":null)}
+            {kpi("kpi_purchase", "이번 달 매입액", thisMonthPurchase>0?Math.round(thisMonthPurchase).toLocaleString()+"원":"—", purchaseCount>0?purchaseCount+"건 입고":"입고 기록 없음", thisMonthPurchase>0?"#8B5CF6":null)}
+          </div>
+        );
+      })()}
       <div style={{display:"flex",flexWrap:"wrap",gap:16,alignItems:"stretch"}}>
         <div className="card rcard" data-card-key="sales" style={{ ...cardLayoutStyle("sales"), position: "relative", minWidth: 280, flex: cardLayouts["sales"] ? "0 0 auto" : "1 1 380px", overflow: "hidden" }}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6}}>
