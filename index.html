@@ -2250,13 +2250,15 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           if (d !== thisYM) return s;
           return s + (parseFloat(f.unitPrice||0) * parseFloat(f.qty||0));
         }, 0);
-        const purchaseCount = (fabricIntakes || []).filter(f => (f.date||"").slice(0,7) === thisYM).length;
+        const monthlySchedTotal = (scheduledExpenses || []).reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
+        const estimatedProfit = thisMonthSales - thisMonthPurchase - monthlySchedTotal;
+        const profitMargin = thisMonthSales > 0 ? (estimatedProfit / thisMonthSales * 100) : 0;
         return (
           <div style={{display:"flex",flexWrap:"wrap",gap:12,alignItems:"stretch"}}>
             {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"곳 (장부 자동연동)", totalUnpaidAmt>0?"#FF9500":"#00B493")}
             {kpi("kpi_this_month", "이번 달 매출", thisMonthSales>0?Math.round(thisMonthSales).toLocaleString()+"원":"—", `${now.getFullYear()}년 ${now.getMonth()+1}월`, thisMonthSales>0?"#007AFF":null)}
             {kpi("kpi_cash", "현금 잔고", Math.round(cashTotal).toLocaleString()+"원", cashCount>0?cashCount+"개 계좌 합계":"등록된 계좌 없음", cashTotal>0?"#10B981":null)}
-            {kpi("kpi_purchase", "이번 달 매입액", thisMonthPurchase>0?Math.round(thisMonthPurchase).toLocaleString()+"원":"—", purchaseCount>0?purchaseCount+"건 입고":"입고 기록 없음", thisMonthPurchase>0?"#8B5CF6":null)}
+            {kpi("kpi_profit", "추정 순이익", thisMonthSales>0?Math.round(estimatedProfit).toLocaleString()+"원":"—", thisMonthSales>0?`매출-매입-운영비 · 마진 ${profitMargin.toFixed(1)}%`:"이번 달 매출 입력 필요", thisMonthSales>0?(estimatedProfit>0?"#10B981":"#F04452"):null)}
           </div>
         );
       })()}
