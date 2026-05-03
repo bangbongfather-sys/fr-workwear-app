@@ -2248,8 +2248,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         const thisMonthPurchase = (fabricIntakes || []).reduce((s,f) => {
           const d = (f.date || "").slice(0,7);
           if (d !== thisYM) return s;
-          const amt = (parseFloat(f.amount) || ((parseFloat(f.price)||0) * (parseFloat(f.qty)||0)));
-          return s + amt;
+          return s + (parseFloat(f.unitPrice||0) * parseFloat(f.qty||0));
         }, 0);
         const purchaseCount = (fabricIntakes || []).filter(f => (f.date||"").slice(0,7) === thisYM).length;
         return (
