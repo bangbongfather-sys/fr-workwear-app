@@ -9654,11 +9654,11 @@ function DrivePreviewInner({ file, driveApi, T, fileIcon }) {
   const isText = t.startsWith("text/") || /\.(txt|md|csv|json)$/i.test(file.name);
 
   if (loading) {
-    return <div style={{ textAlign: "center", padding: 40, color: T.text2, display:"inline-flex", alignItems:"center", gap:8 }}><Icon name="refresh" size={16} style={{animation:"spin 1.4s linear infinite"}}/>미리보기 불러오는 중...</div>;
+    return <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", padding: 40, color: T.text2, gap:8 }}><Icon name="refresh" size={16} style={{animation:"spin 1.4s linear infinite"}}/>미리보기 불러오는 중...</div>;
   }
   if (err) {
     return (
-      <div style={{ textAlign: "center", padding: 40, color: T.text2 }}>
+      <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding: 40, color: T.text2 }}>
         <div style={{ color: "#F04452", fontSize: 14, fontWeight: 700, marginBottom: 6 }}>미리보기 실패</div>
         <div style={{ fontSize: 12 }}>{err}</div>
         <div style={{ fontSize: 12, marginTop: 10 }}>다운로드 후 확인해 주세요.</div>
@@ -9666,11 +9666,11 @@ function DrivePreviewInner({ file, driveApi, T, fileIcon }) {
     );
   }
   if (!blobUrl) return null;
-  if (isImg) return <img src={blobUrl} alt={file.name} style={{ maxWidth: "100%", maxHeight: "82vh", objectFit: "contain" }} />;
-  if (isPdf) return <iframe src={blobUrl} title={file.name} style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />;
-  if (isText) return <iframe src={blobUrl} title={file.name} style={{ width: "100%", height: "82vh", border: "none", background: "#fff" }} />;
+  if (isImg) return <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",overflow:"auto",padding:8}}><img src={blobUrl} alt={file.name} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} /></div>;
+  if (isPdf) return <iframe src={blobUrl} title={file.name} style={{ flex: 1, width: "100%", minHeight: 0, border: "none", background: "#fff" }} />;
+  if (isText) return <iframe src={blobUrl} title={file.name} style={{ flex: 1, width: "100%", minHeight: 0, border: "none", background: "#fff" }} />;
   return (
-    <div style={{ textAlign: "center", padding: 40, color: T.text2 }}>
+    <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding: 40, color: T.text2 }}>
       <div style={{ display:"inline-flex", marginBottom: 12 }}>{fileIcon(file)}</div>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>이 형식은 미리보기를 지원하지 않습니다</div>
       <div style={{ fontSize: 12 }}>다운로드하여 확인해 주세요.</div>
