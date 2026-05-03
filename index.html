@@ -7147,13 +7147,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
   const SyncBadge = () => {
     const styles = {
-      wrap: { display: "flex", alignItems: "center", gap: 5, borderRadius: 100, padding: "5px 12px" },
-      dot: { width: 7, height: 7, borderRadius: "50%" },
-      text: { fontSize: 12, fontWeight: 500 },
+      wrap: { display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 100, padding: "5px 12px", border: `1px solid ${darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"}`, background: darkMode ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)", color: darkMode ? "rgba(239,241,244,0.78)" : "rgba(15,15,26,0.6)" },
+      text: { fontSize: 12, fontWeight: 600, letterSpacing: -0.1 },
     };
-    if (syncStatus === "syncing") return <div style={{ ...styles.wrap, background: "rgba(255,149,0,0.1)" }}><div style={{ ...styles.dot, background: "#FF9500", animation: "pulse 1.2s ease-in-out infinite" }} /><span style={{ ...styles.text, color: "#FF9500" }}>저장 중</span></div>;
-    if (syncStatus === "saved") return <div style={{ ...styles.wrap, background: "rgba(52,199,89,0.1)" }}><div style={{ ...styles.dot, background: "#34C759" }} /><span style={{ ...styles.text, color: "#34C759" }}>동기화됨</span></div>;
-    return <div style={{ ...styles.wrap, background: "rgba(255,59,48,0.1)" }}><div style={{ ...styles.dot, background: "#FF3B30" }} /><span style={{ ...styles.text, color: "#FF3B30" }}>연결 오류</span></div>;
+    if (syncStatus === "syncing") return <div style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span style={styles.text}>저장 중</span></div>;
+    if (syncStatus === "saved") return <div style={styles.wrap}><Icon name="check" size={13}/><span style={styles.text}>동기화됨</span></div>;
+    return <div style={styles.wrap}><Icon name="alert" size={13}/><span style={styles.text}>연결 오류</span></div>;
   };
 
   // 인라인 스타일용 테마 토큰
