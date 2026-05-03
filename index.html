@@ -8077,7 +8077,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               <div className="card">
                 <div className="section-header" style={{ marginBottom: 14 }}>
                   <span className="section-header-title">견적 포함 제품</span>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <button onClick={() => {
                       pushHistory();
                       const eligible = products.filter(p => computeProduct(p, materials, laborItems).base > 0);
@@ -8089,6 +8089,29 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     }} style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>
                       {products.filter(p => computeProduct(p, materials, laborItems).base > 0).every(p => p.include !== false) ? "전체 해제" : "전체 선택"}
                     </button>
+                    <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600, marginLeft: 4 }}>일괄 등급</span>
+                    {GRADES.map(g => (
+                      <button key={g} onClick={() => {
+                        pushHistory();
+                        setProducts(ps => ps.map(p => {
+                          if (p.include === false) return p;
+                          const c = computeProduct(p, materials, laborItems);
+                          if (c.base <= 0) return p;
+                          const gradeList = c.gradeList || GRADES;
+                          if (!gradeList.includes(g)) return p;
+                          const idx = (p.specs || []).findIndex(s => s.id === p.activeSpecId);
+                          if (idx < 0) return p;
+                          const newSpecs = [...p.specs];
+                          newSpecs[idx] = { ...newSpecs[idx], selectedGrade: g };
+                          return { ...p, specs: newSpecs };
+                        }));
+                      }} title={`견적 포함된 모든 제품을 ${g}급으로 설정`}
+                        style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = ACCENT; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = ACCENT; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.color = "var(--text2)"; e.currentTarget.style.borderColor = "var(--border)"; }}>
+                        모두 {g}급
+                      </button>
+                    ))}
                     <span className="info-pill">{products.filter(p => p.include !== false).length}/{products.length}</span>
                   </div>
                 </div>
