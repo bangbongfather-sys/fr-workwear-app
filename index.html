@@ -5118,6 +5118,34 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
       return arr;
     });
   };
+  const touchDragRef = useRef({ active: false, startX: 0, startY: 0, id: null });
+  const onTouchStartSub = (id, e) => {
+    const t = e.touches[0];
+    touchDragRef.current = { active: false, startX: t.clientX, startY: t.clientY, id };
+  };
+  const onTouchMoveSub = (e) => {
+    const ds = touchDragRef.current;
+    if (!ds.id) return;
+    const t = e.touches[0];
+    if (!ds.active) {
+      const dx = Math.abs(t.clientX - ds.startX);
+      const dy = Math.abs(t.clientY - ds.startY);
+      if (dx > 8 || dy > 8) { ds.active = true; setDragSubId(ds.id); }
+      else return;
+    }
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const tabEl = el && el.closest && el.closest("[data-purchase-sub-id]");
+    const targetId = tabEl ? tabEl.getAttribute("data-purchase-sub-id") : null;
+    if (targetId !== dragOverSubId) setDragOverSubId(targetId);
+  };
+  const onTouchEndSub = () => {
+    const ds = touchDragRef.current;
+    if (ds.active && dragOverSubId && dragOverSubId !== ds.id) {
+      reorderPurchaseSubTabs(ds.id, dragOverSubId);
+    }
+    touchDragRef.current = { active: false, startX: 0, startY: 0, id: null };
+    setDragSubId(null); setDragOverSubId(null);
+  };
   const totalSumRef = useRef(null); const totalSumInst = useRef(null);
   const monthlyTrendRef = useRef(null); const monthlyTrendInst = useRef(null);
   const matPieRef = useRef(null); const matPieInst = useRef(null);
