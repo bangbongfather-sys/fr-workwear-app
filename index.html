@@ -10047,6 +10047,38 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
       return { ...prev, subtabs: arr };
     });
   };
+  // 터치 드래그 (모바일 지원)
+  const touchDragRef = React.useRef({ active: false, startX: 0, startY: 0, id: null });
+  const onTouchStartSub = (id, e) => {
+    const t = e.touches[0];
+    touchDragRef.current = { active: false, startX: t.clientX, startY: t.clientY, id };
+  };
+  const onTouchMoveSub = (e) => {
+    const ds = touchDragRef.current;
+    if (!ds.id) return;
+    const t = e.touches[0];
+    if (!ds.active) {
+      const dx = Math.abs(t.clientX - ds.startX);
+      const dy = Math.abs(t.clientY - ds.startY);
+      if (dx > 8 || dy > 8) {
+        ds.active = true;
+        setDragSubId(ds.id);
+      } else return;
+    }
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const tabEl = el && el.closest && el.closest("[data-sub-id]");
+    const targetId = tabEl ? tabEl.getAttribute("data-sub-id") : null;
+    if (targetId !== dragOverId) setDragOverId(targetId);
+  };
+  const onTouchEndSub = () => {
+    const ds = touchDragRef.current;
+    if (ds.active && dragOverId && dragOverId !== ds.id) {
+      reorderSubtabs(ds.id, dragOverId);
+    }
+    touchDragRef.current = { active: false, startX: 0, startY: 0, id: null };
+    setDragSubId(null);
+    setDragOverId(null);
+  };
   const [renameValue, setRenameValue] = React.useState("");
   const [dragActive, setDragActive] = React.useState(false);
   const [search, setSearch] = React.useState("");
