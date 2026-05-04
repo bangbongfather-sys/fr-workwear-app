@@ -3604,10 +3604,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       <div style={{ fontSize: 12, color: T.text2, marginTop: 1 }}>원단 + 기타원가 기준</div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <button type="button" onClick={() => updProd("adminRate", Math.max(0, (Number(activeProd.adminRate) || 0) - 1))}
+                        title="−1%"
+                        style={{ width: 30, height: 36, border: `1px solid ${T.border}`, borderRadius: 8, background: T.surface2, color: T.text, cursor: "pointer", fontSize: 16, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}
+                        onMouseEnter={e => e.currentTarget.style.background = "var(--chip-hover-bg)"}
+                        onMouseLeave={e => e.currentTarget.style.background = T.surface2}>‹</button>
                       <input type="number" value={activeProd.adminRate}
                         className="rate-input"
                         onChange={e => updProd("adminRate", Math.max(0, Number(e.target.value) || 0))} />
-                      <span style={{ fontWeight: 700, color: T.ghostColor, fontSize: 15 }}>%</span>
+                      <button type="button" onClick={() => updProd("adminRate", Math.min(100, (Number(activeProd.adminRate) || 0) + 1))}
+                        title="+1%"
+                        style={{ width: 30, height: 36, border: `1px solid ${T.border}`, borderRadius: 8, background: T.surface2, color: T.text, cursor: "pointer", fontSize: 16, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0 }}
+                        onMouseEnter={e => e.currentTarget.style.background = "var(--chip-hover-bg)"}
+                        onMouseLeave={e => e.currentTarget.style.background = T.surface2}>›</button>
+                      <span style={{ fontWeight: 700, color: T.ghostColor, fontSize: 15, marginLeft: 2 }}>%</span>
                     </div>
                   </div>
                   <input type="range" min={0} max={50} value={activeProd.adminRate}
