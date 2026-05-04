@@ -5104,6 +5104,20 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
   const [showAddTabForm, setShowAddTabForm] = useState(false);
   const [newTabName, setNewTabName] = useState("");
+  const [dragSubId, setDragSubId] = useState(null);
+  const [dragOverSubId, setDragOverSubId] = useState(null);
+  const reorderPurchaseSubTabs = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setPurchaseSubTabs(prev => {
+      const arr = [...(prev || [])];
+      const fi = arr.findIndex(x => x.id === fromId);
+      const ti = arr.findIndex(x => x.id === toId);
+      if (fi < 0 || ti < 0) return prev;
+      const [moved] = arr.splice(fi, 1);
+      arr.splice(ti, 0, moved);
+      return arr;
+    });
+  };
   const totalSumRef = useRef(null); const totalSumInst = useRef(null);
   const monthlyTrendRef = useRef(null); const monthlyTrendInst = useRef(null);
   const matPieRef = useRef(null); const matPieInst = useRef(null);
