@@ -742,6 +742,66 @@
 <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
 
+// ─── 서브탭 순서 변경 훅 (드래그 앤 드롭 + 모바일 터치) ───
+function useSubtabOrder(storageKey, defaultIds, dataAttr = "data-tab-id") {
+  const { useState, useEffect, useRef } = React;
+  const [order, setOrder] = useState(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(storageKey) || "null");
+      if (Array.isArray(v) && v.length === defaultIds.length && defaultIds.every(id => v.includes(id))) return v;
+    } catch {}
+    return defaultIds;
+  });
+  useEffect(() => { try { localStorage.setItem(storageKey, JSON.stringify(order)); } catch {} }, [order, storageKey]);
+  const [dragId, setDragId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const reorder = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setOrder(prev => {
+      const arr = [...prev];
+      const fi = arr.indexOf(fromId);
+      const ti = arr.indexOf(toId);
+      if (fi < 0 || ti < 0) return prev;
+      const [m] = arr.splice(fi, 1);
+      arr.splice(ti, 0, m);
+      return arr;
+    });
+  };
+  const touchRef = useRef({ active: false, startX: 0, startY: 0, id: null });
+  const getProps = (id) => ({
+    [dataAttr]: id,
+    draggable: true,
+    onDragStart: (e) => { setDragId(id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", id); } catch {} },
+    onDragEnd: () => { setDragId(null); setDragOverId(null); },
+    onDragOver: (e) => { if (dragId && dragId !== id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverId(id); } },
+    onDragLeave: () => { if (dragOverId === id) setDragOverId(null); },
+    onDrop: (e) => { e.preventDefault(); if (dragId && dragId !== id) reorder(dragId, id); setDragId(null); setDragOverId(null); },
+    onTouchStart: (e) => { const t = e.touches[0]; touchRef.current = { active: false, startX: t.clientX, startY: t.clientY, id }; },
+    onTouchMove: (e) => {
+      const ds = touchRef.current; if (!ds.id) return;
+      const t = e.touches[0];
+      if (!ds.active) {
+        if (Math.abs(t.clientX - ds.startX) > 8 || Math.abs(t.clientY - ds.startY) > 8) { ds.active = true; setDragId(ds.id); }
+        else return;
+      }
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const tabEl = el && el.closest && el.closest(`[${dataAttr}]`);
+      const targetId = tabEl ? tabEl.getAttribute(dataAttr) : null;
+      if (targetId !== dragOverId) setDragOverId(targetId);
+    },
+    onTouchEnd: () => {
+      const ds = touchRef.current;
+      if (ds.active && dragOverId && dragOverId !== ds.id) reorder(ds.id, dragOverId);
+      touchRef.current = { active: false, startX: 0, startY: 0, id: null };
+      setDragId(null); setDragOverId(null);
+    },
+    onTouchCancel: () => { touchRef.current = { active: false, startX: 0, startY: 0, id: null }; setDragId(null); setDragOverId(null); },
+  });
+  const isDragging = (id) => dragId === id;
+  const isDragOver = (id) => dragOverId === id && dragId && dragId !== id;
+  return { order, getProps, isDragging, isDragOver, dragActive: !!dragId };
+}
+
 // ─── 통합 아이콘 (애플 미니멀 라인 스타일, Lucide 기반) ───
 const ICON_PATHS = {
   pricedb:    <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></>,
