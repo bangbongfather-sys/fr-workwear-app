@@ -10529,8 +10529,16 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
                 );
               }
               const accent = active ? "#007AFF" : null;
+              const isDragging = dragSubId === s.id;
+              const isDragOver = dragOverId === s.id && dragSubId && dragSubId !== s.id;
               return (
                 <div key={s.id}
+                  draggable
+                  onDragStart={(e) => { setDragSubId(s.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); } catch {} }}
+                  onDragEnd={() => { setDragSubId(null); setDragOverId(null); }}
+                  onDragOver={(e) => { if (dragSubId && dragSubId !== s.id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverId(s.id); } }}
+                  onDragLeave={(e) => { if (dragOverId === s.id) setDragOverId(null); }}
+                  onDrop={(e) => { e.preventDefault(); if (dragSubId && dragSubId !== s.id) reorderSubtabs(dragSubId, s.id); setDragSubId(null); setDragOverId(null); }}
                   style={{
                     position: "relative",
                     display: "flex", alignItems: "center", gap: 4,
@@ -10540,13 +10548,14 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
                     background: active
                       ? "linear-gradient(135deg, #007AFF 0%, #4DA0FF 100%)"
                       : (darkMode ? "rgba(255,255,255,0.04)" : "#fff"),
-                    border: active ? `2px solid #007AFF` : `1.5px solid ${T.divider}`,
+                    border: isDragOver ? `2px dashed #007AFF` : (active ? `2px solid #007AFF` : `1.5px solid ${T.divider}`),
                     boxShadow: active ? "0 6px 18px rgba(0,122,255,0.30)" : (darkMode ? "0 1px 2px rgba(0,0,0,0.20)" : "0 1px 3px rgba(15,15,26,0.06)"),
-                    cursor: "pointer", transition: "all 0.18s",
+                    cursor: isDragging ? "grabbing" : "grab", transition: "all 0.18s",
                     transform: active ? "translateY(-1px)" : "none",
+                    opacity: isDragging ? 0.4 : 1,
                   }}
                   onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = "#007AFF"; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,122,255,0.15)"; } }}
-                  onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = T.divider; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = darkMode ? "0 1px 2px rgba(0,0,0,0.20)" : "0 1px 3px rgba(15,15,26,0.06)"; } }}>
+                  onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = isDragOver ? "#007AFF" : T.divider; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = darkMode ? "0 1px 2px rgba(0,0,0,0.20)" : "0 1px 3px rgba(15,15,26,0.06)"; } }}>
                   <button onClick={() => setActiveSub(s.id)}
                     style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0, display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
                     <span style={{ display: "inline-flex", color: active ? "#fff" : T.text2 }}><Icon name={active ? "folderOpen" : "folder"} size={18}/></span>
