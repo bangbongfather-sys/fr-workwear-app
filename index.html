@@ -4459,15 +4459,34 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
     transition: "all 0.18s",
   });
 
+  const TREASURY_SUBTABS = {
+    dashboard: { label: "자금 대시보드", icon: "barChart" },
+    accounts: { label: "통장 관리", icon: "treasury" },
+    investments: { label: "투자 현황", icon: "trendingUp" },
+    ar: { label: "미수금 회수", icon: "clipboard" },
+    schedule: { label: "정기 지출", icon: "calendar" },
+  };
+  const treasurySubOrder = useSubtabOrder("frw_treasury_subtab_order", ["dashboard","accounts","investments","ar","schedule"], "data-treasury-sub");
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 */}
       <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content", flexWrap: "wrap" }}>
-        <button onClick={()=>setSubTab("dashboard")} style={subTabBtnStyle("dashboard")}><Icon name="barChart" size={15}/>자금 대시보드</button>
-        <button onClick={()=>setSubTab("accounts")} style={subTabBtnStyle("accounts")}><Icon name="treasury" size={15}/>통장 관리</button>
-        <button onClick={()=>setSubTab("investments")} style={subTabBtnStyle("investments")}><Icon name="trendingUp" size={15}/>투자 현황</button>
-        <button onClick={()=>setSubTab("ar")} style={subTabBtnStyle("ar")}><Icon name="clipboard" size={15}/>미수금 회수</button>
-        <button onClick={()=>setSubTab("schedule")} style={subTabBtnStyle("schedule")}><Icon name="calendar" size={15}/>정기 지출</button>
+        {treasurySubOrder.order.map(id => {
+          const cfg = TREASURY_SUBTABS[id]; if (!cfg) return null;
+          const dragging = treasurySubOrder.isDragging(id);
+          const dragOver = treasurySubOrder.isDragOver(id);
+          return (
+            <button key={id} onClick={()=>setSubTab(id)} {...treasurySubOrder.getProps(id)}
+              style={{
+                ...subTabBtnStyle(id),
+                cursor: dragging ? "grabbing" : "pointer",
+                opacity: dragging ? 0.4 : 1,
+                outline: dragOver ? "2px dashed #EC6608" : "none",
+                outlineOffset: 1,
+                touchAction: treasurySubOrder.dragActive ? "none" : "manipulation",
+              }}><Icon name={cfg.icon} size={15}/>{cfg.label}</button>
+          );
+        })}
       </div>
 
       {/* 1) 대시보드 */}
