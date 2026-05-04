@@ -5337,12 +5337,16 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
           const isDragging = dragSubId === t.id;
           const isDragOver = dragOverSubId === t.id && dragSubId && dragSubId !== t.id;
           return (
-          <div key={t.id} draggable
+          <div key={t.id} data-purchase-sub-id={t.id} draggable
             onDragStart={(e) => { setDragSubId(t.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); } catch {} }}
             onDragEnd={() => { setDragSubId(null); setDragOverSubId(null); }}
             onDragOver={(e) => { if (dragSubId && dragSubId !== t.id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverSubId(t.id); } }}
             onDragLeave={() => { if (dragOverSubId === t.id) setDragOverSubId(null); }}
             onDrop={(e) => { e.preventDefault(); if (dragSubId && dragSubId !== t.id) reorderPurchaseSubTabs(dragSubId, t.id); setDragSubId(null); setDragOverSubId(null); }}
+            onTouchStart={(e) => onTouchStartSub(t.id, e)}
+            onTouchMove={onTouchMoveSub}
+            onTouchEnd={onTouchEndSub}
+            onTouchCancel={onTouchEndSub}
             style={{
               display:"inline-flex",alignItems:"center",
               cursor: isDragging ? "grabbing" : "grab",
@@ -5351,6 +5355,7 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
               outlineOffset: 1,
               borderRadius: 9,
               transition: "opacity 0.15s",
+              touchAction: dragSubId ? "none" : "manipulation",
             }}>
             <button onClick={()=>setActiveSubTab(t.name)} style={{
               padding:"9px 12px 9px 16px",border:"none",borderRadius:"9px 0 0 9px",cursor:"inherit",fontWeight:700,fontSize:13,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,
