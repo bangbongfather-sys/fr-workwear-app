@@ -4478,6 +4478,209 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
             </div>
           </div>
         </div>
+
+        {/* ━━━━━━━━━━ 엔터프라이즈 재무 분석 ━━━━━━━━━━ */}
+        {(() => {
+          const now = new Date();
+          const ymd365 = new Date(now.getTime() - 365*86400000);
+          let annualSales = 0;
+          if (Array.isArray(orders)) {
+            annualSales += orders.filter(o => o.date && new Date(o.date) >= ymd365)
+              .reduce((s,o) => s + (parseFloat(o.unitPrice||0) * parseInt(o.qty||1)), 0);
+          }
+          Object.values(ledgers || {}).forEach(m => {
+            (m.clients || []).forEach(c => {
+              const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+              if (amt > 0) annualSales += amt;
+            });
+          });
+          const dailySales = annualSales / 365;
+          const dso = dailySales > 0 ? Math.round(totalAR / dailySales) : 0;
+          const annualPurchase = cashFlows.filter(cf => cf.type === "출금" && cf.date && new Date(cf.date) >= ymd365)
+            .reduce((s,cf) => s + (parseFloat(cf.amount)||0), 0);
+          const dailyPurchase = annualPurchase / 365;
+          const recentPurchase30 = cashFlows.filter(cf => cf.type === "출금" && cf.date && new Date(cf.date) >= new Date(now.getTime() - 30*86400000))
+            .reduce((s,cf) => s + (parseFloat(cf.amount)||0), 0);
+          const dpo = dailyPurchase > 0 ? Math.round(recentPurchase30 / dailyPurchase) : 0;
+          const ccc = dso - dpo;
+          const currentAssets = totalBank + totalAR;
+          const currentLiabilities = monthlyFixedExpense;
+          const workingCapital = currentAssets - currentLiabilities;
+          const quickRatio = currentLiabilities > 0 ? (totalBank + totalAR) / currentLiabilities : null;
+          const cashRatio = currentLiabilities > 0 ? totalBank / currentLiabilities : null;
+
+          // AR Aging
+          const aging = { d30: 0, d60: 0, d90: 0, d90p: 0 };
+          Object.entries(ledgers || {}).forEach(([month, m]) => {
+            const invDate = new Date(month + "-15");
+            (m.clients || []).forEach(c => {
+              if (!c.name || c.status !== "미입금") return;
+              const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
+              if (amt <= 0) return;
+              const days = Math.floor((now - invDate) / 86400000);
+              if (days <= 30) aging.d30 += amt;
+              else if (days <= 60) aging.d60 += amt;
+              else if (days <= 90) aging.d90 += amt;
+              else aging.d90p += amt;
+            });
+          });
+          Object.entries(clientAR || {}).forEach(([name, data]) => {
+            const entries = (data && data.entries) || [];
+            entries.forEach(a => {
+              if (a.type !== "청구") return;
+              const amt = parseFloat(a.amount) || 0;
+              if (amt <= 0) return;
+              const d = a.date ? new Date(a.date) : now;
+              const days = Math.floor((now - d) / 86400000);
+              if (days <= 30) aging.d30 += amt;
+              else if (days <= 60) aging.d60 += amt;
+              else if (days <= 90) aging.d90 += amt;
+              else aging.d90p += amt;
+            });
+          });
+          const agingTotal = aging.d30 + aging.d60 + aging.d90 + aging.d90p;
+
+          // 13주 현금 예측
+          const weeks = [];
+          let runningBalance = totalBank;
+          for (let w = 0; w < 13; w++) {
+            const weekStart = new Date(now.getTime() + w*7*86400000);
+            const weekEnd = new Date(weekStart.getTime() + 7*86400000);
+            const weeklyFixed = monthlyFixedExpense / 4.33;
+            let weeklyScheduled = 0;
+            scheduledExpenses.forEach(e => {
+              const day = parseInt(e.dueDay) || 0;
+              const dueThisMonth = new Date(weekStart.getFullYear(), weekStart.getMonth(), day);
+              if (dueThisMonth >= weekStart && dueThisMonth < weekEnd) {
+                weeklyScheduled += parseFloat(e.amount) || 0;
+              }
+            });
+            let inflow = 0;
+            if (w === 0) inflow += aging.d30 * 0.4;
+            else if (w <= 4) inflow += (aging.d30 * 0.4 / 4) + (aging.d60 * 0.5 / 4);
+            else if (w <= 8) inflow += (aging.d60 * 0.3 / 4) + (aging.d90 * 0.4 / 4);
+            else inflow += aging.d90p * 0.1 / 4;
+            inflow += dailySales * 7 * 0.7;
+            const outflow = weeklyFixed + weeklyScheduled + (recentPurchase30 / 4.33);
+            const net = inflow - outflow;
+            runningBalance += net;
+            weeks.push({ w: w+1, label: `W${w+1}`, date: weekStart, inflow: Math.round(inflow), outflow: Math.round(outflow), net: Math.round(net), balance: Math.round(runningBalance) });
+          }
+
+          const fmtCompact = (n) => {
+            const v = Math.abs(n);
+            if (v >= 1e8) return (n/1e8).toFixed(1) + "억";
+            if (v >= 1e7) return (n/1e7).toFixed(1) + "천만";
+            if (v >= 1e4) return (n/1e4).toFixed(0) + "만";
+            return Math.round(n).toLocaleString();
+          };
+
+          const exportCSV = () => {
+            const rows = [
+              ["주차", "날짜", "입금 예상", "출금 예상", "순현금", "누적 잔액"],
+              ...weeks.map(w => [w.label, w.date.toISOString().slice(0,10), w.inflow, w.outflow, w.net, w.balance]),
+            ];
+            const csv = "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = `13주현금흐름_${new Date().toISOString().slice(0,10)}.csv`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          };
+
+          const tile = (label, value, sub, color) => (
+            <div style={{padding:"14px 16px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:12}}>
+              <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.6,marginBottom:4}}>{label}</div>
+              <div style={{fontSize:22,fontWeight:800,color:color||"var(--text1)",lineHeight:1.05,fontVariantNumeric:"tabular-nums"}}>{value}</div>
+              {sub && <div style={{fontSize:11,color:"var(--text2)",marginTop:3}}>{sub}</div>}
+            </div>
+          );
+
+          return <>
+          {/* 운전자본 KPI */}
+          <div className="card" style={{padding:"18px 20px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:8,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",letterSpacing:-0.2}}>운전자본 분석 <span style={{fontSize:11,fontWeight:500,color:"var(--text3)",marginLeft:6}}>Working Capital Metrics</span></div>
+                <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>업계 표준 재무 지표 · 자동 계산</div>
+              </div>
+              <button onClick={exportCSV} style={{padding:"8px 14px",fontSize:12,fontWeight:600,color:"#fff",background:"linear-gradient(135deg,#10B981,#059669)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(16,185,129,0.3)",display:"inline-flex",alignItems:"center",gap:6}}>
+                <span>📊</span><span>CSV 내보내기</span>
+              </button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+              {tile("DSO 매출채권회전일", `${dso}`+"일", dailySales > 0 ? `일평균 매출 ${fmtCompact(dailySales)}원` : "데이터 부족", dso < 60 ? "#10B981" : dso < 90 ? "#F59E0B" : "#EF4444")}
+              {tile("DPO 매입채무회전일", `${dpo}`+"일", dailyPurchase > 0 ? `일평균 매입 ${fmtCompact(dailyPurchase)}원` : "데이터 부족", dpo > 30 ? "#10B981" : "#F59E0B")}
+              {tile("CCC 현금전환주기", `${ccc}`+"일", ccc < 0 ? "역운전자본 (선수금)" : "수금-지급 격차", ccc < 30 ? "#10B981" : ccc < 60 ? "#F59E0B" : "#EF4444")}
+              {tile("운전자본", fmtCompact(workingCapital)+"원", `유동자산 ${fmtCompact(currentAssets)} − 단기부채 ${fmtCompact(currentLiabilities)}`, workingCapital > 0 ? "#10B981" : "#EF4444")}
+              {tile("당좌비율 Quick Ratio", quickRatio !== null ? quickRatio.toFixed(2)+"x" : "—", quickRatio !== null ? (quickRatio >= 1 ? "건전 (≥1)" : "부족") : "단기부채 데이터 필요", quickRatio !== null && quickRatio >= 1.5 ? "#10B981" : quickRatio !== null && quickRatio >= 1 ? "#F59E0B" : "#EF4444")}
+              {tile("현금비율 Cash Ratio", cashRatio !== null ? cashRatio.toFixed(2)+"x" : "—", cashRatio !== null ? `${(cashRatio*100).toFixed(0)}% 즉시 결제 가능` : "단기부채 데이터 필요", cashRatio !== null && cashRatio >= 0.5 ? "#10B981" : cashRatio !== null && cashRatio >= 0.2 ? "#F59E0B" : "#EF4444")}
+            </div>
+          </div>
+
+          {/* AR Aging */}
+          {agingTotal > 0 && (
+            <div className="card" style={{padding:"18px 20px"}}>
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",letterSpacing:-0.2}}>미수금 연령 분석 <span style={{fontSize:11,fontWeight:500,color:"var(--text3)",marginLeft:6}}>AR Aging</span></div>
+                <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>경과일별 미수금 분포 · 90일 이상은 회수 어려움</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:14}}>
+                {tile("0–30일 (정상)", fmtCompact(aging.d30)+"원", `${(aging.d30/agingTotal*100).toFixed(0)}%`, "#10B981")}
+                {tile("31–60일 (주의)", fmtCompact(aging.d60)+"원", `${(aging.d60/agingTotal*100).toFixed(0)}%`, "#F59E0B")}
+                {tile("61–90일 (경고)", fmtCompact(aging.d90)+"원", `${(aging.d90/agingTotal*100).toFixed(0)}%`, "#F97316")}
+                {tile("90일+ (위험)", fmtCompact(aging.d90p)+"원", `${(aging.d90p/agingTotal*100).toFixed(0)}%`, "#EF4444")}
+              </div>
+              <div style={{display:"flex",height:14,borderRadius:7,overflow:"hidden",border:"1px solid var(--divider)"}}>
+                {[["#10B981",aging.d30],["#F59E0B",aging.d60],["#F97316",aging.d90],["#EF4444",aging.d90p]].map(([c,v],i) => {
+                  const pct = (v/agingTotal*100);
+                  return pct > 0 ? <div key={i} style={{width:pct+"%",background:c}} title={`${pct.toFixed(1)}%`}/> : null;
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 13주 현금 예측 */}
+          <div className="card" style={{padding:"18px 20px"}}>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",letterSpacing:-0.2}}>13주 롤링 현금흐름 예측 <span style={{fontSize:11,fontWeight:500,color:"var(--text3)",marginLeft:6}}>13-Week Rolling Cash Forecast</span></div>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>현재 잔액 {fmtCompact(totalBank)}원 기준 · 미수금 회수율/평균 매출/정기지출 자동 반영</div>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{minWidth:780,fontVariantNumeric:"tabular-nums"}}>
+                <thead><tr>
+                  <th style={{textAlign:"left",fontSize:10}}>주차</th>
+                  <th style={{textAlign:"left",fontSize:10}}>날짜</th>
+                  <th style={{textAlign:"right",fontSize:10,color:"#10B981"}}>입금 예상</th>
+                  <th style={{textAlign:"right",fontSize:10,color:"#EF4444"}}>출금 예상</th>
+                  <th style={{textAlign:"right",fontSize:10}}>순현금</th>
+                  <th style={{textAlign:"right",fontSize:10}}>누적 잔액</th>
+                  <th style={{textAlign:"left",fontSize:10,width:90}}>상태</th>
+                </tr></thead>
+                <tbody>
+                  {weeks.map(w => {
+                    const status = w.balance < 0 ? {color:"#EF4444",text:"⚠ 적자",bg:"rgba(239,68,68,0.08)"} : w.balance < monthlyFixedExpense ? {color:"#F59E0B",text:"⚠ 부족",bg:"rgba(245,158,11,0.06)"} : {color:"#10B981",text:"정상",bg:"transparent"};
+                    return <tr key={w.w} style={{background:status.bg}}>
+                      <td style={{fontWeight:700,fontSize:13,color:"var(--text1)"}}>{w.label}</td>
+                      <td style={{fontSize:12,color:"var(--text2)"}}>{w.date.toISOString().slice(5,10).replace("-",".")}</td>
+                      <td style={{textAlign:"right",fontSize:12,color:"#10B981",fontWeight:600}}>+{fmtCompact(w.inflow)}</td>
+                      <td style={{textAlign:"right",fontSize:12,color:"#EF4444",fontWeight:600}}>−{fmtCompact(w.outflow)}</td>
+                      <td style={{textAlign:"right",fontSize:12,fontWeight:700,color:w.net>=0?"#10B981":"#EF4444"}}>{w.net>=0?"+":""}{fmtCompact(w.net)}</td>
+                      <td style={{textAlign:"right",fontSize:13,fontWeight:800,color:status.color,fontVariantNumeric:"tabular-nums"}}>{fmtCompact(w.balance)}</td>
+                      <td style={{fontSize:11,fontWeight:600,color:status.color}}>{status.text}</td>
+                    </tr>;
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{marginTop:12,padding:"10px 12px",background:"var(--surface2)",borderRadius:8,fontSize:11,color:"var(--text2)",lineHeight:1.6}}>
+              💡 <strong>가정:</strong> 미수금 회수율 (30일내 80%, 60일내 50%, 90일내 30%, 90일+ 10%) · 신규 매출 70% 회수 · 정기 지출은 dueDay에 발생.
+              실제 수금/지급 일정은 통장 거래내역으로 보정됩니다.
+            </div>
+          </div>
+          </>;
+        })()}
       </>)}
 
       {/* 2) 통장 관리 */}
