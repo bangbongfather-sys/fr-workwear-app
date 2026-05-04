@@ -5305,10 +5305,27 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
           color:activeSubTab==="all"?(darkMode?"#FFE9D6":"#B84800"):"var(--text2)",
           boxShadow:activeSubTab==="all"?"0 1px 3px rgba(0,0,0,0.08)":"none",
         }}><Icon name="inventory" size={15}/>전체</button>
-        {purchaseSubTabs.map(t => (
-          <div key={t.id} style={{display:"inline-flex",alignItems:"center"}}>
+        {purchaseSubTabs.map(t => {
+          const isDragging = dragSubId === t.id;
+          const isDragOver = dragOverSubId === t.id && dragSubId && dragSubId !== t.id;
+          return (
+          <div key={t.id} draggable
+            onDragStart={(e) => { setDragSubId(t.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); } catch {} }}
+            onDragEnd={() => { setDragSubId(null); setDragOverSubId(null); }}
+            onDragOver={(e) => { if (dragSubId && dragSubId !== t.id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverSubId(t.id); } }}
+            onDragLeave={() => { if (dragOverSubId === t.id) setDragOverSubId(null); }}
+            onDrop={(e) => { e.preventDefault(); if (dragSubId && dragSubId !== t.id) reorderPurchaseSubTabs(dragSubId, t.id); setDragSubId(null); setDragOverSubId(null); }}
+            style={{
+              display:"inline-flex",alignItems:"center",
+              cursor: isDragging ? "grabbing" : "grab",
+              opacity: isDragging ? 0.4 : 1,
+              outline: isDragOver ? "2px dashed #EC6608" : "none",
+              outlineOffset: 1,
+              borderRadius: 9,
+              transition: "opacity 0.15s",
+            }}>
             <button onClick={()=>setActiveSubTab(t.name)} style={{
-              padding:"9px 12px 9px 16px",border:"none",borderRadius:"9px 0 0 9px",cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,
+              padding:"9px 12px 9px 16px",border:"none",borderRadius:"9px 0 0 9px",cursor:"inherit",fontWeight:700,fontSize:13,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,
               background:activeSubTab===t.name?(darkMode?"rgba(236,102,8,0.18)":"#fff"):"transparent",
               color:activeSubTab===t.name?(darkMode?"#FFE9D6":"#B84800"):"var(--text2)",
               boxShadow:activeSubTab===t.name?"0 1px 3px rgba(0,0,0,0.08)":"none",
@@ -5319,7 +5336,8 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
               color:"#F04452",boxShadow:activeSubTab===t.name?"0 1px 3px rgba(0,0,0,0.08)":"none",
             }}><Icon name="close" size={13}/></button>
           </div>
-        ))}
+          );
+        })}
         {showAddTabForm ? (
           <div style={{display:"inline-flex",alignItems:"center",gap:4,background:"#fff",borderRadius:9,padding:"3px"}}>
             <input autoFocus placeholder="거래처명 입력" value={newTabName} onChange={e=>setNewTabName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addSubTab();if(e.key==="Escape"){setShowAddTabForm(false);setNewTabName("");}}}
