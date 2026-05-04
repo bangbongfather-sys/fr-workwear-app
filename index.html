@@ -10597,13 +10597,19 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
               const isDragOver = dragOverId === s.id && dragSubId && dragSubId !== s.id;
               return (
                 <div key={s.id}
+                  data-sub-id={s.id}
                   draggable
                   onDragStart={(e) => { setDragSubId(s.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); } catch {} }}
                   onDragEnd={() => { setDragSubId(null); setDragOverId(null); }}
                   onDragOver={(e) => { if (dragSubId && dragSubId !== s.id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverId(s.id); } }}
                   onDragLeave={(e) => { if (dragOverId === s.id) setDragOverId(null); }}
                   onDrop={(e) => { e.preventDefault(); if (dragSubId && dragSubId !== s.id) reorderSubtabs(dragSubId, s.id); setDragSubId(null); setDragOverId(null); }}
+                  onTouchStart={(e) => onTouchStartSub(s.id, e)}
+                  onTouchMove={onTouchMoveSub}
+                  onTouchEnd={onTouchEndSub}
+                  onTouchCancel={onTouchEndSub}
                   style={{
+                    touchAction: dragSubId ? "none" : "manipulation",
                     position: "relative",
                     display: "flex", alignItems: "center", gap: 4,
                     padding: "12px 8px 12px 18px",
