@@ -3365,21 +3365,34 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
   const allMonths = Object.keys(ledgers).sort().reverse();
   const totalAcrossMonths = Object.values(ledgers).reduce((s, m) => s + (m.clients||[]).reduce((ss, c) => ss + (parseFloat(c.total)||0), 0), 0);
 
+  const LEDGER_SUBTABS = { monthly: { label: "월별 장부", icon: "ledger" }, ar: { label: "거래처별 미수금", icon: "treasury" } };
+  const ledgerSubOrder = useSubtabOrder("frw_ledger_subtab_order", ["monthly", "ar"], "data-ledger-sub");
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 토글 */}
       <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content" }}>
-        {[["monthly", "월별 장부", "ledger"], ["ar", "거래처별 미수금", "treasury"]].map(([id, label, ic]) => (
+        {ledgerSubOrder.order.map(id => {
+          const { label, icon: ic } = LEDGER_SUBTABS[id] || {};
+          if (!label) return null;
+          const dragging = ledgerSubOrder.isDragging(id);
+          const dragOver = ledgerSubOrder.isDragOver(id);
+          return (
           <button key={id} onClick={() => setSubTab(id)}
+            {...ledgerSubOrder.getProps(id)}
             style={{
-              padding: "10px 18px", border: "none", borderRadius: 9, cursor: "pointer", fontWeight: 700,
+              padding: "10px 18px", border: "none", borderRadius: 9, cursor: dragging ? "grabbing" : "pointer", fontWeight: 700,
               fontSize: 13, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 8,
               background: subTab === id ? (darkMode ? "rgba(236,102,8,0.18)" : "#fff") : "transparent",
               color: subTab === id ? (darkMode ? "#FFE9D6" : "#B84800") : "var(--text2)",
               boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
               transition: "all 0.18s",
+              opacity: dragging ? 0.4 : 1,
+              outline: dragOver ? "2px dashed #EC6608" : "none",
+              outlineOffset: 1,
+              touchAction: ledgerSubOrder.dragActive ? "none" : "manipulation",
             }}><Icon name={ic} size={15}/>{label}</button>
-        ))}
+          );
+        })}
       </div>
 
       {subTab === "ar" ? (
