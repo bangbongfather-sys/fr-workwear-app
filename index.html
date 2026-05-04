@@ -10001,6 +10001,20 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
   const localItems = companyFiles.items || {};
   const [activeSub, setActiveSub] = React.useState(() => subtabs[0]?.id || "general");
   const [renamingId, setRenamingId] = React.useState(null);
+  const [dragSubId, setDragSubId] = React.useState(null);
+  const [dragOverId, setDragOverId] = React.useState(null);
+  const reorderSubtabs = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setCompanyFiles(prev => {
+      const arr = [...(prev.subtabs || [])];
+      const fi = arr.findIndex(s => s.id === fromId);
+      const ti = arr.findIndex(s => s.id === toId);
+      if (fi < 0 || ti < 0) return prev;
+      const [moved] = arr.splice(fi, 1);
+      arr.splice(ti, 0, moved);
+      return { ...prev, subtabs: arr };
+    });
+  };
   const [renameValue, setRenameValue] = React.useState("");
   const [dragActive, setDragActive] = React.useState(false);
   const [search, setSearch] = React.useState("");
