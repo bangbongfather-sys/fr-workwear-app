@@ -19,6 +19,20 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#EC6608" />
+  <meta name="application-name" content="NJ SAFETY" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="NJ SAFETY" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      });
+    }
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
 
   <style>
@@ -6657,6 +6671,30 @@ function App() {
   const [editingSpec, setEditingSpec] = useState(null);
   const [editingGradeName, setEditingGradeName] = useState(null);
   const [syncStatus, setSyncStatus] = useState("syncing");
+  // PWA 설치 프롬프트
+  const [installPromptEvt, setInstallPromptEvt] = useState(null);
+  const [installed, setInstalled] = useState(false);
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); setInstallPromptEvt(e); };
+    const onInstalled = () => { setInstalled(true); setInstallPromptEvt(null); };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) setInstalled(true);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  const promptInstall = async () => {
+    if (!installPromptEvt) {
+      alert("설치 안내\n\n[Chrome / Edge]\n주소창 우측의 ⊞ 아이콘 클릭 → '앱 설치'\n또는 메뉴 → '앱 설치'\n\n[Safari (iOS)]\n공유 → '홈 화면에 추가'\n\n[Safari (Mac)]\n파일 → '도크에 추가'");
+      return;
+    }
+    installPromptEvt.prompt();
+    const { outcome } = await installPromptEvt.userChoice;
+    if (outcome === "accepted") setInstalled(true);
+    setInstallPromptEvt(null);
+  };
   const [quote, setQuote] = useState("");
   const [generating, setGenerating] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -7786,6 +7824,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {!installed && (
+                <button onClick={promptInstall} title="앱처럼 바탕화면에 설치" className="no-print"
+                  style={{
+                    height: 36, padding: "0 14px", borderRadius: 18,
+                    border: "none", cursor: "pointer", fontFamily: "inherit",
+                    background: "linear-gradient(135deg, #EC6608, #D85800)",
+                    color: "#fff", fontSize: 12, fontWeight: 700,
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    boxShadow: "0 2px 10px rgba(236,102,8,0.32)",
+                    whiteSpace: "nowrap", flexShrink: 0,
+                  }}>
+                  ⊕ <span className="install-label-full">앱 설치</span>
+                </button>
+              )}
               <SyncBadge />
               <button onClick={handleUndo} title="실행 취소 (Ctrl+Z / ⌘Z)"
                 style={{
