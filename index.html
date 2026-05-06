@@ -1592,18 +1592,18 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
       const sel = c.selectedGrade || "A";
       const finalPrice = c.finalPrice || 0;
       const cost = c.beforeMargin || 0;
-      const margin = finalPrice - cost;
-      const marginRate = finalPrice > 0 ? (margin / finalPrice * 100) : 0;
       // 판매량/매출 (orders에서 제품명 매칭)
       const orderRows = (orders || []).filter(o => (o.productName || "").trim() === (p.name || "").trim());
       const qty = orderRows.reduce((s, o) => s + (parseInt(o.qty) || 0), 0);
       const revenue = orderRows.reduce((s, o) => s + (parseFloat(o.unitPrice) || 0) * (parseInt(o.qty) || 0), 0);
-      // 평균 판매단가가 있으면 그 기준 마진 (없으면 finalPrice 기준)
-      const avgUnitPrice = qty > 0 ? revenue / qty : finalPrice;
-      const realMargin = avgUnitPrice - cost;
-      const realMarginRate = avgUnitPrice > 0 ? (realMargin / avgUnitPrice * 100) : 0;
-      const totalProfit = realMargin * qty;
-      return { id: p.id, name: p.name, grade: sel, cost, finalPrice, avgUnitPrice, margin, marginRate, qty, revenue, totalProfit, realMarginRate };
+      // 실효 단가: 실제 판매가 있으면 평균 판매단가, 없으면 등록 납품가
+      const avgUnitPrice = qty > 0 ? revenue / qty : 0;
+      const effectivePrice = qty > 0 ? avgUnitPrice : finalPrice;
+      const margin = effectivePrice - cost;
+      const marginRate = effectivePrice > 0 ? (margin / effectivePrice * 100) : 0;
+      const totalProfit = margin * qty;
+      const hasActualSales = qty > 0;
+      return { id: p.id, name: p.name, grade: sel, cost, finalPrice, avgUnitPrice, effectivePrice, margin, marginRate, qty, revenue, totalProfit, hasActualSales };
     }).filter(Boolean);
   }, [products, materials, laborItems, orders]);
 
