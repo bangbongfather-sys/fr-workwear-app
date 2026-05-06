@@ -1578,6 +1578,230 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
 }
 
 // 매출 추이 전용 상세 페이지
+// ─── 제품별 수익성 분석 ───
+function ProductProfitabilityView({ products, materials, laborItems, orders, darkMode, setActiveProdId, setCalcSubTab, T }) {
+  const [sortBy, setSortBy] = React.useState("totalProfit"); // totalProfit | marginRate | qty | revenue | name
+  const [filterGrade, setFilterGrade] = React.useState("ALL");
+  const [search, setSearch] = React.useState("");
+
+  // 제품별 분석 데이터 (활성 등급 기준)
+  const items = React.useMemo(() => {
+    return products.map(p => {
+      const c = computeProduct(p, materials, laborItems);
+      if (c.base <= 0) return null;
+      const sel = c.selectedGrade || "A";
+      const finalPrice = c.finalPrice || 0;
+      const cost = c.beforeMargin || 0;
+      const margin = finalPrice - cost;
+      const marginRate = finalPrice > 0 ? (margin / finalPrice * 100) : 0;
+      // 판매량/매출 (orders에서 제품명 매칭)
+      const orderRows = (orders || []).filter(o => (o.productName || "").trim() === (p.name || "").trim());
+      const qty = orderRows.reduce((s, o) => s + (parseInt(o.qty) || 0), 0);
+      const revenue = orderRows.reduce((s, o) => s + (parseFloat(o.unitPrice) || 0) * (parseInt(o.qty) || 0), 0);
+      // 평균 판매단가가 있으면 그 기준 마진 (없으면 finalPrice 기준)
+      const avgUnitPrice = qty > 0 ? revenue / qty : finalPrice;
+      const realMargin = avgUnitPrice - cost;
+      const realMarginRate = avgUnitPrice > 0 ? (realMargin / avgUnitPrice * 100) : 0;
+      const totalProfit = realMargin * qty;
+      return { id: p.id, name: p.name, grade: sel, cost, finalPrice, avgUnitPrice, margin, marginRate, qty, revenue, totalProfit, realMarginRate };
+    }).filter(Boolean);
+  }, [products, materials, laborItems, orders]);
+
+  const filtered = items.filter(i => {
+    if (filterGrade !== "ALL" && i.grade !== filterGrade) return false;
+    if (search && !(i.name || "").toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortBy === "totalProfit") return b.totalProfit - a.totalProfit;
+    if (sortBy === "marginRate") return b.marginRate - a.marginRate;
+    if (sortBy === "qty") return b.qty - a.qty;
+    if (sortBy === "revenue") return b.revenue - a.revenue;
+    return (a.name || "").localeCompare(b.name || "", "ko");
+  });
+
+  // 요약
+  const totalRevenue = items.reduce((s, i) => s + i.revenue, 0);
+  const totalProfit = items.reduce((s, i) => s + i.totalProfit, 0);
+  const avgMargin = items.length > 0 ? items.reduce((s, i) => s + i.marginRate, 0) / items.length : 0;
+  const lowMarginCount = items.filter(i => i.marginRate < 20).length;
+  const highMarginCount = items.filter(i => i.marginRate >= 30).length;
+
+  // 추천 제품 (마진율 30%↑ + 판매량 ≥ 평균)
+  const avgQty = items.length > 0 ? items.reduce((s, i) => s + i.qty, 0) / items.length : 0;
+  const stars = items.filter(i => i.marginRate >= 30 && i.qty >= avgQty && i.qty > 0).slice(0, 3);
+  // 가격 인상 검토 제품 (마진율 20%↓ + 판매량 ≥ 평균)
+  const needPriceUp = items.filter(i => i.marginRate < 20 && i.qty >= avgQty && i.qty > 0).slice(0, 3);
+
+  const fmt = n => Math.round(n || 0).toLocaleString();
+  const marginColor = (r) => r >= 30 ? "#00B493" : r >= 20 ? "#FF9500" : r > 0 ? "#F04452" : "var(--text3)";
+  const gradeColors = { A: "#EC6608", B: "#10B981", C: "#F59E0B", D: "#EF4444" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 요약 KPI */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+        <div className="card">
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>등록 제품</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text1)" }}>{items.length}<span style={{ fontSize: 13, fontWeight: 600, marginLeft: 4 }}>개</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>원가 입력 완료</div>
+        </div>
+        <div className="card">
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>평균 마진율</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: marginColor(avgMargin) }}>{avgMargin.toFixed(1)}<span style={{ fontSize: 14, fontWeight: 700 }}>%</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>활성 등급 기준</div>
+        </div>
+        <div className="card">
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>총 매출 (판매기록)</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)" }}>{fmt(totalRevenue)}<span style={{ fontSize: 13, fontWeight: 600, marginLeft: 2 }}>원</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{(orders || []).length}건 합산</div>
+        </div>
+        <div className="card">
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>총 마진 (추정)</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: totalProfit > 0 ? "#00B493" : "var(--text3)" }}>{fmt(totalProfit)}<span style={{ fontSize: 13, fontWeight: 600, marginLeft: 2 }}>원</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>판매가 × 마진율</div>
+        </div>
+        <div className="card">
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>마진율 분포</div>
+          <div style={{ display: "flex", gap: 10, alignItems: "baseline", marginTop: 4 }}>
+            <div title="마진율 30% 이상"><span style={{ fontSize: 18, fontWeight: 800, color: "#00B493" }}>{highMarginCount}</span><span style={{ fontSize: 10, color: "var(--text3)", marginLeft: 3 }}>우수</span></div>
+            <div title="마진율 20% 미만"><span style={{ fontSize: 18, fontWeight: 800, color: "#F04452" }}>{lowMarginCount}</span><span style={{ fontSize: 10, color: "var(--text3)", marginLeft: 3 }}>저조</span></div>
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 3 }}>30%↑ 우수 / 20%↓ 저조</div>
+        </div>
+      </div>
+
+      {/* 추천 액션 */}
+      {(stars.length > 0 || needPriceUp.length > 0) && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+          {stars.length > 0 && (
+            <div className="card" style={{ borderLeft: "3px solid #00B493" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#00B493", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="sparkles" size={14}/>대표 효자 제품 (마진율 30%↑ + 판매량 양호)</div>
+              {stars.map(s => (
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px dashed var(--divider)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 6px", borderRadius: 4, background: gradeColors[s.grade] || "#888", color: "#fff", flexShrink: 0 }}>{s.grade}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#00B493", flexShrink: 0 }}>{s.marginRate.toFixed(1)}%</span>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}>💡 영업·마케팅 자원을 더 투입할 제품들입니다.</div>
+            </div>
+          )}
+          {needPriceUp.length > 0 && (
+            <div className="card" style={{ borderLeft: "3px solid #F04452" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#F04452", marginBottom: 8, display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="alert" size={14}/>가격 인상 검토 (마진율 20%↓ + 판매량 양호)</div>
+              {needPriceUp.map(s => (
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px dashed var(--divider)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 6px", borderRadius: 4, background: gradeColors[s.grade] || "#888", color: "#fff", flexShrink: 0 }}>{s.grade}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#F04452", flexShrink: 0 }}>{s.marginRate.toFixed(1)}%</span>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}>💡 잘 팔리지만 마진이 낮습니다 — 단계적 가격 인상 또는 원가 절감 검토.</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 필터 + 정렬 */}
+      <div className="card">
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input placeholder="제품명 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ height: 38, fontSize: 13, flex: "1 1 200px", minWidth: 160 }}/>
+          <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} style={{ height: 38, fontSize: 13, width: 130 }}>
+            <option value="ALL">전체 등급</option>
+            <option value="A">A급만</option>
+            <option value="B">B급만</option>
+            <option value="C">C급만</option>
+            <option value="D">D급만</option>
+          </select>
+          <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ height: 38, fontSize: 13, width: 160 }}>
+            <option value="totalProfit">총 마진 큰 순</option>
+            <option value="marginRate">마진율 높은 순</option>
+            <option value="qty">판매량 많은 순</option>
+            <option value="revenue">매출액 큰 순</option>
+            <option value="name">이름순</option>
+          </select>
+        </div>
+      </div>
+
+      {/* 표 */}
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {sorted.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px 24px", color: "var(--text3)", fontSize: 14, lineHeight: 1.8 }}>
+            {items.length === 0
+              ? <>분석할 제품이 없습니다.<br/>단가 계산기에서 원단·공임·마진을 입력하세요.</>
+              : "조건에 맞는 제품이 없습니다."}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead><tr>
+                <th style={{ width: 36, textAlign: "center" }}>#</th>
+                <th>제품명</th>
+                <th style={{ textAlign: "center", width: 60 }}>등급</th>
+                <th style={{ textAlign: "right", width: 110 }}>원가</th>
+                <th style={{ textAlign: "right", width: 110 }}>납품가</th>
+                <th style={{ textAlign: "right", width: 110 }}>단위 마진</th>
+                <th style={{ textAlign: "right", width: 90 }}>마진율</th>
+                <th style={{ textAlign: "right", width: 80 }}>판매량</th>
+                <th style={{ textAlign: "right", width: 130 }}>총 매출</th>
+                <th style={{ textAlign: "right", width: 130 }}>총 마진</th>
+                <th style={{ textAlign: "center", width: 80 }}>관리</th>
+              </tr></thead>
+              <tbody>
+                {sorted.map((it, idx) => {
+                  const mc = marginColor(it.marginRate);
+                  return (
+                    <tr key={it.id}>
+                      <td style={{ textAlign: "center", fontSize: 12, color: "var(--text3)" }}>{idx + 1}</td>
+                      <td style={{ fontSize: 13, fontWeight: 600, color: "var(--text1)" }}>{it.name}</td>
+                      <td style={{ textAlign: "center" }}><span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: gradeColors[it.grade] || "#888", color: "#fff", fontSize: 10, fontWeight: 800 }}>{it.grade}</span></td>
+                      <td style={{ textAlign: "right", fontSize: 12, color: "var(--text2)" }}>{fmt(it.cost)}원</td>
+                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 600 }}>{fmt(it.finalPrice)}원</td>
+                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: mc }}>{fmt(it.margin)}원</td>
+                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 800, color: mc }}>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <div style={{ width: 36, height: 6, background: "var(--divider)", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{ width: `${Math.min(100, Math.max(0, it.marginRate * 2))}%`, height: "100%", background: mc, borderRadius: 3 }}/>
+                          </div>
+                          <span style={{ minWidth: 44, textAlign: "right" }}>{it.marginRate.toFixed(1)}%</span>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: "right", fontSize: 12, color: "var(--text2)" }}>{it.qty > 0 ? it.qty.toLocaleString() : "—"}</td>
+                      <td style={{ textAlign: "right", fontSize: 12, fontWeight: 600 }}>{it.revenue > 0 ? fmt(it.revenue) + "원" : "—"}</td>
+                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 800, color: it.totalProfit > 0 ? "#00B493" : "var(--text3)" }}>{it.totalProfit > 0 ? fmt(it.totalProfit) + "원" : "—"}</td>
+                      <td style={{ textAlign: "center" }}>
+                        <button onClick={() => { setActiveProdId(it.id); setCalcSubTab("calculator"); }}
+                          title="단가 계산기에서 열기"
+                          style={{ background: "transparent", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 600, color: "var(--text2)", cursor: "pointer", fontFamily: "inherit" }}>편집</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ borderTop: "2px solid var(--divider)", background: darkMode ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.02)" }}>
+                  <td colSpan={8} style={{ fontWeight: 800, fontSize: 14, padding: "10px 12px" }}>합계 ({sorted.length}개 제품)</td>
+                  <td style={{ textAlign: "right", fontWeight: 900, fontSize: 14, padding: "10px 12px" }}>{fmt(sorted.reduce((s, i) => s + i.revenue, 0))}원</td>
+                  <td style={{ textAlign: "right", fontWeight: 900, fontSize: 14, padding: "10px 12px", color: "#00B493" }}>{fmt(sorted.reduce((s, i) => s + i.totalProfit, 0))}원</td>
+                  <td/>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: 11, color: "var(--text3)", padding: "10px 14px", background: "var(--surface2)", borderRadius: 8, lineHeight: 1.7 }}>
+        💡 <b>분석 기준</b>: 활성 스펙 + 활성 등급 단가 · 매출은 「판매 기록(주문)」 데이터 합산 · 총 마진 = 단위 마진 × 판매량 (실 단가가 있으면 그 기준).<br/>
+        💡 <b>색상</b>: <span style={{color:"#00B493",fontWeight:700}}>30%↑ 우수</span> / <span style={{color:"#FF9500",fontWeight:700}}>20~30% 보통</span> / <span style={{color:"#F04452",fontWeight:700}}>20%↓ 저조</span>
+      </div>
+    </div>
+  );
+}
+
 function SalesDetailView({ onBack, thisYear, months12, monthLabels, monthValues, monthlyRevOrders, monthlyRevLedger = {}, monthSource = [], monthlySales, setMonthlySales, orders, darkMode }) {
   const chartRef = useRef(null);
   const chartInst = useRef(null);
