@@ -6860,6 +6860,17 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [tab, products, activeProdId, prodSearch]);
 
+  // 활성 제품 칩이 보이도록 자동 스크롤
+  useEffect(() => {
+    if (tab !== "calc" || !activeProdId) return;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-prod-chip-scroll="1"] [data-prodid="${activeProdId}"]`);
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      }
+    });
+  }, [tab, activeProdId]);
+
   const applyCloudData = (d) => {
     if (!d) return;
     if (d.materials) setMaterials(d.materials);
