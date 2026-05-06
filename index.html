@@ -2066,8 +2066,37 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
         <button onClick={onBack} style={{padding:"8px 16px",borderRadius:10,border:"1px solid var(--border)",background:"var(--surface)",cursor:"pointer",fontSize:13,fontFamily:"inherit",color:"var(--text2)",display:"flex",alignItems:"center",gap:6}}>← 대시보드로</button>
         <div style={{fontSize:20,fontWeight:800,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="clipboard" size={14}/>제품별 판매 현황 </span><span style={{fontSize:13,fontWeight:500,color:"var(--text3)"}}>상세 관리</span></div>
         <div style={{flex:1}}/>
+        <button onClick={addingNew ? cancelAdd : startAdd} className={addingNew ? "" : "btn-primary"}
+          style={addingNew
+            ? {padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"transparent",cursor:"pointer",fontSize:13,fontFamily:"inherit",color:"var(--text2)"}
+            : {padding:"8px 16px",fontSize:13}}>
+          {addingNew ? "닫기" : <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="plus" size={14}/>판매 추가</span>}
+        </button>
         <button onClick={exportCSV} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,fontFamily:"inherit",color:"var(--text2)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="inbox" size={14}/>CSV 내보내기</span></button>
       </div>
+
+      {addingNew && (
+        <div className="card" style={{ background: "var(--surface2)", borderLeft: "3px solid #007AFF" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", marginBottom: 12, display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="plus" size={14}/>새 판매 기록 추가</div>
+          <div style={{ display: "grid", gridTemplateColumns: "130px 1fr 70px 110px 1fr", gap: 8, marginBottom: 8 }}>
+            <input type="date" value={newDraft.date} onChange={e => setNewDraft(d => ({ ...d, date: e.target.value }))} title="판매일"/>
+            <input list="frw-orders-prod-list" placeholder="제품 선택 또는 직접 입력 *" value={newDraft.productName} onChange={e => setNewDraft(d => ({ ...d, productName: e.target.value }))}/>
+            <input type="number" placeholder="수량" value={newDraft.qty} onChange={e => setNewDraft(d => ({ ...d, qty: e.target.value }))}/>
+            <input type="number" placeholder="단가(원) *" value={newDraft.unitPrice} onChange={e => setNewDraft(d => ({ ...d, unitPrice: e.target.value }))}/>
+            <input placeholder="거래처명" value={newDraft.client} onChange={e => setNewDraft(d => ({ ...d, client: e.target.value }))}/>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "130px 130px 1fr auto auto", gap: 8 }}>
+            <input type="date" value={newDraft.paymentDue} onChange={e => setNewDraft(d => ({ ...d, paymentDue: e.target.value }))} title="결제 예정일"/>
+            <input type="date" value={newDraft.paidDate} onChange={e => setNewDraft(d => ({ ...d, paidDate: e.target.value }))} title="결제 완료일"/>
+            <input placeholder="비고 (선택)" value={newDraft.note} onChange={e => setNewDraft(d => ({ ...d, note: e.target.value }))}/>
+            <button onClick={cancelAdd} style={{ padding: "0 14px", height: 44, borderRadius: 10, border: "1px solid var(--border)", background: "transparent", cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--text2)", fontFamily: "inherit" }}>취소</button>
+            <button onClick={saveAdd} className="btn-primary" style={{ padding: "0 22px", height: 44, fontSize: 13 }}>저장</button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>
+            💡 결제 완료일을 입력하면 즉시 「완납」 처리됩니다. 결제 예정일만 입력 시 「미수」로 등록됩니다.
+          </div>
+        </div>
+      )}
 
       {/* 요약 KPI */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
