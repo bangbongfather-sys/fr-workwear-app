@@ -1779,9 +1779,14 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
                       <td style={{ fontSize: 13, fontWeight: 600, color: "var(--text1)" }}>{it.name}</td>
                       <td style={{ textAlign: "center" }}><span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 999, background: gradeColors[it.grade] || "#888", color: "#fff", fontSize: 10, fontWeight: 800 }}>{it.grade}</span></td>
                       <td style={{ textAlign: "right", fontSize: 12, color: "var(--text2)" }}>{fmt(it.cost)}원</td>
-                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 600 }}>{fmt(it.finalPrice)}원</td>
+                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 600 }} title={it.hasActualSales ? `등록 단가: ${fmt(it.finalPrice)}원\n실 평균 판매가: ${fmt(it.avgUnitPrice)}원` : `등록 단가: ${fmt(it.finalPrice)}원`}>
+                        {fmt(it.effectivePrice)}원
+                        {it.hasActualSales && Math.abs(it.avgUnitPrice - it.finalPrice) > 1 && (
+                          <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text3)", marginTop: 1 }}>실판매 평균</div>
+                        )}
+                      </td>
                       <td style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: mc }}>{fmt(it.margin)}원</td>
-                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 800, color: mc }}>
+                      <td style={{ textAlign: "right", fontSize: 13, fontWeight: 800, color: mc }} title={it.hasActualSales ? "실 평균 판매가 기준" : "등록 납품가 기준"}>
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                           <div style={{ width: 36, height: 6, background: "var(--divider)", borderRadius: 3, overflow: "hidden" }}>
                             <div style={{ width: `${Math.min(100, Math.max(0, it.marginRate * 2))}%`, height: "100%", background: mc, borderRadius: 3 }}/>
