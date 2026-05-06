@@ -2846,12 +2846,12 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
         </div>
         {showOrderForm&&(
           <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
+            <datalist id="frw-dash-prod-list">
+              {products.map(p => <option key={p.id} value={p.name}/>)}
+            </datalist>
             <div style={{display:"grid",gridTemplateColumns:"130px 1fr 70px 110px",gap:8,marginBottom:8}}>
               <input type="date" value={newOrder.date} onChange={e=>setNewOrder(o=>({...o,date:e.target.value}))}/>
               <input list="frw-dash-prod-list" placeholder="제품 선택 또는 직접 입력 *" value={newOrder.productName} onChange={e=>setNewOrder(o=>({...o,productName:e.target.value}))}/>
-              <datalist id="frw-dash-prod-list">
-                {products.map(p => <option key={p.id} value={p.name}/>)}
-              </datalist>
               <input type="number" placeholder="수량" value={newOrder.qty} onChange={e=>setNewOrder(o=>({...o,qty:e.target.value}))}/>
               <input type="number" placeholder="단가(원) *" value={newOrder.unitPrice} onChange={e=>setNewOrder(o=>({...o,unitPrice:e.target.value}))}/>
             </div>
