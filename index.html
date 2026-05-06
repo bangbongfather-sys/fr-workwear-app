@@ -19,6 +19,20 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#EC6608" />
+  <meta name="application-name" content="NJ SAFETY" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="NJ SAFETY" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      });
+    }
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
 
   <style>
@@ -742,6 +756,66 @@
 <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
 
+// ─── 서브탭 순서 변경 훅 (드래그 앤 드롭 + 모바일 터치) ───
+function useSubtabOrder(storageKey, defaultIds, dataAttr = "data-tab-id") {
+  const { useState, useEffect, useRef } = React;
+  const [order, setOrder] = useState(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(storageKey) || "null");
+      if (Array.isArray(v) && v.length === defaultIds.length && defaultIds.every(id => v.includes(id))) return v;
+    } catch {}
+    return defaultIds;
+  });
+  useEffect(() => { try { localStorage.setItem(storageKey, JSON.stringify(order)); } catch {} }, [order, storageKey]);
+  const [dragId, setDragId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+  const reorder = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setOrder(prev => {
+      const arr = [...prev];
+      const fi = arr.indexOf(fromId);
+      const ti = arr.indexOf(toId);
+      if (fi < 0 || ti < 0) return prev;
+      const [m] = arr.splice(fi, 1);
+      arr.splice(ti, 0, m);
+      return arr;
+    });
+  };
+  const touchRef = useRef({ active: false, startX: 0, startY: 0, id: null });
+  const getProps = (id) => ({
+    [dataAttr]: id,
+    draggable: true,
+    onDragStart: (e) => { setDragId(id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", id); } catch {} },
+    onDragEnd: () => { setDragId(null); setDragOverId(null); },
+    onDragOver: (e) => { if (dragId && dragId !== id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverId(id); } },
+    onDragLeave: () => { if (dragOverId === id) setDragOverId(null); },
+    onDrop: (e) => { e.preventDefault(); if (dragId && dragId !== id) reorder(dragId, id); setDragId(null); setDragOverId(null); },
+    onTouchStart: (e) => { const t = e.touches[0]; touchRef.current = { active: false, startX: t.clientX, startY: t.clientY, id }; },
+    onTouchMove: (e) => {
+      const ds = touchRef.current; if (!ds.id) return;
+      const t = e.touches[0];
+      if (!ds.active) {
+        if (Math.abs(t.clientX - ds.startX) > 8 || Math.abs(t.clientY - ds.startY) > 8) { ds.active = true; setDragId(ds.id); }
+        else return;
+      }
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const tabEl = el && el.closest && el.closest(`[${dataAttr}]`);
+      const targetId = tabEl ? tabEl.getAttribute(dataAttr) : null;
+      if (targetId !== dragOverId) setDragOverId(targetId);
+    },
+    onTouchEnd: () => {
+      const ds = touchRef.current;
+      if (ds.active && dragOverId && dragOverId !== ds.id) reorder(ds.id, dragOverId);
+      touchRef.current = { active: false, startX: 0, startY: 0, id: null };
+      setDragId(null); setDragOverId(null);
+    },
+    onTouchCancel: () => { touchRef.current = { active: false, startX: 0, startY: 0, id: null }; setDragId(null); setDragOverId(null); },
+  });
+  const isDragging = (id) => dragId === id;
+  const isDragOver = (id) => dragOverId === id && dragId && dragId !== id;
+  return { order, getProps, isDragging, isDragOver, dragActive: !!dragId };
+}
+
 // ─── 통합 아이콘 (애플 미니멀 라인 스타일, Lucide 기반) ───
 const ICON_PATHS = {
   pricedb:    <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></>,
@@ -781,6 +855,8 @@ const ICON_PATHS = {
   trendingUp: <><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></>,
   clipboard:  <><path d="M9 2h6a2 2 0 0 1 2 2v2H7V4a2 2 0 0 1 2-2z"/><path d="M5 6h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/></>,
   document:   <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></>,
+  filePdf:    <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 13v5M11 13v5M7 13v5M9 13h2a1 1 0 0 1 0 2H9"/></>,
+  fileSheet:  <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="13" x2="12" y2="21"/></>,
   sparkles:   <><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"/><path d="M19 13l.7 2.3L22 16l-2.3.7L19 19l-.7-2.3L16 16l2.3-.7z"/></>,
   inbox:      <><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></>,
   save:       <><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></>,
@@ -3305,21 +3381,34 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
   const allMonths = Object.keys(ledgers).sort().reverse();
   const totalAcrossMonths = Object.values(ledgers).reduce((s, m) => s + (m.clients||[]).reduce((ss, c) => ss + (parseFloat(c.total)||0), 0), 0);
 
+  const LEDGER_SUBTABS = { monthly: { label: "월별 장부", icon: "ledger" }, ar: { label: "거래처별 미수금", icon: "treasury" } };
+  const ledgerSubOrder = useSubtabOrder("frw_ledger_subtab_order", ["monthly", "ar"], "data-ledger-sub");
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 토글 */}
       <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content" }}>
-        {[["monthly", "월별 장부", "ledger"], ["ar", "거래처별 미수금", "treasury"]].map(([id, label, ic]) => (
+        {ledgerSubOrder.order.map(id => {
+          const { label, icon: ic } = LEDGER_SUBTABS[id] || {};
+          if (!label) return null;
+          const dragging = ledgerSubOrder.isDragging(id);
+          const dragOver = ledgerSubOrder.isDragOver(id);
+          return (
           <button key={id} onClick={() => setSubTab(id)}
+            {...ledgerSubOrder.getProps(id)}
             style={{
-              padding: "10px 18px", border: "none", borderRadius: 9, cursor: "pointer", fontWeight: 700,
+              padding: "10px 18px", border: "none", borderRadius: 9, cursor: dragging ? "grabbing" : "pointer", fontWeight: 700,
               fontSize: 13, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 8,
               background: subTab === id ? (darkMode ? "rgba(236,102,8,0.18)" : "#fff") : "transparent",
               color: subTab === id ? (darkMode ? "#FFE9D6" : "#B84800") : "var(--text2)",
               boxShadow: subTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
               transition: "all 0.18s",
+              opacity: dragging ? 0.4 : 1,
+              outline: dragOver ? "2px dashed #EC6608" : "none",
+              outlineOffset: 1,
+              touchAction: ledgerSubOrder.dragActive ? "none" : "manipulation",
             }}><Icon name={ic} size={15}/>{label}</button>
-        ))}
+          );
+        })}
       </div>
 
       {subTab === "ar" ? (
@@ -3381,10 +3470,18 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
         <div style={{flex:1}}/>
         <button onClick={() => exportLedgerExcel(selectedYM, monthClients)} disabled={monthClients.length===0}
           title="현재 월 장부 엑셀 다운로드"
-          style={{padding:"8px 14px",height:38,borderRadius:10,border:"1.5px solid #16A34A",background:monthClients.length===0?"transparent":"rgba(22,163,74,0.10)",color:monthClients.length===0?"var(--text3)":"#16A34A",fontSize:12,fontWeight:700,cursor:monthClients.length===0?"not-allowed":"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,opacity:monthClients.length===0?0.5:1}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="barChart" size={14}/>엑셀</span></button>
+          style={{padding:"8px 14px",height:38,borderRadius:10,border:"1.5px solid var(--divider)",background:"transparent",color:monthClients.length===0?"var(--text3)":"var(--text2)",fontSize:12,fontWeight:600,cursor:monthClients.length===0?"not-allowed":"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,opacity:monthClients.length===0?0.5:1,transition:"all 0.15s"}}
+          onMouseEnter={e => { if (!e.currentTarget.disabled) { e.currentTarget.style.borderColor = "var(--text1)"; e.currentTarget.style.color = "var(--text1)"; } }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--divider)"; e.currentTarget.style.color = monthClients.length===0?"var(--text3)":"var(--text2)"; }}>
+          <Icon name="fileSheet" size={14}/>엑셀
+        </button>
         <button onClick={() => exportLedgerPDF(selectedYM, monthClients)} disabled={monthClients.length===0}
           title="현재 월 장부 PDF 다운로드"
-          style={{padding:"8px 14px",height:38,borderRadius:10,border:"1.5px solid #DC2626",background:monthClients.length===0?"transparent":"rgba(220,38,38,0.10)",color:monthClients.length===0?"var(--text3)":"#DC2626",fontSize:12,fontWeight:700,cursor:monthClients.length===0?"not-allowed":"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,opacity:monthClients.length===0?0.5:1}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="document" size={14}/>PDF</span></button>
+          style={{padding:"8px 14px",height:38,borderRadius:10,border:"1.5px solid var(--divider)",background:"transparent",color:monthClients.length===0?"var(--text3)":"var(--text2)",fontSize:12,fontWeight:600,cursor:monthClients.length===0?"not-allowed":"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,opacity:monthClients.length===0?0.5:1,transition:"all 0.15s"}}
+          onMouseEnter={e => { if (!e.currentTarget.disabled) { e.currentTarget.style.borderColor = "var(--text1)"; e.currentTarget.style.color = "var(--text1)"; } }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--divider)"; e.currentTarget.style.color = monthClients.length===0?"var(--text3)":"var(--text2)"; }}>
+          <Icon name="filePdf" size={14}/>PDF
+        </button>
         <span style={{fontSize:11,color:"var(--text3)"}}>전체 누적: <b style={{color:"var(--text1)"}}>{Math.round(totalAcrossMonths).toLocaleString()}원</b></span>
       </div>
 
@@ -4385,15 +4482,34 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
     transition: "all 0.18s",
   });
 
+  const TREASURY_SUBTABS = {
+    dashboard: { label: "자금 대시보드", icon: "barChart" },
+    accounts: { label: "통장 관리", icon: "treasury" },
+    investments: { label: "투자 현황", icon: "trendingUp" },
+    ar: { label: "미수금 회수", icon: "clipboard" },
+    schedule: { label: "정기 지출", icon: "calendar" },
+  };
+  const treasurySubOrder = useSubtabOrder("frw_treasury_subtab_order", ["dashboard","accounts","investments","ar","schedule"], "data-treasury-sub");
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 */}
       <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content", flexWrap: "wrap" }}>
-        <button onClick={()=>setSubTab("dashboard")} style={subTabBtnStyle("dashboard")}><Icon name="barChart" size={15}/>자금 대시보드</button>
-        <button onClick={()=>setSubTab("accounts")} style={subTabBtnStyle("accounts")}><Icon name="treasury" size={15}/>통장 관리</button>
-        <button onClick={()=>setSubTab("investments")} style={subTabBtnStyle("investments")}><Icon name="trendingUp" size={15}/>투자 현황</button>
-        <button onClick={()=>setSubTab("ar")} style={subTabBtnStyle("ar")}><Icon name="clipboard" size={15}/>미수금 회수</button>
-        <button onClick={()=>setSubTab("schedule")} style={subTabBtnStyle("schedule")}><Icon name="calendar" size={15}/>정기 지출</button>
+        {treasurySubOrder.order.map(id => {
+          const cfg = TREASURY_SUBTABS[id]; if (!cfg) return null;
+          const dragging = treasurySubOrder.isDragging(id);
+          const dragOver = treasurySubOrder.isDragOver(id);
+          return (
+            <button key={id} onClick={()=>setSubTab(id)} {...treasurySubOrder.getProps(id)}
+              style={{
+                ...subTabBtnStyle(id),
+                cursor: dragging ? "grabbing" : "pointer",
+                opacity: dragging ? 0.4 : 1,
+                outline: dragOver ? "2px dashed #EC6608" : "none",
+                outlineOffset: 1,
+                touchAction: treasurySubOrder.dragActive ? "none" : "manipulation",
+              }}><Icon name={cfg.icon} size={15}/>{cfg.label}</button>
+          );
+        })}
       </div>
 
       {/* 1) 대시보드 */}
@@ -5103,6 +5219,48 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
   const [showAddTabForm, setShowAddTabForm] = useState(false);
   const [newTabName, setNewTabName] = useState("");
+  const [dragSubId, setDragSubId] = useState(null);
+  const [dragOverSubId, setDragOverSubId] = useState(null);
+  const reorderPurchaseSubTabs = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setPurchaseSubTabs(prev => {
+      const arr = [...(prev || [])];
+      const fi = arr.findIndex(x => x.id === fromId);
+      const ti = arr.findIndex(x => x.id === toId);
+      if (fi < 0 || ti < 0) return prev;
+      const [moved] = arr.splice(fi, 1);
+      arr.splice(ti, 0, moved);
+      return arr;
+    });
+  };
+  const touchDragRef = useRef({ active: false, startX: 0, startY: 0, id: null });
+  const onTouchStartSub = (id, e) => {
+    const t = e.touches[0];
+    touchDragRef.current = { active: false, startX: t.clientX, startY: t.clientY, id };
+  };
+  const onTouchMoveSub = (e) => {
+    const ds = touchDragRef.current;
+    if (!ds.id) return;
+    const t = e.touches[0];
+    if (!ds.active) {
+      const dx = Math.abs(t.clientX - ds.startX);
+      const dy = Math.abs(t.clientY - ds.startY);
+      if (dx > 8 || dy > 8) { ds.active = true; setDragSubId(ds.id); }
+      else return;
+    }
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const tabEl = el && el.closest && el.closest("[data-purchase-sub-id]");
+    const targetId = tabEl ? tabEl.getAttribute("data-purchase-sub-id") : null;
+    if (targetId !== dragOverSubId) setDragOverSubId(targetId);
+  };
+  const onTouchEndSub = () => {
+    const ds = touchDragRef.current;
+    if (ds.active && dragOverSubId && dragOverSubId !== ds.id) {
+      reorderPurchaseSubTabs(ds.id, dragOverSubId);
+    }
+    touchDragRef.current = { active: false, startX: 0, startY: 0, id: null };
+    setDragSubId(null); setDragOverSubId(null);
+  };
   const totalSumRef = useRef(null); const totalSumInst = useRef(null);
   const monthlyTrendRef = useRef(null); const monthlyTrendInst = useRef(null);
   const matPieRef = useRef(null); const matPieInst = useRef(null);
@@ -5290,10 +5448,32 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
           color:activeSubTab==="all"?(darkMode?"#FFE9D6":"#B84800"):"var(--text2)",
           boxShadow:activeSubTab==="all"?"0 1px 3px rgba(0,0,0,0.08)":"none",
         }}><Icon name="inventory" size={15}/>전체</button>
-        {purchaseSubTabs.map(t => (
-          <div key={t.id} style={{display:"inline-flex",alignItems:"center"}}>
+        {purchaseSubTabs.map(t => {
+          const isDragging = dragSubId === t.id;
+          const isDragOver = dragOverSubId === t.id && dragSubId && dragSubId !== t.id;
+          return (
+          <div key={t.id} data-purchase-sub-id={t.id} draggable
+            onDragStart={(e) => { setDragSubId(t.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); } catch {} }}
+            onDragEnd={() => { setDragSubId(null); setDragOverSubId(null); }}
+            onDragOver={(e) => { if (dragSubId && dragSubId !== t.id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverSubId(t.id); } }}
+            onDragLeave={() => { if (dragOverSubId === t.id) setDragOverSubId(null); }}
+            onDrop={(e) => { e.preventDefault(); if (dragSubId && dragSubId !== t.id) reorderPurchaseSubTabs(dragSubId, t.id); setDragSubId(null); setDragOverSubId(null); }}
+            onTouchStart={(e) => onTouchStartSub(t.id, e)}
+            onTouchMove={onTouchMoveSub}
+            onTouchEnd={onTouchEndSub}
+            onTouchCancel={onTouchEndSub}
+            style={{
+              display:"inline-flex",alignItems:"center",
+              cursor: isDragging ? "grabbing" : "grab",
+              opacity: isDragging ? 0.4 : 1,
+              outline: isDragOver ? "2px dashed #EC6608" : "none",
+              outlineOffset: 1,
+              borderRadius: 9,
+              transition: "opacity 0.15s",
+              touchAction: dragSubId ? "none" : "manipulation",
+            }}>
             <button onClick={()=>setActiveSubTab(t.name)} style={{
-              padding:"9px 12px 9px 16px",border:"none",borderRadius:"9px 0 0 9px",cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,
+              padding:"9px 12px 9px 16px",border:"none",borderRadius:"9px 0 0 9px",cursor:"inherit",fontWeight:700,fontSize:13,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,
               background:activeSubTab===t.name?(darkMode?"rgba(236,102,8,0.18)":"#fff"):"transparent",
               color:activeSubTab===t.name?(darkMode?"#FFE9D6":"#B84800"):"var(--text2)",
               boxShadow:activeSubTab===t.name?"0 1px 3px rgba(0,0,0,0.08)":"none",
@@ -5304,7 +5484,8 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
               color:"#F04452",boxShadow:activeSubTab===t.name?"0 1px 3px rgba(0,0,0,0.08)":"none",
             }}><Icon name="close" size={13}/></button>
           </div>
-        ))}
+          );
+        })}
         {showAddTabForm ? (
           <div style={{display:"inline-flex",alignItems:"center",gap:4,background:"#fff",borderRadius:9,padding:"3px"}}>
             <input autoFocus placeholder="거래처명 입력" value={newTabName} onChange={e=>setNewTabName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addSubTab();if(e.key==="Escape"){setShowAddTabForm(false);setNewTabName("");}}}
@@ -6489,6 +6670,30 @@ function App() {
   const [editingSpec, setEditingSpec] = useState(null);
   const [editingGradeName, setEditingGradeName] = useState(null);
   const [syncStatus, setSyncStatus] = useState("syncing");
+  // PWA 설치 프롬프트
+  const [installPromptEvt, setInstallPromptEvt] = useState(null);
+  const [installed, setInstalled] = useState(false);
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); setInstallPromptEvt(e); };
+    const onInstalled = () => { setInstalled(true); setInstallPromptEvt(null); };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) setInstalled(true);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  const promptInstall = async () => {
+    if (!installPromptEvt) {
+      alert("설치 안내\n\n[Chrome / Edge]\n주소창 우측의 ⊞ 아이콘 클릭 → '앱 설치'\n또는 메뉴 → '앱 설치'\n\n[Safari (iOS)]\n공유 → '홈 화면에 추가'\n\n[Safari (Mac)]\n파일 → '도크에 추가'");
+      return;
+    }
+    installPromptEvt.prompt();
+    const { outcome } = await installPromptEvt.userChoice;
+    if (outcome === "accepted") setInstalled(true);
+    setInstallPromptEvt(null);
+  };
   const [quote, setQuote] = useState("");
   const [generating, setGenerating] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -6499,6 +6704,8 @@ function App() {
   const [quoteClient, setQuoteClient] = useState("");
   const [quoteClientOpen, setQuoteClientOpen] = useState(null); // null | "builder" | "current"
   const [quoteSubTab, setQuoteSubTab] = useState("builder"); // "builder" | "current" | "history"
+  const QUOTE_SUBTABS = { builder: { label: "제품 선택 & 생성", icon: "purchase" }, current: { label: "견적서 작성", icon: "edit" }, history: { label: "견적 이력", icon: "history" } };
+  const quoteSubOrder = useSubtabOrder("frw_quote_subtab_order", ["builder", "current", "history"], "data-quote-sub");
   const [quoteStyle, setQuoteStyle] = useState(() => load("frw_quote_style", "apple")); // apple | bold | card | korean
   useEffect(() => { save("frw_quote_style", quoteStyle); }, [quoteStyle]);
   const [prodSearch, setProdSearch] = useState("");
@@ -6572,6 +6779,8 @@ function App() {
   const [suppliers, setSuppliers] = useState(() => load("frw_suppliers", []));
   const [purchaseOrders, setPurchaseOrders] = useState(() => load("frw_purchase_orders", []));
   const [poSubTab, setPoSubTab] = useState("current"); // "current" | "history"
+  const PO_SUBTABS = { current: { label: "발주서 작성", icon: "purchase" }, history: { label: "발주 이력", icon: "history" } };
+  const poSubOrder = useSubtabOrder("frw_po_subtab_order", ["current", "history"], "data-po-sub");
   const [poStyle, setPoStyle] = useState(() => load("frw_po_style", "apple")); // apple | bold | card | korean
   useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
   const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
@@ -7614,6 +7823,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {!installed && (
+                <button onClick={promptInstall} title="앱처럼 바탕화면에 설치" className="no-print"
+                  style={{
+                    height: 36, padding: "0 14px", borderRadius: 18,
+                    border: "none", cursor: "pointer", fontFamily: "inherit",
+                    background: "linear-gradient(135deg, #EC6608, #D85800)",
+                    color: "#fff", fontSize: 12, fontWeight: 700,
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    boxShadow: "0 2px 10px rgba(236,102,8,0.32)",
+                    whiteSpace: "nowrap", flexShrink: 0,
+                  }}>
+                  ⊕ <span className="install-label-full">앱 설치</span>
+                </button>
+              )}
               <SyncBadge />
               <button onClick={handleUndo} title="실행 취소 (Ctrl+Z / ⌘Z)"
                 style={{
@@ -8340,17 +8563,27 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           <div>
             {/* 서브탭 네비게이션 */}
             <div className="no-print" style={{ display: "flex", gap: 4, marginBottom: 20, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
-              {[["builder", "제품 선택 & 생성", "purchase"], ["current", "견적서 작성", "edit"], ["history", "견적 이력", "history"]].map(([id, label, ic]) => (
+              {quoteSubOrder.order.map(id => {
+                const cfg = QUOTE_SUBTABS[id]; if (!cfg) return null;
+                const dragging = quoteSubOrder.isDragging(id);
+                const dragOver = quoteSubOrder.isDragOver(id);
+                return (
                 <button key={id} onClick={() => { setQuoteSubTab(id); if (id === "history") setViewingQuote(null); }}
+                  {...quoteSubOrder.getProps(id)}
                   style={{
                     padding: "9px 16px", border: "none", borderRadius: 9,
                     background: quoteSubTab === id ? (darkMode ? "rgba(236,102,8,0.18)" : "#fff") : "transparent",
                     color: quoteSubTab === id ? NAVY : T.text2,
-                    fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                    fontSize: 13, fontWeight: 700, cursor: dragging ? "grabbing" : "pointer", fontFamily: "inherit",
                     boxShadow: quoteSubTab === id ? "0 1px 2px rgba(0,0,0,0.04)" : "none",
                     transition: "all 0.15s", display: "inline-flex", alignItems: "center", gap: 8,
-                  }}><Icon name={ic} size={15}/>{label}</button>
-              ))}
+                    opacity: dragging ? 0.4 : 1,
+                    outline: dragOver ? "2px dashed #EC6608" : "none",
+                    outlineOffset: 1,
+                    touchAction: quoteSubOrder.dragActive ? "none" : "manipulation",
+                  }}><Icon name={cfg.icon} size={15}/>{cfg.label}</button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -9039,17 +9272,27 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "purchase" && (
           <div>
             <div className="no-print" style={{ display: "flex", gap: 4, marginBottom: 20, padding: 4, background: T.surface2, borderRadius: 12, width: "fit-content" }}>
-              {[["current", "발주서 작성", "purchase"], ["history", "발주 이력", "history"]].map(([id, label, ic]) => (
+              {poSubOrder.order.map(id => {
+                const cfg = PO_SUBTABS[id]; if (!cfg) return null;
+                const dragging = poSubOrder.isDragging(id);
+                const dragOver = poSubOrder.isDragOver(id);
+                return (
                 <button key={id} onClick={() => { setPoSubTab(id); if (id === "history") setViewingPO(null); }}
+                  {...poSubOrder.getProps(id)}
                   style={{
                     padding: "9px 16px", border: "none", borderRadius: 9,
                     background: poSubTab === id ? (darkMode ? "#2A2A40" : "#fff") : "transparent",
                     color: poSubTab === id ? T.text : T.text2,
-                    fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                    fontSize: 13, fontWeight: 700, cursor: dragging ? "grabbing" : "pointer", fontFamily: "inherit",
                     boxShadow: poSubTab === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
                     transition: "all 0.15s", display: "inline-flex", alignItems: "center", gap: 8,
-                  }}><Icon name={ic} size={15}/>{label}</button>
-              ))}
+                    opacity: dragging ? 0.4 : 1,
+                    outline: dragOver ? "2px dashed #EC6608" : "none",
+                    outlineOffset: 1,
+                    touchAction: poSubOrder.dragActive ? "none" : "manipulation",
+                  }}><Icon name={cfg.icon} size={15}/>{cfg.label}</button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -10000,6 +10243,52 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
   const localItems = companyFiles.items || {};
   const [activeSub, setActiveSub] = React.useState(() => subtabs[0]?.id || "general");
   const [renamingId, setRenamingId] = React.useState(null);
+  const [dragSubId, setDragSubId] = React.useState(null);
+  const [dragOverId, setDragOverId] = React.useState(null);
+  const reorderSubtabs = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setCompanyFiles(prev => {
+      const arr = [...(prev.subtabs || [])];
+      const fi = arr.findIndex(s => s.id === fromId);
+      const ti = arr.findIndex(s => s.id === toId);
+      if (fi < 0 || ti < 0) return prev;
+      const [moved] = arr.splice(fi, 1);
+      arr.splice(ti, 0, moved);
+      return { ...prev, subtabs: arr };
+    });
+  };
+  // 터치 드래그 (모바일 지원)
+  const touchDragRef = React.useRef({ active: false, startX: 0, startY: 0, id: null });
+  const onTouchStartSub = (id, e) => {
+    const t = e.touches[0];
+    touchDragRef.current = { active: false, startX: t.clientX, startY: t.clientY, id };
+  };
+  const onTouchMoveSub = (e) => {
+    const ds = touchDragRef.current;
+    if (!ds.id) return;
+    const t = e.touches[0];
+    if (!ds.active) {
+      const dx = Math.abs(t.clientX - ds.startX);
+      const dy = Math.abs(t.clientY - ds.startY);
+      if (dx > 8 || dy > 8) {
+        ds.active = true;
+        setDragSubId(ds.id);
+      } else return;
+    }
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const tabEl = el && el.closest && el.closest("[data-sub-id]");
+    const targetId = tabEl ? tabEl.getAttribute("data-sub-id") : null;
+    if (targetId !== dragOverId) setDragOverId(targetId);
+  };
+  const onTouchEndSub = () => {
+    const ds = touchDragRef.current;
+    if (ds.active && dragOverId && dragOverId !== ds.id) {
+      reorderSubtabs(ds.id, dragOverId);
+    }
+    touchDragRef.current = { active: false, startX: 0, startY: 0, id: null };
+    setDragSubId(null);
+    setDragOverId(null);
+  };
   const [renameValue, setRenameValue] = React.useState("");
   const [dragActive, setDragActive] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -10514,9 +10803,23 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
                 );
               }
               const accent = active ? "#007AFF" : null;
+              const isDragging = dragSubId === s.id;
+              const isDragOver = dragOverId === s.id && dragSubId && dragSubId !== s.id;
               return (
                 <div key={s.id}
+                  data-sub-id={s.id}
+                  draggable
+                  onDragStart={(e) => { setDragSubId(s.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); } catch {} }}
+                  onDragEnd={() => { setDragSubId(null); setDragOverId(null); }}
+                  onDragOver={(e) => { if (dragSubId && dragSubId !== s.id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverId(s.id); } }}
+                  onDragLeave={(e) => { if (dragOverId === s.id) setDragOverId(null); }}
+                  onDrop={(e) => { e.preventDefault(); if (dragSubId && dragSubId !== s.id) reorderSubtabs(dragSubId, s.id); setDragSubId(null); setDragOverId(null); }}
+                  onTouchStart={(e) => onTouchStartSub(s.id, e)}
+                  onTouchMove={onTouchMoveSub}
+                  onTouchEnd={onTouchEndSub}
+                  onTouchCancel={onTouchEndSub}
                   style={{
+                    touchAction: dragSubId ? "none" : "manipulation",
                     position: "relative",
                     display: "flex", alignItems: "center", gap: 4,
                     padding: "12px 8px 12px 18px",
@@ -10525,13 +10828,14 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
                     background: active
                       ? "linear-gradient(135deg, #007AFF 0%, #4DA0FF 100%)"
                       : (darkMode ? "rgba(255,255,255,0.04)" : "#fff"),
-                    border: active ? `2px solid #007AFF` : `1.5px solid ${T.divider}`,
+                    border: isDragOver ? `2px dashed #007AFF` : (active ? `2px solid #007AFF` : `1.5px solid ${T.divider}`),
                     boxShadow: active ? "0 6px 18px rgba(0,122,255,0.30)" : (darkMode ? "0 1px 2px rgba(0,0,0,0.20)" : "0 1px 3px rgba(15,15,26,0.06)"),
-                    cursor: "pointer", transition: "all 0.18s",
+                    cursor: isDragging ? "grabbing" : "grab", transition: "all 0.18s",
                     transform: active ? "translateY(-1px)" : "none",
+                    opacity: isDragging ? 0.4 : 1,
                   }}
                   onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = "#007AFF"; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,122,255,0.15)"; } }}
-                  onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = T.divider; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = darkMode ? "0 1px 2px rgba(0,0,0,0.20)" : "0 1px 3px rgba(15,15,26,0.06)"; } }}>
+                  onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = isDragOver ? "#007AFF" : T.divider; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = darkMode ? "0 1px 2px rgba(0,0,0,0.20)" : "0 1px 3px rgba(15,15,26,0.06)"; } }}>
                   <button onClick={() => setActiveSub(s.id)}
                     style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0, display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
                     <span style={{ display: "inline-flex", color: active ? "#fff" : T.text2 }}><Icon name={active ? "folderOpen" : "folder"} size={18}/></span>
@@ -11191,17 +11495,28 @@ function b64UrlDecode(s) {
   catch { try { return atob(str); } catch { return ""; } }
 }
 
+const CORRECT_ID = "njsafety91";
 const CORRECT_PW = "911201";
 
 function LoginScreen({ onSuccess }) {
+  const [id, setId] = React.useState(() => localStorage.getItem("nj_saved_id") || "");
   const [pw, setPw] = React.useState("");
+  const [rememberId, setRememberId] = React.useState(() => !!localStorage.getItem("nj_saved_id"));
   const [shake, setShake] = React.useState(false);
   const [err, setErr] = React.useState(false);
+  const pwRef = React.useRef(null);
+
+  React.useEffect(() => {
+    // ID가 이미 저장돼 있으면 비번 칸으로 포커스, 아니면 ID 칸으로
+    if (id) pwRef.current && pwRef.current.focus();
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (pw === CORRECT_PW) {
+    if (id.trim() === CORRECT_ID && pw === CORRECT_PW) {
       sessionStorage.setItem("nj_auth", "1");
+      if (rememberId) localStorage.setItem("nj_saved_id", id.trim());
+      else localStorage.removeItem("nj_saved_id");
       onSuccess();
     } else {
       setErr(true);
@@ -11214,33 +11529,58 @@ function LoginScreen({ onSuccess }) {
   return (
     <div style={{
       minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "var(--bg)", flexDirection: "column", gap: 0,
+      background: "var(--bg)", flexDirection: "column", gap: 0, padding: 16,
     }}>
       <form onSubmit={handleSubmit} style={{
         background: "var(--surface)", borderRadius: 20, padding: "40px 36px 36px",
         boxShadow: "0 4px 32px rgba(0,0,0,0.10)", border: "0.5px solid var(--border)",
-        width: 320, display: "flex", flexDirection: "column", gap: 18,
+        width: 340, maxWidth: "100%", display: "flex", flexDirection: "column", gap: 14,
         animation: shake ? "shake 0.45s ease" : "none",
       }}>
-        <div style={{ textAlign: "center", marginBottom: 4 }}>
-          <div style={{ fontSize: 32, marginBottom: 6 }}>🔒</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>NJ SAFETY</div>
-          <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 4 }}>비밀번호를 입력하세요</div>
+        <div style={{ textAlign: "center", marginBottom: 8 }}>
+          <div style={{ display: "inline-flex", marginBottom: 8, color: "var(--text2)" }}><Icon name="lock" size={28}/></div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>NJ SAFETY</div>
+          <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6 }}>로그인하여 시작하세요</div>
         </div>
-        <input
-          type="password"
-          placeholder="비밀번호"
-          value={pw}
-          autoFocus
-          onChange={e => { setPw(e.target.value); setErr(false); }}
-          style={{
-            borderRadius: 12, height: 48, fontSize: 18, textAlign: "center", letterSpacing: 4,
-            border: err ? "2px solid #F04452" : "2px solid transparent",
-            background: "var(--input-bg)", color: "var(--input-color)",
-          }}
-        />
-        {err && <div style={{ fontSize: 12, color: "#F04452", textAlign: "center", marginTop: -10 }}>비밀번호가 틀렸습니다</div>}
-        <button type="submit" className="btn-primary" style={{ height: 48, fontSize: 15, borderRadius: 12 }}>입장</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, marginLeft: 2 }}>아이디</label>
+          <input
+            type="text"
+            placeholder="아이디"
+            value={id}
+            autoFocus={!id}
+            autoComplete="username"
+            onChange={e => { setId(e.target.value); setErr(false); }}
+            style={{
+              borderRadius: 12, height: 46, fontSize: 15, padding: "0 14px",
+              border: err ? "2px solid #F04452" : "2px solid transparent",
+              background: "var(--input-bg)", color: "var(--input-color)",
+            }}
+          />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, marginLeft: 2 }}>비밀번호</label>
+          <input
+            ref={pwRef}
+            type="password"
+            placeholder="비밀번호"
+            value={pw}
+            autoComplete="current-password"
+            onChange={e => { setPw(e.target.value); setErr(false); }}
+            style={{
+              borderRadius: 12, height: 46, fontSize: 15, padding: "0 14px",
+              border: err ? "2px solid #F04452" : "2px solid transparent",
+              background: "var(--input-bg)", color: "var(--input-color)",
+            }}
+          />
+        </div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text2)", cursor: "pointer", padding: "4px 2px", userSelect: "none" }}>
+          <input type="checkbox" checked={rememberId} onChange={e => setRememberId(e.target.checked)}
+            style={{ width: 16, height: 16, accentColor: "#EC6608", cursor: "pointer" }}/>
+          아이디 저장
+        </label>
+        {err && <div style={{ fontSize: 12, color: "#F04452", textAlign: "center", margin: "-4px 0 0" }}>아이디 또는 비밀번호가 일치하지 않습니다</div>}
+        <button type="submit" className="btn-primary" style={{ height: 48, fontSize: 15, borderRadius: 12, marginTop: 4 }}>로그인</button>
       </form>
       <style>{`@keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-8px)}30%{transform:translateX(8px)}45%{transform:translateX(-6px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}`}</style>
     </div>
