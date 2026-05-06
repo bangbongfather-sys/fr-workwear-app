@@ -11496,17 +11496,28 @@ function b64UrlDecode(s) {
   catch { try { return atob(str); } catch { return ""; } }
 }
 
+const CORRECT_ID = "njsafety";
 const CORRECT_PW = "911201";
 
 function LoginScreen({ onSuccess }) {
+  const [id, setId] = React.useState(() => localStorage.getItem("nj_saved_id") || "");
   const [pw, setPw] = React.useState("");
+  const [rememberId, setRememberId] = React.useState(() => !!localStorage.getItem("nj_saved_id"));
   const [shake, setShake] = React.useState(false);
   const [err, setErr] = React.useState(false);
+  const pwRef = React.useRef(null);
+
+  React.useEffect(() => {
+    // ID가 이미 저장돼 있으면 비번 칸으로 포커스, 아니면 ID 칸으로
+    if (id) pwRef.current && pwRef.current.focus();
+  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (pw === CORRECT_PW) {
+    if (id.trim() === CORRECT_ID && pw === CORRECT_PW) {
       sessionStorage.setItem("nj_auth", "1");
+      if (rememberId) localStorage.setItem("nj_saved_id", id.trim());
+      else localStorage.removeItem("nj_saved_id");
       onSuccess();
     } else {
       setErr(true);
@@ -11519,33 +11530,58 @@ function LoginScreen({ onSuccess }) {
   return (
     <div style={{
       minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "var(--bg)", flexDirection: "column", gap: 0,
+      background: "var(--bg)", flexDirection: "column", gap: 0, padding: 16,
     }}>
       <form onSubmit={handleSubmit} style={{
         background: "var(--surface)", borderRadius: 20, padding: "40px 36px 36px",
         boxShadow: "0 4px 32px rgba(0,0,0,0.10)", border: "0.5px solid var(--border)",
-        width: 320, display: "flex", flexDirection: "column", gap: 18,
+        width: 340, maxWidth: "100%", display: "flex", flexDirection: "column", gap: 14,
         animation: shake ? "shake 0.45s ease" : "none",
       }}>
-        <div style={{ textAlign: "center", marginBottom: 4 }}>
-          <div style={{ fontSize: 32, marginBottom: 6 }}>🔒</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>NJ SAFETY</div>
-          <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 4 }}>비밀번호를 입력하세요</div>
+        <div style={{ textAlign: "center", marginBottom: 8 }}>
+          <div style={{ display: "inline-flex", marginBottom: 8, color: "var(--text2)" }}><Icon name="lock" size={28}/></div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>NJ SAFETY</div>
+          <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6 }}>로그인하여 시작하세요</div>
         </div>
-        <input
-          type="password"
-          placeholder="비밀번호"
-          value={pw}
-          autoFocus
-          onChange={e => { setPw(e.target.value); setErr(false); }}
-          style={{
-            borderRadius: 12, height: 48, fontSize: 18, textAlign: "center", letterSpacing: 4,
-            border: err ? "2px solid #F04452" : "2px solid transparent",
-            background: "var(--input-bg)", color: "var(--input-color)",
-          }}
-        />
-        {err && <div style={{ fontSize: 12, color: "#F04452", textAlign: "center", marginTop: -10 }}>비밀번호가 틀렸습니다</div>}
-        <button type="submit" className="btn-primary" style={{ height: 48, fontSize: 15, borderRadius: 12 }}>입장</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, marginLeft: 2 }}>아이디</label>
+          <input
+            type="text"
+            placeholder="아이디"
+            value={id}
+            autoFocus={!id}
+            autoComplete="username"
+            onChange={e => { setId(e.target.value); setErr(false); }}
+            style={{
+              borderRadius: 12, height: 46, fontSize: 15, padding: "0 14px",
+              border: err ? "2px solid #F04452" : "2px solid transparent",
+              background: "var(--input-bg)", color: "var(--input-color)",
+            }}
+          />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, marginLeft: 2 }}>비밀번호</label>
+          <input
+            ref={pwRef}
+            type="password"
+            placeholder="비밀번호"
+            value={pw}
+            autoComplete="current-password"
+            onChange={e => { setPw(e.target.value); setErr(false); }}
+            style={{
+              borderRadius: 12, height: 46, fontSize: 15, padding: "0 14px",
+              border: err ? "2px solid #F04452" : "2px solid transparent",
+              background: "var(--input-bg)", color: "var(--input-color)",
+            }}
+          />
+        </div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text2)", cursor: "pointer", padding: "4px 2px", userSelect: "none" }}>
+          <input type="checkbox" checked={rememberId} onChange={e => setRememberId(e.target.checked)}
+            style={{ width: 16, height: 16, accentColor: "#EC6608", cursor: "pointer" }}/>
+          아이디 저장
+        </label>
+        {err && <div style={{ fontSize: 12, color: "#F04452", textAlign: "center", margin: "-4px 0 0" }}>아이디 또는 비밀번호가 일치하지 않습니다</div>}
+        <button type="submit" className="btn-primary" style={{ height: 48, fontSize: 15, borderRadius: 12, marginTop: 4 }}>로그인</button>
       </form>
       <style>{`@keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-8px)}30%{transform:translateX(8px)}45%{transform:translateX(-6px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}`}</style>
     </div>
