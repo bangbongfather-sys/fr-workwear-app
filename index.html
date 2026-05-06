@@ -1976,8 +1976,32 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
   const [dateTo, setDateTo] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [draft, setDraft] = useState(null);
+  const [addingNew, setAddingNew] = useState(false);
+  const [newDraft, setNewDraft] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", note: "", paymentDue: "", paidDate: "" });
 
   const todayStr = new Date().toISOString().slice(0,10);
+
+  const startAdd = () => {
+    setAddingNew(true);
+    setNewDraft({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", note: "", paymentDue: "", paidDate: "" });
+  };
+  const cancelAdd = () => { setAddingNew(false); };
+  const saveAdd = () => {
+    if (!newDraft.productName || !newDraft.unitPrice) { alert("제품명과 단가는 필수입니다"); return; }
+    const newOrder = {
+      id: uid(),
+      date: newDraft.date || todayStr,
+      productName: newDraft.productName.trim(),
+      qty: parseInt(newDraft.qty) || 1,
+      unitPrice: parseFloat(newDraft.unitPrice) || 0,
+      client: (newDraft.client || "").trim(),
+      paymentDue: newDraft.paymentDue || "",
+      paidDate: newDraft.paidDate || "",
+      note: (newDraft.note || "").trim(),
+    };
+    setOrders(prev => [newOrder, ...prev]);
+    setAddingNew(false);
+  };
 
   const filtered = orders.filter(o => {
     const total = parseFloat(o.unitPrice||0)*parseInt(o.qty||1);
