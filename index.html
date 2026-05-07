@@ -12133,7 +12133,27 @@ function WelcomeScreen({ onEnter, orders, ledgers, products }) {
 
 function Root() {
   const [authed, setAuthed] = React.useState(() => sessionStorage.getItem("nj_auth") === "1");
+  const [welcomeSeen, setWelcomeSeen] = React.useState(() => sessionStorage.getItem("nj_welcome_seen") === "1");
+  const [pendingTab, setPendingTab] = React.useState(null);
+
+  React.useEffect(() => {
+    if (pendingTab) {
+      try { localStorage.setItem("frw_tab", JSON.stringify(pendingTab)); } catch {}
+      setPendingTab(null);
+    }
+  }, [pendingTab]);
+
   if (!authed) return <LoginScreen onSuccess={() => setAuthed(true)} />;
+  if (!welcomeSeen) return <WelcomeScreen
+    orders={(() => { try { return JSON.parse(localStorage.getItem("frw_orders") || "[]"); } catch { return []; } })()}
+    ledgers={(() => { try { return JSON.parse(localStorage.getItem("frw_ledgers") || "{}"); } catch { return {}; } })()}
+    products={(() => { try { return JSON.parse(localStorage.getItem("frw_products") || "[]"); } catch { return []; } })()}
+    onEnter={(targetTab) => {
+      if (targetTab) { try { localStorage.setItem("frw_tab", JSON.stringify(targetTab)); } catch {} }
+      sessionStorage.setItem("nj_welcome_seen", "1");
+      setWelcomeSeen(true);
+    }}
+  />;
   return <App />;
 }
 
