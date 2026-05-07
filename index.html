@@ -11845,6 +11845,44 @@ function b64UrlDecode(s) {
 const CORRECT_ID = "njsafety91";
 const CORRECT_PW = "911201";
 
+// NJ Logo Mark — 디자인 시안 기반 (SVG)
+function NJMark({ size = 32, mono = false }) {
+  const orange = mono ? 'currentColor' : '#EC6608';
+  const orangeDeep = mono ? 'currentColor' : '#B84800';
+  const dark = mono ? 'currentColor' : '#2A2F38';
+  const darkDeep = mono ? 'currentColor' : '#14171D';
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-label="NJ Safety">
+      <defs>
+        <linearGradient id="nj-l-grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={dark}/><stop offset="1" stopColor={darkDeep}/></linearGradient>
+        <linearGradient id="nj-r-grad" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor={orange}/><stop offset="1" stopColor={orangeDeep}/></linearGradient>
+      </defs>
+      <rect x="6" y="8" width="14" height="48" rx="1" fill="url(#nj-l-grad)"/>
+      <rect x="44" y="8" width="14" height="48" rx="1" fill="url(#nj-r-grad)"/>
+      <polygon points="20,8 34,8 44,56 30,56" fill="url(#nj-l-grad)"/>
+      <polygon points="34,8 44,8 44,56 30,56" fill="url(#nj-r-grad)" opacity="0.95"/>
+      <g transform="rotate(-22 32 32)">
+        <rect x="28" y="22" width="6" height="22" rx="1" fill="#fff" opacity="0.95"/>
+        <rect x="28" y="26" width="6" height="2" fill={orange}/>
+        <rect x="28" y="32" width="6" height="2" fill={orange}/>
+        <rect x="28" y="38" width="6" height="2" fill={orange}/>
+      </g>
+    </svg>
+  );
+}
+function NJLogo({ size = 32, color, showWordmark = true }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: color || 'inherit' }}>
+      <NJMark size={size}/>
+      {showWordmark && (
+        <span style={{ fontWeight: 800, fontSize: size * 0.5, letterSpacing: '0.04em' }}>
+          NJ <span style={{ color: '#EC6608' }}>SAFETY</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function LoginScreen({ onSuccess }) {
   const [id, setId] = React.useState(() => localStorage.getItem("nj_saved_id") || "");
   const [pw, setPw] = React.useState("");
@@ -11852,16 +11890,20 @@ function LoginScreen({ onSuccess }) {
   const [shake, setShake] = React.useState(false);
   const [err, setErr] = React.useState(false);
   const pwRef = React.useRef(null);
+  const [isMobile, setIsMobile] = React.useState(() => window.innerWidth < 900);
 
   React.useEffect(() => {
-    // ID가 이미 저장돼 있으면 비번 칸으로 포커스, 아니면 ID 칸으로
     if (id) pwRef.current && pwRef.current.focus();
+    const onResize = () => setIsMobile(window.innerWidth < 900);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (id.trim() === CORRECT_ID && pw === CORRECT_PW) {
       sessionStorage.setItem("nj_auth", "1");
+      sessionStorage.removeItem("nj_welcome_seen");
       if (rememberId) localStorage.setItem("nj_saved_id", id.trim());
       else localStorage.removeItem("nj_saved_id");
       onSuccess();
@@ -11875,61 +11917,216 @@ function LoginScreen({ onSuccess }) {
 
   return (
     <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "var(--bg)", flexDirection: "column", gap: 0, padding: 16,
+      width: "100%", minHeight: "100vh",
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+      background: "var(--bg)",
+      fontFamily: "inherit",
     }}>
-      <form onSubmit={handleSubmit} style={{
-        background: "var(--surface)", borderRadius: 20, padding: "40px 36px 36px",
-        boxShadow: "0 4px 32px rgba(0,0,0,0.10)", border: "0.5px solid var(--border)",
-        width: 340, maxWidth: "100%", display: "flex", flexDirection: "column", gap: 14,
-        animation: shake ? "shake 0.45s ease" : "none",
+      {/* Left visual (다크 히어로) */}
+      <div style={{
+        background: "linear-gradient(160deg, #14171D 0%, #2A2F38 60%, #1C2026 100%)",
+        position: "relative", overflow: "hidden",
+        display: isMobile ? "none" : "flex", flexDirection: "column", justifyContent: "space-between",
+        padding: "44px 48px", color: "#fff",
       }}>
-        <div style={{ textAlign: "center", marginBottom: 8 }}>
-          <div style={{ display: "inline-flex", marginBottom: 8, color: "var(--text2)" }}><Icon name="lock" size={28}/></div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>NJ SAFETY</div>
-          <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6 }}>로그인하여 시작하세요</div>
+        <div style={{ position: "absolute", right: -80, top: -40, opacity: 0.08 }}>
+          <NJMark size={520}/>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, marginLeft: 2 }}>아이디</label>
-          <input
-            type="text"
-            placeholder="아이디"
-            value={id}
-            autoFocus={!id}
-            autoComplete="username"
-            onChange={e => { setId(e.target.value); setErr(false); }}
-            style={{
-              borderRadius: 12, height: 46, fontSize: 15, padding: "0 14px",
-              border: err ? "2px solid #F04452" : "2px solid transparent",
-              background: "var(--input-bg)", color: "var(--input-color)",
-            }}
-          />
+        <NJLogo size={32} color="#fff"/>
+        <div style={{ position: "relative" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".12em", color: "#EC6608", marginBottom: 14 }}>SAFETY EQUIPMENT · SINCE 2009</div>
+          <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: "-.025em", lineHeight: 1.1 }}>
+            현장의 신뢰,<br/>NJ SAFETY가 책임집니다.
+          </div>
+          <div style={{ fontSize: 14, color: "#B4BAC4", marginTop: 16, lineHeight: 1.6 }}>
+            단가표·견적·발주·장부를 한 곳에서 관리하는<br/>사내 통합 운영 시스템
+          </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, marginLeft: 2 }}>비밀번호</label>
-          <input
-            ref={pwRef}
-            type="password"
-            placeholder="비밀번호"
-            value={pw}
-            autoComplete="current-password"
-            onChange={e => { setPw(e.target.value); setErr(false); }}
-            style={{
-              borderRadius: 12, height: 46, fontSize: 15, padding: "0 14px",
-              border: err ? "2px solid #F04452" : "2px solid transparent",
-              background: "var(--input-bg)", color: "var(--input-color)",
-            }}
-          />
+        <div style={{ fontSize: 11, color: "#5A6270", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+          v2.0 · 내부 임직원 전용 · 무단 접근 금지
         </div>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text2)", cursor: "pointer", padding: "4px 2px", userSelect: "none" }}>
-          <input type="checkbox" checked={rememberId} onChange={e => setRememberId(e.target.checked)}
-            style={{ width: 16, height: 16, accentColor: "#EC6608", cursor: "pointer" }}/>
-          아이디 저장
-        </label>
-        {err && <div style={{ fontSize: 12, color: "#F04452", textAlign: "center", margin: "-4px 0 0" }}>아이디 또는 비밀번호가 일치하지 않습니다</div>}
-        <button type="submit" className="btn-primary" style={{ height: 48, fontSize: 15, borderRadius: 12, marginTop: 4 }}>로그인</button>
-      </form>
-      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}15%{transform:translateX(-8px)}30%{transform:translateX(8px)}45%{transform:translateX(-6px)}60%{transform:translateX(6px)}75%{transform:translateX(-3px)}90%{transform:translateX(3px)}}`}</style>
+      </div>
+
+      {/* Right login form */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 32, background: "var(--bg)" }}>
+        <form onSubmit={handleSubmit} style={{
+          width: 380, maxWidth: "100%",
+          animation: shake ? "njShake .45s" : "none",
+        }}>
+          {isMobile && (
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
+              <NJLogo size={36}/>
+            </div>
+          )}
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#EC6608", letterSpacing: ".08em", marginBottom: 8 }}>SECURE LOGIN</div>
+          <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-.02em", marginBottom: 6, color: "var(--text1)" }}>로그인</div>
+          <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 28 }}>회사에서 발급받은 아이디·비밀번호로 입장하세요.</div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, display: "block", marginBottom: 6 }}>아이디</label>
+            <input
+              type="text" value={id} autoFocus={!id} autoComplete="username"
+              onChange={e => { setId(e.target.value); setErr(false); }}
+              placeholder="아이디"
+              style={{
+                width: "100%", height: 46, padding: "0 14px", fontSize: 14,
+                border: `1.5px solid ${err ? "#D9342B" : "var(--border)"}`,
+                borderRadius: 8, background: "var(--surface)", color: "var(--text1)",
+                outline: "none", fontFamily: "inherit",
+              }}
+            />
+          </div>
+          <div style={{ marginBottom: 14, position: "relative" }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, display: "block", marginBottom: 6 }}>비밀번호</label>
+            <input
+              ref={pwRef} type="password" value={pw} autoComplete="current-password"
+              onChange={e => { setPw(e.target.value); setErr(false); }}
+              placeholder="• • • • • •"
+              style={{
+                width: "100%", height: 46, padding: "0 14px", fontSize: 16, letterSpacing: ".25em",
+                border: `1.5px solid ${err ? "#D9342B" : "var(--border)"}`,
+                borderRadius: 8, background: "var(--surface)", color: "var(--text1)",
+                outline: "none", fontFamily: "inherit",
+              }}
+            />
+          </div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--text2)", cursor: "pointer", padding: "4px 2px", userSelect: "none", marginBottom: 14 }}>
+            <input type="checkbox" checked={rememberId} onChange={e => setRememberId(e.target.checked)}
+              style={{ width: 16, height: 16, accentColor: "#EC6608", cursor: "pointer" }}/>
+            아이디 저장
+          </label>
+          {err && <div style={{ fontSize: 12, color: "#D9342B", marginBottom: 12 }}>아이디 또는 비밀번호가 일치하지 않습니다.</div>}
+          <button type="submit" style={{
+            width: "100%", height: 48, background: "#EC6608", color: "#fff", border: "none",
+            borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+            display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
+            boxShadow: "0 2px 8px rgba(236,102,8,0.32)",
+          }}>입장하기 <Icon name="arrowRight" size={16}/></button>
+
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 20, fontSize: 12, color: "var(--text3)" }}>
+            <span>비밀번호 분실 시 관리자 문의</span>
+            <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>02-1577-0000</span>
+          </div>
+        </form>
+      </div>
+      <style>{`@keyframes njShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}`}</style>
+    </div>
+  );
+}
+
+// 웰컴 화면 — 로그인 직후 첫 화면
+function WelcomeScreen({ onEnter, orders, ledgers, products }) {
+  const today = new Date();
+  const greeting = (() => {
+    const h = today.getHours();
+    if (h < 12) return "좋은 아침입니다";
+    if (h < 18) return "안녕하세요";
+    return "수고 많으셨습니다";
+  })();
+
+  // 실제 데이터 기반 통계
+  const thisYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
+  const monthSales = (orders || []).filter(o => (o.date||"").startsWith(thisYM)).reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
+  const monthLedger = ((ledgers || {})[thisYM]?.clients || []).reduce((s,c) => s + parseFloat(c.total||0), 0);
+  const monthRevenue = monthLedger > 0 ? monthLedger : monthSales;
+  const unpaidCount = ((ledgers || {})[thisYM]?.clients || []).filter(c => c.status === "미입금").length;
+  const productCount = (products || []).length;
+
+  const stats = [
+    { label: "이달 매출", value: monthRevenue > 0 ? `₩${(monthRevenue/10000).toFixed(0)}만` : "—", sub: `${thisYM}` },
+    { label: "등록 제품", value: `${productCount}개`, sub: "단가 계산기" },
+    { label: "이달 미입금", value: `${unpaidCount}곳`, sub: unpaidCount > 0 ? "확인 필요" : "—" },
+    { label: "오늘 날짜", value: today.toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }), sub: today.toLocaleDateString("ko-KR", { weekday: "long" }) },
+  ];
+
+  return (
+    <div style={{ width: "100%", minHeight: "100vh", overflow: "auto", background: "var(--bg)", fontFamily: "inherit" }}>
+      {/* Hero */}
+      <div style={{
+        background: "linear-gradient(135deg, #14171D 0%, #2A2F38 100%)",
+        color: "#fff", padding: "44px 44px 88px", position: "relative", overflow: "hidden",
+      }}>
+        <div style={{ position: "absolute", right: -60, top: -40, opacity: 0.08 }}><NJMark size={360}/></div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 36, position: "relative", flexWrap: "wrap", gap: 12 }}>
+          <NJLogo size={28} color="#fff"/>
+          <div style={{ fontSize: 12, color: "#828A98", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}>
+            {today.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" })}
+          </div>
+        </div>
+        <div style={{ position: "relative", maxWidth: 720 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#EC6608", letterSpacing: ".12em", marginBottom: 14 }}>WELCOME BACK</div>
+          <div style={{ fontSize: "clamp(26px, 5vw, 38px)", fontWeight: 800, letterSpacing: "-.025em", lineHeight: 1.15, marginBottom: 12 }}>
+            {greeting}.
+          </div>
+          <div style={{ fontSize: 15, color: "#B4BAC4", lineHeight: 1.6, marginBottom: 28 }}>
+            NJ SAFETY 통합 관리 시스템에 접속하셨습니다.<br/>
+            오늘도 안전하고 효율적인 하루 되세요.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={() => onEnter("calc")} style={{
+              background: "#EC6608", color: "#fff", border: "none",
+              padding: "14px 24px", borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: "pointer",
+              display: "inline-flex", alignItems: "center", gap: 8, fontFamily: "inherit",
+              boxShadow: "0 4px 14px rgba(236,102,8,0.35)",
+            }}>단가 계산기로 이동 <Icon name="arrowRight" size={16}/></button>
+            <button onClick={() => onEnter("dashboard")} style={{
+              background: "rgba(255,255,255,0.08)", color: "#fff",
+              border: "1px solid rgba(255,255,255,0.16)", padding: "14px 22px", borderRadius: 8,
+              fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              display: "inline-flex", alignItems: "center", gap: 8,
+            }}><Icon name="dashboard" size={16}/>경영 대시보드</button>
+            <button onClick={() => onEnter()} style={{
+              background: "transparent", color: "#B4BAC4",
+              border: "none", padding: "14px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+              textDecoration: "underline", textUnderlineOffset: 4,
+            }}>건너뛰기</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats grid */}
+      <div style={{ padding: "0 44px", marginTop: -56, position: "relative", maxWidth: 1200, margin: "-56px auto 0" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+          {stats.map((s, i) => (
+            <div key={i} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", letterSpacing: ".04em", textTransform: "uppercase" }}>{s.label}</div>
+              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-.02em", marginTop: 6, marginBottom: 4, color: "var(--text1)" }}>{s.value}</div>
+              <div style={{ fontSize: 12, color: "var(--text3)" }}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Quick actions */}
+      <div style={{ padding: "32px 44px 60px", maxWidth: 1200, margin: "0 auto" }}>
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16, color: "var(--text1)" }}>빠른 작업</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            {[
+              { l: "단가 계산", k: "calc", i: "calc" },
+              { l: "견적서 작성", k: "quote", i: "quote" },
+              { l: "발주 등록", k: "purchase", i: "purchase" },
+              { l: "장부 관리", k: "ledger", i: "ledger" },
+              { l: "거래처별 단가", k: "clients", i: "clients" },
+              { l: "회사 필요 파일", k: "files", i: "files" },
+            ].map((q, i) => (
+              <button key={i} onClick={() => onEnter(q.k)} style={{
+                background: "var(--surface2)", border: "1px solid var(--border)",
+                borderRadius: 8, padding: "16px 14px", cursor: "pointer",
+                display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 10,
+                color: "var(--text1)", fontFamily: "inherit", textAlign: "left",
+                transition: "all 0.15s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = "var(--surface)"; e.currentTarget.style.borderColor = "#EC6608"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "var(--surface2)"; e.currentTarget.style.borderColor = "var(--border)"; }}>
+                <Icon name={q.i} size={20}/>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{q.l}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
