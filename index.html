@@ -10621,24 +10621,43 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
               const done = doneByDate[k] || 0;
               const dow = d.getDay();
               const dayColor = dow === 0 ? "#EF4444" : dow === 6 ? "#3B82F6" : "var(--text1)";
+              const cellTodos = todosByDate[k] || [];
+              const visibleTodos = cellTodos.slice(0, 2);
+              const moreCount = cellTodos.length - visibleTodos.length;
               return (
                 <button key={i} onClick={() => setSelectedDate(k)}
                   style={{
-                    aspectRatio: "1/1.1", padding: "6px 8px",
+                    minHeight: 92, padding: "6px 6px 4px",
                     border: isSelected ? "2px solid #EC6608" : isToday ? "1.5px solid #EC6608" : "1px solid var(--border)",
                     borderRadius: 10, background: isSelected ? "rgba(236,102,8,0.08)" : "var(--surface)",
                     cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                    display: "flex", flexDirection: "column", justifyContent: "space-between",
-                    transition: "all 0.12s", position: "relative",
+                    display: "flex", flexDirection: "column", gap: 3,
+                    transition: "all 0.12s", position: "relative", overflow: "hidden",
                   }}
                   onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "var(--surface2)"; }}
                   onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "var(--surface)"; }}
                 >
-                  <div style={{ fontSize: 13, fontWeight: isToday ? 800 : 600, color: isSelected ? "#EC6608" : dayColor }}>{d.getDate()}</div>
-                  {cnt > 0 && (
-                    <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: done === cnt ? "#10B981" : "#EC6608", padding: "1px 6px", borderRadius: 100, alignSelf: "flex-start" }}>
-                      {done}/{cnt}
-                    </span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 12, fontWeight: isToday ? 800 : 600, color: isSelected ? "#EC6608" : dayColor }}>{d.getDate()}</span>
+                    {cnt > 0 && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: "#fff", background: done === cnt ? "#10B981" : "#EC6608", padding: "1px 5px", borderRadius: 100, lineHeight: 1.4 }}>
+                        {done}/{cnt}
+                      </span>
+                    )}
+                  </div>
+                  {visibleTodos.map(t => (
+                    <div key={t.id} title={t.text} style={{
+                      fontSize: 10, lineHeight: 1.25, padding: "1px 4px",
+                      borderRadius: 4,
+                      background: t.done ? "rgba(16,185,129,0.12)" : "rgba(236,102,8,0.10)",
+                      color: t.done ? "var(--text3)" : "var(--text1)",
+                      textDecoration: t.done ? "line-through" : "none",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      borderLeft: `2px solid ${t.done ? "#10B981" : "#EC6608"}`,
+                    }}>{t.text}</div>
+                  ))}
+                  {moreCount > 0 && (
+                    <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text3)", padding: "0 4px" }}>+{moreCount}건</div>
                   )}
                 </button>
               );
