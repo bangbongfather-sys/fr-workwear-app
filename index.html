@@ -10567,9 +10567,16 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
 
   const countByDate = {};
   const doneByDate = {};
+  const todosByDate = {};
   todos.forEach(t => {
     countByDate[t.date] = (countByDate[t.date] || 0) + 1;
     if (t.done) doneByDate[t.date] = (doneByDate[t.date] || 0) + 1;
+    if (!todosByDate[t.date]) todosByDate[t.date] = [];
+    todosByDate[t.date].push(t);
+  });
+  // 각 날짜의 todo를 미완료 우선, 생성순으로 정렬
+  Object.keys(todosByDate).forEach(k => {
+    todosByDate[k].sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
   });
 
   const todayKey = ymd(today);
