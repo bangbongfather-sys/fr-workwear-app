@@ -12367,6 +12367,87 @@ function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
           </div>
         </div>
 
+        {/* 오늘의 To-do List */}
+        {(() => {
+          const todayKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+          const todayTodos = (todos || []).filter(t => t.date === todayKey).sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
+          const upcoming = (todos || []).filter(t => !t.done && t.date > todayKey).sort((a,b) => a.date.localeCompare(b.date)).slice(0, 3);
+          if (todayTodos.length === 0 && upcoming.length === 0) {
+            return (
+              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginTop: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <Icon name="calendar" size={16}/> 오늘의 일정
+                  </div>
+                  <button onClick={() => onEnter("schedule")} style={{ background: "transparent", border: "none", color: "#EC6608", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "4px 8px" }}>
+                    일정 등록 →
+                  </button>
+                </div>
+                <div style={{ padding: "20px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7 }}>
+                  오늘 등록된 일정이 없습니다.<br/>일정 탭에서 할 일을 추가해보세요.
+                </div>
+              </div>
+            );
+          }
+          const doneCount = todayTodos.filter(t => t.done).length;
+          return (
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginTop: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <Icon name="calendar" size={16}/> 오늘의 일정
+                  {todayTodos.length > 0 && (
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: doneCount === todayTodos.length ? "#10B981" : "#EC6608", padding: "2px 8px", borderRadius: 100 }}>
+                      {doneCount}/{todayTodos.length}
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => onEnter("schedule")} style={{ background: "transparent", border: "none", color: "#EC6608", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "4px 8px" }}>
+                  전체 보기 →
+                </button>
+              </div>
+              {todayTodos.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {todayTodos.map(t => (
+                    <div key={t.id} style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 12px", borderRadius: 8,
+                      background: "var(--surface2)", border: "1px solid var(--border)",
+                      opacity: t.done ? 0.6 : 1,
+                    }}>
+                      <span style={{
+                        width: 20, height: 20, borderRadius: 5,
+                        border: t.done ? "none" : "1.5px solid var(--border)",
+                        background: t.done ? "#10B981" : "transparent",
+                        color: "#fff", fontSize: 12, flexShrink: 0,
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      }}>{t.done ? "✓" : ""}</span>
+                      <span style={{ fontSize: 13, color: t.done ? "var(--text3)" : "var(--text1)", textDecoration: t.done ? "line-through" : "none", flex: 1 }}>{t.text}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {upcoming.length > 0 && (
+                <div style={{ marginTop: todayTodos.length > 0 ? 14 : 0, paddingTop: todayTodos.length > 0 ? 14 : 0, borderTop: todayTodos.length > 0 ? "1px dashed var(--divider)" : "none" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>다가오는 일정</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {upcoming.map(t => {
+                      const days = Math.round((new Date(t.date) - new Date(todayKey)) / 86400000);
+                      const label = days === 1 ? "내일" : `${days}일 후`;
+                      return (
+                        <div key={t.id} onClick={() => onEnter("schedule")} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "var(--surface2)", cursor: "pointer", border: "1px solid var(--border)" }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", minWidth: 56 }}>{label}</span>
+                          <span style={{ fontSize: 11, color: "var(--text3)", minWidth: 56 }}>{t.date.slice(5).replace("-",".")}</span>
+                          <span style={{ fontSize: 13, color: "var(--text1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* 오늘의 경제 뉴스 */}
         {news.length > 0 && (
           <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginTop: 16 }}>
