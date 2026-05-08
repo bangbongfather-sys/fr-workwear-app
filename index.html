@@ -12124,13 +12124,26 @@ function WelcomeScreen({ onEnter, orders, ledgers, products }) {
       {/* Stats grid */}
       <div style={{ padding: "0 44px", marginTop: -56, position: "relative", maxWidth: 1200, margin: "-56px auto 0" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-          {stats.map((s, i) => (
-            <div key={i} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 18 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", letterSpacing: ".04em", textTransform: "uppercase" }}>{s.label}</div>
-              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-.02em", marginTop: 6, marginBottom: 4, color: "var(--text1)" }}>{s.value}</div>
-              <div style={{ fontSize: 12, color: "var(--text3)" }}>{s.sub}</div>
-            </div>
-          ))}
+          {stats.map((s, i) => {
+            const clickable = !!s.goto;
+            const Tag = clickable ? "button" : "div";
+            return (
+              <Tag key={i}
+                onClick={clickable ? () => onEnter(s.goto) : undefined}
+                style={{
+                  background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 18,
+                  textAlign: "left", fontFamily: "inherit", cursor: clickable ? "pointer" : "default",
+                  transition: clickable ? "all 0.15s" : undefined, width: "100%",
+                }}
+                onMouseEnter={clickable ? e => { e.currentTarget.style.borderColor = "#EC6608"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 4px 14px rgba(236,102,8,0.12)"; } : undefined}
+                onMouseLeave={clickable ? e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; } : undefined}
+              >
+                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", letterSpacing: ".04em", textTransform: "uppercase" }}>{s.label}</div>
+                <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-.02em", marginTop: 6, marginBottom: 4, color: "var(--text1)" }}>{s.value}</div>
+                <div style={{ fontSize: 12, color: clickable ? "#EC6608" : "var(--text3)", fontWeight: clickable ? 600 : 400 }}>{s.sub}</div>
+              </Tag>
+            );
+          })}
         </div>
       </div>
 
