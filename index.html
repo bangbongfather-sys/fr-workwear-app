@@ -12042,11 +12042,39 @@ function WelcomeScreen({ onEnter, orders, ledgers, products }) {
   const productCount = (products || []).length;
 
   const stats = [
-    { label: "이달 매출", value: monthRevenue > 0 ? `₩${(monthRevenue/10000).toFixed(0)}만` : "—", sub: `${thisYM}` },
-    { label: "등록 제품", value: `${productCount}개`, sub: "단가 계산기" },
-    { label: "이달 미입금", value: `${unpaidCount}곳`, sub: unpaidCount > 0 ? "확인 필요" : "—" },
+    { label: "이달 매출", value: monthRevenue > 0 ? `₩${Math.round(monthRevenue).toLocaleString()}` : "—", sub: `${thisYM}` },
+    { label: "등록 제품", value: `${productCount}개`, sub: "단가 계산기 →", goto: "calc" },
+    { label: "이달 미입금", value: `${unpaidCount}곳`, sub: unpaidCount > 0 ? "확인 필요 →" : "장부 보기 →", goto: "ledger" },
     { label: "오늘 날짜", value: today.toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }), sub: today.toLocaleDateString("ko-KR", { weekday: "long" }) },
   ];
+
+  // 오늘의 경제 뉴스 (캐시 또는 fetch)
+  const [news, setNews] = React.useState(() => {
+    try {
+      const c = JSON.parse(localStorage.getItem("frw_news_ko-economy") || "null");
+      return (c && c.items) ? c.items.slice(0, 4) : [];
+    } catch { return []; }
+  });
+  React.useEffect(() => {
+    const cacheKey = "frw_news_ko-economy";
+    try {
+      const c = JSON.parse(localStorage.getItem(cacheKey) || "null");
+      if (c && c.ts && (Date.now() - c.ts) < 3600000 && c.items?.length) {
+        setNews(c.items.slice(0, 4));
+        return;
+      }
+    } catch {}
+    const url = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://news.google.com/rss/search?q=경제+OR+제조업+OR+수출&hl=ko&gl=KR&ceid=KR:ko");
+    fetch(url).then(r => r.json()).then(d => {
+      if (d.status !== "ok") return;
+      const items = (d.items || []).map(it => ({
+        title: it.title, link: it.link, date: it.pubDate,
+        source: it.author || "",
+      }));
+      setNews(items.slice(0, 4));
+      try { localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), items })); } catch {}
+    }).catch(() => {});
+  }, []);
 
   return (
     <div style={{ width: "100%", minHeight: "100vh", overflow: "auto", background: "var(--bg)", fontFamily: "inherit" }}>
