@@ -10797,58 +10797,147 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
               <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, padding: "6px 0", color: i === 0 ? "#EF4444" : i === 6 ? "#3B82F6" : "var(--text3)", letterSpacing: 0.4 }}>{w}</div>
             ))}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
-            {cells.map((d, i) => {
-              if (!d) return <div key={i} style={{ aspectRatio: "1/1.1" }}/>;
-              const k = ymd(d);
-              const isToday = k === todayKey;
-              const isSelected = k === selectedDate;
-              const cnt = countByDate[k] || 0;
-              const done = doneByDate[k] || 0;
-              const dow = d.getDay();
-              const dayColor = dow === 0 ? "#EF4444" : dow === 6 ? "#3B82F6" : "var(--text1)";
-              const cellTodos = todosByDate[k] || [];
-              const visibleTodos = cellTodos.slice(0, 2);
-              const moreCount = cellTodos.length - visibleTodos.length;
-              return (
-                <button key={i} onClick={() => setSelectedDate(k)}
-                  style={{
-                    minHeight: 92, padding: "6px 6px 4px",
-                    border: isSelected ? "2px solid #EC6608" : isToday ? "1.5px solid #EC6608" : "1px solid var(--border)",
-                    borderRadius: 10, background: isSelected ? "rgba(236,102,8,0.08)" : "var(--surface)",
-                    cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                    display: "flex", flexDirection: "column", gap: 3,
-                    transition: "all 0.12s", position: "relative", overflow: "hidden",
-                  }}
-                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "var(--surface2)"; }}
-                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "var(--surface)"; }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, fontWeight: isToday ? 800 : 600, color: isSelected ? "#EC6608" : dayColor }}>{d.getDate()}</span>
-                    {cnt > 0 && (
-                      <span style={{ fontSize: 9, fontWeight: 700, color: "#fff", background: done === cnt ? "#10B981" : "#EC6608", padding: "1px 5px", borderRadius: 100, lineHeight: 1.4 }}>
-                        {done}/{cnt}
-                      </span>
-                    )}
-                  </div>
-                  {visibleTodos.map(t => (
-                    <div key={t.id} title={t.text} style={{
-                      fontSize: 10, lineHeight: 1.25, padding: "1px 4px",
-                      borderRadius: 4,
-                      background: t.done ? "rgba(16,185,129,0.12)" : "rgba(236,102,8,0.10)",
-                      color: t.done ? "var(--text3)" : "var(--text1)",
-                      textDecoration: t.done ? "line-through" : "none",
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      borderLeft: `2px solid ${t.done ? "#10B981" : "#EC6608"}`,
-                    }}>{t.text}</div>
-                  ))}
-                  {moreCount > 0 && (
-                    <div style={{ fontSize: 9, fontWeight: 600, color: "var(--text3)", padding: "0 4px" }}>+{moreCount}건</div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          {/* 노션 캘린더 스타일: 주별 row + 멀티데이 이벤트는 가로 바로 표시 */}
+          {(() => {
+            // 6주 × 7일 cells를 주 단위로 그룹화
+            const weeks = [];
+            for (let w = 0; w < 6; w++) weeks.push(cells.slice(w*7, w*7+7));
+            // 이벤트 색상 팔레트 (todo.id 기반 안정 색상)
+            const palette = [
+              { bg: "#EC6608", soft: "rgba(236,102,8,0.16)", text: "#fff" },
+              { bg: "#3B82F6", soft: "rgba(59,130,246,0.16)", text: "#fff" },
+              { bg: "#8B5CF6", soft: "rgba(139,92,246,0.16)", text: "#fff" },
+              { bg: "#10B981", soft: "rgba(16,185,129,0.16)", text: "#fff" },
+              { bg: "#F59E0B", soft: "rgba(245,158,11,0.16)", text: "#fff" },
+              { bg: "#EF4444", soft: "rgba(239,68,68,0.16)", text: "#fff" },
+              { bg: "#06B6D4", soft: "rgba(6,182,212,0.16)", text: "#fff" },
+              { bg: "#EC4899", soft: "rgba(236,72,153,0.16)", text: "#fff" },
+            ];
+            const colorOf = (id) => palette[Math.abs(Number(id) || 0) % palette.length];
+
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {weeks.map((week, wi) => {
+                  // 이번 주 표시 가능 일자 범위
+                  const firstDate = week.find(d => d);
+                  const lastDate = [...week].reverse().find(d => d);
+                  if (!firstDate) return <div key={wi} style={{ minHeight: 32 }}/>;
+                  const weekStart = ymd(firstDate);
+                  const weekEnd = ymd(lastDate);
+
+                  // 이번 주에 걸치는 이벤트 추출 + 컬럼 위치 계산
+                  const weekEvents = [];
+                  todos.forEach(t => {
+                    if (!t.date) return;
+                    const tStart = t.date;
+                    const tEnd = t.endDate && t.endDate >= t.date ? t.endDate : t.date;
+                    if (tEnd < weekStart || tStart > weekEnd) return;
+                    // 이번 주 안에서의 시작/끝 컬럼 (0~6)
+                    let startCol = 0, endCol = 6;
+                    for (let c = 0; c < 7; c++) {
+                      if (week[c] && ymd(week[c]) === tStart) { startCol = c; break; }
+                      if (week[c] && ymd(week[c]) > tStart) { startCol = c; break; }
+                    }
+                    if (tStart < weekStart) startCol = 0;
+                    for (let c = 6; c >= 0; c--) {
+                      if (week[c] && ymd(week[c]) === tEnd) { endCol = c; break; }
+                      if (week[c] && ymd(week[c]) < tEnd) { endCol = c; break; }
+                    }
+                    if (tEnd > weekEnd) endCol = 6;
+                    if (endCol < startCol) return;
+                    weekEvents.push({ t, startCol, endCol, continuesLeft: tStart < weekStart, continuesRight: tEnd > weekEnd });
+                  });
+
+                  // 트랙 할당 (greedy): 같은 트랙 안에서 겹치지 않도록
+                  weekEvents.sort((a,b) => a.startCol - b.startCol || (b.endCol - b.startCol) - (a.endCol - a.startCol));
+                  const tracks = []; // tracks[i] = endCol last assigned
+                  weekEvents.forEach(ev => {
+                    let placed = -1;
+                    for (let i = 0; i < tracks.length; i++) {
+                      if (tracks[i] < ev.startCol) { tracks[i] = ev.endCol; placed = i; break; }
+                    }
+                    if (placed === -1) { tracks.push(ev.endCol); placed = tracks.length - 1; }
+                    ev.track = placed;
+                  });
+                  const maxTrack = tracks.length;
+                  const trackH = 20; // px
+                  const headerH = 24; // 날짜 숫자 영역
+                  const rowH = headerH + Math.max(2, maxTrack) * (trackH + 2) + 8;
+
+                  return (
+                    <div key={wi} style={{ position: "relative", minHeight: rowH, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+                      {/* 날짜 셀 (배경) */}
+                      {week.map((d, ci) => {
+                        if (!d) return <div key={ci} style={{ minHeight: rowH, borderRadius: 8, background: "transparent" }}/>;
+                        const k = ymd(d);
+                        const isToday = k === todayKey;
+                        const isSelected = k === selectedDate;
+                        const dow = d.getDay();
+                        const dayColor = dow === 0 ? "#EF4444" : dow === 6 ? "#3B82F6" : "var(--text1)";
+                        return (
+                          <button key={ci} onClick={() => setSelectedDate(k)}
+                            style={{
+                              minHeight: rowH, padding: "6px 8px",
+                              border: isSelected ? "1.5px solid #EC6608" : isToday ? "1.5px solid rgba(236,102,8,0.5)" : "1px solid var(--border)",
+                              borderRadius: 8,
+                              background: isSelected ? "rgba(236,102,8,0.06)" : isToday ? "rgba(236,102,8,0.03)" : "var(--surface)",
+                              cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                              transition: "background 0.12s", position: "relative",
+                              display: "flex", flexDirection: "column",
+                            }}
+                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "var(--surface2)"; }}
+                            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = isToday ? "rgba(236,102,8,0.03)" : "var(--surface)"; }}
+                          >
+                            <span style={{
+                              fontSize: 12, fontWeight: isToday ? 800 : 600,
+                              color: isToday ? "#EC6608" : dayColor,
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              minWidth: 22, height: 22, borderRadius: 11,
+                              background: isToday ? "rgba(236,102,8,0.12)" : "transparent",
+                              alignSelf: "flex-start",
+                            }}>{d.getDate()}</span>
+                          </button>
+                        );
+                      })}
+                      {/* 이벤트 바 (absolute) */}
+                      <div style={{ position: "absolute", top: headerH, left: 0, right: 0, pointerEvents: "none" }}>
+                        {weekEvents.map(ev => {
+                          const c = colorOf(ev.t.id);
+                          const left = `calc(${(ev.startCol / 7) * 100}% + 4px)`;
+                          const width = `calc(${((ev.endCol - ev.startCol + 1) / 7) * 100}% - 8px)`;
+                          const top = ev.track * (trackH + 2);
+                          const isMulti = ev.endCol > ev.startCol || ev.continuesLeft || ev.continuesRight;
+                          return (
+                            <div key={ev.t.id} title={ev.t.text}
+                              onClick={(e) => { e.stopPropagation(); setSelectedDate(ymd(week[ev.startCol] || firstDate)); }}
+                              style={{
+                                position: "absolute", left, width, top, height: trackH,
+                                pointerEvents: "auto", cursor: "pointer",
+                                background: ev.t.done ? "rgba(148,163,184,0.18)" : (isMulti ? c.bg : c.soft),
+                                color: ev.t.done ? "var(--text3)" : (isMulti ? c.text : c.bg),
+                                borderRadius: ev.continuesLeft ? "0 6px 6px 0" : ev.continuesRight ? "6px 0 0 6px" : 6,
+                                paddingLeft: isMulti ? 8 : 6, paddingRight: 8,
+                                fontSize: 11, fontWeight: 600, lineHeight: `${trackH}px`,
+                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                                textDecoration: ev.t.done ? "line-through" : "none",
+                                borderLeft: !isMulti ? `3px solid ${c.bg}` : "none",
+                                boxShadow: isMulti && !ev.t.done ? `0 1px 2px ${c.soft}` : "none",
+                                transition: "transform 0.1s",
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"}
+                              onMouseLeave={e => e.currentTarget.style.transform = "none"}
+                            >
+                              {ev.t.done && "✓ "}{ev.t.text}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
 
         <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
