@@ -10802,18 +10802,11 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
             // 6주 × 7일 cells를 주 단위로 그룹화
             const weeks = [];
             for (let w = 0; w < 6; w++) weeks.push(cells.slice(w*7, w*7+7));
-            // 이벤트 색상 팔레트 (todo.id 기반 안정 색상)
-            const palette = [
-              { bg: "#EC6608", soft: "rgba(236,102,8,0.16)", text: "#fff" },
-              { bg: "#3B82F6", soft: "rgba(59,130,246,0.16)", text: "#fff" },
-              { bg: "#8B5CF6", soft: "rgba(139,92,246,0.16)", text: "#fff" },
-              { bg: "#10B981", soft: "rgba(16,185,129,0.16)", text: "#fff" },
-              { bg: "#F59E0B", soft: "rgba(245,158,11,0.16)", text: "#fff" },
-              { bg: "#EF4444", soft: "rgba(239,68,68,0.16)", text: "#fff" },
-              { bg: "#06B6D4", soft: "rgba(6,182,212,0.16)", text: "#fff" },
-              { bg: "#EC4899", soft: "rgba(236,72,153,0.16)", text: "#fff" },
-            ];
-            const colorOf = (id) => palette[Math.abs(Number(id) || 0) % palette.length];
+            // 노션 스타일 회색 톤 (모든 이벤트 단일 색상)
+            const eventColor = darkMode
+              ? { bg: "rgba(255,255,255,0.10)", soft: "rgba(255,255,255,0.06)", text: "#E5E7EB", border: "rgba(255,255,255,0.18)" }
+              : { bg: "#EFEEEC", soft: "#F5F4F2", text: "#37352F", border: "#E3E2DE" };
+            const colorOf = (_id) => eventColor;
 
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -10913,19 +10906,18 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
                               style={{
                                 position: "absolute", left, width, top, height: trackH,
                                 pointerEvents: "auto", cursor: "pointer",
-                                background: ev.t.done ? "rgba(148,163,184,0.18)" : (isMulti ? c.bg : c.soft),
-                                color: ev.t.done ? "var(--text3)" : (isMulti ? c.text : c.bg),
-                                borderRadius: ev.continuesLeft ? "0 6px 6px 0" : ev.continuesRight ? "6px 0 0 6px" : 6,
-                                paddingLeft: isMulti ? 8 : 6, paddingRight: 8,
-                                fontSize: 11, fontWeight: 600, lineHeight: `${trackH}px`,
+                                background: ev.t.done ? (darkMode ? "rgba(255,255,255,0.04)" : "#F7F6F4") : c.bg,
+                                color: ev.t.done ? "var(--text3)" : c.text,
+                                border: `1px solid ${ev.t.done ? "transparent" : c.border}`,
+                                borderRadius: ev.continuesLeft ? "0 4px 4px 0" : ev.continuesRight ? "4px 0 0 4px" : 4,
+                                paddingLeft: 8, paddingRight: 8,
+                                fontSize: 11, fontWeight: 500, lineHeight: `${trackH - 2}px`,
                                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                                 textDecoration: ev.t.done ? "line-through" : "none",
-                                borderLeft: !isMulti ? `3px solid ${c.bg}` : "none",
-                                boxShadow: isMulti && !ev.t.done ? `0 1px 2px ${c.soft}` : "none",
-                                transition: "transform 0.1s",
+                                transition: "background 0.1s",
                               }}
-                              onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"}
-                              onMouseLeave={e => e.currentTarget.style.transform = "none"}
+                              onMouseEnter={e => { if (!ev.t.done) e.currentTarget.style.background = darkMode ? "rgba(255,255,255,0.16)" : "#E5E4E1"; }}
+                              onMouseLeave={e => { if (!ev.t.done) e.currentTarget.style.background = c.bg; }}
                             >
                               {ev.t.done && "✓ "}{ev.t.text}
                             </div>
