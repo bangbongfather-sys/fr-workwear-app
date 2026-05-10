@@ -10675,14 +10675,26 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
     setBulkSyncing(true);
     let okCount = 0, failCount = 0;
     const updates = {};
+    const errors = [];
+    let envMissing = false;
     for (const t of pending) {
       const pageId = await notionCreate(t);
       if (pageId) { updates[t.id] = pageId; okCount++; }
-      else { failCount++; }
+      else {
+        failCount++;
+        if (notionMsg) errors.push(`• ${t.text}: ${notionMsg}`);
+        // 환경변수 누락 → 즉시 중단
+        if (notionStatus === "off") { envMissing = true; break; }
+      }
     }
     setTodos(prev => prev.map(x => updates[x.id] ? { ...x, notionPageId: updates[x.id] } : x));
     setBulkSyncing(false);
-    alert(`동기화 완료\n성공: ${okCount}건\n실패: ${failCount}건`);
+    if (envMissing) {
+      alert(`❌ 노션 연동이 설정되지 않았습니다.\n\nCloudflare Worker에 아래 환경변수를 설정해주세요:\n\n1. Cloudflare 대시보드 → Workers & Pages → fr-workwear-app\n2. Settings → Variables and Secrets\n3. 추가:\n   • NOTION_TOKEN (Secret) — secret_xxx 형태의 노션 통합 토큰\n   • NOTION_TODO_DSID (Plain) — To Do List 데이터베이스 ID\n     (예: 2c70e386-6388-818e-9ad9-000bfd99e1c4)\n\n설정 후 다시 시도해주세요.`);
+    } else {
+      const detailMsg = errors.length > 0 ? `\n\n실패 사유:\n${errors.slice(0, 5).join("\n")}${errors.length > 5 ? `\n…외 ${errors.length - 5}건` : ""}` : "";
+      alert(`동기화 완료\n성공: ${okCount}건\n실패: ${failCount}건${detailMsg}`);
+    }
   };
 
   const year = cursor.getFullYear(), month = cursor.getMonth();
