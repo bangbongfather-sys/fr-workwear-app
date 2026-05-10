@@ -10544,6 +10544,64 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
   const [cursor, setCursor] = React.useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = React.useState(() => ymd(today));
   const [draft, setDraft] = React.useState("");
+  // ── 노션 동기화 ──
+  const [notionStatus, setNotionStatus] = React.useState(""); // "" | "syncing" | "synced" | "error" | "off"
+  const [notionMsg, setNotionMsg] = React.useState("");
+  const [bulkSyncing, setBulkSyncing] = React.useState(false);
+  const NOTION_API = "/api/notion/todo";
+
+  // Notion 동기화 헬퍼 — 실패해도 UI 흐름은 막지 않음
+  const notionCreate = async (todo) => {
+    try {
+      setNotionStatus("syncing");
+      const res = await fetch(NOTION_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: todo.text, date: todo.date, done: !!todo.done }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (res.status === 500 && /환경변수/.test(data.error || "")) { setNotionStatus("off"); setNotionMsg("노션 미설정"); }
+        else { setNotionStatus("error"); setNotionMsg(data.error || `HTTP ${res.status}`); }
+        return null;
+      }
+      setNotionStatus("synced"); setNotionMsg("");
+      return data.notionPageId || null;
+    } catch (e) {
+      setNotionStatus("error"); setNotionMsg(e.message || "네트워크 오류");
+      return null;
+    }
+  };
+  const notionPatch = async (notionPageId, patch) => {
+    if (!notionPageId) return;
+    try {
+      setNotionStatus("syncing");
+      const res = await fetch(`${NOTION_API}/${notionPageId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setNotionStatus("error"); setNotionMsg(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setNotionStatus("synced"); setNotionMsg("");
+    } catch (e) { setNotionStatus("error"); setNotionMsg(e.message); }
+  };
+  const notionArchive = async (notionPageId) => {
+    if (!notionPageId) return;
+    try {
+      setNotionStatus("syncing");
+      const res = await fetch(`${NOTION_API}/${notionPageId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setNotionStatus("error"); setNotionMsg(data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setNotionStatus("synced"); setNotionMsg("");
+    } catch (e) { setNotionStatus("error"); setNotionMsg(e.message); }
+  };
 
   const addTodo = () => {
     const text = draft.trim();
@@ -10551,10 +10609,52 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
     const t = { id: Date.now(), date: selectedDate, text, done: false, createdAt: Date.now() };
     setTodos(prev => [...prev, t]);
     setDraft("");
+    // 비동기로 노션에 생성 → notionPageId 받아서 todo 갱신
+    notionCreate(t).then(pageId => {
+      if (pageId) setTodos(prev => prev.map(x => x.id === t.id ? { ...x, notionPageId: pageId } : x));
+    });
   };
-  const toggleTodo = (id) => setTodos(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
-  const removeTodo = (id) => setTodos(prev => prev.filter(t => t.id !== id));
-  const updateTodo = (id, text) => setTodos(prev => prev.map(t => t.id === id ? { ...t, text } : t));
+  const toggleTodo = (id) => {
+    let target = null;
+    setTodos(prev => prev.map(t => {
+      if (t.id !== id) return t;
+      target = { ...t, done: !t.done };
+      return target;
+    }));
+    if (target) notionPatch(target.notionPageId, { done: target.done });
+  };
+  const removeTodo = (id) => {
+    const target = todos.find(t => t.id === id);
+    setTodos(prev => prev.filter(t => t.id !== id));
+    if (target?.notionPageId) notionArchive(target.notionPageId);
+  };
+  const updateTodo = (id, text) => {
+    let target = null;
+    setTodos(prev => prev.map(t => {
+      if (t.id !== id) return t;
+      target = { ...t, text };
+      return target;
+    }));
+    if (target?.notionPageId) notionPatch(target.notionPageId, { text });
+  };
+
+  // 기존 todo (notionPageId 없는 것) 일괄 동기화
+  const bulkSyncToNotion = async () => {
+    const pending = todos.filter(t => !t.notionPageId);
+    if (pending.length === 0) { alert("동기화 대기 중인 일정이 없습니다 ✓"); return; }
+    if (!window.confirm(`${pending.length}개 일정을 노션 To Do List에 등록할까요?`)) return;
+    setBulkSyncing(true);
+    let okCount = 0, failCount = 0;
+    const updates = {};
+    for (const t of pending) {
+      const pageId = await notionCreate(t);
+      if (pageId) { updates[t.id] = pageId; okCount++; }
+      else { failCount++; }
+    }
+    setTodos(prev => prev.map(x => updates[x.id] ? { ...x, notionPageId: updates[x.id] } : x));
+    setBulkSyncing(false);
+    alert(`동기화 완료\n성공: ${okCount}건\n실패: ${failCount}건`);
+  };
 
   const year = cursor.getFullYear(), month = cursor.getMonth();
   const firstDay = new Date(year, month, 1);
@@ -10595,9 +10695,36 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
           <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.2, display: "inline-flex", alignItems: "center", gap: 8 }}>
             <Icon name="calendar" size={18}/> 일정 / To-do List
           </div>
-          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>날짜별 할 일 등록 · 캘린더 클릭으로 날짜 선택</div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>날짜별 할 일 등록 · 캘린더 클릭으로 날짜 선택 · 추가/수정 시 노션 To Do List에 자동 동기화</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {/* 노션 동기화 상태 뱃지 */}
+          {notionStatus && (
+            <span title={notionMsg || notionStatus} style={{
+              display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100,
+              fontSize: 11, fontWeight: 700,
+              background:
+                notionStatus === "syncing" ? "rgba(255,149,0,0.12)" :
+                notionStatus === "synced"  ? "rgba(52,199,89,0.12)" :
+                notionStatus === "off"     ? "rgba(148,163,184,0.18)" :
+                                             "rgba(239,68,68,0.12)",
+              color:
+                notionStatus === "syncing" ? "#FF9500" :
+                notionStatus === "synced"  ? "#10B981" :
+                notionStatus === "off"     ? "#64748B" :
+                                             "#EF4444",
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", animation: notionStatus === "syncing" ? "pulse 1.2s ease-in-out infinite" : "none" }}/>
+              {notionStatus === "syncing" ? "노션 동기화" : notionStatus === "synced" ? "노션 동기화됨" : notionStatus === "off" ? "노션 미설정" : "노션 오류"}
+            </span>
+          )}
+          {/* 일괄 동기화 버튼 */}
+          {todos.some(t => !t.notionPageId) && (
+            <button onClick={bulkSyncToNotion} disabled={bulkSyncing} title="아직 노션에 등록되지 않은 일정을 일괄 동기화"
+              style={{ padding: "0 12px", height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", cursor: bulkSyncing ? "wait" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>
+              {bulkSyncing ? "동기화 중..." : `↻ 노션 일괄 동기화 (${todos.filter(t => !t.notionPageId).length})`}
+            </button>
+          )}
           <button onClick={() => setCursor(new Date(year, month-1, 1))} title="이전 달" style={{ width: 36, height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontSize: 16, fontWeight: 700, fontFamily: "inherit" }}>‹</button>
           <button onClick={() => { const t = new Date(); setCursor(new Date(t.getFullYear(), t.getMonth(), 1)); setSelectedDate(ymd(t)); }} style={{ padding: "0 14px", height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", minWidth: 110 }}>{monthLabel}</button>
           <button onClick={() => setCursor(new Date(year, month+1, 1))} title="다음 달" style={{ width: 36, height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontSize: 16, fontWeight: 700, fontFamily: "inherit" }}>›</button>
