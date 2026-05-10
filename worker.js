@@ -117,16 +117,28 @@ async function handleNotionApi(request, env, url) {
 }
 
 // 웹앱 todo → 노션 properties 매핑
-//   text        → 이름 (title)
-//   date        → 업무 기간 (date.start)
-//   done        → 완료 (checkbox) + 상태 구분 (status: 시작 전 / 완료)
+//   text                → 이름 (title)
+//   date / endDate      → 업무 기간 (date.start / date.end)
+//                          - date 만 있으면 단일 일자 (date.end 미설정)
+//                          - endDate 도 있으면 기간 (date.start ~ date.end)
+//                          - date null/빈문자열이면 업무 기간 자체 제거
+//   done                → 완료 (checkbox) + 상태 구분 (status: 시작 전 / 완료)
 function buildProperties(body) {
   const props = {};
   if (body.text !== undefined) {
     props["이름"] = { title: [{ text: { content: String(body.text || "").slice(0, 1900) } }] };
   }
-  if (body.date !== undefined) {
-    props["업무 기간"] = body.date ? { date: { start: body.date } } : { date: null };
+  // date 또는 endDate 중 하나라도 정의되면 업무 기간 갱신
+  if (body.date !== undefined || body.endDate !== undefined) {
+    const start = body.date;
+    const end = body.endDate;
+    if (start) {
+      const dateObj = { start };
+      if (end && end !== start) dateObj.end = end;
+      props["업무 기간"] = { date: dateObj };
+    } else {
+      props["업무 기간"] = { date: null };
+    }
   }
   if (body.done !== undefined) {
     props["완료"] = { checkbox: !!body.done };

@@ -10544,6 +10544,10 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
   const [cursor, setCursor] = React.useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = React.useState(() => ymd(today));
   const [draft, setDraft] = React.useState("");
+  const [draftEnd, setDraftEnd] = React.useState(""); // 종료일 (업무 기간) — 비워두면 단일일자
+  const [editingId, setEditingId] = React.useState(null);
+  const [editDate, setEditDate] = React.useState(""); // 인라인 시작일 편집
+  const [editEnd, setEditEnd] = React.useState("");   // 인라인 종료일 편집
   // ── 노션 동기화 ──
   const [notionStatus, setNotionStatus] = React.useState(""); // "" | "syncing" | "synced" | "error" | "off"
   const [notionMsg, setNotionMsg] = React.useState("");
@@ -10557,7 +10561,7 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
       const res = await fetch(NOTION_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: todo.text, date: todo.date, done: !!todo.done }),
+        body: JSON.stringify({ text: todo.text, date: todo.date, endDate: todo.endDate || null, done: !!todo.done }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -10606,9 +10610,14 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
   const addTodo = () => {
     const text = draft.trim();
     if (!text) return;
-    const t = { id: Date.now(), date: selectedDate, text, done: false, createdAt: Date.now() };
+    // 종료일이 비어있으면 시작일과 동일 (단일일자)
+    // 종료일이 시작일보다 이전이면 swap
+    let start = selectedDate, end = draftEnd ? draftEnd : "";
+    if (end && end < start) { const tmp = start; start = end; end = tmp; }
+    const t = { id: Date.now(), date: start, endDate: end || "", text, done: false, createdAt: Date.now() };
     setTodos(prev => [...prev, t]);
     setDraft("");
+    setDraftEnd("");
     // 비동기로 노션에 생성 → notionPageId 받아서 todo 갱신
     notionCreate(t).then(pageId => {
       if (pageId) setTodos(prev => prev.map(x => x.id === t.id ? { ...x, notionPageId: pageId } : x));
@@ -10637,6 +10646,26 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
     }));
     if (target?.notionPageId) notionPatch(target.notionPageId, { text });
   };
+  // 인라인 날짜(업무 기간) 편집
+  const startEditDates = (t) => {
+    setEditingId(t.id);
+    setEditDate(t.date || selectedDate);
+    setEditEnd(t.endDate || "");
+  };
+  const saveEditDates = () => {
+    if (!editingId) return;
+    let start = editDate, end = editEnd;
+    if (end && end < start) { const tmp = start; start = end; end = tmp; }
+    let target = null;
+    setTodos(prev => prev.map(t => {
+      if (t.id !== editingId) return t;
+      target = { ...t, date: start, endDate: end || "" };
+      return target;
+    }));
+    if (target?.notionPageId) notionPatch(target.notionPageId, { date: start, endDate: end || null });
+    setEditingId(null); setEditDate(""); setEditEnd("");
+  };
+  const cancelEditDates = () => { setEditingId(null); setEditDate(""); setEditEnd(""); };
 
   // 기존 todo (notionPageId 없는 것) 일괄 동기화
   const bulkSyncToNotion = async () => {
@@ -10665,14 +10694,26 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
   while (cells.length < 42) cells.push(null);
 
+  // 업무 기간(범위)을 모든 날짜에 펼쳐서 캘린더에 표시
+  const expandRange = (t) => {
+    const out = [];
+    if (!t.date) return out;
+    const end = t.endDate && t.endDate >= t.date ? t.endDate : t.date;
+    const cur = new Date(t.date);
+    const last = new Date(end);
+    while (cur <= last) { out.push(ymd(cur)); cur.setDate(cur.getDate() + 1); }
+    return out;
+  };
   const countByDate = {};
   const doneByDate = {};
   const todosByDate = {};
   todos.forEach(t => {
-    countByDate[t.date] = (countByDate[t.date] || 0) + 1;
-    if (t.done) doneByDate[t.date] = (doneByDate[t.date] || 0) + 1;
-    if (!todosByDate[t.date]) todosByDate[t.date] = [];
-    todosByDate[t.date].push(t);
+    expandRange(t).forEach(k => {
+      countByDate[k] = (countByDate[k] || 0) + 1;
+      if (t.done) doneByDate[k] = (doneByDate[k] || 0) + 1;
+      if (!todosByDate[k]) todosByDate[k] = [];
+      todosByDate[k].push(t);
+    });
   });
   // 각 날짜의 todo를 미완료 우선, 생성순으로 정렬
   Object.keys(todosByDate).forEach(k => {
@@ -10680,9 +10721,15 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
   });
 
   const todayKey = ymd(today);
-  const dayTodos = todos.filter(t => t.date === selectedDate).sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
+  // 선택된 날짜에 해당 todo가 포함되는 모든 항목 (단일 + 범위)
+  const dayTodos = todos.filter(t => {
+    if (t.date === selectedDate) return true;
+    if (t.endDate && t.endDate >= selectedDate && t.date <= selectedDate) return true;
+    return false;
+  }).sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
+  // 다가오는 일정: 종료일이 오늘 이후인 미완료 todo
   const allUpcoming = todos
-    .filter(t => !t.done && t.date >= todayKey)
+    .filter(t => !t.done && (t.endDate || t.date) >= todayKey)
     .sort((a,b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
 
   const monthLabel = `${year}년 ${month+1}월`;
@@ -10801,13 +10848,27 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
             <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{dayTodos.length}건 · 완료 {dayTodos.filter(t=>t.done).length}건</div>
           </div>
 
-          <div style={{ display: "flex", gap: 6 }}>
-            <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addTodo(); }}
-              placeholder="할 일을 입력하세요" style={{ flex: 1 }} />
-            <button onClick={addTodo} disabled={!draft.trim()}
-              style={{ padding: "0 16px", height: 44, borderRadius: 10, border: "none", background: draft.trim() ? "#EC6608" : "var(--surface2)", color: draft.trim() ? "#fff" : "var(--text3)", fontWeight: 700, fontSize: 13, cursor: draft.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-              + 추가
-            </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addTodo(); }}
+                placeholder="할 일을 입력하세요" style={{ flex: 1 }} />
+              <button onClick={addTodo} disabled={!draft.trim()}
+                style={{ padding: "0 16px", height: 44, borderRadius: 10, border: "none", background: draft.trim() ? "#EC6608" : "var(--surface2)", color: draft.trim() ? "#fff" : "var(--text3)", fontWeight: 700, fontSize: 13, cursor: draft.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                + 추가
+              </button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text3)" }}>
+              <span style={{ fontWeight: 700, letterSpacing: 0.3 }}>업무 기간</span>
+              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+                style={{ height: 32, padding: "0 8px", fontSize: 12, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+              <span style={{ color: "var(--text3)" }}>→</span>
+              <input type="date" value={draftEnd} onChange={e => setDraftEnd(e.target.value)} placeholder="종료일 (선택)" min={selectedDate}
+                style={{ height: 32, padding: "0 8px", fontSize: 12, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+              {draftEnd && (
+                <button onClick={() => setDraftEnd("")} title="종료일 지우기" style={{ width: 22, height: 22, border: "none", borderRadius: 4, background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 11, fontFamily: "inherit", padding: 0 }}>✕</button>
+              )}
+              <span style={{ marginLeft: "auto", fontStyle: "italic" }}>{draftEnd ? `${Math.round((new Date(draftEnd) - new Date(selectedDate))/86400000) + 1}일간` : "단일 일자"}</span>
+            </div>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflowY: "auto" }}>
@@ -10816,28 +10877,59 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
                 할 일이 없습니다.<br/>위에서 추가해보세요.
               </div>
             ) : (
-              dayTodos.map(t => (
+              dayTodos.map(t => {
+                const isEditing = editingId === t.id;
+                const hasRange = t.endDate && t.endDate !== t.date;
+                const rangeDays = hasRange ? Math.round((new Date(t.endDate) - new Date(t.date)) / 86400000) + 1 : 0;
+                return (
                 <div key={t.id} style={{
-                  display: "flex", alignItems: "center", gap: 10,
+                  display: "flex", flexDirection: "column", gap: 6,
                   padding: "10px 12px", borderRadius: 10,
                   background: t.done ? "var(--surface2)" : "var(--surface)",
                   border: "1px solid var(--border)",
                   opacity: t.done ? 0.65 : 1, transition: "all 0.15s",
                 }}>
-                  <button onClick={() => toggleTodo(t.id)} title={t.done ? "미완료로" : "완료"}
-                    style={{ width: 22, height: 22, borderRadius: 6, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#10B981" : "transparent", color: "#fff", cursor: "pointer", fontSize: 13, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, fontFamily: "inherit" }}>
-                    {t.done ? "✓" : ""}
-                  </button>
-                  <input value={t.text} onChange={e => updateTodo(t.id, e.target.value)}
-                    style={{ flex: 1, height: "auto", padding: "4px 8px", fontSize: 13, background: "transparent", border: "none", textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text3)" : "var(--text1)", borderRadius: 6 }} />
-                  <button onClick={() => removeTodo(t.id)} title="삭제"
-                    style={{ width: 26, height: 26, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 14, padding: 0, fontFamily: "inherit", flexShrink: 0 }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "#EF4444"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text3)"; }}>
-                    ✕
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button onClick={() => toggleTodo(t.id)} title={t.done ? "미완료로" : "완료"}
+                      style={{ width: 22, height: 22, borderRadius: 6, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#10B981" : "transparent", color: "#fff", cursor: "pointer", fontSize: 13, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, fontFamily: "inherit" }}>
+                      {t.done ? "✓" : ""}
+                    </button>
+                    <input value={t.text} onChange={e => updateTodo(t.id, e.target.value)}
+                      style={{ flex: 1, height: "auto", padding: "4px 8px", fontSize: 13, background: "transparent", border: "none", textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text3)" : "var(--text1)", borderRadius: 6 }} />
+                    <button onClick={() => removeTodo(t.id)} title="삭제"
+                      style={{ width: 26, height: 26, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 14, padding: 0, fontFamily: "inherit", flexShrink: 0 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "#EF4444"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text3)"; }}>
+                      ✕
+                    </button>
+                  </div>
+                  {/* 업무 기간 표시/편집 */}
+                  {isEditing ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text3)", paddingLeft: 32 }}>
+                      <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
+                        style={{ height: 28, padding: "0 6px", fontSize: 11, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                      <span>→</span>
+                      <input type="date" value={editEnd} onChange={e => setEditEnd(e.target.value)} min={editDate}
+                        style={{ height: 28, padding: "0 6px", fontSize: 11, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                      <button onClick={saveEditDates} style={{ padding: "0 10px", height: 26, border: "none", borderRadius: 6, background: "#10B981", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>저장</button>
+                      <button onClick={cancelEditDates} style={{ padding: "0 8px", height: 26, border: "1px solid var(--border)", borderRadius: 6, background: "transparent", color: "var(--text2)", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>취소</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text3)", paddingLeft: 32, cursor: "pointer" }} onClick={() => startEditDates(t)} title="업무 기간 편집">
+                      <span style={{ fontWeight: 700 }}>📅</span>
+                      <span>{t.date.slice(5).replace("-",".")}</span>
+                      {hasRange && (
+                        <>
+                          <span>→</span>
+                          <span>{t.endDate.slice(5).replace("-",".")}</span>
+                          <span style={{ padding: "1px 6px", borderRadius: 999, background: "rgba(236,102,8,0.10)", color: "#EC6608", fontWeight: 700, fontSize: 10 }}>{rangeDays}일간</span>
+                        </>
+                      )}
+                      <span style={{ marginLeft: 4, opacity: 0.7 }}>✎</span>
+                    </div>
+                  )}
                 </div>
-              ))
+              );})
             )}
           </div>
         </div>
@@ -10852,14 +10944,20 @@ function ScheduleTab({ todos, setTodos, darkMode }) {
             {allUpcoming.slice(0, 8).map(t => {
               const d = new Date(t.date);
               const days = Math.round((d - new Date(todayKey)) / 86400000);
-              const label = days === 0 ? "오늘" : days === 1 ? "내일" : `${days}일 후`;
+              const label = days <= 0 ? "진행 중" : days === 1 ? "내일" : `${days}일 후`;
+              const hasRange = t.endDate && t.endDate !== t.date;
+              const rangeDays = hasRange ? Math.round((new Date(t.endDate) - new Date(t.date)) / 86400000) + 1 : 0;
               return (
                 <div key={t.id} onClick={() => setSelectedDate(t.date)}
                   style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "var(--surface2)", border: "1px solid var(--border)", cursor: "pointer", transition: "background 0.12s" }}
                   onMouseEnter={e => e.currentTarget.style.background = "var(--surface)"}
                   onMouseLeave={e => e.currentTarget.style.background = "var(--surface2)"}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: days === 0 ? "#EC6608" : "var(--text2)", minWidth: 56 }}>{label}</span>
-                  <span style={{ fontSize: 12, color: "var(--text3)", minWidth: 78 }}>{t.date.slice(5).replace("-",".")}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: days <= 0 ? "#EC6608" : "var(--text2)", minWidth: 56 }}>{label}</span>
+                  <span style={{ fontSize: 12, color: "var(--text3)", minWidth: hasRange ? 130 : 78 }}>
+                    {t.date.slice(5).replace("-",".")}
+                    {hasRange && ` → ${t.endDate.slice(5).replace("-",".")}`}
+                  </span>
+                  {hasRange && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "rgba(236,102,8,0.10)", color: "#EC6608", fontWeight: 700 }}>{rangeDays}일</span>}
                   <span style={{ fontSize: 13, color: "var(--text1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</span>
                 </div>
               );
