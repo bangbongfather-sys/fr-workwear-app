@@ -5105,12 +5105,64 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
       {subTab === "accounts" && (<>
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-            <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>통장/계좌 관리</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>통장/계좌 관리</span></div>
+              {accounts.length > 0 && (
+                <span style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 10px",borderRadius:100,background:"rgba(16,185,129,0.12)",color:"#10B981",fontSize:11,fontWeight:700}}>
+                  <span style={{width:6,height:6,borderRadius:"50%",background:"currentColor"}}/>
+                  {accounts.length}개 계좌 · 총 {Math.round(totalBank).toLocaleString()}원
+                </span>
+              )}
+            </div>
             <div style={{display:"flex",gap:8}}>
               <button onClick={()=>setShowCfForm(v=>!v)} style={{padding:"8px 14px",fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>{showCfForm?"닫기":"+ 거래 입력"}</button>
               <button onClick={()=>setShowAcctForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showAcctForm?"닫기":"+ 계좌 추가"}</button>
             </div>
           </div>
+
+          {/* 총 잔액 강조 카드 */}
+          {accounts.length > 0 && (
+            <div style={{
+              background: "linear-gradient(135deg, rgba(16,185,129,0.08), rgba(16,185,129,0.02))",
+              border: "1px solid rgba(16,185,129,0.2)",
+              borderRadius: 14,
+              padding: "16px 20px",
+              marginBottom: 14,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: 12,
+            }}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:"#10B981",letterSpacing:0.4,textTransform:"uppercase",marginBottom:4}}>전 계좌 총 잔액</div>
+                <div style={{fontSize:28,fontWeight:800,color:"var(--text1)",letterSpacing:-0.5,lineHeight:1}}>
+                  {Math.round(totalBank).toLocaleString()}<span style={{fontSize:14,marginLeft:4,color:"var(--text2)",fontWeight:600}}>원</span>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+                {(() => {
+                  const positive = accounts.filter(a => (parseFloat(a.balance)||0) > 0);
+                  const zeroOrNeg = accounts.filter(a => (parseFloat(a.balance)||0) <= 0);
+                  const maxAcc = positive.length > 0 ? positive.reduce((m, a) => (parseFloat(a.balance)||0) > (parseFloat(m.balance)||0) ? a : m) : null;
+                  return (
+                    <>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,marginBottom:2}}>활성 계좌</div>
+                        <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>{positive.length}<span style={{fontSize:11,color:"var(--text2)",marginLeft:2,fontWeight:500}}>/ {accounts.length}개</span></div>
+                      </div>
+                      {maxAcc && (
+                        <div style={{textAlign:"right",borderLeft:"1px solid var(--border)",paddingLeft:14}}>
+                          <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,marginBottom:2}}>최대 잔액 계좌</div>
+                          <div style={{fontSize:13,fontWeight:700,color:maxAcc.color||"#10B981"}}>{maxAcc.name} · {Math.round(parseFloat(maxAcc.balance)||0).toLocaleString()}원</div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
 
           {/* 계좌 추가 폼 */}
           {showAcctForm && (
