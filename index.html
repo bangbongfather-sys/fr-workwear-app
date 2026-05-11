@@ -4027,58 +4027,117 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
                               <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="ledger" size={14}/>자동 미수금 (장부 미입금 상태)</span></div>
                               <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(0,122,255,0.1)",color:"#007AFF",fontWeight:700}}>장부에서 입금완료로 바꾸면 자동 차감</div>
                             </div>
-                            {expAutoEntries.length === 0 ? (
-                              <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0 12px",fontStyle:"italic"}}>이 거래처에 등록된 청구가 없습니다.</div>
-                            ) : (
-                              <table style={{marginBottom:14}}>
-                                <thead><tr>
-                                  <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
-                                  <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
-                                  <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
-                                  <th style={{fontSize:11}}>메모</th>
-                                </tr></thead>
-                                <tbody>
-                                  {expAutoEntries.map((ae, aei) => {
-                                    const isUnpaid = ae.status === "미입금";
-                                    const toggleHere = () => {
-                                      const newStatus = isUnpaid ? "입금완료" : "미입금";
-                                      const amt = Math.round(ae.amount||0).toLocaleString();
-                                      if (!window.confirm(`[${ae.ym}] "${c.name||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${ae.status}" → "${newStatus}" 로 변경하시겠습니까?`)) return;
-                                      setLedgers(prev => {
-                                        const next = { ...prev };
-                                        const month = next[ae.ym];
-                                        if (!month || !month.clients) return prev;
-                                        next[ae.ym] = {
-                                          ...month,
-                                          clients: month.clients.map(mc => {
-                                            if ((mc.name||"").trim() === (c.name||"").trim()) {
-                                              return { ...mc, status: isUnpaid ? "입금완료" : "미입금" };
-                                            }
-                                            return mc;
-                                          })
-                                        };
-                                        return next;
-                                      });
-                                    };
-                                    return (
-                                      <tr key={"a"+aei} style={{opacity:isUnpaid?1:0.65}}>
+                            {(() => {
+                              const unpaidRows = expAutoEntries.filter(e => e.status === "미입금");
+                              const paidRows = expAutoEntries.filter(e => e.status === "입금완료");
+                              const paidSum = paidRows.reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
+                              const cKey = c.id;
+                              const isOpen = showPaidHistory.has(cKey);
+                              const togglePaidView = () => setShowPaidHistory(prev => { const n = new Set(prev); if (n.has(cKey)) n.delete(cKey); else n.add(cKey); return n; });
+                              const togglePaidStatusRow = (ae) => {
+                                const isUnpaid = ae.status === "미입금";
+                                const amt = Math.round(ae.amount||0).toLocaleString();
+                                if (!window.confirm(`[${ae.ym}] "${c.name||"(이름없음)"}" (${amt}원)\n\n입금현황을 "${ae.status}" → "${isUnpaid ? "입금완료" : "미입금"}" 로 변경하시겠습니까?`)) return;
+                                setLedgers(prev => {
+                                  const next = { ...prev };
+                                  const month = next[ae.ym];
+                                  if (!month || !month.clients) return prev;
+                                  next[ae.ym] = {
+                                    ...month,
+                                    clients: month.clients.map(mc => {
+                                      if ((mc.name||"").trim() === (c.name||"").trim()) {
+                                        return { ...mc, status: isUnpaid ? "입금완료" : "미입금" };
+                                      }
+                                      return mc;
+                                    })
+                                  };
+                                  return next;
+                                });
+                              };
+                              if (expAutoEntries.length === 0) {
+                                return <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0 12px",fontStyle:"italic"}}>이 거래처에 등록된 청구가 없습니다.</div>;
+                              }
+                              if (unpaidRows.length === 0) {
+                                return (
+                                  <div style={{padding:"8px 0 14px"}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:8,fontSize:12,color:"#10B981",fontWeight:600,marginBottom:8}}>
+                                      ✓ 미입금 없음 · 모두 완납 처리됨 ({paidRows.length}건 · {Math.round(paidSum).toLocaleString()}원)
+                                    </div>
+                                    <button onClick={togglePaidView} style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
+                                      {isOpen ? "완납 내역 숨기기 ▲" : `완납 내역 보기 ▼ (${paidRows.length}건)`}
+                                    </button>
+                                    {isOpen && (
+                                      <table style={{marginTop:10}}>
+                                        <thead><tr>
+                                          <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
+                                          <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
+                                          <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
+                                          <th style={{fontSize:11}}>메모</th>
+                                        </tr></thead>
+                                        <tbody>
+                                          {paidRows.map((ae, ei) => (
+                                            <tr key={"p"+ei} style={{opacity:0.65}}>
+                                              <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{ae.ym}</td>
+                                              <td style={{textAlign:"center"}}>
+                                                <button onClick={()=>togglePaidStatusRow(ae)} title="미입금으로 되돌리기" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✓ 완납</button>
+                                              </td>
+                                              <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"var(--text3)",textDecoration:"line-through"}}>{Math.round(ae.amount).toLocaleString()}원</td>
+                                              <td style={{fontSize:12,color:"var(--text3)"}}>{ae.memo}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return (
+                                <table style={{marginBottom:14}}>
+                                  <thead><tr>
+                                    <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
+                                    <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
+                                    <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
+                                    <th style={{fontSize:11}}>메모</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {unpaidRows.map((ae, aei) => (
+                                      <tr key={"u"+aei}>
                                         <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{ae.ym}</td>
                                         <td style={{textAlign:"center"}}>
-                                          <button onClick={toggleHere} title={isUnpaid?"입금완료로 변경":"미입금으로 되돌리기"} style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isUnpaid?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isUnpaid?"#FF9500":"#00B493",border:"none",cursor:"pointer",fontFamily:"inherit"}}>{isUnpaid?"⏳ 미입금":"✓ 완납"}</button>
+                                          <button onClick={()=>togglePaidStatusRow(ae)} title="입금완료로 변경" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(255,149,0,0.15)",color:"#FF9500",border:"none",cursor:"pointer",fontFamily:"inherit"}}>⏳ 미입금</button>
                                         </td>
-                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isUnpaid?"#F04452":"var(--text3)",textDecoration:isUnpaid?"none":"line-through"}}>{isUnpaid?"+":""}{Math.round(ae.amount).toLocaleString()}원</td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#F04452"}}>+{Math.round(ae.amount).toLocaleString()}원</td>
                                         <td style={{fontSize:12,color:"var(--text2)"}}>{ae.memo}</td>
                                       </tr>
-                                    );
-                                  })}
-                                  <tr style={{borderTop:"1px solid var(--divider)"}}>
-                                    <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
-                                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(expAutoSum).toLocaleString()}원</td>
-                                    <td/>
-                                  </tr>
-                                </tbody>
-                              </table>
-                            )}
+                                    ))}
+                                    <tr style={{borderTop:"1px solid var(--divider)"}}>
+                                      <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
+                                      <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(expAutoSum).toLocaleString()}원</td>
+                                      <td/>
+                                    </tr>
+                                    {paidRows.length > 0 && (
+                                      <tr>
+                                        <td colSpan={4} style={{paddingTop:10}}>
+                                          <button onClick={togglePaidView} style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"#10B981",background:"transparent",border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
+                                            {isOpen ? `완납 ${paidRows.length}건 숨기기 ▲` : `완납 ${paidRows.length}건 보기 ▼ (${Math.round(paidSum).toLocaleString()}원)`}
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    )}
+                                    {isOpen && paidRows.map((ae, ei) => (
+                                      <tr key={"p"+ei} style={{opacity:0.65}}>
+                                        <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{ae.ym}</td>
+                                        <td style={{textAlign:"center"}}>
+                                          <button onClick={()=>togglePaidStatusRow(ae)} title="미입금으로 되돌리기" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✓ 완납</button>
+                                        </td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"var(--text3)",textDecoration:"line-through"}}>{Math.round(ae.amount).toLocaleString()}원</td>
+                                        <td style={{fontSize:12,color:"var(--text3)"}}>{ae.memo}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              );
+                            })()}
 
                             {/* 2. 수동 부분입금/조정 */}
                             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>✏️ 부분 입금/수동 조정 (선택)</div>
