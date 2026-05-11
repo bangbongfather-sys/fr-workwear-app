@@ -4458,6 +4458,16 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                             </div>
                             {(c.autoUnpaidList.length === 0 && c.autoPaidList.length === 0) ? (
                               <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0 12px",fontStyle:"italic"}}>장부에 등록된 청구가 없습니다.</div>
+                            ) : c.autoUnpaidList.length === 0 ? (
+                              <div style={{padding:"8px 0 14px"}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:8,fontSize:12,color:"#10B981",fontWeight:600,marginBottom:8}}>
+                                  ✓ 미입금 없음 · 모두 완납 처리됨 ({c.autoPaidList.length}건 · {Math.round(c.autoPaidSum).toLocaleString()}원)
+                                </div>
+                                <button onClick={() => setShowPaidHistory(prev => { const n = new Set(prev); if (n.has(c.name)) n.delete(c.name); else n.add(c.name); return n; })}
+                                  style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
+                                  {showPaidHistory.has(c.name) ? "완납 내역 숨기기 ▲" : `완납 내역 보기 ▼ (${c.autoPaidList.length}건)`}
+                                </button>
+                              </div>
                             ) : (
                               <table style={{marginBottom:14}}>
                                 <thead><tr>
@@ -4477,7 +4487,22 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                                       <td style={{fontSize:12,color:"var(--text2)"}}>{e.memo}</td>
                                     </tr>
                                   ))}
-                                  {c.autoPaidList.map((e, ei) => (
+                                  <tr style={{borderTop:"1px solid var(--divider)"}}>
+                                    <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
+                                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(c.autoUnpaidSum).toLocaleString()}원</td>
+                                    <td/>
+                                  </tr>
+                                  {c.autoPaidList.length > 0 && (
+                                    <tr>
+                                      <td colSpan={4} style={{paddingTop:10}}>
+                                        <button onClick={() => setShowPaidHistory(prev => { const n = new Set(prev); if (n.has(c.name)) n.delete(c.name); else n.add(c.name); return n; })}
+                                          style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"#10B981",background:"transparent",border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
+                                          {showPaidHistory.has(c.name) ? `완납 ${c.autoPaidList.length}건 숨기기 ▲` : `완납 ${c.autoPaidList.length}건 보기 ▼ (${Math.round(c.autoPaidSum).toLocaleString()}원)`}
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  )}
+                                  {showPaidHistory.has(c.name) && c.autoPaidList.map((e, ei) => (
                                     <tr key={"p"+ei} style={{opacity:0.65}}>
                                       <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{e.ym}</td>
                                       <td style={{textAlign:"center"}}>
@@ -4487,11 +4512,6 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                                       <td style={{fontSize:11,color:"var(--text3)"}}>장부에서 입금완료 처리됨</td>
                                     </tr>
                                   ))}
-                                  <tr style={{borderTop:"1px solid var(--divider)"}}>
-                                    <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
-                                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(c.autoUnpaidSum).toLocaleString()}원</td>
-                                    <td/>
-                                  </tr>
                                 </tbody>
                               </table>
                             )}
