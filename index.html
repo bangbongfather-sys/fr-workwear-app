@@ -4141,7 +4141,12 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
 
                             {/* 2. 수동 부분입금/조정 */}
                             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>✏️ 부분 입금/수동 조정 (선택)</div>
-                            {getAR(c.name).length === 0 ? null : (
+                            {getAR(c.name).length === 0 ? null : (() => {
+                              const arEntries = getAR(c.name);
+                              const sumCharge = arEntries.filter(a => a.type === "청구").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
+                              const sumPay = arEntries.filter(a => a.type === "입금").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
+                              const sumNet = sumCharge - sumPay;
+                              return (
                               <table style={{marginBottom:8}}>
                                 <thead><tr>
                                   <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
@@ -4151,7 +4156,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
                                   <th style={{width:40}}></th>
                                 </tr></thead>
                                 <tbody>
-                                  {getAR(c.name).map(a => {
+                                  {arEntries.map(a => {
                                     const isCharge = a.type === "청구";
                                     return (
                                       <tr key={a.id}>
@@ -4165,9 +4170,21 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, 
                                       </tr>
                                     );
                                   })}
+                                  <tr style={{borderTop:"2px solid var(--divider)",background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}}>
+                                    <td colSpan={2} style={{fontSize:12,fontWeight:800,padding:"8px 8px",color:"var(--text2)"}}>합계 ({arEntries.length}건)</td>
+                                    <td style={{textAlign:"right",fontSize:13,fontWeight:800,padding:"8px 8px"}}>
+                                      <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}>
+                                        <span style={{color:"#FF9500",fontSize:11,fontWeight:700}}>청구 +{Math.round(sumCharge).toLocaleString()}</span>
+                                        <span style={{color:"#00B493",fontSize:11,fontWeight:700}}>입금 -{Math.round(sumPay).toLocaleString()}</span>
+                                        <span style={{color:sumNet>0?"#F04452":sumNet<0?"#00B493":"var(--text2)",fontSize:13,fontWeight:900,marginTop:1,paddingTop:2,borderTop:"1px dashed var(--divider)"}}>순 {sumNet>0?"+":""}{Math.round(sumNet).toLocaleString()}원</span>
+                                      </div>
+                                    </td>
+                                    <td colSpan={2}/>
+                                  </tr>
                                 </tbody>
                               </table>
-                            )}
+                              );
+                            })()}
                             {/* 수동 청구/입금 추가 폼 */}
                             <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6,marginTop:8}}>
                               <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
@@ -4624,6 +4641,24 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                                       </tr>
                                     );
                                   })}
+                                  {(() => {
+                                    const sumCharge = c.entries.filter(a => a.type === "청구").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
+                                    const sumPay = c.entries.filter(a => a.type === "입금").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
+                                    const sumNet = sumCharge - sumPay;
+                                    return (
+                                      <tr style={{borderTop:"2px solid var(--divider)",background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}}>
+                                        <td colSpan={2} style={{fontSize:12,fontWeight:800,padding:"8px 8px",color:"var(--text2)"}}>합계 ({c.entries.length}건)</td>
+                                        <td style={{textAlign:"right",fontSize:13,fontWeight:800,padding:"8px 8px"}}>
+                                          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}>
+                                            <span style={{color:"#FF9500",fontSize:11,fontWeight:700}}>청구 +{Math.round(sumCharge).toLocaleString()}</span>
+                                            <span style={{color:"#00B493",fontSize:11,fontWeight:700}}>입금 -{Math.round(sumPay).toLocaleString()}</span>
+                                            <span style={{color:sumNet>0?"#F04452":sumNet<0?"#00B493":"var(--text2)",fontSize:13,fontWeight:900,marginTop:1,paddingTop:2,borderTop:"1px dashed var(--divider)"}}>순 {sumNet>0?"+":""}{Math.round(sumNet).toLocaleString()}원</span>
+                                          </div>
+                                        </td>
+                                        <td colSpan={2}/>
+                                      </tr>
+                                    );
+                                  })()}
                                 </tbody>
                               </table>
                             )}
