@@ -4592,6 +4592,16 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const [showCfForm, setShowCfForm] = useState(false);
   const [cfDraft, setCfDraft] = useState({ accountId:"", client:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
   const [cfClientFilter, setCfClientFilter] = useState(""); // 거래처별 합산 보기 — 선택된 거래처
+  const [editCfId, setEditCfId] = useState(null);
+  const [editCfDraft, setEditCfDraft] = useState(null);
+  const startEditCf = (cf) => { setEditCfId(cf.id); setEditCfDraft({ ...cf, amount: String(cf.amount || "") }); };
+  const cancelEditCf = () => { setEditCfId(null); setEditCfDraft(null); };
+  const saveEditCf = () => {
+    if (!editCfDraft || !editCfDraft.client?.trim() || !editCfDraft.amount) { alert("거래처명 + 금액 필수"); return; }
+    const amt = parseFloat(editCfDraft.amount) || 0;
+    setCashFlows(prev => prev.map(c => c.id === editCfId ? { ...editCfDraft, client: editCfDraft.client.trim(), amount: amt } : c));
+    cancelEditCf();
+  };
   const [showSchedForm, setShowSchedForm] = useState(false);
   const [schedDraft, setSchedDraft] = useState({ name:"", amount:"", category:"임대료", dueDay:"10", memo:"" });
 
@@ -5343,20 +5353,78 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
               {cfClientFilter && <button onClick={()=>setCfClientFilter("")} style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border)",background:"none",color:"var(--text2)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>전체 보기</button>}
             </div>
             <div style={{overflowX:"auto"}}>
+              {/* 편집용 datalist (재사용) */}
+              <datalist id="cf-edit-client-list">
+                {Array.from(new Set([
+                  ...clients.map(c => c.name),
+                  ...suppliers.map(s => s.name),
+                  ...cashFlows.map(c => c.client).filter(Boolean),
+                ])).filter(Boolean).sort().map(n => <option key={n} value={n}/>)}
+              </datalist>
               <table>
                 <thead><tr>
-                  <th style={{width:100}}>날짜</th><th style={{width:60,textAlign:"center"}}>구분</th>
+                  <th style={{width:110}}>날짜</th><th style={{width:60,textAlign:"center"}}>구분</th>
                   <th>거래처</th><th>분류/메모</th>
-                  <th style={{textAlign:"right"}}>금액</th>
-                  <th style={{width:140,fontSize:10,color:"var(--text3)"}}>계좌(참고)</th>
-                  <th style={{width:40,textAlign:"center"}}>관리</th>
+                  <th style={{textAlign:"right",width:140}}>금액</th>
+                  <th style={{width:130,fontSize:10,color:"var(--text3)"}}>계좌(참고)</th>
+                  <th style={{width:80,textAlign:"center"}}>관리</th>
                 </tr></thead>
                 <tbody>
                   {[...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0, cfClientFilter ? 1000 : 30).map(cf => {
                     const acc = accounts.find(a=>a.id===cf.accountId);
                     const isIn = cf.type === "입금";
+                    const isEditing = editCfId === cf.id;
+
+                    if (isEditing && editCfDraft) {
+                      const editIsIn = editCfDraft.type === "입금";
+                      return (
+                        <tr key={cf.id} style={{background:"rgba(99,102,241,0.04)"}}>
+                          <td style={{padding:"8px 6px"}}>
+                            <input type="date" value={editCfDraft.date||""} onChange={e=>setEditCfDraft(d=>({...d,date:e.target.value}))} style={{height:32,fontSize:12,padding:"0 6px"}}/>
+                          </td>
+                          <td style={{textAlign:"center",padding:"8px 4px"}}>
+                            <select value={editCfDraft.type} onChange={e=>setEditCfDraft(d=>({...d,type:e.target.value}))} style={{height:32,fontSize:12,padding:"0 4px",fontWeight:700,color:editIsIn?"#10B981":"#EF4444"}}>
+                              <option value="입금">입금</option><option value="출금">출금</option>
+                            </select>
+                          </td>
+                          <td style={{padding:"8px 6px"}}>
+                            <input list="cf-edit-client-list" placeholder="거래처명 *" value={editCfDraft.client||""} onChange={e=>setEditCfDraft(d=>({...d,client:e.target.value}))} style={{height:32,fontSize:13,padding:"0 8px",fontWeight:600}}/>
+                          </td>
+                          <td style={{padding:"8px 6px"}}>
+                            <div style={{display:"flex",gap:4}}>
+                              <input placeholder="분류" value={editCfDraft.category||""} onChange={e=>setEditCfDraft(d=>({...d,category:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",flex:1}}/>
+                              <input placeholder="메모" value={editCfDraft.memo||""} onChange={e=>setEditCfDraft(d=>({...d,memo:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",flex:1}}/>
+                            </div>
+                          </td>
+                          <td style={{padding:"8px 6px"}}>
+                            <input type="number" value={editCfDraft.amount} onChange={e=>setEditCfDraft(d=>({...d,amount:e.target.value}))} style={{height:32,fontSize:13,padding:"0 8px",textAlign:"right",fontWeight:700,color:editIsIn?"#10B981":"#EF4444"}}/>
+                          </td>
+                          <td style={{padding:"8px 6px"}}>
+                            <select value={editCfDraft.accountId||""} onChange={e=>setEditCfDraft(d=>({...d,accountId:e.target.value}))} style={{height:32,fontSize:11,padding:"0 6px"}}>
+                              <option value="">— 계좌 —</option>
+                              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                            </select>
+                          </td>
+                          <td style={{textAlign:"center",padding:"8px 4px"}}>
+                            <div style={{display:"inline-flex",gap:2}}>
+                              <button onClick={saveEditCf} title="저장" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"rgba(16,185,129,0.12)",color:"#10B981",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                                onMouseEnter={e=>e.currentTarget.style.background="rgba(16,185,129,0.22)"}
+                                onMouseLeave={e=>e.currentTarget.style.background="rgba(16,185,129,0.12)"}>
+                                <Icon name="check" size={14}/>
+                              </button>
+                              <button onClick={cancelEditCf} title="취소" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"var(--surface2)",color:"var(--text2)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                                onMouseEnter={e=>e.currentTarget.style.background="var(--chip-hover-bg)"}
+                                onMouseLeave={e=>e.currentTarget.style.background="var(--surface2)"}>
+                                <Icon name="close" size={14}/>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+
                     return (
-                      <tr key={cf.id}>
+                      <tr key={cf.id} className="cf-row">
                         <td style={{fontSize:12,color:"var(--text2)"}}>{cf.date}</td>
                         <td style={{textAlign:"center"}}>
                           <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isIn?"rgba(16,185,129,0.15)":"rgba(239,68,68,0.15)",color:isIn?"#10B981":"#EF4444"}}>{cf.type}</span>
@@ -5365,7 +5433,20 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                         <td style={{fontSize:12,color:"var(--text2)"}}>{cf.category}{cf.memo?` · ${cf.memo}`:""}</td>
                         <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:isIn?"#10B981":"#EF4444"}}>{isIn?"+":"-"}{fmt(cf.amount)}원</td>
                         <td style={{fontSize:11,color:"var(--text3)"}}>{acc?acc.name:cf.accountId?"(삭제됨)":"—"}</td>
-                        <td style={{textAlign:"center"}}><button onClick={()=>deleteCf(cf.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
+                        <td style={{textAlign:"center"}}>
+                          <div style={{display:"inline-flex",gap:2}}>
+                            <button onClick={()=>startEditCf(cf)} title="수정" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                              onMouseEnter={e=>{e.currentTarget.style.background="rgba(99,102,241,0.12)";e.currentTarget.style.color="#6366F1";}}
+                              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}>
+                              <Icon name="edit" size={14}/>
+                            </button>
+                            <button onClick={()=>deleteCf(cf.id)} title="삭제" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                              onMouseEnter={e=>{e.currentTarget.style.background="rgba(239,68,68,0.12)";e.currentTarget.style.color="#EF4444";}}
+                              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}>
+                              <Icon name="trash" size={14}/>
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
