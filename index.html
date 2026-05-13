@@ -10664,7 +10664,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   <div key={po.id}
                                     onClick={() => setViewingPO(po)}
                                     style={{
-                                      display: "grid", gridTemplateColumns: "120px 1.2fr 1.5fr 80px 200px 50px", gap: 12,
+                                      display: "grid", gridTemplateColumns: "120px 1.2fr 1.5fr 80px 200px 90px", gap: 12,
                                       padding: "12px 16px", borderBottom: idx < sorted.length - 1 ? `1px solid ${T.divider}` : "none",
                                       cursor: "pointer", alignItems: "center",
                                       transition: "background 0.12s",
@@ -10672,13 +10672,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                     onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
                                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                                   >
-                                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text2, fontVariantNumeric: "tabular-nums" }}>{dateDisplay}</div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text2, fontVariantNumeric: "tabular-nums" }}>{dateDisplay}{po.updatedAt && <span title="수정됨" style={{ marginLeft: 4, fontSize: 10, color: "#EC6608", fontWeight: 700 }}>✎</span>}</div>
                                     <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>🏭 {po.supplier?.name || "—"}</div>
                                     <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"}</div>
                                     <div style={{ fontSize: 12, color: T.text2, textAlign: "right" }}>{(po.items || []).length}건{po.photos?.length > 0 ? ` · 📷${po.photos.length}` : ""}</div>
                                     <div style={{ fontSize: 14, fontWeight: 800, color: NAVY, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(po.totalAmount || 0).toLocaleString()}원</div>
-                                    <div style={{ textAlign: "center" }}>
-                                      <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}>✕</button>
+                                    <div style={{ textAlign: "center", display: "flex", gap: 4, justifyContent: "center" }}>
+                                      <button onClick={(e) => { e.stopPropagation(); editPOFromHistory(po); }} title="수정" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 13, fontFamily: "inherit", padding: 4, display: "inline-flex", alignItems: "center" }}><Icon name="edit" size={14}/></button>
+                                      <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}>✕</button>
                                     </div>
                                   </div>
                                 );
