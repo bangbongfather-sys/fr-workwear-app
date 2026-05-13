@@ -6564,7 +6564,16 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
             <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>신규 매입 등록</div>
             <div style={{display:"grid",gridTemplateColumns:"130px 1fr 1fr",gap:8,marginBottom:8}}>
               <input type="date" value={newI.date} onChange={e=>setNewI(p=>({...p,date:e.target.value}))}/>
-              <select value={newI.materialName} onChange={e=>setNewI(p=>({...p,materialName:e.target.value}))} style={{height:44}}>
+              <select value={newI.materialName} onChange={e=>{
+                const nm = e.target.value;
+                const found = materials.find(m=>m.name===nm);
+                setNewI(p=>({
+                  ...p,
+                  materialName: nm,
+                  // 단가표에 등록된 품목이면 단가/단위 자동 반영 (사용자가 이미 입력한 단가가 있어도 덮어씀 — 새로 선택했으니까)
+                  ...(found ? { unitPrice: String(found.price ?? ""), unit: found.unit || p.unit } : {}),
+                }));
+              }} style={{height:44}}>
                 <option value="">품목 선택... (원단/임가공/기타)</option>
                 {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
                 <option value="__custom__">직접 입력 (임가공/기타)</option>
