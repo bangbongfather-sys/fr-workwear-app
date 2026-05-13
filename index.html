@@ -8149,17 +8149,48 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,"0")}.${String(now.getDate()).padStart(2,"0")}`;
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
     const title = (poDraft.title || "").trim() || `${sup.name || "공급처"} - ${items.map(it => it.name).slice(0, 2).join(", ")}${items.length > 2 ? " 외" : ""}`;
+    // 수정 모드: poDraft.editId 가 있고 기존 발주서 ID와 일치하면 교체
+    const editId = poDraft.editId;
+    const existing = editId ? purchaseOrders.find(p => p.id === editId) : null;
     const entry = {
-      id: uid(), title, dateStr, timeStr, savedAt: now.getTime(),
+      id: existing ? existing.id : uid(),
+      title,
+      dateStr: existing ? existing.dateStr : dateStr,
+      timeStr: existing ? existing.timeStr : timeStr,
+      savedAt: existing ? existing.savedAt : now.getTime(),
+      updatedAt: existing ? now.getTime() : undefined,
       supplier: sup, items, photos: poDraft.photos || [], orderDate: poDraft.orderDate || "", deliveryDate: poDraft.deliveryDate || "",
       paymentTerms: poDraft.paymentTerms || "", deliveryPlace: poDraft.deliveryPlace || "",
       memo: poDraft.memo || "", body: poDraft.body, poStyle, totalAmount: subtotal + tax,
     };
-    const next = [entry, ...purchaseOrders];
+    const next = existing
+      ? purchaseOrders.map(p => p.id === existing.id ? entry : p)
+      : [entry, ...purchaseOrders];
     setPurchaseOrders(next);
     save("frw_purchase_orders", next);
     cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders: next, fabricIntakes, monthlySales }).catch(() => {});
-    alert(`💾 발주서가 저장됐습니다!\n${dateStr} ${timeStr}`);
+    alert(`${existing ? "✏️ 발주서가 수정됐습니다" : "💾 발주서가 저장됐습니다"}!\n${entry.dateStr} ${entry.timeStr}${existing ? `\n(수정: ${dateStr} ${timeStr})` : ""}`);
+    // 수정 완료 후 editId 제거
+    if (existing) setPoDraft(prev => prev ? { ...prev, editId: undefined } : prev);
+  };
+
+  const editPOFromHistory = (po) => {
+    setPoDraft({
+      editId: po.id,
+      title: po.title || "",
+      supplier: po.supplier || {},
+      items: po.items || [],
+      photos: po.photos || [],
+      orderDate: po.orderDate || "",
+      deliveryDate: po.deliveryDate || "",
+      paymentTerms: po.paymentTerms || "",
+      deliveryPlace: po.deliveryPlace || "",
+      memo: po.memo || "",
+      body: po.body || "",
+    });
+    if (po.poStyle) setPoStyle(po.poStyle);
+    setViewingPO(null);
+    setPoSubTab("current");
   };
 
   const deletePO = (id) => {
