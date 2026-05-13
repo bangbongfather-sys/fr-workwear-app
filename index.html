@@ -6497,14 +6497,41 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
 
   const thisMonth = new Date().toISOString().slice(0,7);
   const pendingCnt = supplierFiltered.filter(r=>["주문완료","운송중","검수중"].includes(r.status)).length;
-  const totalVal = supplierFiltered.reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0),0);
   const thisMoComp = supplierFiltered.filter(r=>r.date?.startsWith(thisMonth)&&["입고완료","검수완료"].includes(r.status)).length;
 
   const filtered = supplierFiltered.filter(r => {
     if (filterMonth && !r.date?.startsWith(filterMonth)) return false;
     if (filterStatus && r.status !== filterStatus) return false;
+    if (filterMat && (r.materialName||"") !== filterMat) return false;
+    if (searchMat.trim() && !(r.materialName||"").toLowerCase().includes(searchMat.trim().toLowerCase())) return false;
     return true;
   });
+
+  // 현재 필터 결과 기준 총합
+  const totalVal = filtered.reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0),0);
+  const totalQtyByUnit = filtered.reduce((m,r) => { const u = r.unit || ""; m[u] = (m[u]||0) + parseFloat(r.qty||0); return m; }, {});
+  // 전체(필터 무시) 매입 총합 — 비교용
+  const grandTotal = supplierFiltered.reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0),0);
+
+  // 품목별 합계 (현재 필터 결과 기준)
+  const matSummary = (() => {
+    const m = {};
+    filtered.forEach(r => {
+      const key = (r.materialName||"(미지정)").trim() || "(미지정)";
+      if (!m[key]) m[key] = { name: key, qty: 0, amount: 0, count: 0, units: new Set() };
+      m[key].qty += parseFloat(r.qty||0);
+      m[key].amount += parseFloat(r.unitPrice||0) * parseFloat(r.qty||0);
+      m[key].count += 1;
+      if (r.unit) m[key].units.add(r.unit);
+    });
+    return Object.values(m).sort((a,b) => b.amount - a.amount);
+  })();
+
+  // 품목 드롭다운용 unique 목록 (단가표 + 실제 기록 모두 포함)
+  const allMatNames = Array.from(new Set([
+    ...materials.map(m => m.name),
+    ...supplierFiltered.map(r => (r.materialName||"").trim()).filter(Boolean),
+  ])).sort((a,b) => a.localeCompare(b, "ko"));
 
   const addIntake = () => {
     const matName = newI.materialName === "__custom__" ? newI.customMaterial : newI.materialName;
