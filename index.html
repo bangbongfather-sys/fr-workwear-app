@@ -6557,14 +6557,23 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
         {(filterMonth||filterStatus||filterMat||searchMat.trim()) && statCard("전체 매입 총합", Math.round(grandTotal).toLocaleString()+"원", "var(--text2)")}
       </div>
       <div className="card">
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:16}}>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
           <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{height:40,fontSize:13,flex:"0 0 160px"}}/>
           <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{height:40,fontSize:13,width:140}}>
             <option value="">전체 상태</option>
             {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
           </select>
-          {(filterMonth||filterStatus)&&(
-            <button onClick={()=>{setFilterMonth("");setFilterStatus("");}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit"}}>필터 초기화</button>
+          <select value={filterMat} onChange={e=>setFilterMat(e.target.value)} style={{height:40,fontSize:13,minWidth:200,flex:"0 1 240px"}} title="품목 단일 선택 필터">
+            <option value="">전체 품목</option>
+            {allMatNames.map(n=><option key={n} value={n}>{n}</option>)}
+          </select>
+          <div style={{position:"relative",flex:"1 1 220px",minWidth:200}}>
+            <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"var(--text3)",display:"inline-flex",pointerEvents:"none"}}><Icon name="search" size={14}/></span>
+            <input value={searchMat} onChange={e=>setSearchMat(e.target.value)} placeholder="품목명 부분 검색 (예: 아라미드)"
+              style={{height:40,fontSize:13,paddingLeft:34,width:"100%"}}/>
+          </div>
+          {(filterMonth||filterStatus||filterMat||searchMat.trim())&&(
+            <button onClick={()=>{setFilterMonth("");setFilterStatus("");setFilterMat("");setSearchMat("");}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit",whiteSpace:"nowrap"}}>필터 초기화</button>
           )}
           <div style={{flex:1}}/>
           {fabricIntakes.length > 0 && (
@@ -6575,6 +6584,52 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
           )}
           <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 입고 등록"}</button>
         </div>
+
+        {/* 품목별 합계 (현재 필터 결과 기준) */}
+        {matSummary.length > 0 && (
+          <div style={{marginBottom:16,padding:"10px 14px",background:"var(--surface2)",borderRadius:10,border:"1px solid var(--border)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,cursor:"pointer"}} onClick={()=>setShowMatSummary(v=>!v)}>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--text1)",display:"inline-flex",alignItems:"center",gap:8}}>
+                📊 품목별 합계 ({matSummary.length}개 품목)
+                {Object.keys(totalQtyByUnit).length > 0 && (
+                  <span style={{fontSize:11,fontWeight:600,color:"var(--text2)"}}>· 총 수량 {Object.entries(totalQtyByUnit).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" + ")}</span>
+                )}
+              </div>
+              <span style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>{showMatSummary?"숨기기 ▲":"펼치기 ▼"}</span>
+            </div>
+            {showMatSummary && (
+              <div style={{marginTop:10,overflowX:"auto"}}>
+                <table style={{width:"100%",fontVariantNumeric:"tabular-nums"}}>
+                  <thead><tr>
+                    <th style={{textAlign:"left",fontSize:11}}>품목명</th>
+                    <th style={{textAlign:"right",fontSize:11,width:100}}>건수</th>
+                    <th style={{textAlign:"right",fontSize:11,width:140}}>총 수량</th>
+                    <th style={{textAlign:"right",fontSize:11,width:160}}>총 금액</th>
+                    <th style={{textAlign:"right",fontSize:11,width:160}}>부가세포함</th>
+                  </tr></thead>
+                  <tbody>
+                    {matSummary.map(m => (
+                      <tr key={m.name} style={{cursor:"pointer"}} onClick={()=>setFilterMat(m.name)} title="이 품목만 보기">
+                        <td style={{fontSize:13,fontWeight:600,color:"var(--text1)"}}>{m.name}</td>
+                        <td style={{textAlign:"right",fontSize:12,color:"var(--text2)"}}>{m.count}건</td>
+                        <td style={{textAlign:"right",fontSize:12,color:"var(--text1)"}}>{Math.round(m.qty).toLocaleString()} {Array.from(m.units).join("/")||""}</td>
+                        <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:"var(--text1)"}}>{Math.round(m.amount).toLocaleString()}원</td>
+                        <td style={{textAlign:"right",fontSize:12,fontWeight:600,color:"#EC6608"}}>{Math.round(m.amount*1.1).toLocaleString()}원</td>
+                      </tr>
+                    ))}
+                    <tr style={{borderTop:"2px solid var(--divider)"}}>
+                      <td style={{fontSize:13,fontWeight:800,paddingTop:8}}>합계</td>
+                      <td style={{textAlign:"right",fontSize:12,fontWeight:700,paddingTop:8,color:"var(--text2)"}}>{filtered.length}건</td>
+                      <td/>
+                      <td style={{textAlign:"right",fontSize:14,fontWeight:800,paddingTop:8,color:"#EC6608"}}>{Math.round(totalVal).toLocaleString()}원</td>
+                      <td style={{textAlign:"right",fontSize:13,fontWeight:700,paddingTop:8,color:"#EC6608"}}>{Math.round(totalVal*1.1).toLocaleString()}원</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
         {selectedIds.size > 0 && (
           <div style={{
             marginBottom: 14, padding: "10px 14px", borderRadius: 12,
