@@ -6647,7 +6647,15 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
                       </td>
                       <td><input type="date" value={editDraft.date||""} onChange={e=>setEditDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
                       <td>
-                        <select value={editDraft.materialName||""} onChange={e=>setEditDraft(d=>({...d,materialName:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
+                        <select value={editDraft.materialName||""} onChange={e=>{
+                          const nm = e.target.value;
+                          const found = materials.find(m=>m.name===nm);
+                          setEditDraft(d=>({
+                            ...d,
+                            materialName: nm,
+                            ...(found ? { unitPrice: String(found.price ?? ""), unit: found.unit || d.unit } : {}),
+                          }));
+                        }} style={{height:34,fontSize:12,padding:"0 6px"}}>
                           <option value="">선택...</option>
                           {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
                           {editDraft.materialName && !materials.find(m=>m.name===editDraft.materialName) && <option value={editDraft.materialName}>{editDraft.materialName} (직접입력)</option>}
