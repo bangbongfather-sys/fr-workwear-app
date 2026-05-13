@@ -10158,6 +10158,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               /* 작성 폼 — 애플/토스 스타일 */
               <div className="po-form" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
+                {/* 수정 모드 안내 배너 */}
+                {poDraft.editId && (
+                  <div style={{ padding: "12px 16px", borderRadius: 12, background: "linear-gradient(135deg, rgba(236,102,8,0.10), rgba(236,102,8,0.04))", border: "1.5px solid rgba(236,102,8,0.3)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>✏️</span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#EC6608" }}>발주서 수정 모드</div>
+                        <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 2 }}>저장 시 기존 발주서가 업데이트됩니다 (덮어쓰기)</div>
+                      </div>
+                    </div>
+                    <button onClick={() => { if (confirm("수정 취소하고 발주 이력으로 돌아갈까요?\n변경사항은 저장되지 않습니다.")) { setPoDraft(null); setPoSubTab("history"); } }}
+                      style={{ padding: "8px 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                      수정 취소
+                    </button>
+                  </div>
+                )}
+
                 {/* ① 공급처 정보 */}
                 <div className="card">
                   <div className="section-header">
