@@ -1,6 +1,6 @@
 # 간단한 PowerShell HTTP 서버 (Python/Node 없이 작동)
 # 사용법: 우클릭 → PowerShell로 실행
-$root = "C:\Users\magic\OneDrive\바탕 화면\fr-workwear-app"
+$root = $PSScriptRoot
 $port = 8765
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:$port/")
