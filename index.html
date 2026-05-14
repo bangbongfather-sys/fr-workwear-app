@@ -937,8 +937,26 @@ async function cloudLoad() {
   return await r.json();
 }
 async function cloudSave(data) {
-  const r = await fetch(FB_URL, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  // PATCH = shallow merge at root. data에 포함된 key만 갱신하고 나머지 top-level key는 보존.
+  // PUT은 전체 노드를 교체하므로, 부분 cloudSave 호출이 다른 key(ledgers 등)를 삭제하는 데이터 손실 버그가 있었음.
+  // 2026-05-14 수정: PUT → PATCH. 부분 저장이 안전해짐.
+  const r = await fetch(FB_URL, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
   if (!r.ok) throw new Error("save failed");
+}
+
+// 일일 자동 백업: 하루에 한 번, 앱 첫 로드 시 현재 Firebase 상태를 별도 노드에 스냅샷.
+// 경로: /frw_backup_YYYY-MM-DD.json (frw.json과 형제 노드). 같은 날 두 번째 호출은 no-op.
+// 복구: Firebase 콘솔에서 frw_backup_<날짜>를 frw로 복사하면 그 날짜의 상태로 롤백.
+async function cloudBackupDaily(data) {
+  if (!data || typeof data !== "object") return;
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC 기준)
+  const lastKey = "frw_last_backup_date";
+  if (load(lastKey, "") === today) return; // 오늘 이미 백업됨
+  try {
+    const backupUrl = FB_URL.replace("/frw.json", `/frw_backup_${today}.json`);
+    const r = await fetch(backupUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    if (r.ok) save(lastKey, today);
+  } catch { /* 백업 실패는 무시 — 본 동기화를 방해하지 않음 */ }
 }
 
 // 이미지 압축 (Firebase RTDB 안전 사이즈로): 최대 1024px wide, JPEG quality 0.75 → 보통 50~150KB
@@ -7642,7 +7660,12 @@ function App() {
   };
 
   useEffect(() => {
-    cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); })
+    cloudLoad().then(d => {
+      applyCloudData(d);
+      setSyncStatus("saved");
+      // 로드 직후 데이터 그대로 일일 백업 (하루 한 번). 오늘 작업하다 실수로 덮어쓰면 어제 백업으로 복구.
+      cloudBackupDaily(d);
+    })
       .catch(() => setSyncStatus("error")).finally(() => { initialized.current = true; });
   }, []);
 
