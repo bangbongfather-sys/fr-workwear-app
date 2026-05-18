@@ -1,12 +1,16 @@
-// Cloudflare Worker — 정적 자산 서빙 + 노션 To Do List 동기화 프록시
+// Cloudflare Worker — 정적 자산 서빙 + 노션 To Do List 동기화 프록시 + Firebase RTDB 프록시
 //
 // 환경 변수 (Cloudflare 대시보드에서 설정):
-//   NOTION_TOKEN     (Secret) — 노션 Internal Integration Token (secret_xxx)
-//   NOTION_TODO_DSID (Plain)  — To Do List 데이터베이스 ID
-//                                (현재값: 2c70e386-6388-818e-9ad9-000bfd99e1c4)
+//   NOTION_TOKEN        (Secret) — 노션 Internal Integration Token (secret_xxx)
+//   NOTION_TODO_DSID    (Plain)  — To Do List 데이터베이스 ID
+//                                   (현재값: 2c70e386-6388-818e-9ad9-000bfd99e1c4)
+//   FIREBASE_DB_SECRET  (Secret) — Firebase Realtime Database 비밀 키 (legacy DB secret).
+//                                   Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → 데이터베이스 비밀번호.
+//                                   클라이언트에는 절대 노출되지 않고 이 워커만 사용.
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
+const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 
 export default {
   async fetch(request, env) {
@@ -17,7 +21,7 @@ export default {
       return new Response(null, {
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
           "Access-Control-Max-Age": "86400",
         },
@@ -27,6 +31,11 @@ export default {
     // 노션 동기화 API
     if (url.pathname.startsWith("/api/notion/")) {
       return handleNotionApi(request, env, url);
+    }
+
+    // Firebase RTDB 프록시 (클라이언트가 Firebase URL/시크릿을 직접 보지 않게 우회)
+    if (url.pathname === "/api/sync" || url.pathname.startsWith("/api/sync/")) {
+      return handleFirebaseSync(request, env, url);
     }
 
     // 그 외 모든 요청은 정적 자산 (index.html 등)
@@ -113,6 +122,59 @@ async function handleNotionApi(request, env, url) {
     return new Response(JSON.stringify({ error: "지원하지 않는 메서드/경로" }), { status: 405, headers: corsHeaders });
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message || "내부 오류" }), { status: 500, headers: corsHeaders });
+  }
+}
+
+// Firebase RTDB 프록시
+//
+// 경로 매핑:
+//   /api/sync                       → /frw.json            (메인 데이터: GET/PUT/PATCH)
+//   /api/sync/backup/YYYY-MM-DD     → /frw_backup_<date>.json (일일 백업: PUT)
+//
+// 보안: FIREBASE_DB_SECRET가 Firebase RTDB ?auth= 쿼리에 자동 부착되어, Firebase 규칙은
+// 'auth != null'로 잠가도 동작. 시크릿은 워커 환경에만 있고 클라이언트로 새지 않음.
+async function handleFirebaseSync(request, env, url) {
+  if (!env.FIREBASE_DB_SECRET) {
+    return new Response(JSON.stringify({
+      error: "FIREBASE_DB_SECRET 환경변수가 설정되지 않았습니다. wrangler secret put FIREBASE_DB_SECRET 로 등록하세요."
+    }), { status: 500, headers: corsHeaders });
+  }
+
+  // 경로 매칭
+  let fbPath;
+  if (url.pathname === "/api/sync" || url.pathname === "/api/sync/") {
+    fbPath = "/frw.json";
+  } else {
+    const m = url.pathname.match(/^\/api\/sync\/backup\/(\d{4}-\d{2}-\d{2})\/?$/);
+    if (!m) {
+      return new Response(JSON.stringify({ error: "Not found", path: url.pathname }), { status: 404, headers: corsHeaders });
+    }
+    fbPath = `/frw_backup_${m[1]}.json`;
+  }
+
+  // 허용 메서드 화이트리스트
+  const method = request.method;
+  if (!["GET", "PUT", "PATCH"].includes(method)) {
+    return new Response(JSON.stringify({ error: `메서드 ${method} 미지원 (GET/PUT/PATCH만 허용)` }), { status: 405, headers: corsHeaders });
+  }
+
+  // Firebase 호출
+  const fbUrl = `https://${FB_HOST}${fbPath}?auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`;
+  const body = method === "GET" ? undefined : await request.text();
+  try {
+    const res = await fetch(fbUrl, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    const text = await res.text();
+    // Firebase 응답을 그대로 전달 (단, 시크릿이 헤더에 들어가지 않게 자체 corsHeaders로 응답)
+    return new Response(text, {
+      status: res.status,
+      headers: corsHeaders,
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message || "Firebase 프록시 오류" }), { status: 502, headers: corsHeaders });
   }
 }
 

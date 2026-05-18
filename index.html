@@ -883,7 +883,9 @@ function Icon({ name, size = 18, strokeWidth = 1.7, style, className }) {
 }
 
 
-const FB_URL = "https://njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app/frw.json";
+// Firebase RTDB는 Cloudflare Worker(/api/sync)를 통해 프록시. Worker가 FIREBASE_DB_SECRET를
+// 부착해 인증하므로 클라이언트엔 시크릿/실제 RTDB URL이 노출되지 않음. (2026-05-14 보안 강화)
+const FB_URL = "/api/sync";
 const GMAIL_CLIENT_ID = "483707566941-58n12qi4jeepusbeg09n26iurt0199u7.apps.googleusercontent.com";
 const GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send";
 const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile";
@@ -953,7 +955,8 @@ async function cloudBackupDaily(data) {
   const lastKey = "frw_last_backup_date";
   if (load(lastKey, "") === today) return; // 오늘 이미 백업됨
   try {
-    const backupUrl = FB_URL.replace("/frw.json", `/frw_backup_${today}.json`);
+    // Worker 프록시 경로: /api/sync/backup/YYYY-MM-DD → Firebase /frw_backup_<date>.json
+    const backupUrl = `${FB_URL}/backup/${today}`;
     const r = await fetch(backupUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
     if (r.ok) save(lastKey, today);
   } catch { /* 백업 실패는 무시 — 본 동기화를 방해하지 않음 */ }
