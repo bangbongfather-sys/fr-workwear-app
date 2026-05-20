@@ -63,12 +63,12 @@
     return;
   }
 
-  // 5. 클라우드에 저장
-  const updated = { ...data, fabricIntakes: [...existing, ...fresh] };
+  // 5. 클라우드에 저장 — PATCH 사용 (다른 필드 보존)
+  // 2026-05-14: PUT → PATCH 변경. PUT 은 전체 노드 교체로 ledgers 등 데이터 손실 위험.
   const saveRes = await fetch(FB_URL, {
-    method: "PUT",
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updated),
+    body: JSON.stringify({ fabricIntakes: [...existing, ...fresh] }),
   });
   if (!saveRes.ok) { console.error("[Import] 저장 실패", saveRes.status); alert("❌ 저장 실패: " + saveRes.status); return; }
 
