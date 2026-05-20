@@ -6497,8 +6497,26 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
   const [searchMat, setSearchMat] = useState(""); // 품목명 부분 검색
   const [showMatSummary, setShowMatSummary] = useState(false); // 품목별 합계 펼침 토글
   const [showForm, setShowForm] = useState(false);
-  const [newI, setNewI] = useState({ date:new Date().toISOString().slice(0,10), materialName:"", customMaterial:"", supplier:filterSupplier||"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", inspector:"", note:"" });
-  useEffect(() => { setNewI(p => ({ ...p, supplier: filterSupplier || p.supplier })); }, [filterSupplier]);
+  // 2026-05-20: 단일 품목 등록 → 매입일 1개 + 품목 N개 배치 등록으로 변경.
+  // 스키마는 그대로 (각 fabricIntakes row = 1품목). UI만 매입일을 그룹 키로 사용.
+  const blankItem = () => ({ id: uid(), materialName:"", customMaterial:"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", note:"" });
+  const [newBatch, setNewBatch] = useState(() => ({
+    date: new Date().toISOString().slice(0,10),
+    supplier: filterSupplier || "",
+    inspector: "",
+    items: [blankItem()],
+  }));
+  useEffect(() => { setNewBatch(p => ({ ...p, supplier: filterSupplier || p.supplier })); }, [filterSupplier]);
+  const setBatchField = (key, val) => setNewBatch(p => ({ ...p, [key]: val }));
+  const setItemField = (id, key, val, autoApply = null) => setNewBatch(p => ({
+    ...p,
+    items: p.items.map(it => it.id === id ? { ...it, [key]: val, ...(autoApply || {}) } : it),
+  }));
+  const addItemRow = () => setNewBatch(p => ({ ...p, items: [...p.items, blankItem()] }));
+  const removeItemRow = (id) => setNewBatch(p => p.items.length <= 1 ? p : ({ ...p, items: p.items.filter(it => it.id !== id) }));
+  const resetBatch = () => setNewBatch({ date: new Date().toISOString().slice(0,10), supplier: filterSupplier || "", inspector: "", items: [blankItem()] });
+  const batchTotal = newBatch.items.reduce((s,it) => s + (parseFloat(it.unitPrice||0) * parseFloat(it.qty||0)), 0);
+  const batchValidCount = newBatch.items.filter(it => (it.materialName === "__custom__" ? it.customMaterial : it.materialName) && it.qty).length;
   // 거래처 탭일 때는 해당 거래처의 매입만 보여주기 (부분 매칭)
   const supplierFiltered = filterSupplier
     ? fabricIntakes.filter(r => (r.supplier||"").trim().includes(filterSupplier) || filterSupplier.includes((r.supplier||"").trim()))
@@ -6570,11 +6588,27 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
     ...supplierFiltered.map(r => (r.materialName||"").trim()).filter(Boolean),
   ])).sort((a,b) => a.localeCompare(b, "ko"));
 
-  const addIntake = () => {
-    const matName = newI.materialName === "__custom__" ? newI.customMaterial : newI.materialName;
-    if (!matName || !newI.qty || !newI.supplier) return;
-    setFabricIntakes(prev => [...prev, { id:uid(), ...newI, materialName:matName }]);
-    setNewI({ date:new Date().toISOString().slice(0,10), materialName:"", customMaterial:"", supplier:"", qty:"", unit:"yard", unitPrice:"", status:"주문완료", inspector:"", note:"" });
+  const commitBatch = () => {
+    if (!newBatch.date) { alert("매입일은 필수입니다"); return; }
+    if (!newBatch.supplier || !newBatch.supplier.trim()) { alert("공급업체명은 필수입니다"); return; }
+    const validItems = newBatch.items
+      .map(it => ({ ...it, materialName: it.materialName === "__custom__" ? (it.customMaterial || "").trim() : (it.materialName || "").trim() }))
+      .filter(it => it.materialName && it.qty);
+    if (validItems.length === 0) { alert("품목을 최소 1개 입력하세요 (품목명+수량 필수)"); return; }
+    const rows = validItems.map(it => ({
+      id: uid(),
+      date: newBatch.date,
+      supplier: newBatch.supplier.trim(),
+      inspector: newBatch.inspector || "",
+      materialName: it.materialName,
+      qty: it.qty,
+      unit: it.unit,
+      unitPrice: it.unitPrice,
+      status: it.status,
+      note: it.note || "",
+    }));
+    setFabricIntakes(prev => [...prev, ...rows]);
+    resetBatch();
     setShowForm(false);
   };
   const statCard = (label,val,color) => (
@@ -6684,44 +6718,89 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
         )}
         {showForm&&(
           <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:16}}>
-            <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:12,textTransform:"uppercase",letterSpacing:0.5}}>신규 매입 등록</div>
-            <div style={{display:"grid",gridTemplateColumns:"130px 1fr 1fr",gap:8,marginBottom:8}}>
-              <input type="date" value={newI.date} onChange={e=>setNewI(p=>({...p,date:e.target.value}))}/>
-              <select value={newI.materialName} onChange={e=>{
-                const nm = e.target.value;
-                const found = materials.find(m=>m.name===nm);
-                setNewI(p=>({
-                  ...p,
-                  materialName: nm,
-                  // 단가표에 등록된 품목이면 단가/단위 자동 반영 (사용자가 이미 입력한 단가가 있어도 덮어씀 — 새로 선택했으니까)
-                  ...(found ? { unitPrice: String(found.price ?? ""), unit: found.unit || p.unit } : {}),
-                }));
-              }} style={{height:44}}>
-                <option value="">품목 선택... (원단/임가공/기타)</option>
-                {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
-                <option value="__custom__">직접 입력 (임가공/기타)</option>
-              </select>
-              {newI.materialName==="__custom__"
-                ?<input placeholder="품목명 직접 입력 (예: 봉제 임가공, 컨설팅 등)" value={newI.customMaterial} onChange={e=>setNewI(p=>({...p,customMaterial:e.target.value}))}/>
-                :<input placeholder="공급업체명 *" value={newI.supplier} onChange={e=>setNewI(p=>({...p,supplier:e.target.value}))}/>}
+            {/* 헤더: 제목 + 품목 개수 + 단축 액션 */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,gap:8,flexWrap:"wrap"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>
+                신규 매입 등록 <span style={{textTransform:"none",letterSpacing:0,color:"var(--text2)",fontWeight:600,marginLeft:6}}>· 한 매입일에 여러 품목</span>
+              </div>
+              <div style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>품목 {newBatch.items.length}개 · 유효 {batchValidCount}건</div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 80px 100px 110px 120px",gap:8,marginBottom:8}}>
-              {newI.materialName==="__custom__"
-                ?<input placeholder="공급업체명 *" value={newI.supplier} onChange={e=>setNewI(p=>({...p,supplier:e.target.value}))}/>
-                :<div style={{display:"flex",alignItems:"center",paddingLeft:8,fontSize:13,color:"var(--text2)"}}>{newI.materialName||"품목을 선택하세요"}</div>}
-              <input type="number" placeholder="수량 *" value={newI.qty} onChange={e=>setNewI(p=>({...p,qty:e.target.value}))}/>
-              <select value={newI.unit} onChange={e=>setNewI(p=>({...p,unit:e.target.value}))} style={{height:44}}>
-                <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
-              </select>
-              <input type="number" placeholder="단가(원)" value={newI.unitPrice} onChange={e=>setNewI(p=>({...p,unitPrice:e.target.value}))}/>
-              <select value={newI.status} onChange={e=>setNewI(p=>({...p,status:e.target.value}))} style={{height:44}}>
-                {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
-              </select>
+
+            {/* 공통 정보 (모든 품목에 공유): 매입일 · 공급업체 · 검수담당 */}
+            <div style={{display:"grid",gridTemplateColumns:"160px 1fr 1fr",gap:8,marginBottom:14,padding:"10px 12px",background:"var(--surface3, var(--surface))",borderRadius:10,border:"1px solid var(--divider)"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                <label style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3}}>매입일 *</label>
+                <input type="date" value={newBatch.date} onChange={e=>setBatchField("date", e.target.value)} style={{height:38}}/>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                <label style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3}}>공급업체 *</label>
+                <input placeholder="예: ㈜OO직물" value={newBatch.supplier} onChange={e=>setBatchField("supplier", e.target.value)} style={{height:38}}/>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                <label style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3}}>검수 담당자 (선택)</label>
+                <input placeholder="비워두면 미지정" value={newBatch.inspector} onChange={e=>setBatchField("inspector", e.target.value)} style={{height:38}}/>
+              </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",gap:8}}>
-              <input placeholder="검수 담당자" value={newI.inspector} onChange={e=>setNewI(p=>({...p,inspector:e.target.value}))}/>
-              <input placeholder="비고 / 메모" value={newI.note} onChange={e=>setNewI(p=>({...p,note:e.target.value}))}/>
-              <button className="btn-primary" onClick={addIntake} style={{padding:"0 20px",height:44,fontSize:13}}>등록</button>
+
+            {/* 품목 행 헤더 (테이블 스타일) */}
+            <div style={{display:"grid",gridTemplateColumns:"28px 1fr 80px 80px 110px 110px 1fr 32px",gap:6,padding:"0 4px 6px",fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3,borderBottom:"1px solid var(--divider)",marginBottom:8}}>
+              <div style={{textAlign:"center"}}>#</div>
+              <div>품목 *</div>
+              <div>수량 *</div>
+              <div>단위</div>
+              <div>단가(원)</div>
+              <div>상태</div>
+              <div>메모</div>
+              <div/>
+            </div>
+
+            {/* 품목 행 리스트 */}
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:12}}>
+              {newBatch.items.map((it, idx) => (
+                <div key={it.id} style={{display:"grid",gridTemplateColumns:"28px 1fr 80px 80px 110px 110px 1fr 32px",gap:6,alignItems:"center"}}>
+                  <div style={{textAlign:"center",fontSize:12,color:"var(--text3)",fontWeight:700}}>{idx+1}</div>
+                  {it.materialName==="__custom__" ? (
+                    <input placeholder="품목명 직접 입력 (예: 봉제 임가공)" value={it.customMaterial} onChange={e=>setItemField(it.id,"customMaterial",e.target.value)} style={{height:38}}/>
+                  ) : (
+                    <select value={it.materialName} onChange={e=>{
+                      const nm = e.target.value;
+                      const found = materials.find(m=>m.name===nm);
+                      setItemField(it.id, "materialName", nm, found ? { unitPrice: String(found.price ?? ""), unit: found.unit || it.unit } : null);
+                    }} style={{height:38,fontSize:13}}>
+                      <option value="">품목 선택...</option>
+                      {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
+                      <option value="__custom__">직접 입력 (임가공/기타)</option>
+                    </select>
+                  )}
+                  <input type="number" placeholder="수량" value={it.qty} onChange={e=>setItemField(it.id,"qty",e.target.value)} style={{height:38}}/>
+                  <select value={it.unit} onChange={e=>setItemField(it.id,"unit",e.target.value)} style={{height:38,fontSize:13}}>
+                    <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
+                  </select>
+                  <input type="number" placeholder="단가" value={it.unitPrice} onChange={e=>setItemField(it.id,"unitPrice",e.target.value)} style={{height:38}}/>
+                  <select value={it.status} onChange={e=>setItemField(it.id,"status",e.target.value)} style={{height:38,fontSize:13}}>
+                    {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <input placeholder="비고" value={it.note} onChange={e=>setItemField(it.id,"note",e.target.value)} style={{height:38}}/>
+                  <button onClick={()=>removeItemRow(it.id)} disabled={newBatch.items.length<=1} title={newBatch.items.length<=1?"최소 1개 품목 필요":"이 품목 제거"}
+                    style={{padding:0,height:38,width:32,border:"1px solid var(--border)",background:"transparent",color:newBatch.items.length<=1?"var(--text3)":"#F04452",borderRadius:8,cursor:newBatch.items.length<=1?"not-allowed":"pointer",fontSize:18,fontWeight:700,fontFamily:"inherit",opacity:newBatch.items.length<=1?0.4:1}}>×</button>
+                </div>
+              ))}
+            </div>
+
+            {/* 하단: + 품목 추가 + 합계 + 등록 */}
+            <div style={{display:"flex",alignItems:"center",gap:12,paddingTop:12,borderTop:"1px solid var(--divider)",flexWrap:"wrap"}}>
+              <button onClick={addItemRow}
+                style={{padding:"8px 14px",borderRadius:8,border:"1.5px dashed var(--border)",background:"none",color:"var(--text1)",cursor:"pointer",fontSize:12,fontFamily:"inherit",fontWeight:600}}>+ 품목 추가</button>
+              <div style={{flex:1,textAlign:"right",fontSize:13,color:"var(--text2)",fontVariantNumeric:"tabular-nums"}}>
+                예상 합계: <span style={{fontWeight:800,color:"var(--text1)",fontSize:14}}>{Math.round(batchTotal).toLocaleString()}원</span>
+                <span style={{marginLeft:8,fontSize:11,color:"#EC6608",fontWeight:600}}>(부가세포함 {Math.round(batchTotal*1.1).toLocaleString()}원)</span>
+              </div>
+              <button onClick={()=>{setShowForm(false);resetBatch();}}
+                style={{padding:"0 16px",height:40,borderRadius:8,border:"1px solid var(--border)",background:"transparent",color:"var(--text2)",cursor:"pointer",fontSize:13,fontFamily:"inherit",fontWeight:600}}>취소</button>
+              <button className="btn-primary" onClick={commitBatch} disabled={batchValidCount===0}
+                style={{padding:"0 20px",height:40,fontSize:13,opacity:batchValidCount===0?0.5:1,cursor:batchValidCount===0?"not-allowed":"pointer"}}>
+                전체 등록 ({batchValidCount}건)
+              </button>
             </div>
           </div>
         )}
