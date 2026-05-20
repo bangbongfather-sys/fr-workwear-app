@@ -7636,30 +7636,32 @@ function App() {
 
   const applyCloudData = (d) => {
     if (!d) return;
-    if (d.materials) setMaterials(d.materials);
-    if (d.laborItems) setLaborItems(d.laborItems);
-    if (d.products && d.products.length > 0) {
+    // 모든 필드 `!== undefined` 체크 (빈 배열/객체도 정상 데이터로 인정)
+    // 이전 버그: `if (d.xxx)` 패턴이 빈 배열/객체를 falsy 로 무시 → 삭제·초기화 작업이 동기화 안 되는 문제
+    if (d.materials !== undefined) setMaterials(d.materials);
+    if (d.laborItems !== undefined) setLaborItems(d.laborItems);
+    if (d.products !== undefined && Array.isArray(d.products) && d.products.length > 0) {
       const migrated = d.products.map(migrateProduct);
       setProducts(migrated);
       setActiveProdId(prev => migrated.find(p => p.id === prev) ? prev : migrated[0].id);
     }
     if (d.apiKey !== undefined) setApiKey(d.apiKey);
-    if (d.quoteHistory) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
-    if (d.orders) setOrders(d.orders);
-    if (d.clients) setClients(d.clients);
-    if (d.bids) setBids(d.bids);
-    if (d.todos) setTodos(d.todos);
-    if (d.ledgers) setLedgers(d.ledgers);
-    if (d.clientAR) setClientAR(d.clientAR);
-    if (d.accounts) setAccounts(d.accounts);
-    if (d.investments) setInvestments(d.investments);
-    if (d.cashFlows) setCashFlows(d.cashFlows);
-    if (d.scheduledExpenses) setScheduledExpenses(d.scheduledExpenses);
-    if (d.purchaseSubTabs) setPurchaseSubTabs(d.purchaseSubTabs);
-    if (d.suppliers) setSuppliers(d.suppliers);
-    if (d.purchaseOrders) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
-    if (d.fabricIntakes) setFabricIntakes(d.fabricIntakes);
-    if (d.monthlySales) setMonthlySales(d.monthlySales);
+    if (d.quoteHistory !== undefined) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
+    if (d.orders !== undefined) setOrders(d.orders);
+    if (d.clients !== undefined) setClients(d.clients);
+    if (d.bids !== undefined) setBids(d.bids);
+    if (d.todos !== undefined) setTodos(d.todos);
+    if (d.ledgers !== undefined) setLedgers(d.ledgers);
+    if (d.clientAR !== undefined) setClientAR(d.clientAR);
+    if (d.accounts !== undefined) setAccounts(d.accounts);
+    if (d.investments !== undefined) setInvestments(d.investments);
+    if (d.cashFlows !== undefined) setCashFlows(d.cashFlows);
+    if (d.scheduledExpenses !== undefined) setScheduledExpenses(d.scheduledExpenses);
+    if (d.purchaseSubTabs !== undefined) setPurchaseSubTabs(d.purchaseSubTabs);
+    if (d.suppliers !== undefined) setSuppliers(d.suppliers);
+    if (d.purchaseOrders !== undefined) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
+    if (d.fabricIntakes !== undefined) setFabricIntakes(d.fabricIntakes);
+    if (d.monthlySales !== undefined) setMonthlySales(d.monthlySales);
   };
 
   useEffect(() => {
