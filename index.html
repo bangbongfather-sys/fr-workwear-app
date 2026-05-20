@@ -897,8 +897,24 @@ const ORANGE = "#F59E0B";
 function load(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
 }
+// localStorage 쓰기 실패(quota 초과 등)는 사용자가 모르고 데이터 일관성이 깨지므로
+// 1회 한정으로 사용자에게 알림. 가장 흔한 원인: 너무 많은 견적/이미지 → quota 초과.
+let _saveErrAlerted = false;
 function save(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    if (!_saveErrAlerted) {
+      _saveErrAlerted = true;
+      console.warn("[save] localStorage 쓰기 실패", key, e);
+      // alert 은 렌더 흐름 안에서 부담스러우니 setTimeout 으로
+      setTimeout(() => {
+        try {
+          alert("⚠️ 브라우저 저장 공간이 부족합니다.\n\n오래된 견적/이미지를 삭제하거나 사용 중인 다른 사이트의 데이터를 정리해 주세요.\n클라우드 동기화는 정상 작동합니다.");
+        } catch {}
+      }, 100);
+    }
+  }
 }
 
 // IndexedDB (대용량 저장: 회사 필요 파일 등)
