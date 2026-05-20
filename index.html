@@ -5886,7 +5886,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   );
 }
 
-function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubTabs = [], setPurchaseSubTabs, darkMode }) {
+function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems = [], purchaseSubTabs = [], setPurchaseSubTabs, darkMode }) {
   // 매입 서브탭: "dashboard" (종합 대시보드) | "all" (전체) | supplier name | "summary" (총합계)
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
   const [showAddTabForm, setShowAddTabForm] = useState(false);
@@ -6184,7 +6184,7 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, purchaseSubT
         ? <PurchaseDashboardView fabricIntakes={fabricIntakes} dashStatusRef={dashStatusRef} dashMonthlyRef={dashMonthlyRef} dashSupTopRef={dashSupTopRef} dashItemTopRef={dashItemTopRef} darkMode={darkMode} setActiveSubTab={setActiveSubTab} />
         : activeSubTab === "summary"
           ? <PurchaseSummaryView fabricIntakes={fabricIntakes} totalSumRef={totalSumRef} monthlyTrendRef={monthlyTrendRef} matPieRef={matPieRef} darkMode={darkMode} />
-          : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} darkMode={darkMode} filterSupplier={activeSubTab === "all" ? "" : activeSubTab} />
+          : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} laborItems={laborItems} darkMode={darkMode} filterSupplier={activeSubTab === "all" ? "" : activeSubTab} />
       }
     </div>
   );
@@ -6488,7 +6488,7 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
 }
 
 // 매입 목록 뷰 (필터 가능: 전체 또는 특정 거래처)
-function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode, filterSupplier }) {
+function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborItems = [], darkMode, filterSupplier }) {
   const STATUSES = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
   const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
   const [filterMonth, setFilterMonth] = useState("");
@@ -6582,9 +6582,10 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
     return Object.values(m).sort((a,b) => b.amount - a.amount);
   })();
 
-  // 품목 드롭다운용 unique 목록 (단가표 + 실제 기록 모두 포함)
+  // 품목 드롭다운용 unique 목록 (단가표 자재 + 공임 + 실제 기록 모두 포함)
   const allMatNames = Array.from(new Set([
     ...materials.map(m => m.name),
+    ...laborItems.map(l => l.name),
     ...supplierFiltered.map(r => (r.materialName||"").trim()).filter(Boolean),
   ])).sort((a,b) => a.localeCompare(b, "ko"));
 
@@ -6760,21 +6761,32 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
                 <div key={it.id} style={{display:"grid",gridTemplateColumns:"28px 1fr 80px 80px 110px 110px 1fr 32px",gap:6,alignItems:"center"}}>
                   <div style={{textAlign:"center",fontSize:12,color:"var(--text3)",fontWeight:700}}>{idx+1}</div>
                   {it.materialName==="__custom__" ? (
-                    <input placeholder="품목명 직접 입력 (예: 봉제 임가공)" value={it.customMaterial} onChange={e=>setItemField(it.id,"customMaterial",e.target.value)} style={{height:38}}/>
+                    <input placeholder="품목명 직접 입력 (기타)" value={it.customMaterial} onChange={e=>setItemField(it.id,"customMaterial",e.target.value)} style={{height:38}}/>
                   ) : (
                     <select value={it.materialName} onChange={e=>{
                       const nm = e.target.value;
-                      const found = materials.find(m=>m.name===nm);
+                      // 자재(materials) 우선, 없으면 공임(laborItems)에서 찾기
+                      const found = materials.find(m=>m.name===nm) || laborItems.find(l=>l.name===nm);
                       setItemField(it.id, "materialName", nm, found ? { unitPrice: String(found.price ?? ""), unit: found.unit || it.unit } : null);
                     }} style={{height:38,fontSize:13}}>
                       <option value="">품목 선택...</option>
-                      {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
-                      <option value="__custom__">직접 입력 (임가공/기타)</option>
+                      {materials.length > 0 && (
+                        <optgroup label="📦 원단/자재 (단가표)">
+                          {materials.map(m=><option key={`mat-${m.id}`} value={m.name}>{m.name}</option>)}
+                        </optgroup>
+                      )}
+                      {laborItems.length > 0 && (
+                        <optgroup label="🛠 공임/임가공">
+                          {laborItems.map(l=><option key={`lab-${l.id}`} value={l.name}>{l.name}</option>)}
+                        </optgroup>
+                      )}
+                      <option value="__custom__">직접 입력 (기타)</option>
                     </select>
                   )}
                   <input type="number" placeholder="수량" value={it.qty} onChange={e=>setItemField(it.id,"qty",e.target.value)} style={{height:38}}/>
                   <select value={it.unit} onChange={e=>setItemField(it.id,"unit",e.target.value)} style={{height:38,fontSize:13}}>
                     <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
+                    <option value="벌">벌</option><option value="장">장</option><option value="개">개</option><option value="식">식</option>
                   </select>
                   <input type="number" placeholder="단가" value={it.unitPrice} onChange={e=>setItemField(it.id,"unitPrice",e.target.value)} style={{height:38}}/>
                   <select value={it.status} onChange={e=>setItemField(it.id,"status",e.target.value)} style={{height:38,fontSize:13}}>
@@ -6869,6 +6881,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, darkMode
                           <input type="number" value={editDraft.qty||""} onChange={e=>setEditDraft(d=>({...d,qty:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px",textAlign:"right",width:80}}/>
                           <select value={editDraft.unit||"yard"} onChange={e=>setEditDraft(d=>({...d,unit:e.target.value}))} style={{height:34,fontSize:11,padding:"0 4px",width:60}}>
                             <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
+                            <option value="벌">벌</option><option value="장">장</option><option value="개">개</option><option value="식">식</option>
                           </select>
                         </div>
                       </td>
@@ -10190,6 +10203,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             fabricIntakes={fabricIntakes}
             setFabricIntakes={setFabricIntakes}
             materials={materials}
+            laborItems={laborItems}
             purchaseSubTabs={purchaseSubTabs}
             setPurchaseSubTabs={setPurchaseSubTabs}
             darkMode={darkMode}
