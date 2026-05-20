@@ -140,6 +140,34 @@
       box-shadow: 0 2px 4px rgba(15,17,21,0.05), 0 8px 28px rgba(236,102,8,0.11);
     }
 
+    /* ─── KPI 큰 숫자 반응형 ─── */
+    /* 자금/경영 대시보드 등에서 "3,017,252,308원" 같은 긴 숫자가 카드 폭을 넘어
+       나오는 문제를 viewport 기반 clamp() 로 자동 축소.
+       - 14px(좁은 화면) ~ 24px(넓은 화면) 사이 viewport 폭에 비례해 조정
+       - white-space:nowrap + tabular-nums → 숫자 줄바꿈 차단 + 자릿수 정렬
+       - overflow:hidden + text-overflow:ellipsis → 극단적으로 작아져도 잘림 방지
+       (container-type on .card는 의도치 않은 layout 영향 가능성 있어 viewport 기반으로 선택) */
+    .kpi-num {
+      font-weight: 800;
+      font-size: clamp(14px, 1.7vw, 24px);
+      line-height: 1.1;
+      white-space: nowrap;
+      letter-spacing: -0.012em;
+      font-variant-numeric: tabular-nums;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      display: block;
+    }
+    /* 접미사("원"/"일"/"%") — inline fontSize 그대로 두되 좁은 화면에서는 살짝 줄임.
+       inline style이 className을 override하므로 !important로 강제. */
+    @media (max-width: 900px) {
+      .kpi-num > span { font-size: 11px !important; }
+    }
+    @media (max-width: 600px) {
+      .kpi-num > span { font-size: 10px !important; }
+    }
+
     /* ─── NJ SAFETY 로고 (다크모드 대응) ─── */
     .nj-logo-img {
       transition: filter 0.25s;
@@ -4981,27 +5009,27 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
           <div className="card">
             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 자산</div>
-            <div style={{fontSize:24,fontWeight:800,color:"var(--text1)"}}>{fmt(totalAssets)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div className="kpi-num" style={{color:"var(--text1)"}}>{fmt(totalAssets)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
             <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>현금+투자+미수</div>
           </div>
           <div className="card" onClick={()=>setSubTab("accounts")} style={{cursor:"pointer"}} title="통장 관리 탭으로 이동">
             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>가용 현금</span></div>
-            <div style={{fontSize:24,fontWeight:800,color:"#10B981"}}>{fmt(totalBank)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div className="kpi-num" style={{color:"#10B981"}}>{fmt(totalBank)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
             <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>{accounts.length}개 통장</div>
           </div>
           <div className="card" onClick={()=>setSubTab("investments")} style={{cursor:"pointer"}} title="투자 현황 탭으로 이동">
             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="trendingUp" size={14}/>투자자산</span></div>
-            <div style={{fontSize:24,fontWeight:800,color:"#EC6608"}}>{fmt(totalInvestment)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div className="kpi-num" style={{color:"#EC6608"}}>{fmt(totalInvestment)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
             <div style={{fontSize:10,color:investmentRoi>=0?"#00B493":"#F04452",marginTop:3,fontWeight:700}}>{investmentRoi>=0?"+":""}{investmentRoi.toFixed(1)}% ({investmentReturn>=0?"+":""}{fmt(investmentReturn)}원)</div>
           </div>
           <div className="card" onClick={()=>setSubTab("ar")} style={{cursor:"pointer"}} title="미수금 회수 탭으로 이동">
             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="clipboard" size={14}/>미수금</span></div>
-            <div style={{fontSize:24,fontWeight:800,color:"#F59E0B"}}>{fmt(totalAR)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
+            <div className="kpi-num" style={{color:"#F59E0B"}}>{fmt(totalAR)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
             <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>{arList.length}개 거래처 (장부 자동연동)</div>
           </div>
           <div className="card" onClick={()=>setSubTab("schedule")} style={{cursor:"pointer"}} title="정기 지출 탭으로 이동">
             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>⏱ Runway (현금가용)</div>
-            <div style={{fontSize:24,fontWeight:800,color:runwayDays>180?"#00B493":runwayDays>60?"#FF9500":"#F04452"}}>{runwayDays>=999?"∞":runwayDays}<span style={{fontSize:13,marginLeft:2}}>일</span></div>
+            <div className="kpi-num" style={{color:runwayDays>180?"#00B493":runwayDays>60?"#FF9500":"#F04452"}}>{runwayDays>=999?"∞":runwayDays}<span style={{fontSize:13,marginLeft:2}}>일</span></div>
             <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>월평균 지출 {fmt(monthlyAvgExpense)}원</div>
           </div>
         </div>
