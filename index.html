@@ -6491,7 +6491,33 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
 function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborItems = [], darkMode, filterSupplier }) {
   const STATUSES = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
   const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
-  const [filterMonth, setFilterMonth] = useState("");
+  // 기간 필터: 시작일/종료일 (YYYY-MM-DD). 둘 다 빈 값이면 전체 기간.
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  // 빠른 기간 선택 헬퍼
+  const setRangePreset = (preset) => {
+    const today = new Date();
+    const fmt = (d) => d.toISOString().slice(0,10);
+    const todayStr = fmt(today);
+    let from = "", to = "";
+    if (preset === "thisMonth") {
+      from = fmt(new Date(today.getFullYear(), today.getMonth(), 1));
+      to = todayStr;
+    } else if (preset === "lastMonth") {
+      from = fmt(new Date(today.getFullYear(), today.getMonth()-1, 1));
+      to = fmt(new Date(today.getFullYear(), today.getMonth(), 0)); // 지난달 마지막 일
+    } else if (preset === "last3") {
+      from = fmt(new Date(today.getFullYear(), today.getMonth()-2, 1));
+      to = todayStr;
+    } else if (preset === "thisYear") {
+      from = `${today.getFullYear()}-01-01`;
+      to = todayStr;
+    } else if (preset === "lastYear") {
+      from = `${today.getFullYear()-1}-01-01`;
+      to = `${today.getFullYear()-1}-12-31`;
+    }
+    setFilterFrom(from); setFilterTo(to);
+  };
   const [filterStatus, setFilterStatus] = useState("");
   const [filterMat, setFilterMat] = useState(""); // 정확히 일치하는 품목명 필터
   const [searchMat, setSearchMat] = useState(""); // 품목명 부분 검색
@@ -6555,7 +6581,9 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const thisMoComp = supplierFiltered.filter(r=>r.date?.startsWith(thisMonth)&&["입고완료","검수완료"].includes(r.status)).length;
 
   const filtered = supplierFiltered.filter(r => {
-    if (filterMonth && !r.date?.startsWith(filterMonth)) return false;
+    // 기간 필터: YYYY-MM-DD 문자열은 사전식 정렬이 시간순과 일치하므로 직접 비교 가능
+    if (filterFrom && (r.date||"") < filterFrom) return false;
+    if (filterTo && (r.date||"") > filterTo) return false;
     if (filterStatus && r.status !== filterStatus) return false;
     if (filterMat && (r.materialName||"") !== filterMat) return false;
     if (searchMat.trim() && !(r.materialName||"").toLowerCase().includes(searchMat.trim().toLowerCase())) return false;
@@ -6626,11 +6654,16 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
         {statCard("매입 기록 (필터 적용)", filtered.length+" / "+supplierFiltered.length+"건", null)}
         {statCard("매입 가액 (필터 기준)", Math.round(totalVal).toLocaleString()+"원", null)}
         {statCard("부가세포함 금액", Math.round(totalVal*1.1).toLocaleString()+"원", "#EC6608")}
-        {(filterMonth||filterStatus||filterMat||searchMat.trim()) && statCard("전체 매입 총합", Math.round(grandTotal).toLocaleString()+"원", "var(--text2)")}
+        {(filterFrom||filterTo||filterStatus||filterMat||searchMat.trim()) && statCard("전체 매입 총합", Math.round(grandTotal).toLocaleString()+"원", "var(--text2)")}
       </div>
       <div className="card">
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
-          <input type="month" value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={{height:40,fontSize:13,flex:"0 0 160px"}}/>
+        {/* 메인 필터 행: 기간 + 상태 + 품목 + 검색 + 초기화 */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:6,padding:"0 10px",height:40,background:"var(--surface2)",borderRadius:10,border:"1px solid var(--border)",flex:"0 0 auto"}} title="매입일 기간 필터">
+            <input type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} style={{height:32,fontSize:12,border:"none",background:"none",padding:0,width:130}} title="시작일"/>
+            <span style={{color:"var(--text3)",fontSize:12,fontWeight:700}}>~</span>
+            <input type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} style={{height:32,fontSize:12,border:"none",background:"none",padding:0,width:130}} title="종료일"/>
+          </div>
           <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{height:40,fontSize:13,width:140}}>
             <option value="">전체 상태</option>
             {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
@@ -6644,8 +6677,8 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
             <input value={searchMat} onChange={e=>setSearchMat(e.target.value)} placeholder="품목명 부분 검색 (예: 아라미드)"
               style={{height:40,fontSize:13,paddingLeft:34,width:"100%"}}/>
           </div>
-          {(filterMonth||filterStatus||filterMat||searchMat.trim())&&(
-            <button onClick={()=>{setFilterMonth("");setFilterStatus("");setFilterMat("");setSearchMat("");}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit",whiteSpace:"nowrap"}}>필터 초기화</button>
+          {(filterFrom||filterTo||filterStatus||filterMat||searchMat.trim())&&(
+            <button onClick={()=>{setFilterFrom("");setFilterTo("");setFilterStatus("");setFilterMat("");setSearchMat("");}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit",whiteSpace:"nowrap"}}>필터 초기화</button>
           )}
           <div style={{flex:1}}/>
           {fabricIntakes.length > 0 && (
@@ -6655,6 +6688,43 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
             >🗑 전체 삭제</button>
           )}
           <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 입고 등록"}</button>
+        </div>
+
+        {/* 빠른 기간 선택 + 현재 조회 기간 표시 */}
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,marginRight:4}}>빠른 기간</span>
+          {[
+            {key:"thisMonth", label:"이번 달"},
+            {key:"lastMonth", label:"지난 달"},
+            {key:"last3", label:"최근 3개월"},
+            {key:"thisYear", label:"올해"},
+            {key:"lastYear", label:"작년"},
+          ].map(p => (
+            <button key={p.key} onClick={()=>setRangePreset(p.key)}
+              style={{padding:"4px 12px",height:28,borderRadius:14,border:"1px solid var(--border)",background:"var(--surface2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontFamily:"inherit",fontWeight:600,whiteSpace:"nowrap"}}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(236,102,8,0.10)";e.currentTarget.style.borderColor="rgba(236,102,8,0.4)";e.currentTarget.style.color="#EC6608";}}
+              onMouseLeave={e=>{e.currentTarget.style.background="var(--surface2)";e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text2)";}}>
+              {p.label}
+            </button>
+          ))}
+          {(filterFrom||filterTo) && (() => {
+            // 조회 기간 표시 (선택 기간 + 일수)
+            let days = null;
+            if (filterFrom && filterTo) {
+              days = Math.round((new Date(filterTo) - new Date(filterFrom)) / 86400000) + 1;
+            }
+            return (
+              <>
+                <div style={{flex:1,minWidth:12}}/>
+                <span style={{fontSize:11,color:"var(--text2)",fontWeight:600,padding:"4px 10px",background:"rgba(236,102,8,0.08)",borderRadius:8,border:"1px solid rgba(236,102,8,0.25)",whiteSpace:"nowrap"}}>
+                  📅 조회 기간 <b style={{color:"#EC6608"}}>{filterFrom||"전체"} ~ {filterTo||"오늘"}</b>
+                  {days != null && <span style={{color:"var(--text3)",fontWeight:500,marginLeft:4}}>({days}일)</span>}
+                  {" · "}<b style={{color:"var(--text1)"}}>{filtered.length}건</b>
+                  {" · "}<b style={{color:"var(--text1)"}}>{Math.round(totalVal).toLocaleString()}원</b>
+                </span>
+              </>
+            );
+          })()}
         </div>
 
         {/* 품목별 합계 (현재 필터 결과 기준) */}
