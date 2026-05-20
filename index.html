@@ -6550,6 +6550,15 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  // 접힌 매입일 그룹 (기본은 모두 펼침 = 빈 Set)
+  const [collapsedDates, setCollapsedDates] = useState(() => new Set());
+  const toggleDateCollapse = (date) => setCollapsedDates(prev => {
+    const n = new Set(prev);
+    if (n.has(date)) n.delete(date); else n.add(date);
+    return n;
+  });
+  const collapseAllDates = (dates) => setCollapsedDates(new Set(dates));
+  const expandAllDates = () => setCollapsedDates(new Set());
 
   const startEdit = (r) => { setEditId(r.id); setEditDraft({ ...r }); };
   const cancelEdit = () => { setEditId(null); setEditDraft(null); };
@@ -6920,7 +6929,56 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
               <th>담당자</th><th>비고</th><th style={{textAlign:"center", minWidth: 110}}>관리</th>
             </tr></thead>
             <tbody>
-              {[...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(r=>{
+              {(() => {
+                // 매입일별 그룹화: 같은 date끼리 묶어서 헤더 행 + 품목 행들 구조로 렌더링
+                const sortedFiltered = [...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+                const groups = [];
+                let cur = null;
+                for (const r of sortedFiltered) {
+                  const d = r.date || "(날짜 없음)";
+                  if (!cur || cur.date !== d) { cur = { date: d, rows: [] }; groups.push(cur); }
+                  cur.rows.push(r);
+                }
+                return groups.map(group => {
+                  const groupSum = group.rows.reduce((s,r) => s + parseFloat(r.unitPrice||0) * parseFloat(r.qty||0), 0);
+                  const groupQtyByUnit = group.rows.reduce((m,r) => { const u = r.unit || ""; m[u] = (m[u]||0) + parseFloat(r.qty||0); return m; }, {});
+                  const isCollapsed = collapsedDates.has(group.date);
+                  const groupIds = group.rows.map(r => r.id);
+                  const allGroupSelected = groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
+                  const someGroupSelected = groupIds.some(id => selectedIds.has(id));
+                  const groupHeaderRow = (
+                    <tr key={`hdr-${group.date}`} style={{background: darkMode ? "rgba(236,102,8,0.10)" : "rgba(236,102,8,0.06)", borderTop:"2px solid var(--divider)"}}>
+                      <td style={{textAlign:"center", padding:"10px 6px"}}>
+                        <input type="checkbox" checked={allGroupSelected}
+                          ref={el => { if (el) el.indeterminate = !allGroupSelected && someGroupSelected; }}
+                          onChange={(e)=>{
+                            if (e.target.checked) setSelectedIds(prev => { const n = new Set(prev); groupIds.forEach(id => n.add(id)); return n; });
+                            else setSelectedIds(prev => { const n = new Set(prev); groupIds.forEach(id => n.delete(id)); return n; });
+                          }}
+                          title={allGroupSelected ? "이 매입일 전체 해제" : "이 매입일 전체 선택"}
+                          onClick={e=>e.stopPropagation()}
+                          style={{width:18, height:18, accentColor:"#EC6608", cursor:"pointer"}} />
+                      </td>
+                      <td colSpan={11} style={{padding:"10px 14px", cursor:"pointer", userSelect:"none"}} onClick={() => toggleDateCollapse(group.date)}>
+                        <span style={{display:"inline-flex", alignItems:"center", gap:10, fontSize:13, flexWrap:"wrap"}}>
+                          <span style={{fontSize:11, color:"var(--text3)", fontFamily:"monospace", minWidth:14, display:"inline-block"}}>{isCollapsed ? "▶" : "▼"}</span>
+                          <span style={{fontSize:14}}>📅</span>
+                          <b style={{color:"var(--text1)", fontSize:14, fontVariantNumeric:"tabular-nums"}}>{group.date}</b>
+                          <span style={{color:"var(--text2)", fontSize:12}}>· <b style={{color:"var(--text1)"}}>{group.rows.length}건</b></span>
+                          {Object.keys(groupQtyByUnit).length > 0 && (
+                            <span style={{color:"var(--text3)", fontSize:11}}>· {Object.entries(groupQtyByUnit).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" + ")}</span>
+                          )}
+                          <span style={{color:"var(--text2)", fontSize:12}}>· 공급가 <b style={{color:"#EC6608", fontSize:14}}>{Math.round(groupSum).toLocaleString()}원</b></span>
+                          <span style={{color:"var(--text3)", fontSize:11}}>(VAT 포함 {Math.round(groupSum*1.1).toLocaleString()}원)</span>
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                  if (isCollapsed) return <React.Fragment key={group.date}>{groupHeaderRow}</React.Fragment>;
+                  return (
+                    <React.Fragment key={group.date}>
+                      {groupHeaderRow}
+                      {group.rows.map(r => {
                 const isEditing = editId === r.id;
                 if (isEditing && editDraft) {
                   const editTotal = parseFloat(editDraft.unitPrice||0) * parseFloat(editDraft.qty||0);
@@ -6996,6 +7054,10 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                   </td>
                 </tr>);
               })}
+                    </React.Fragment>
+                  );
+                });
+              })()}
             </tbody></table>
           </div>
         )}
