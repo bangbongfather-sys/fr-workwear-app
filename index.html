@@ -7674,12 +7674,16 @@ function App() {
       .catch(() => setSyncStatus("error")).finally(() => { initialized.current = true; });
   }, []);
 
+  // visibility 핸들러: 백그라운드 → 포그라운드 복귀 시 cloud 재로드
+  // 단, pending save 가 있으면(=로컬에 미저장 변경분 있음) reload 스킵 → 로컬 변경분 보호
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible" && initialized.current) {
-        setSyncStatus("syncing");
-        cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error"));
-      }
+      if (document.visibilityState !== "visible") return;
+      if (!initialized.current) return;
+      // syncTimer 활성 = 로컬 변경분이 cloud 로 저장 대기 중 → reload 하면 덮어씀 → 스킵
+      if (syncTimer.current) return;
+      setSyncStatus("syncing");
+      cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error"));
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -7695,7 +7699,8 @@ function App() {
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
       cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos })
-        .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"));
+        .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"))
+        .finally(() => { syncTimer.current = null; });
     }, 1500);
   }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos]);
 
