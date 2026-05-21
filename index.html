@@ -7020,7 +7020,8 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                       <td>
                         <select value={editDraft.materialName||""} onChange={e=>{
                           const nm = e.target.value;
-                          const found = materials.find(m=>m.name===nm);
+                          // 자재 + 공임 둘 다 탐색 (신규 폼과 동일)
+                          const found = materials.find(m=>m.name===nm) || laborItems.find(l=>l.name===nm);
                           setEditDraft(d=>({
                             ...d,
                             materialName: nm,
@@ -7028,8 +7029,20 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                           }));
                         }} style={{height:34,fontSize:12,padding:"0 6px"}}>
                           <option value="">선택...</option>
-                          {materials.map(m=><option key={m.id} value={m.name}>{m.name}</option>)}
-                          {editDraft.materialName && !materials.find(m=>m.name===editDraft.materialName) && <option value={editDraft.materialName}>{editDraft.materialName} (직접입력)</option>}
+                          {materials.length > 0 && (
+                            <optgroup label="📦 원단/자재 (단가표)">
+                              {materials.map(m=><option key={`em-${m.id}`} value={m.name}>{m.name}</option>)}
+                            </optgroup>
+                          )}
+                          {laborItems.length > 0 && (
+                            <optgroup label="🛠 공임/임가공">
+                              {laborItems.map(l=><option key={`el-${l.id}`} value={l.name}>{l.name}</option>)}
+                            </optgroup>
+                          )}
+                          {editDraft.materialName
+                            && !materials.find(m=>m.name===editDraft.materialName)
+                            && !laborItems.find(l=>l.name===editDraft.materialName)
+                            && <option value={editDraft.materialName}>{editDraft.materialName} (직접입력)</option>}
                         </select>
                       </td>
                       <td><input value={editDraft.supplier||""} onChange={e=>setEditDraft(d=>({...d,supplier:e.target.value}))} placeholder="공급업체" style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
