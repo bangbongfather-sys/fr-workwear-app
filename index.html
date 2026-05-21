@@ -11627,6 +11627,32 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 서브탭 네비게이션 */}
+      <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
+        {scheduleSubOrder.order.map(id => {
+          const cfg = SCHEDULE_SUBTABS[id]; if (!cfg) return null;
+          const dragging = scheduleSubOrder.isDragging(id);
+          const dragOver = scheduleSubOrder.isDragOver(id);
+          return (
+            <button key={id} onClick={() => setScheduleSub(id)}
+              {...scheduleSubOrder.getProps(id)}
+              style={{
+                padding: "9px 16px", border: "none", borderRadius: 9,
+                background: scheduleSub === id ? (darkMode ? "rgba(236,102,8,0.18)" : "#fff") : "transparent",
+                color: scheduleSub === id ? (darkMode ? "#FFE9D6" : "#B84800") : "var(--text2)",
+                fontSize: 13, fontWeight: 700, cursor: dragging ? "grabbing" : "pointer", fontFamily: "inherit",
+                boxShadow: scheduleSub === id ? "0 1px 2px rgba(0,0,0,0.04)" : "none",
+                transition: "all 0.15s", display: "inline-flex", alignItems: "center", gap: 8,
+                opacity: dragging ? 0.4 : 1,
+                outline: dragOver ? "2px dashed #EC6608" : "none",
+                outlineOffset: 1,
+                touchAction: scheduleSubOrder.dragActive ? "none" : "manipulation",
+              }}><Icon name={cfg.icon} size={15}/>{cfg.label}</button>
+          );
+        })}
+      </div>
+
+      {scheduleSub === "calendar" && (<>
       <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.2, display: "inline-flex", alignItems: "center", gap: 8 }}>
