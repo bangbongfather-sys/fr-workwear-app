@@ -11964,6 +11964,563 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
       )}
 
       <style>{`@media (max-width: 768px) { .schedule-grid { grid-template-columns: 1fr !important; } }`}</style>
+      </>)}
+
+      {scheduleSub === "notes" && (
+        <NotesPanel notes={notes} setNotes={setNotes} clients={clients} darkMode={darkMode} />
+      )}
+
+      {scheduleSub === "recurring" && (
+        <RecurringPanel recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} darkMode={darkMode} />
+      )}
+    </div>
+  );
+}
+
+// ─── 중요 메모 패널 ───
+function NotesPanel({ notes, setNotes, clients, darkMode }) {
+  const [search, setSearch] = React.useState("");
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  const [filterCategory, setFilterCategory] = React.useState("");
+  const [editing, setEditing] = React.useState(null); // note object or null
+  React.useEffect(() => {
+    const h = setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 200);
+    return () => clearTimeout(h);
+  }, [search]);
+
+  const relTime = (ts) => {
+    if (!ts) return "";
+    const diff = Date.now() - ts;
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return "방금";
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}분 전`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}시간 전`;
+    const d = Math.floor(h / 24);
+    if (d < 30) return `${d}일 전`;
+    const date = new Date(ts);
+    return `${date.getFullYear()}.${String(date.getMonth()+1).padStart(2,"0")}.${String(date.getDate()).padStart(2,"0")}`;
+  };
+
+  const openNew = () => {
+    setEditing({
+      id: null,
+      title: "",
+      body: "",
+      category: "거래처",
+      color: noteCategoryColor("거래처"),
+      pinned: false,
+      clientId: null,
+      tags: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      _isNew: true,
+    });
+  };
+  const openEdit = (n) => setEditing({ ...n, tagsText: (n.tags || []).join(", ") });
+  const closeModal = () => setEditing(null);
+  const saveNote = () => {
+    if (!editing) return;
+    const title = (editing.title || "").trim();
+    const body = (editing.body || "").trim();
+    if (!title && !body) { alert("제목 또는 본문을 입력해주세요."); return; }
+    const tags = (editing.tagsText !== undefined ? editing.tagsText : (editing.tags || []).join(","))
+      .split(",").map(t => t.trim()).filter(Boolean);
+    const now = Date.now();
+    const next = {
+      id: editing.id || uid(),
+      title, body,
+      category: editing.category || "기타",
+      color: noteCategoryColor(editing.category || "기타"),
+      pinned: !!editing.pinned,
+      clientId: editing.clientId || null,
+      tags,
+      createdAt: editing.createdAt || now,
+      updatedAt: now,
+    };
+    setNotes(prev => {
+      const exists = prev.some(p => p.id === next.id);
+      return exists ? prev.map(p => p.id === next.id ? next : p) : [next, ...prev];
+    });
+    setEditing(null);
+  };
+  const deleteNote = (id) => {
+    if (!window.confirm("이 메모를 삭제할까요?")) return;
+    setNotes(prev => prev.filter(p => p.id !== id));
+    setEditing(null);
+  };
+  const togglePin = (id) => {
+    setNotes(prev => prev.map(p => p.id === id ? { ...p, pinned: !p.pinned, updatedAt: Date.now() } : p));
+  };
+
+  const filtered = notes.filter(n => {
+    if (filterCategory && n.category !== filterCategory) return false;
+    if (debouncedSearch) {
+      const hay = `${n.title || ""} ${n.body || ""} ${(n.tags || []).join(" ")}`.toLowerCase();
+      if (!hay.includes(debouncedSearch)) return false;
+    }
+    return true;
+  }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const pinned = filtered.filter(n => n.pinned);
+  const others = filtered.filter(n => !n.pinned);
+
+  const Card = ({ n }) => (
+    <div onClick={() => openEdit(n)}
+      style={{
+        position: "relative", padding: "12px 14px", borderRadius: 10,
+        background: "var(--surface)", border: "1px solid var(--border)",
+        borderLeft: `2px solid ${n.color || noteCategoryColor(n.category)}`,
+        cursor: "pointer", display: "flex", flexDirection: "column", gap: 6,
+        transition: "background 0.12s",
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
+      onMouseLeave={e => e.currentTarget.style.background = "var(--surface)"}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {n.title || <span style={{ color: "var(--text3)", fontWeight: 500 }}>(제목 없음)</span>}
+        </div>
+        <button onClick={(e) => { e.stopPropagation(); togglePin(n.id); }} title={n.pinned ? "고정 해제" : "고정"}
+          style={{ width: 24, height: 24, border: "none", borderRadius: 6, background: n.pinned ? "rgba(236,102,8,0.12)" : "transparent", color: n.pinned ? "#EC6608" : "var(--text3)", cursor: "pointer", fontSize: 13, padding: 0, fontFamily: "inherit", flexShrink: 0 }}>
+          {n.pinned ? "★" : "☆"}
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); if (window.confirm("이 메모를 삭제할까요?")) setNotes(prev => prev.filter(p => p.id !== n.id)); }} title="삭제"
+          style={{ width: 24, height: 24, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", cursor: "pointer", padding: 0, fontFamily: "inherit", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "#EF4444"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text3)"; }}>
+          <Icon name="trash" size={13}/>
+        </button>
+      </div>
+      {n.body && (
+        <div style={{
+          fontSize: 12, color: "var(--text2)", lineHeight: 1.5,
+          display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "pre-wrap",
+        }}>{n.body}</div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: `${n.color || noteCategoryColor(n.category)}22`, color: n.color || noteCategoryColor(n.category) }}>{n.category}</span>
+        {(n.tags || []).slice(0, 3).map(t => (
+          <span key={t} style={{ fontSize: 10, color: "var(--text3)", padding: "2px 6px", borderRadius: 999, background: "var(--surface2)" }}>#{t}</span>
+        ))}
+        <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text3)" }}>{relTime(n.updatedAt)}</span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="card" style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={openNew}
+          style={{ padding: "0 14px", height: 36, borderRadius: 8, border: "none", background: "#EC6608", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="plus" size={14}/>새 메모
+        </button>
+        <div style={{ position: "relative", flex: 1, minWidth: 180, maxWidth: 320 }}>
+          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", display: "inline-flex" }}><Icon name="search" size={14}/></span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="제목/본문/태그 검색"
+            style={{ width: "100%", height: 36, padding: "0 12px 0 32px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+        </div>
+        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
+          style={{ height: 36, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }}>
+          <option value="">전체 카테고리</option>
+          {NOTE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.id}</option>)}
+        </select>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text3)" }}>{filtered.length}개</span>
+      </div>
+
+      {notes.length === 0 ? (
+        <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7 }}>
+          메모가 없습니다.<br/>+ 새 메모 버튼으로 첫 메모를 작성하세요.
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>검색 결과가 없습니다.</div>
+      ) : (
+        <>
+          {pinned.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: "#EC6608" }}>★</span> 고정 메모 <span style={{ color: "var(--text3)", fontWeight: 500 }}>({pinned.length})</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                {pinned.map(n => <Card key={n.id} n={n}/>)}
+              </div>
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Icon name="clipboard" size={12}/> 전체 메모 <span style={{ color: "var(--text3)", fontWeight: 500 }}>({others.length})</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+              {others.map(n => <Card key={n.id} n={n}/>)}
+            </div>
+          </div>
+        </>
+      )}
+
+      {editing && (
+        <div onClick={closeModal} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.3)", border: "1px solid var(--border)" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>{editing._isNew ? "새 메모" : "메모 편집"}</div>
+              <button onClick={closeModal} style={{ width: 28, height: 28, border: "none", borderRadius: 6, background: "transparent", color: "var(--text2)", cursor: "pointer", padding: 0, fontFamily: "inherit" }}><Icon name="close" size={14}/></button>
+            </div>
+            <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" }}>
+              <input value={editing.title} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="제목"
+                style={{ width: "100%", height: 40, padding: "0 12px", fontSize: 14, fontWeight: 700, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+              <textarea value={editing.body} onChange={e => setEditing({ ...editing, body: e.target.value })} placeholder="본문 (여러 줄 입력 가능)" rows={8}
+                style={{ width: "100%", padding: "10px 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", resize: "vertical", lineHeight: 1.5 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>카테고리</div>
+                  <select value={editing.category} onChange={e => setEditing({ ...editing, category: e.target.value, color: noteCategoryColor(e.target.value) })}
+                    style={{ width: "100%", height: 36, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }}>
+                    {NOTE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.id}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>거래처 연결 (선택)</div>
+                  <select value={editing.clientId || ""} onChange={e => setEditing({ ...editing, clientId: e.target.value || null })}
+                    style={{ width: "100%", height: 36, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }}>
+                    <option value="">없음</option>
+                    {(clients || []).map(c => <option key={c.id} value={c.id}>{c.name || c.companyName || "(이름 없음)"}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>태그 (쉼표로 구분)</div>
+                <input value={editing.tagsText !== undefined ? editing.tagsText : (editing.tags || []).join(", ")}
+                  onChange={e => setEditing({ ...editing, tagsText: e.target.value })}
+                  placeholder="예: 중요, 후속조치"
+                  style={{ width: "100%", height: 36, padding: "0 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+              </div>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text2)", cursor: "pointer" }}>
+                <input type="checkbox" checked={!!editing.pinned} onChange={e => setEditing({ ...editing, pinned: e.target.checked })} />
+                상단 고정
+              </label>
+            </div>
+            <div style={{ padding: "12px 18px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {!editing._isNew && editing.id && (
+                <button onClick={() => deleteNote(editing.id)}
+                  style={{ padding: "0 14px", height: 36, borderRadius: 8, border: "1px solid rgba(239,68,68,0.4)", background: "transparent", color: "#EF4444", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", marginRight: "auto" }}>삭제</button>
+              )}
+              <button onClick={closeModal}
+                style={{ padding: "0 14px", height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+              <button onClick={saveNote}
+                style={{ padding: "0 16px", height: 36, borderRadius: 8, border: "none", background: "#EC6608", color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 정기 일정 패널 ───
+function RecurringPanel({ recurringSchedules, setRecurringSchedules, darkMode }) {
+  const [editing, setEditing] = React.useState(null);
+  const [filterCategory, setFilterCategory] = React.useState("");
+
+  const toYMD = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const todayKey = toYMD(new Date());
+
+  const computeNextDue = (r, from) => {
+    // from: Date (검사 시작점, 보통 오늘 또는 직전 도래일 +1일)
+    const base = from instanceof Date ? new Date(from) : new Date();
+    base.setHours(0,0,0,0);
+    if (r.pattern === "weekly") {
+      const wd = Number(r.weekday) || 0;
+      const diff = (wd - base.getDay() + 7) % 7;
+      const d = new Date(base);
+      d.setDate(d.getDate() + (diff === 0 ? 7 : diff));
+      return toYMD(d);
+    }
+    if (r.pattern === "monthly") {
+      const day = Math.max(1, Math.min(31, Number(r.day) || 1));
+      let d = new Date(base.getFullYear(), base.getMonth(), day);
+      if (d < base) d = new Date(base.getFullYear(), base.getMonth() + 1, day);
+      // clamp (e.g., feb 31 → feb 28)
+      if (d.getDate() !== day) d = new Date(d.getFullYear(), d.getMonth(), 0);
+      return toYMD(d);
+    }
+    if (r.pattern === "yearly") {
+      const m = Math.max(1, Math.min(12, Number(r.month) || 1));
+      const day = Math.max(1, Math.min(31, Number(r.yearlyDay) || 1));
+      let d = new Date(base.getFullYear(), m - 1, day);
+      if (d < base) d = new Date(base.getFullYear() + 1, m - 1, day);
+      return toYMD(d);
+    }
+    return r.nextDueDate || toYMD(base);
+  };
+
+  const openNew = () => {
+    setEditing({
+      id: null,
+      title: "",
+      category: "인증",
+      pattern: "yearly",
+      weekday: 1,
+      day: 1,
+      month: 1,
+      yearlyDay: 1,
+      nextDueDate: "",
+      leadDays: 30,
+      note: "",
+      history: [],
+      createdAt: Date.now(),
+      _isNew: true,
+    });
+  };
+  const openEdit = (r) => setEditing({ ...r });
+  const closeModal = () => setEditing(null);
+  const saveRecurring = () => {
+    if (!editing) return;
+    const title = (editing.title || "").trim();
+    if (!title) { alert("제목을 입력해주세요."); return; }
+    const next = {
+      id: editing.id || uid(),
+      title,
+      category: editing.category || "기타",
+      pattern: editing.pattern || "yearly",
+      weekday: Number(editing.weekday) || 0,
+      day: Number(editing.day) || 1,
+      month: Number(editing.month) || 1,
+      yearlyDay: Number(editing.yearlyDay) || 1,
+      nextDueDate: editing.nextDueDate || computeNextDue(editing, new Date()),
+      leadDays: Math.max(0, Number(editing.leadDays) || 0),
+      note: editing.note || "",
+      history: editing.history || [],
+      createdAt: editing.createdAt || Date.now(),
+    };
+    if (!next.nextDueDate) next.nextDueDate = computeNextDue(next, new Date());
+    setRecurringSchedules(prev => {
+      const exists = prev.some(p => p.id === next.id);
+      return exists ? prev.map(p => p.id === next.id ? next : p) : [next, ...prev];
+    });
+    setEditing(null);
+  };
+  const deleteRecurring = (id) => {
+    if (!window.confirm("이 정기 일정을 삭제할까요?")) return;
+    setRecurringSchedules(prev => prev.filter(p => p.id !== id));
+    setEditing(null);
+  };
+  const completeRecurring = (r) => {
+    const completedDate = r.nextDueDate;
+    const dueDate = new Date(r.nextDueDate);
+    const advanceFrom = new Date(dueDate); advanceFrom.setDate(advanceFrom.getDate() + 1);
+    const newNext = computeNextDue(r, advanceFrom);
+    setRecurringSchedules(prev => prev.map(p => p.id === r.id ? {
+      ...p,
+      nextDueDate: newNext,
+      history: [...(p.history || []), { completedAt: Date.now(), completedDate }],
+    } : p));
+  };
+
+  const dDayLabel = (dateStr) => {
+    if (!dateStr) return "";
+    const t = new Date(todayKey); t.setHours(0,0,0,0);
+    const d = new Date(dateStr); d.setHours(0,0,0,0);
+    const diff = Math.round((d - t) / 86400000);
+    if (diff === 0) return "오늘";
+    if (diff < 0) return `${Math.abs(diff)}일 지남`;
+    return `D-${diff}`;
+  };
+  const patternLabel = (r) => {
+    if (r.pattern === "weekly") return `매주 ${["일","월","화","수","목","금","토"][r.weekday || 0]}요일`;
+    if (r.pattern === "monthly") return `매월 ${r.day}일`;
+    if (r.pattern === "yearly") return `매년 ${r.month}/${r.yearlyDay}`;
+    return "사용자 지정";
+  };
+
+  const filtered = recurringSchedules.filter(r => !filterCategory || r.category === filterCategory);
+  const sorted = [...filtered].sort((a, b) => (a.nextDueDate || "").localeCompare(b.nextDueDate || ""));
+  const urgent = sorted.filter(r => {
+    if (!r.nextDueDate) return false;
+    const t = new Date(todayKey); t.setHours(0,0,0,0);
+    const d = new Date(r.nextDueDate); d.setHours(0,0,0,0);
+    const diff = Math.round((d - t) / 86400000);
+    return diff <= (r.leadDays || 0);
+  });
+
+  const Row = ({ r, highlight }) => {
+    const t = new Date(todayKey); t.setHours(0,0,0,0);
+    const d = new Date(r.nextDueDate || todayKey); d.setHours(0,0,0,0);
+    const diff = Math.round((d - t) / 86400000);
+    const isOverdue = diff < 0;
+    const isUrgent = !isOverdue && diff <= (r.leadDays || 0);
+    const badgeColor = isOverdue ? "#EF4444" : isUrgent ? "#EC6608" : "var(--text2)";
+    const badgeBg = isOverdue ? "rgba(239,68,68,0.10)" : isUrgent ? "rgba(236,102,8,0.10)" : "var(--surface2)";
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10,
+        background: highlight ? (isOverdue ? "rgba(239,68,68,0.05)" : "rgba(236,102,8,0.04)") : "var(--surface)",
+        border: `1px solid ${highlight ? (isOverdue ? "rgba(239,68,68,0.3)" : "rgba(236,102,8,0.3)") : "var(--border)"}`,
+        flexWrap: "wrap",
+      }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {r.title}
+            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: badgeBg, color: badgeColor, fontWeight: 700 }}>
+              {dDayLabel(r.nextDueDate)} {r.nextDueDate && `(${r.nextDueDate.slice(5).replace("-","/")})`}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>
+            #{r.category} · {patternLabel(r)}{r.note ? ` · ${r.note}` : ""}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => completeRecurring(r)} title="완료 처리 (다음 주기로 이동)"
+            style={{ padding: "0 12px", height: 32, borderRadius: 7, border: "none", background: "#10B981", color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <Icon name="check" size={12}/>완료
+          </button>
+          <button onClick={() => openEdit(r)}
+            style={{ width: 32, height: 32, borderRadius: 7, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="edit" size={13}/>
+          </button>
+          <button onClick={() => deleteRecurring(r.id)}
+            style={{ width: 32, height: 32, borderRadius: 7, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text3)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="trash" size={13}/>
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="card" style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={openNew}
+          style={{ padding: "0 14px", height: 36, borderRadius: 8, border: "none", background: "#EC6608", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="plus" size={14}/>새 정기 일정
+        </button>
+        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
+          style={{ height: 36, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", marginLeft: "auto" }}>
+          <option value="">전체 카테고리</option>
+          {RECURRING_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <span style={{ fontSize: 11, color: "var(--text3)" }}>{sorted.length}건</span>
+      </div>
+
+      {recurringSchedules.length === 0 ? (
+        <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7 }}>
+          등록된 정기 일정이 없습니다.<br/>+ 새 정기 일정 버튼으로 첫 항목을 등록하세요.
+        </div>
+      ) : (
+        <>
+          {urgent.length > 0 && (
+            <div className="card" style={{ padding: 14, background: darkMode ? "rgba(236,102,8,0.06)" : "rgba(236,102,8,0.04)", borderColor: "rgba(236,102,8,0.3)" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#EC6608", marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Icon name="alert" size={13}/> 도래 임박 / 지남 ({urgent.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {urgent.map(r => <Row key={r.id} r={r} highlight />)}
+              </div>
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Icon name="clipboard" size={12}/> 전체 정기 일정
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {sorted.map(r => <Row key={r.id} r={r} />)}
+            </div>
+          </div>
+        </>
+      )}
+
+      {editing && (
+        <div onClick={closeModal} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.3)", border: "1px solid var(--border)" }}>
+            <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>{editing._isNew ? "새 정기 일정" : "정기 일정 편집"}</div>
+              <button onClick={closeModal} style={{ width: 28, height: 28, border: "none", borderRadius: 6, background: "transparent", color: "var(--text2)", cursor: "pointer", padding: 0, fontFamily: "inherit" }}><Icon name="close" size={14}/></button>
+            </div>
+            <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" }}>
+              <input value={editing.title} onChange={e => setEditing({ ...editing, title: e.target.value })} placeholder="제목 (예: KS K 0594 인증 갱신)"
+                style={{ width: "100%", height: 40, padding: "0 12px", fontSize: 14, fontWeight: 700, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>카테고리</div>
+                  <select value={editing.category} onChange={e => setEditing({ ...editing, category: e.target.value })}
+                    style={{ width: "100%", height: 36, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }}>
+                    {RECURRING_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>주기</div>
+                  <select value={editing.pattern} onChange={e => setEditing({ ...editing, pattern: e.target.value })}
+                    style={{ width: "100%", height: 36, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }}>
+                    <option value="weekly">매주</option>
+                    <option value="monthly">매월</option>
+                    <option value="yearly">매년</option>
+                  </select>
+                </div>
+              </div>
+              {editing.pattern === "weekly" && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>요일</div>
+                  <select value={editing.weekday} onChange={e => setEditing({ ...editing, weekday: Number(e.target.value) })}
+                    style={{ width: "100%", height: 36, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }}>
+                    {["일","월","화","수","목","금","토"].map((w, i) => <option key={w} value={i}>{w}요일</option>)}
+                  </select>
+                </div>
+              )}
+              {editing.pattern === "monthly" && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>일자 (1~31)</div>
+                  <input type="number" min={1} max={31} value={editing.day} onChange={e => setEditing({ ...editing, day: Number(e.target.value) })}
+                    style={{ width: "100%", height: 36, padding: "0 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                </div>
+              )}
+              {editing.pattern === "yearly" && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>월</div>
+                    <input type="number" min={1} max={12} value={editing.month} onChange={e => setEditing({ ...editing, month: Number(e.target.value) })}
+                      style={{ width: "100%", height: 36, padding: "0 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>일</div>
+                    <input type="number" min={1} max={31} value={editing.yearlyDay} onChange={e => setEditing({ ...editing, yearlyDay: Number(e.target.value) })}
+                      style={{ width: "100%", height: 36, padding: "0 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                  </div>
+                </div>
+              )}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>다음 도래일 (자동 계산, 수정 가능)</div>
+                  <input type="date" value={editing.nextDueDate || ""} onChange={e => setEditing({ ...editing, nextDueDate: e.target.value })}
+                    style={{ width: "100%", height: 36, padding: "0 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>알림 일수 (며칠 전부터 강조)</div>
+                  <input type="number" min={0} max={365} value={editing.leadDays} onChange={e => setEditing({ ...editing, leadDays: Number(e.target.value) })}
+                    style={{ width: "100%", height: 36, padding: "0 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 4 }}>메모</div>
+                <textarea value={editing.note} onChange={e => setEditing({ ...editing, note: e.target.value })} rows={3} placeholder="비고 / 절차 / 담당자 등"
+                  style={{ width: "100%", padding: "10px 12px", fontSize: 13, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", resize: "vertical", lineHeight: 1.5 }} />
+              </div>
+              {editing.history && editing.history.length > 0 && (
+                <div style={{ fontSize: 11, color: "var(--text3)" }}>
+                  완료 이력: {editing.history.length}회 · 최근 {editing.history[editing.history.length-1].completedDate}
+                </div>
+              )}
+            </div>
+            <div style={{ padding: "12px 18px", borderTop: "1px solid var(--border)", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {!editing._isNew && editing.id && (
+                <button onClick={() => deleteRecurring(editing.id)}
+                  style={{ padding: "0 14px", height: 36, borderRadius: 8, border: "1px solid rgba(239,68,68,0.4)", background: "transparent", color: "#EF4444", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit", marginRight: "auto" }}>삭제</button>
+              )}
+              <button onClick={closeModal}
+                style={{ padding: "0 14px", height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+              <button onClick={saveRecurring}
+                style={{ padding: "0 16px", height: 36, borderRadius: 8, border: "none", background: "#EC6608", color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
