@@ -6634,18 +6634,45 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
     }
     return rows;
   }, []);
-  const pastePreview = React.useMemo(() => parsePasteText(pasteText), [pasteText, parsePasteText]);
+  // 파싱된 raw 결과를 자재/공임 단가표와 매칭. 매칭 성공 시 등록된 항목 사용 (단가/단위 자동),
+  // 실패 시에만 "직접 입력" + 옵션 prefix 적용. 매칭 규칙: 이름 끝의 " 제작" 제거 후 exact match.
+  const pastePreview = React.useMemo(() => {
+    const rawRows = parsePasteText(pasteText);
+    return rawRows.map(r => {
+      const strippedName = (r.name || "").replace(/\s*제작\s*$/, "").trim();
+      const matchedMaterial = materials.find(m => m.name === strippedName);
+      const matchedLabor = !matchedMaterial ? laborItems.find(l => l.name === strippedName) : null;
+      return {
+        ...r,
+        strippedName,
+        matched: matchedMaterial || matchedLabor || null,
+        matchedKind: matchedMaterial ? "material" : matchedLabor ? "labor" : "",
+      };
+    });
+  }, [pasteText, parsePasteText, materials, laborItems]);
   const applyPasteToBatch = () => {
     if (pastePreview.length === 0) return;
     const newItems = pastePreview.map(r => {
-      const transformedName = pasteAutoPrefix
-        ? `공임비 - ${(r.name || "").replace(/\s*제작\s*$/, "").trim()}`
-        : r.name;
       const sizeNote = r.size ? `사이즈 ${r.size}` : "";
+      if (r.matched) {
+        // 단가표 매칭 → 등록 이름을 select value로 사용, 단가/단위 자동 채움
+        return {
+          id: uid(),
+          materialName: r.matched.name,
+          customMaterial: "",
+          qty: r.qty || "",
+          unit: r.matched.unit || pasteDefaultUnit,
+          unitPrice: r.price || String(r.matched.price ?? ""),
+          status: pasteDefaultStatus,
+          note: sizeNote,
+        };
+      }
+      // 매칭 실패 → 직접 입력 (옵션 prefix 적용)
+      const customName = pasteAutoPrefix ? `공임비 - ${r.strippedName}` : r.strippedName;
       return {
         id: uid(),
         materialName: "__custom__",
-        customMaterial: transformedName,
+        customMaterial: customName,
         qty: r.qty || "",
         unit: pasteDefaultUnit,
         unitPrice: r.price || "",
@@ -6957,7 +6984,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                 <div style={{display:"flex",alignItems:"center",gap:14,marginTop:10,flexWrap:"wrap"}}>
                   <label style={{display:"inline-flex",alignItems:"center",gap:6,fontSize:12,color:"var(--text2)",cursor:"pointer"}}>
                     <input type="checkbox" checked={pasteAutoPrefix} onChange={e=>setPasteAutoPrefix(e.target.checked)} style={{accentColor:"#EC6608",width:14,height:14,cursor:"pointer"}}/>
-                    품목명에 <b style={{color:"var(--text1)"}}>"공임비 - "</b> 자동 prefix <span style={{color:"var(--text3)"}}>(+ "제작" 자동 제거)</span>
+                    <b style={{color:"var(--text1)"}}>단가표 미매칭 행</b>만 <b style={{color:"var(--text1)"}}>"공임비 - "</b> prefix <span style={{color:"var(--text3)"}}>(매칭된 행은 등록 이름 그대로 사용)</span>
                   </label>
                   <div style={{display:"inline-flex",alignItems:"center",gap:4,fontSize:12,color:"var(--text2)"}}>
                     기본 단위:
@@ -7004,14 +7031,30 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                       </thead>
                       <tbody>
                         {pastePreview.map((r,i) => {
-                          const transformedName = pasteAutoPrefix
-                            ? `공임비 - ${(r.name || "").replace(/\s*제작\s*$/, "").trim()}`
-                            : r.name;
                           const total = (parseFloat(r.qty||0) * parseFloat(r.price||0)) || 0;
+                          const displayName = r.matched
+                            ? r.matched.name
+                            : (pasteAutoPrefix ? `공임비 - ${r.strippedName}` : r.strippedName);
                           return (
                             <tr key={i} style={{borderTop:"1px solid var(--divider)"}}>
                               <td style={{padding:"4px 8px",color:"var(--text3)"}}>{i+1}</td>
-                              <td style={{padding:"4px 8px"}}>{transformedName || <span style={{color:"#F04452"}}>(미지정)</span>}</td>
+                              <td style={{padding:"4px 8px"}}>
+                                {r.matched ? (
+                                  <span>
+                                    <span style={{color:"#10B981",fontWeight:700,marginRight:4}} title="단가표 매칭됨">✓</span>
+                                    {displayName}
+                                    <span style={{fontSize:9,color:"var(--text3)",marginLeft:6,padding:"1px 5px",background:"rgba(16,185,129,0.12)",borderRadius:4,fontWeight:600}}>
+                                      {r.matchedKind === "material" ? "자재 단가표" : "공임 단가표"}
+                                    </span>
+                                  </span>
+                                ) : displayName ? (
+                                  <span>
+                                    <span style={{color:"#FF9500",fontWeight:700,marginRight:4}} title="단가표에 없음 — 직접 입력으로 추가됨">+</span>
+                                    {displayName}
+                                    <span style={{fontSize:9,color:"var(--text3)",marginLeft:6,padding:"1px 5px",background:"rgba(255,149,0,0.12)",borderRadius:4,fontWeight:600}}>직접 입력</span>
+                                  </span>
+                                ) : <span style={{color:"#F04452"}}>(미지정)</span>}
+                              </td>
                               <td style={{padding:"4px 8px",textAlign:"right"}}>{r.qty}</td>
                               <td style={{padding:"4px 8px",textAlign:"right"}}>{r.price ? Number(r.price).toLocaleString() : "—"}</td>
                               <td style={{padding:"4px 8px",textAlign:"right",color:"var(--text2)"}}>{r.size || "—"}</td>
