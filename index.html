@@ -11485,6 +11485,94 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
     } catch (e) { setNotionStatus("error"); setNotionMsg(e.message); }
   };
 
+  // ─── 정기 일정 → 캘린더 자동 등록 ───
+  // 매주/매월/매년 패턴의 정기 일정을 미래 3개월(연간은 1년) 범위 내 todos로 자동 생성.
+  // 중복 방지: generatedKey = `${recurringId}-${date}` 로 식별.
+  // recurringSchedules가 바뀔 때마다 useEffect로 동기화.
+  // - 신규 추가: 미래 발생일 todos에 자동 삽입
+  // - 규칙 삭제: 미래·미완료 자동 todo 자동 정리 (과거/완료 항목은 기록으로 보존)
+  // - 노션 동기화: 자동 생성 todo는 즉시 sync 안 함 (Notion 폭주 방지). 사용자가
+  //   "↻ 노션 일괄 동기화" 버튼 누를 때 함께 동기화됨 (notionPageId 없는 모든 todo 대상).
+  const RECURRING_HORIZON_MONTHS = 3;
+  const generateRecurringOccurrences = React.useCallback((rule, fromDate, toDate) => {
+    const occs = [];
+    const start = new Date(fromDate); start.setHours(0,0,0,0);
+    const end = new Date(toDate); end.setHours(0,0,0,0);
+    if (rule.pattern === "weekly") {
+      const wd = Number(rule.weekday) || 0;
+      const d = new Date(start);
+      while (d <= end) {
+        if (d.getDay() === wd) occs.push(ymd(d));
+        d.setDate(d.getDate() + 1);
+      }
+    } else if (rule.pattern === "monthly") {
+      const day = Math.max(1, Math.min(31, Number(rule.day) || 1));
+      let m = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (m <= end) {
+        let d = new Date(m.getFullYear(), m.getMonth(), day);
+        // clamp: 2월 31일 → 2월 28/29일
+        if (d.getDate() !== day) d = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+        if (d >= start && d <= end) occs.push(ymd(d));
+        m.setMonth(m.getMonth() + 1);
+      }
+    } else if (rule.pattern === "yearly") {
+      const mIdx = Math.max(1, Math.min(12, Number(rule.month) || 1)) - 1;
+      const day = Math.max(1, Math.min(31, Number(rule.yearlyDay) || 1));
+      for (let yOffset = 0; yOffset < 2; yOffset++) {
+        let d = new Date(start.getFullYear() + yOffset, mIdx, day);
+        if (d.getDate() !== day) d = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        if (d >= start && d <= end) occs.push(ymd(d));
+      }
+    }
+    return occs;
+  }, []);
+
+  React.useEffect(() => {
+    const now = new Date(); now.setHours(0,0,0,0);
+    const horizonMonthly = new Date(now); horizonMonthly.setMonth(horizonMonthly.getMonth() + RECURRING_HORIZON_MONTHS);
+    const horizonYearly = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
+
+    setTodos(prevTodos => {
+      const activeRuleIds = new Set(recurringSchedules.map(r => r.id));
+
+      // 1단계: 더 이상 존재하지 않는 규칙에서 생성된 미래·미완료 todo 제거
+      // (과거/완료된 항목은 기록으로 보존)
+      let next = prevTodos.filter(t => {
+        if (!t.recurringId) return true;
+        if (t.done) return true;
+        const td = new Date(t.date || "1970-01-01"); td.setHours(0,0,0,0);
+        if (td < now) return true;
+        return activeRuleIds.has(t.recurringId);
+      });
+
+      // 2단계: 활성 규칙별로 미래 발생일을 todos에 누락 없이 추가
+      const existingKeys = new Set(next.map(t => t.generatedKey).filter(Boolean));
+      for (const rule of recurringSchedules) {
+        const horizon = rule.pattern === "yearly" ? horizonYearly : horizonMonthly;
+        const occs = generateRecurringOccurrences(rule, now, horizon);
+        for (const date of occs) {
+          const genKey = `${rule.id}-${date}`;
+          if (existingKeys.has(genKey)) continue;
+          next.push({
+            id: uid(),
+            text: rule.title,
+            date,
+            endDate: "",
+            done: false,
+            createdAt: Date.now(),
+            recurringId: rule.id,
+            generatedKey: genKey,
+            isAuto: true,
+            category: rule.category || "",
+          });
+          existingKeys.add(genKey);
+        }
+      }
+      // todos 배열 ref가 동일하면 React가 update 스킵 → 무한루프 위험 없음
+      return next;
+    });
+  }, [recurringSchedules, generateRecurringOccurrences, setTodos]);
+
   const addTodo = () => {
     const text = draft.trim();
     if (!text) return;
@@ -11891,6 +11979,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                       style={{ width: 22, height: 22, borderRadius: 6, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#10B981" : "transparent", color: "#fff", cursor: "pointer", fontSize: 13, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, fontFamily: "inherit" }}>
                       {t.done ? "✓" : ""}
                     </button>
+                    {(t.isAuto || t.recurringId) && (
+                      <span title="정기 일정에서 자동 생성됨"
+                        style={{ fontSize: 13, opacity: 0.8, flexShrink: 0 }}>🔁</span>
+                    )}
                     <input value={t.text} onChange={e => updateTodo(t.id, e.target.value)}
                       style={{ flex: 1, height: "auto", padding: "4px 8px", fontSize: 13, background: "transparent", border: "none", textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text3)" : "var(--text1)", borderRadius: 6 }} />
                     <button onClick={() => removeTodo(t.id)} title="삭제"
@@ -12399,6 +12491,24 @@ function RecurringPanel({ recurringSchedules, setRecurringSchedules, darkMode })
         </select>
         <span style={{ fontSize: 11, color: "var(--text3)" }}>{sorted.length}건</span>
       </div>
+
+      {/* 자동 동기화 안내 배너 */}
+      {recurringSchedules.length > 0 && (
+        <div style={{
+          padding: "10px 14px",
+          borderRadius: 10,
+          background: darkMode ? "rgba(236,102,8,0.10)" : "rgba(236,102,8,0.06)",
+          border: "1px solid rgba(236,102,8,0.25)",
+          display: "flex", alignItems: "center", gap: 10, marginBottom: 14,
+          fontSize: 12, color: "var(--text2)"
+        }}>
+          <span style={{ fontSize: 16 }}>🔁</span>
+          <span>
+            등록한 정기 일정은 <b style={{color:"#EC6608"}}>매월·매주·매년 도래일에 캘린더에 자동 표시</b>됩니다 (미래 3개월/연간은 1년 범위).
+            <span style={{color:"var(--text3)",marginLeft:4}}>·자동 생성된 항목은 캘린더에서 🔁 아이콘으로 표시. 노션 동기화는 "↻ 노션 일괄 동기화" 버튼으로 함께 처리됨.</span>
+          </span>
+        </div>
+      )}
 
       {recurringSchedules.length === 0 ? (
         <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7 }}>
