@@ -11396,7 +11396,24 @@ function NewsTab({ darkMode }) {
 }
 
 // ─── 일정 / To-do List ───
-function ScheduleTab({ todos, setTodos, darkMode }) {
+const SCHEDULE_SUBTABS = {
+  calendar:  { label: "캘린더",   icon: "calendar" },
+  notes:     { label: "중요 메모", icon: "clipboard" },
+  recurring: { label: "정기 일정", icon: "refresh" },
+};
+const NOTE_CATEGORIES = [
+  { id: "거래처",   color: "#EC6608" },
+  { id: "회의",     color: "#3B82F6" },
+  { id: "아이디어", color: "#8B5CF6" },
+  { id: "이슈",     color: "#EF4444" },
+  { id: "기타",     color: "#64748B" },
+];
+const RECURRING_CATEGORIES = ["인증", "신고", "회의", "기타"];
+const noteCategoryColor = (id) => (NOTE_CATEGORIES.find(c => c.id === id) || NOTE_CATEGORIES[4]).color;
+
+function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode }) {
+  const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","notes","recurring"], "data-schedule-sub");
+  const [scheduleSub, setScheduleSub] = React.useState("calendar");
   const today = new Date();
   const ymd = (d) => {
     const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0");
