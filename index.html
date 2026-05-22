@@ -8024,6 +8024,50 @@ function App() {
   useEffect(() => { save("frw_quote_style", quoteStyle); }, [quoteStyle]);
   const [prodSearch, setProdSearch] = useState("");
   const [showProdSearch, setShowProdSearch] = useState(false);
+  // 견적 포함 제품 순서 변경 (드래그 앤 드롭 + 터치)
+  const [dragQuoteProdId, setDragQuoteProdId] = useState(null);
+  const [dragOverQuoteProdId, setDragOverQuoteProdId] = useState(null);
+  const reorderQuoteProducts = (fromId, toId) => {
+    if (!fromId || !toId || fromId === toId) return;
+    setProducts(prev => {
+      const arr = [...prev];
+      const fi = arr.findIndex(x => x.id === fromId);
+      const ti = arr.findIndex(x => x.id === toId);
+      if (fi < 0 || ti < 0) return prev;
+      const [m] = arr.splice(fi, 1);
+      arr.splice(ti, 0, m);
+      return arr;
+    });
+  };
+  const quoteProdTouchRef = React.useRef({ active: false, startX: 0, startY: 0, id: null });
+  const onQuoteProdTouchStart = (id, e) => {
+    const t = e.touches[0];
+    quoteProdTouchRef.current = { active: false, startX: t.clientX, startY: t.clientY, id };
+  };
+  const onQuoteProdTouchMove = (e) => {
+    const ds = quoteProdTouchRef.current;
+    if (!ds.id) return;
+    const t = e.touches[0];
+    if (!ds.active) {
+      if (Math.abs(t.clientX - ds.startX) > 8 || Math.abs(t.clientY - ds.startY) > 8) {
+        ds.active = true;
+        setDragQuoteProdId(ds.id);
+      } else return;
+    }
+    const el = document.elementFromPoint(t.clientX, t.clientY);
+    const cardEl = el && el.closest && el.closest("[data-quote-prod-id]");
+    const targetId = cardEl ? Number(cardEl.getAttribute("data-quote-prod-id")) : null;
+    if (targetId !== dragOverQuoteProdId) setDragOverQuoteProdId(targetId);
+  };
+  const onQuoteProdTouchEnd = () => {
+    const ds = quoteProdTouchRef.current;
+    if (ds.active && dragOverQuoteProdId && dragOverQuoteProdId !== ds.id) {
+      reorderQuoteProducts(ds.id, dragOverQuoteProdId);
+    }
+    quoteProdTouchRef.current = { active: false, startX: 0, startY: 0, id: null };
+    setDragQuoteProdId(null);
+    setDragOverQuoteProdId(null);
+  };
   const [orders, setOrders] = useState(() => load("frw_orders", []));
   const [clients, setClients] = useState(() => load("frw_clients", []));
   const [globalSearch, setGlobalSearch] = useState("");
