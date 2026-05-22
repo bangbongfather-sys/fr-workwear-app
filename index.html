@@ -10132,6 +10132,43 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 </button>
                               );
                             })}
+                            {/* 직접 입력 단가 (CUSTOM) */}
+                            {(() => {
+                              const isCustom = (c.selectedGrade || "A") === "CUSTOM";
+                              const curCustom = c.customPrice || "";
+                              const setSpecField = (patch) => setProducts(ps => ps.map(x => {
+                                if (x.id !== p.id) return x;
+                                const idx = x.specs.findIndex(s => s.id === x.activeSpecId);
+                                if (idx < 0) return x;
+                                const newSpecs = [...x.specs];
+                                newSpecs[idx] = { ...newSpecs[idx], ...patch };
+                                return { ...x, specs: newSpecs };
+                              }));
+                              return (
+                                <div style={{ display: "flex", alignItems: "stretch", gap: 0, flex: "1.6 1 0", minWidth: 130, border: `1.5px solid ${isCustom ? ACCENT : T.divider}`, borderRadius: 8, overflow: "hidden", background: isCustom ? ACCENT : T.ghostBg, transition: "all 0.12s" }}>
+                                  <button onClick={() => setSpecField({ selectedGrade: "CUSTOM" })}
+                                    title="직접 입력 단가 사용"
+                                    style={{
+                                      border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit",
+                                      padding: "5px 8px", color: isCustom ? "#fff" : T.text2,
+                                      fontSize: 11, fontWeight: 700, lineHeight: 1.3, whiteSpace: "nowrap",
+                                      borderRight: `1px solid ${isCustom ? "rgba(255,255,255,0.3)" : T.divider}`,
+                                    }}>
+                                    <div style={{ fontSize: 11 }}>직접</div>
+                                    <div style={{ fontSize: 9, fontWeight: 600, opacity: 0.85 }}>입력</div>
+                                  </button>
+                                  <input type="number" placeholder="단가" value={curCustom}
+                                    onChange={e => setSpecField({ customPrice: e.target.value, selectedGrade: "CUSTOM" })}
+                                    onFocus={() => { if (!isCustom) setSpecField({ selectedGrade: "CUSTOM" }); }}
+                                    style={{
+                                      flex: 1, minWidth: 0, padding: "0 8px", border: "none", outline: "none",
+                                      background: "transparent", color: isCustom ? "#fff" : T.text,
+                                      fontSize: 12, fontWeight: 700, textAlign: "right", fontFamily: "inherit",
+                                    }}/>
+                                  <span style={{ alignSelf: "center", padding: "0 8px 0 2px", fontSize: 10, fontWeight: 600, color: isCustom ? "rgba(255,255,255,0.85)" : T.text3 }}>원</span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </div>
