@@ -10118,16 +10118,43 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     const c = computeProduct(p, materials, laborItems);
                     const isInc = p.include !== false;
                     const hasData = c.base > 0;
+                    const isDragging = dragQuoteProdId === p.id;
+                    const isDragOver = dragOverQuoteProdId === p.id && dragQuoteProdId && dragQuoteProdId !== p.id;
                     return (
-                      <div key={p.id} style={{
+                      <div key={p.id}
+                        data-quote-prod-id={p.id}
+                        onDragOver={(e) => { if (dragQuoteProdId && dragQuoteProdId !== p.id) { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch {} setDragOverQuoteProdId(p.id); } }}
+                        onDragLeave={() => { if (dragOverQuoteProdId === p.id) setDragOverQuoteProdId(null); }}
+                        onDrop={(e) => { e.preventDefault(); if (dragQuoteProdId && dragQuoteProdId !== p.id) reorderQuoteProducts(dragQuoteProdId, p.id); setDragQuoteProdId(null); setDragOverQuoteProdId(null); }}
+                        style={{
                         borderRadius: 14,
                         background: isInc && hasData ? T.surface2 : T.surface,
-                        border: `1.5px solid ${isInc && hasData ? T.divider : T.border}`,
-                        opacity: hasData ? 1 : 0.5,
+                        border: isDragOver ? `2px dashed #EC6608` : `1.5px solid ${isInc && hasData ? T.divider : T.border}`,
+                        opacity: isDragging ? 0.4 : (hasData ? 1 : 0.5),
                         overflow: "hidden",
+                        transition: "opacity 0.15s, border-color 0.12s",
                       }}>
-                        {/* 상단: 체크박스 + 이름 + 가격 + 이동버튼 */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
+                        {/* 상단: 드래그 핸들 + 체크박스 + 이름 + 가격 + 이동버튼 */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
+                          <span
+                            draggable
+                            onDragStart={(e) => { setDragQuoteProdId(p.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(p.id)); } catch {} }}
+                            onDragEnd={() => { setDragQuoteProdId(null); setDragOverQuoteProdId(null); }}
+                            onTouchStart={(e) => onQuoteProdTouchStart(p.id, e)}
+                            onTouchMove={onQuoteProdTouchMove}
+                            onTouchEnd={onQuoteProdTouchEnd}
+                            onTouchCancel={onQuoteProdTouchEnd}
+                            title="끌어서 순서 변경"
+                            style={{
+                              cursor: isDragging ? "grabbing" : "grab",
+                              color: T.text3,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "2px 2px",
+                              flexShrink: 0,
+                              touchAction: dragQuoteProdId ? "none" : "manipulation",
+                            }}
+                          ><Icon name="grip" size={16}/></span>
                           <input type="checkbox" checked={isInc && hasData}
                             disabled={!hasData}
                             onChange={e => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, include: e.target.checked } : x))}
