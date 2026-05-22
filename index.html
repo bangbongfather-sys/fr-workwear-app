@@ -10184,8 +10184,13 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   // 사용자가 직접 설정한 등급별 마진율의 평균
                   const avgM = hasData ? withData.reduce((sum, { p, c }) => {
                     const sel = c.selectedGrade || "A";
+                    if (sel === "CUSTOM") {
+                      // 직접 입력 단가는 원가 대비 실제 마진율로 계산
+                      const m = c.beforeMargin > 0 ? ((c.finalPrice - c.beforeMargin) / c.beforeMargin * 100) : 0;
+                      return sum + m;
+                    }
                     const sp = getActiveSpec(p) || {};
-                    const m = (sp.margins || DEFAULT_MARGINS)[sel] ?? DEFAULT_MARGINS[sel];
+                    const m = (sp.margins || DEFAULT_MARGINS)[sel] ?? DEFAULT_MARGINS[sel] ?? 0;
                     return sum + m;
                   }, 0) / withData.length : 0;
                   // 납품가 대비 실질 마진율 평균
