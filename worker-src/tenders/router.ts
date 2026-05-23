@@ -18,8 +18,10 @@
 
 import { runPoll, runDailyPoll, seedKeywords } from './poll';
 import { sendTenderNotification, sendTestEmail } from './notify';
+import { runDeadlineCheck } from './deadline-check';
+import { runChangeHistoryPoll } from './change-history';
 import { fbGet, fbPatch } from './firebase';
-import type { KeywordCategory, TenderEnv, TenderKeyword, TenderNotice, TenderStatus } from './types';
+import type { ChangeHistoryRecord, KeywordCategory, TenderEnv, TenderKeyword, TenderNotice, TenderStatus } from './types';
 
 /** 클라이언트에 노출 가능한 status 값 화이트리스트 */
 const VALID_STATUSES: readonly TenderStatus[] = [
@@ -144,6 +146,59 @@ export async function handleTendersApi(
       return jsonResponse({ ok: true, mode: isTest ? 'test' : 'production', ...result });
     }
 
+    // ─── POST /api/tenders/check-deadlines ───
+    // Phase 4A: 마감 임박(D-3, D-1) 알림 수동 트리거.
+    // cron이 자동으로 KST 09:00, 14:00에 호출. 디버깅·즉시 점검 용.
+    if (path === 'check-deadlines') {
+      if (request.method !== 'POST' && request.method !== 'GET') {
+        return errorResponse('이 엔드포인트는 GET 또는 POST 메서드만 허용합니다', 405);
+      }
+      const appUrl = `${url.protocol}//${url.host}`;
+      const result = await runDeadlineCheck(env, appUrl);
+      return jsonResponse({ ok: true, ...result });
+    }
+
+    // ─── POST /api/tenders/check-changes ───
+    // Phase 4B: 공고 변경(정정/취소) 추적 수동 트리거.
+    // cron이 자동으로 KST 11:00, 16:00에 호출.
+    if (path === 'check-changes') {
+      if (request.method !== 'POST' && request.method !== 'GET') {
+        return errorResponse('이 엔드포인트는 GET 또는 POST 메서드만 허용합니다', 405);
+      }
+      const appUrl = `${url.protocol}//${url.host}`;
+      const result = await runChangeHistoryPoll(env, appUrl);
+      return jsonResponse({ ok: true, ...result });
+    }
+
+    // ─── GET /api/tenders/change-history ───
+    // 변경이력 목록 (최신순). UI에서 공고 상세에 표시.
+    if (path === 'change-history') {
+      if (request.method !== 'GET') {
+        return errorResponse('이 엔드포인트는 GET 메서드만 허용합니다', 405);
+      }
+      const data = await fbGet<Record<string, ChangeHistoryRecord>>(
+        '/tenders/changeHistory',
+        env.FIREBASE_DB_SECRET,
+      );
+      const list: Array<ChangeHistoryRecord & { key: string }> = [];
+      if (data) {
+        for (const [key, rec] of Object.entries(data)) {
+          if (!rec) continue;
+          // 페이로드 크기 ↓ — prevData/newData는 별도 요청 시에만 반환 (?detail=true)
+          if (url.searchParams.get('detail') === 'true') {
+            list.push({ key, ...rec });
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { prevData: _p, newData: _n, ...rest } = rec;
+            list.push({ key, ...rest, prevData: null, newData: null });
+          }
+        }
+      }
+      // 감지 시각 내림차순
+      list.sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
+      return jsonResponse({ ok: true, count: list.length, changes: list });
+    }
+
     // ─── GET /api/tenders/notices ───
     // 클라이언트(BidsTab)가 수집된 공고를 표시하기 위해 호출.
     // 응답에서 rawData(원본 조달청 응답)는 제외 → 페이로드 크기 ↓.
@@ -169,35 +224,100 @@ export async function handleTendersApi(
     }
 
     // ─── PATCH /api/tenders/notices/{key} ───
-    // 사용자 상태 변경 (신규 → 검토 → 응찰 → 낙찰/미낙찰/제외).
-    // body: { "status": "reviewed" | "applied" | "won" | "lost" | "skipped" | "new" }
+    // 사용자 상태 변경 (신규 → 검토 → 응찰 → 낙찰/미낙찰/제외) + Phase 4C 응찰 필드.
+    // body 예시:
+    //   { "status": "applied", "estimatedCost": 12000000, "estimatedMargin": 18, "applicationMemo": "..." }
+    //   { "status": "skipped", "skipReason": "원가 미달" }
+    //   { "status": "reviewed" }
     const noticeMatch = path.match(/^notices\/(.+)$/);
     if (noticeMatch) {
-      if (request.method !== 'PATCH' && request.method !== 'POST') {
-        return errorResponse('이 엔드포인트는 PATCH 또는 POST 메서드만 허용합니다', 405);
-      }
       const key = decodeURIComponent(noticeMatch[1]!);
-      let body: { status?: string };
+
+      // DELETE — 공고 1건 영구 삭제 (실수 방지 위해 ?confirm=true 필수)
+      if (request.method === 'DELETE') {
+        if (url.searchParams.get('confirm') !== 'true') {
+          return errorResponse('공고 삭제는 ?confirm=true 필수입니다', 400);
+        }
+        await fbPatch('/tenders/notices', { [key]: null }, env.FIREBASE_DB_SECRET);
+        return jsonResponse({ ok: true, key, deleted: true });
+      }
+
+      if (request.method !== 'PATCH' && request.method !== 'POST') {
+        return errorResponse('이 엔드포인트는 PATCH, POST, DELETE 메서드만 허용합니다', 405);
+      }
+      let body: Partial<TenderNotice>;
       try {
-        body = (await request.json()) as { status?: string };
+        body = (await request.json()) as Partial<TenderNotice>;
       } catch {
         return errorResponse('요청 본문이 유효한 JSON이 아닙니다', 400);
       }
-      if (!body.status) {
-        return errorResponse('status 필드가 필요합니다', 400);
+
+      const nowISO = new Date().toISOString();
+      const patch: Record<string, unknown> = { updatedAt: nowISO };
+
+      if (body.status !== undefined) {
+        if (!VALID_STATUSES.includes(body.status as TenderStatus)) {
+          return errorResponse(
+            `status는 다음 중 하나여야 합니다: ${VALID_STATUSES.join(', ')}`,
+            400,
+          );
+        }
+        patch['status'] = body.status;
+        // applied/skipped 결정 시 reviewedAt 자동 기록
+        if (body.status === 'applied' || body.status === 'skipped') {
+          patch['reviewedAt'] = nowISO;
+        }
       }
-      if (!VALID_STATUSES.includes(body.status as TenderStatus)) {
-        return errorResponse(
-          `status는 다음 중 하나여야 합니다: ${VALID_STATUSES.join(', ')}`,
-          400,
-        );
+
+      // Phase 4C 응찰 필드 — 옵셔널 검증
+      const numCheck = (v: unknown, name: string): string | null => {
+        if (v === null) return null;  // null은 명시적 해제로 허용
+        if (typeof v !== 'number' || !Number.isFinite(v)) return `${name}는 숫자여야 합니다`;
+        if (v < 0) return `${name}는 0 이상이어야 합니다`;
+        return null;
+      };
+      if (body.estimatedCost !== undefined) {
+        const err = numCheck(body.estimatedCost, 'estimatedCost');
+        if (err) return errorResponse(err, 400);
+        patch['estimatedCost'] = body.estimatedCost;
       }
-      await fbPatch(
-        `/tenders/notices/${key}`,
-        { status: body.status, updatedAt: new Date().toISOString() },
-        env.FIREBASE_DB_SECRET,
-      );
-      return jsonResponse({ ok: true, key, status: body.status });
+      if (body.estimatedMargin !== undefined) {
+        const err = numCheck(body.estimatedMargin, 'estimatedMargin');
+        if (err) return errorResponse(err, 400);
+        patch['estimatedMargin'] = body.estimatedMargin;
+      }
+      if (body.ourBidAmount !== undefined) {
+        const err = numCheck(body.ourBidAmount, 'ourBidAmount');
+        if (err) return errorResponse(err, 400);
+        patch['ourBidAmount'] = body.ourBidAmount;
+      }
+      if (body.applicationMemo !== undefined) {
+        if (body.applicationMemo !== null && typeof body.applicationMemo !== 'string') {
+          return errorResponse('applicationMemo는 문자열이어야 합니다', 400);
+        }
+        if (typeof body.applicationMemo === 'string' && body.applicationMemo.length > 2000) {
+          return errorResponse('applicationMemo는 2000자 이하여야 합니다', 400);
+        }
+        patch['applicationMemo'] = body.applicationMemo;
+      }
+      if (body.skipReason !== undefined) {
+        if (body.skipReason !== null && typeof body.skipReason !== 'string') {
+          return errorResponse('skipReason는 문자열이어야 합니다', 400);
+        }
+        if (typeof body.skipReason === 'string' && body.skipReason.length > 500) {
+          return errorResponse('skipReason는 500자 이하여야 합니다', 400);
+        }
+        patch['skipReason'] = body.skipReason;
+      }
+
+      // updatedAt + status/reviewedAt 외에 아무 필드도 없으면 거부
+      const realFields = Object.keys(patch).filter((k) => k !== 'updatedAt');
+      if (realFields.length === 0) {
+        return errorResponse('갱신할 필드가 없습니다', 400);
+      }
+
+      await fbPatch(`/tenders/notices/${key}`, patch, env.FIREBASE_DB_SECRET);
+      return jsonResponse({ ok: true, key, patch });
     }
 
     // ─── GET /api/tenders/keywords ───

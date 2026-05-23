@@ -67,10 +67,47 @@ export interface TenderNotice {
   status: TenderStatus;         // 워크플로 상태
   notifiedAt: string | null;    // ISO 8601, 이메일 알림 전송 시각 (Phase 2)
 
+  // ─── Phase 4C: 응찰 워크플로우 데이터 ───
+  // status가 'applied'일 때 입력. status가 'skipped'면 skipReason만 사용.
+  estimatedCost?: number | null;       // 우리 견적가 (원)
+  estimatedMargin?: number | null;     // 예상 마진 (%)
+  ourBidAmount?: number | null;        // 실제 투찰 금액 (원)
+  applicationMemo?: string | null;     // 응찰 메모
+  skipReason?: string | null;          // 응찰 안 함 사유
+  reviewedAt?: string | null;          // ISO 8601, 응찰 결정 시각
+
   // ─── 메타 ───
   rawData: Record<string, unknown> | null;  // 디버깅용 조달청 원본 응답
   createdAt: string;            // ISO 8601, 최초 수집 시각
   updatedAt: string;            // ISO 8601, 마지막 갱신 시각
+}
+
+/**
+ * Phase 4A — 마감 임박 알림 발송 이력 1건.
+ * Firebase RTDB 경로: `tenders/deadlineReminders/{noticeKey}_{type}`
+ * idempotent 키 사용: 동일 noticeKey + type 조합은 1회만 발송.
+ */
+export interface DeadlineReminderLog {
+  noticeKey: string;            // notices의 키
+  type: 'd-3' | 'd-1' | 'd-day';
+  sentAt: string;               // ISO 8601
+}
+
+/**
+ * Phase 4B — 공고 변경 이력 1건 (정정/취소).
+ * Firebase RTDB 경로: `tenders/changeHistory/{auto-push-key}`
+ */
+export interface ChangeHistoryRecord {
+  bidNtceNo: string;
+  bidNtceOrdPrev: string;       // 변경 전 차수
+  bidNtceOrdNew: string;        // 변경 후 차수
+  changeType: string | null;    // 정정/취소/연기 등 (ntceKindNm)
+  changeReason: string | null;  // rbidPermsnYn 등
+  prevData: Record<string, unknown> | null;
+  newData: Record<string, unknown> | null;
+  detectedAt: string;           // ISO 8601
+  notified: boolean;            // 이메일 알림 발송 여부
+  notifiedAt?: string | null;
 }
 
 /**

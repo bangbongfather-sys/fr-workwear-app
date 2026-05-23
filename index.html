@@ -11713,6 +11713,11 @@ function TenderAutoSection({ darkMode }) {
   const [showAll, setShowAll] = useState(false);
   const [updatingKey, setUpdatingKey] = useState(null);
   const [statusFilter, setStatusFilter] = useState("");
+  // Phase 4C: 응찰 정보 펼침 (한 번에 1개만)
+  const [expandedKey, setExpandedKey] = useState(null);
+  // 펼침 상태에서 편집 중인 임시 값 (Save 누르기 전까지 notices에 반영 안 함)
+  const [draft, setDraft] = useState({});  // { estimatedCost, estimatedMargin, applicationMemo, skipReason }
+  const [savingDraft, setSavingDraft] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -11741,11 +11746,64 @@ function TenderAutoSection({ darkMode }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // 낙관적 업데이트: 응답 성공 시 로컬 state 갱신
-      setNotices(prev => prev.map(n => n.key === key ? { ...n, status: newStatus } : n));
+      setNotices(prev => prev.map(n => n.key === key ? { ...n, status: newStatus, reviewedAt: (newStatus === 'applied' || newStatus === 'skipped') ? new Date().toISOString() : n.reviewedAt } : n));
     } catch (e) {
       alert("상태 변경 실패: " + (e?.message || String(e)));
     } finally {
       setUpdatingKey(null);
+    }
+  };
+
+  // Phase 4C: 응찰 정보 펼침 토글 + 기존 값으로 draft 초기화
+  const toggleExpand = (key) => {
+    if (expandedKey === key) {
+      setExpandedKey(null);
+      setDraft({});
+      return;
+    }
+    const n = notices.find(x => x.key === key);
+    setDraft({
+      estimatedCost: n?.estimatedCost ?? "",
+      estimatedMargin: n?.estimatedMargin ?? "",
+      ourBidAmount: n?.ourBidAmount ?? "",
+      applicationMemo: n?.applicationMemo ?? "",
+      skipReason: n?.skipReason ?? "",
+    });
+    setExpandedKey(key);
+  };
+
+  // 응찰 정보 저장 — PATCH로 응찰 필드 갱신
+  const saveDraft = async (key) => {
+    setSavingDraft(true);
+    try {
+      const payload = {};
+      const toNum = (v) => {
+        if (v === "" || v === null || v === undefined) return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      if (draft.estimatedCost !== undefined) payload.estimatedCost = toNum(draft.estimatedCost);
+      if (draft.estimatedMargin !== undefined) payload.estimatedMargin = toNum(draft.estimatedMargin);
+      if (draft.ourBidAmount !== undefined) payload.ourBidAmount = toNum(draft.ourBidAmount);
+      if (draft.applicationMemo !== undefined) payload.applicationMemo = draft.applicationMemo || null;
+      if (draft.skipReason !== undefined) payload.skipReason = draft.skipReason || null;
+
+      const res = await fetch(`/api/tenders/notices/${encodeURIComponent(key)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      setNotices(prev => prev.map(n => n.key === key ? { ...n, ...payload } : n));
+      setExpandedKey(null);
+      setDraft({});
+    } catch (e) {
+      alert("응찰 정보 저장 실패: " + (e?.message || String(e)));
+    } finally {
+      setSavingDraft(false);
     }
   };
 
@@ -11920,6 +11978,11 @@ function TenderAutoSection({ darkMode }) {
                     </button>
                   ))}
                   <div style={{ flex: 1 }} />
+                  {/* Phase 4C: 응찰 정보 펼침 토글 */}
+                  <button onClick={() => toggleExpand(n.key)}
+                    style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid var(--border)", background: expandedKey === n.key ? "var(--text3)" : "transparent", color: expandedKey === n.key ? "#fff" : "var(--text2)", cursor: "pointer", fontSize: 10, fontFamily: "inherit", fontWeight: 600 }}>
+                    {expandedKey === n.key ? "▴ 접기" : (n.estimatedCost || n.estimatedMargin || n.applicationMemo || n.skipReason) ? "📝 응찰정보 ✓" : "📝 응찰정보"}
+                  </button>
                   {n.bidNtceUrl && (
                     <a href={n.bidNtceUrl} target="_blank" rel="noreferrer"
                       style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #EC6608", background: "transparent", color: "#EC6608", fontSize: 10, fontFamily: "inherit", fontWeight: 600, textDecoration: "none" }}>
@@ -11927,6 +11990,62 @@ function TenderAutoSection({ darkMode }) {
                     </a>
                   )}
                 </div>
+
+                {/* Phase 4C: 응찰 정보 입력 영역 (펼침 시) */}
+                {expandedKey === n.key && (
+                  <div style={{ marginTop: 8, padding: 12, background: darkMode ? "rgba(236,102,8,0.06)" : "rgba(236,102,8,0.04)", border: "1px dashed rgba(236,102,8,0.35)", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)" }}>
+                      📝 응찰 검토 정보
+                      {n.reviewedAt && <span style={{ marginLeft: 8, fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>검토일 {fmtDateTime(n.reviewedAt)}</span>}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)" }}>견적가 (원)</span>
+                        <input type="number" value={draft.estimatedCost ?? ""} onChange={(e) => setDraft({ ...draft, estimatedCost: e.target.value })}
+                          placeholder="예: 12000000"
+                          style={{ height: 28, fontSize: 12, padding: "0 8px", textAlign: "right" }} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)" }}>예상 마진 (%)</span>
+                        <input type="number" step="0.1" value={draft.estimatedMargin ?? ""} onChange={(e) => setDraft({ ...draft, estimatedMargin: e.target.value })}
+                          placeholder="예: 18"
+                          style={{ height: 28, fontSize: 12, padding: "0 8px", textAlign: "right" }} />
+                      </label>
+                      <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)" }}>실제 투찰가 (원)</span>
+                        <input type="number" value={draft.ourBidAmount ?? ""} onChange={(e) => setDraft({ ...draft, ourBidAmount: e.target.value })}
+                          placeholder="입찰 확정 후 입력"
+                          style={{ height: 28, fontSize: 12, padding: "0 8px", textAlign: "right" }} />
+                      </label>
+                    </div>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)" }}>응찰 메모 (사양·납기·특이사항)</span>
+                      <textarea value={draft.applicationMemo ?? ""} onChange={(e) => setDraft({ ...draft, applicationMemo: e.target.value })}
+                        rows={2}
+                        placeholder="예: 아라미드 본딩 원단 필요, 납기 30일, 시험성적서 첨부 요구"
+                        style={{ fontSize: 12, padding: "6px 8px", fontFamily: "inherit", resize: "vertical" }} />
+                    </label>
+                    {(n.status === "skipped" || draft.skipReason) && (
+                      <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)" }}>응찰 안 함 사유</span>
+                        <input value={draft.skipReason ?? ""} onChange={(e) => setDraft({ ...draft, skipReason: e.target.value })}
+                          placeholder="예: 원가 미달, 납기 불가, 자격 미충족"
+                          style={{ height: 28, fontSize: 12, padding: "0 8px" }} />
+                      </label>
+                    )}
+                    <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 4 }}>
+                      <button onClick={() => { setExpandedKey(null); setDraft({}); }}
+                        disabled={savingDraft}
+                        style={{ padding: "6px 14px", fontSize: 11, fontWeight: 600, color: "var(--text2)", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>
+                        취소
+                      </button>
+                      <button onClick={() => saveDraft(n.key)} disabled={savingDraft}
+                        style={{ padding: "6px 14px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#EC6608", border: "none", borderRadius: 6, cursor: savingDraft ? "wait" : "pointer", fontFamily: "inherit" }}>
+                        {savingDraft ? "저장 중..." : "저장"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}

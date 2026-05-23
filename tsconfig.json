@@ -2,7 +2,9 @@
   "// 설명": "worker-src/ 모듈의 TypeScript strict 검사용. wrangler는 esbuild로 자동 빌드하므로 이 설정 없어도 동작은 함. 본 설정은 IDE 타입 검사 + tsc --noEmit 으로 빌드 전 검증 용도.",
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022"],
+    // WebWorker lib으로 Workers 런타임 글로벌 (fetch/Request/Response/AbortSignal/console/setTimeout 등) 인식.
+    // @cloudflare/workers-types 안 깔아도 1차 검증 통과.
+    "lib": ["ES2022", "WebWorker"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
 

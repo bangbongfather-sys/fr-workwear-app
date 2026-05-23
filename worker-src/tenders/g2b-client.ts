@@ -136,7 +136,7 @@ export async function fetchAllThngTenders(
     const items = data.response.body.items;
 
     // 데이터 없음 — 정상 종료 (빈 문자열, undefined, 빈 배열 모두 처리)
-    if (!items || items === '' || (Array.isArray(items) && items.length === 0)) {
+    if (!items || (Array.isArray(items) && items.length === 0)) {
       console.log(`[g2b-client] 페이지 ${pageNo}: 데이터 없음 (종료)`);
       break;
     }
@@ -161,4 +161,39 @@ export async function fetchAllThngTenders(
   }
 
   return results;
+}
+
+/**
+ * 특정 bidNtceNo 1건만 조회 (Phase 4B 변경이력 추적용).
+ *
+ * 정정공고가 발생하면 같은 bidNtceNo에 새 차수(bidNtceOrd)가 생기므로,
+ * 우리 DB의 차수와 비교해서 변경 여부 감지.
+ *
+ * 응답 배열에서 첫 번째 (가장 최신 차수) 아이템을 반환.
+ *
+ * @param bidNtceNo 조회 대상 공고번호 (예: "20260523001")
+ * @param serviceKey 공공데이터포털 Decoding 인증키
+ * @returns 가장 최신 차수의 공고. 데이터 없으면 null.
+ */
+export async function fetchTenderByBidNtceNo(
+  bidNtceNo: string,
+  serviceKey: string,
+): Promise<G2BTenderItem | null> {
+  if (!serviceKey) {
+    throw new Error('G2B_SERVICE_KEY가 비어 있음');
+  }
+  const url = `${BASE_URL}/getBidPblancListInfoThngPPSSrch` +
+    `?serviceKey=${encodeURIComponent(serviceKey)}` +
+    `&pageNo=1&numOfRows=10` +
+    `&bidNtceNo=${encodeURIComponent(bidNtceNo)}` +
+    `&type=json`;
+  const data = await fetchWithRetry<G2BTenderItem>(url);
+  const items = data.response.body.items;
+  if (!items || (Array.isArray(items) && items.length === 0)) {
+    return null;
+  }
+  const list = items as G2BTenderItem[];
+  // 차수 내림차순 정렬 후 첫 번째 (최신)
+  list.sort((a, b) => (b.bidNtceOrd ?? '0').localeCompare(a.bidNtceOrd ?? '0'));
+  return list[0] ?? null;
 }

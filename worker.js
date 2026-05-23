@@ -19,6 +19,8 @@
 import { handleTendersApi } from "./worker-src/tenders/router.js";
 import { runDailyPoll } from "./worker-src/tenders/poll.js";
 import { sendTenderNotification } from "./worker-src/tenders/notify.js";
+import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
+import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
@@ -83,6 +85,28 @@ export default {
         sendTenderNotification(env, appUrl)
           .then((result) => console.log(`[scheduled] 이메일 알림 완료:`, result))
           .catch((err) => console.error(`[scheduled] 이메일 알림 실패:`, err?.message ?? err))
+      );
+      return;
+    }
+
+    // KST 09:00, 14:00 (UTC 00:00, 05:00) — Phase 4A 마감 임박 점검
+    if (event.cron === "0 0,5 * * *") {
+      const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
+      ctx.waitUntil(
+        runDeadlineCheck(env, appUrl)
+          .then((result) => console.log(`[scheduled] 마감 임박 점검 완료:`, result))
+          .catch((err) => console.error(`[scheduled] 마감 임박 점검 실패:`, err?.message ?? err))
+      );
+      return;
+    }
+
+    // KST 11:00, 16:00 (UTC 02:00, 07:00) — Phase 4B 변경이력 폴링
+    if (event.cron === "0 2,7 * * *") {
+      const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
+      ctx.waitUntil(
+        runChangeHistoryPoll(env, appUrl)
+          .then((result) => console.log(`[scheduled] 변경이력 폴링 완료:`, result))
+          .catch((err) => console.error(`[scheduled] 변경이력 폴링 실패:`, err?.message ?? err))
       );
       return;
     }

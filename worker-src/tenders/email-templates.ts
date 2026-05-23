@@ -187,3 +187,163 @@ export function buildSubject(count: number): string {
   const todayKST = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   return `[NJ Safety 입찰알리미] 신규 ${count}건 · ${todayKST}`;
 }
+
+// ─── Phase 4A — 마감 임박 이메일 ──────────────────────────────
+
+/**
+ * 마감 D-3/D-1 임박 공고 알림 HTML.
+ * D-3 그룹 + D-1 그룹을 두 섹션으로 분리해 표시.
+ */
+export function renderDeadlineEmail(
+  d3: TenderForEmail[],
+  d1: TenderForEmail[],
+  appUrl?: string,
+): string {
+  const ctaButton = appUrl
+    ? `<a href="${escapeHtml(appUrl)}" style="display:inline-block;padding:11px 22px;background:${BRAND_ORANGE};color:#ffffff;text-decoration:none;border-radius:10px;font-size:13px;font-weight:700;font-family:'Pretendard',sans-serif;">📋 입찰 관리 열기 →</a>`
+    : '';
+
+  const renderSection = (label: string, color: string, list: TenderForEmail[]) => {
+    if (list.length === 0) return '';
+    const rows = list.map((t) => {
+      const dt = t.bidClseDt ? new Date(t.bidClseDt).getTime() : null;
+      const hoursLeft = dt ? Math.round((dt - Date.now()) / (60 * 60 * 1000)) : null;
+      const timeLabel = hoursLeft != null
+        ? (hoursLeft > 24 ? `${Math.floor(hoursLeft / 24)}일 ${hoursLeft % 24}시간` : `${hoursLeft}시간`)
+        : '-';
+      return `
+        <tr style="border-top:1px solid ${BORDER};">
+          <td style="padding:14px 12px;vertical-align:top;">
+            <div style="font-size:14px;font-weight:700;color:${INK};margin-bottom:4px;line-height:1.4;">
+              ${t.bidNtceUrl
+                ? `<a href="${escapeHtml(t.bidNtceUrl)}" style="color:${INK};text-decoration:none;">${escapeHtml(t.bidNtceNm)} ↗</a>`
+                : escapeHtml(t.bidNtceNm)}
+            </div>
+            <div style="font-size:12px;color:${TEXT_2};">
+              ${escapeHtml(t.dminsttNm ?? t.ntceInsttNm ?? '기관 미상')}
+            </div>
+          </td>
+          <td style="padding:14px 12px;text-align:right;vertical-align:top;white-space:nowrap;">
+            <div style="font-size:14px;font-weight:800;color:${INK};">${formatPrice(t.presmptPrce)}</div>
+            <div style="font-size:11px;color:${color};font-weight:700;margin-top:4px;">⏰ ${timeLabel} 남음</div>
+            <div style="font-size:10px;color:${TEXT_3};">${formatDateTime(t.bidClseDt)}</div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    return `
+      <div style="margin-top:16px;background:#ffffff;border-radius:14px;border:1px solid ${BORDER};overflow:hidden;">
+        <div style="padding:12px 16px;background:${color};color:#ffffff;font-size:13px;font-weight:700;">
+          ${label} <span style="opacity:0.85;font-weight:600;margin-left:6px;">${list.length}건</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;">${rows}</table>
+      </div>
+    `;
+  };
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>마감 임박 알림</title></head>
+<body style="margin:0;padding:0;background:${BG};font-family:'Pretendard','Apple SD Gothic Neo',-apple-system,BlinkMacSystemFont,sans-serif;color:${INK};">
+  <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
+    <div style="padding:24px 20px 18px;background:linear-gradient(135deg,${DANGER} 0%,${WARNING} 100%);border-radius:14px 14px 0 0;color:#ffffff;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;opacity:0.9;">⏰ DEADLINE REMINDER</div>
+      <div style="font-size:20px;font-weight:800;margin-top:6px;">마감 임박 공고 ${d3.length + d1.length}건</div>
+      <div style="font-size:12px;margin-top:8px;opacity:0.92;line-height:1.5;">
+        매일 KST 09:00 / 14:00 자동 점검. 응찰 결정 안 한 공고만 표시됩니다.
+      </div>
+    </div>
+    ${renderSection('🚨 D-1 (24시간 이내)', DANGER, d1)}
+    ${renderSection('⚠️ D-3 (3일 이내)', WARNING, d3)}
+    ${ctaButton ? `<div style="text-align:center;margin-top:20px;">${ctaButton}</div>` : ''}
+    <div style="margin-top:20px;padding:14px 16px;background:#ffffff;border-radius:10px;border:1px solid ${BORDER};font-size:11px;color:${TEXT_3};text-align:center;line-height:1.6;">
+      동일 공고는 D-3, D-1 각 1회씩만 알림 발송 (중복 방지).<br>
+      알림 끄려면 fr-workwear-app에서 해당 공고 상태를 "응찰 안 함(skipped)"으로 변경.
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+export function buildDeadlineSubject(d3Count: number, d1Count: number): string {
+  const parts: string[] = [];
+  if (d1Count > 0) parts.push(`D-1 ${d1Count}건`);
+  if (d3Count > 0) parts.push(`D-3 ${d3Count}건`);
+  return `[NJ Safety 입찰알리미] ⏰ 마감 임박 ${parts.join(' · ')}`;
+}
+
+// ─── Phase 4B — 공고 변경 이메일 ──────────────────────────────
+
+export interface ChangeEmailItem {
+  noticeKey: string;
+  bidNtceNo: string;
+  bidNtceNm: string;
+  dminsttNm: string | null;
+  bidNtceUrl: string | null;
+  bidClseDt: string | null;
+  prevOrd: string;
+  newOrd: string;
+  changeType: string | null;
+}
+
+/**
+ * 공고 변경(정정/취소/연기) 알림 HTML.
+ */
+export function renderChangeEmail(changes: ChangeEmailItem[], appUrl?: string): string {
+  const ctaButton = appUrl
+    ? `<a href="${escapeHtml(appUrl)}" style="display:inline-block;padding:11px 22px;background:${BRAND_ORANGE};color:#ffffff;text-decoration:none;border-radius:10px;font-size:13px;font-weight:700;font-family:'Pretendard',sans-serif;">📋 입찰 관리 열기 →</a>`
+    : '';
+
+  const rows = changes.map((c) => `
+    <tr style="border-top:1px solid ${BORDER};">
+      <td style="padding:14px 12px;vertical-align:top;">
+        <div style="font-size:14px;font-weight:700;color:${INK};margin-bottom:4px;line-height:1.4;">
+          ${c.bidNtceUrl
+            ? `<a href="${escapeHtml(c.bidNtceUrl)}" style="color:${INK};text-decoration:none;">${escapeHtml(c.bidNtceNm)} ↗</a>`
+            : escapeHtml(c.bidNtceNm)}
+        </div>
+        <div style="font-size:12px;color:${TEXT_2};">
+          ${escapeHtml(c.dminsttNm ?? '기관 미상')}
+          ${c.bidClseDt ? ` · 마감 ${formatDateTime(c.bidClseDt)}` : ''}
+        </div>
+      </td>
+      <td style="padding:14px 12px;text-align:right;vertical-align:top;white-space:nowrap;">
+        <div style="display:inline-block;padding:4px 10px;background:${BRAND_ORANGE_LIGHT};color:${BRAND_ORANGE};border-radius:6px;font-size:11px;font-weight:700;">
+          ${escapeHtml(c.changeType ?? '변경')}
+        </div>
+        <div style="font-size:11px;color:${TEXT_2};margin-top:6px;">
+          차수 <b style="color:${INK};">${escapeHtml(c.prevOrd)}</b> → <b style="color:${BRAND_ORANGE};">${escapeHtml(c.newOrd)}</b>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>공고 변경 알림</title></head>
+<body style="margin:0;padding:0;background:${BG};font-family:'Pretendard','Apple SD Gothic Neo',-apple-system,BlinkMacSystemFont,sans-serif;color:${INK};">
+  <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
+    <div style="padding:24px 20px 18px;background:linear-gradient(135deg,${BRAND_ORANGE} 0%,${WARNING} 100%);border-radius:14px 14px 0 0;color:#ffffff;">
+      <div style="font-size:11px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;opacity:0.9;">📝 CHANGE NOTICE</div>
+      <div style="font-size:20px;font-weight:800;margin-top:6px;">공고 변경 감지 ${changes.length}건</div>
+      <div style="font-size:12px;margin-top:8px;opacity:0.92;line-height:1.5;">
+        매일 KST 11:00 / 16:00 자동 점검. 우리가 추적 중인 공고에서 차수 증가(정정공고) 발견.
+      </div>
+    </div>
+    <div style="margin-top:14px;background:#ffffff;border-radius:14px;border:1px solid ${BORDER};overflow:hidden;">
+      <table style="width:100%;border-collapse:collapse;">${rows}</table>
+    </div>
+    ${ctaButton ? `<div style="text-align:center;margin-top:20px;">${ctaButton}</div>` : ''}
+    <div style="margin-top:20px;padding:14px 16px;background:#ffffff;border-radius:10px;border:1px solid ${BORDER};font-size:11px;color:${TEXT_3};text-align:center;line-height:1.6;">
+      정정공고는 일정·금액·규격이 바뀔 수 있으므로 반드시 원문 확인하세요.<br>
+      이 메일은 차수 변경 1회당 1번 발송됩니다.
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+export function buildChangeSubject(count: number): string {
+  return `[NJ Safety 입찰알리미] 📝 공고 변경 ${count}건`;
+}
