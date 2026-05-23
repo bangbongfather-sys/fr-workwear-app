@@ -1,4 +1,5 @@
 // Cloudflare Worker — 정적 자산 서빙 + 노션 To Do List 동기화 프록시 + Firebase RTDB 프록시
+//                     + 입찰 모니터링 (조달청 OpenAPI 일일 폴링)
 //
 // 환경 변수 (Cloudflare 대시보드에서 설정):
 //   NOTION_TOKEN        (Secret) — 노션 Internal Integration Token (secret_xxx)
@@ -7,6 +8,17 @@
 //   FIREBASE_DB_SECRET  (Secret) — Firebase Realtime Database 비밀 키 (legacy DB secret).
 //                                   Firebase 콘솔 → 프로젝트 설정 → 서비스 계정 → 데이터베이스 비밀번호.
 //                                   클라이언트에는 절대 노출되지 않고 이 워커만 사용.
+//   G2B_SERVICE_KEY     (Secret) — 공공데이터포털 나라장터 OpenAPI Decoding 인증키.
+//                                   data.go.kr 마이페이지 → 오픈API → 개발계정에서 발급.
+//                                   입찰 모니터링 모듈(/api/tenders/*) 전용.
+//   MATCH_THRESHOLD     (Plain)  — 입찰 매칭 임계값 (기본 7). wrangler.jsonc vars로 설정.
+//
+// Cron Triggers (wrangler.jsonc → triggers.crons):
+//   "0 18 * * *" — UTC 18:00 = KST 03:00, 매일 입찰 폴링 자동 실행
+
+import { handleTendersApi } from "./worker-src/tenders/router.js";
+import { runDailyPoll } from "./worker-src/tenders/poll.js";
+import { sendTenderNotification } from "./worker-src/tenders/notify.js";
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
@@ -38,8 +50,44 @@ export default {
       return handleFirebaseSync(request, env, url);
     }
 
+    // 입찰 모니터링 API (조달청 폴링 + 키워드 시드 등)
+    if (url.pathname === "/api/tenders" || url.pathname.startsWith("/api/tenders/")) {
+      return handleTendersApi(request, env, url);
+    }
+
     // 그 외 모든 요청은 정적 자산 (index.html 등)
     return env.ASSETS.fetch(request);
+  },
+
+  // Cron Trigger 자동 실행 진입점.
+  // wrangler.jsonc의 triggers.crons에 등록된 스케줄이 발동하면 호출됨.
+  // event.cron 값으로 어떤 스케줄이 호출됐는지 분기.
+  // ctx.waitUntil은 Worker가 백그라운드 작업 완료까지 살아있도록 보장 (장기 fetch에 필수).
+  async scheduled(event, env, ctx) {
+    console.log(`[scheduled] cron 실행: ${event.cron} @ ${new Date(event.scheduledTime).toISOString()}`);
+
+    // KST 03:00 (UTC 18:00) — 입찰 데이터 폴링
+    if (event.cron === "0 18 * * *") {
+      ctx.waitUntil(
+        runDailyPoll(env)
+          .then((result) => console.log(`[scheduled] 일일 폴링 완료:`, result))
+          .catch((err) => console.error(`[scheduled] 일일 폴링 실패:`, err?.message ?? err))
+      );
+      return;
+    }
+
+    // KST 08:30 (UTC 23:30) — 이메일 알림 발송
+    if (event.cron === "30 23 * * *") {
+      const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
+      ctx.waitUntil(
+        sendTenderNotification(env, appUrl)
+          .then((result) => console.log(`[scheduled] 이메일 알림 완료:`, result))
+          .catch((err) => console.error(`[scheduled] 이메일 알림 실패:`, err?.message ?? err))
+      );
+      return;
+    }
+
+    console.warn(`[scheduled] 등록되지 않은 cron 스케줄: ${event.cron}`);
   },
 };
 

@@ -11487,6 +11487,463 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   );
 }
 
+// ─── 키워드 관리 패널 (Phase 3 키워드 CRUD UI) ───
+// 카테고리별 그룹화 + 인라인 편집 (활성/카테고리/가중치) + 추가/삭제.
+// 시드 키워드(seed_*)는 [seed] 배지 + 삭제 불가. 사용자 추가(user_*)는 전체 작업 가능.
+function KeywordManagerPanel({ darkMode, onClose }) {
+  const [keywords, setKeywords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [updatingKey, setUpdatingKey] = useState(null);
+  const [newKw, setNewKw] = useState({ keyword: "", category: "core", weight: 5 });
+  const [adding, setAdding] = useState(false);
+
+  const CATEGORIES = [
+    { v: "core",     label: "📦 핵심",       desc: "제품명 직접 매칭 (가중치 보통 8~10)" },
+    { v: "material", label: "🧵 소재",       desc: "원단/섬유 키워드 (보통 5~7)" },
+    { v: "standard", label: "📋 규격/인증",  desc: "표준·인증 키워드 (보통 7~8)" },
+    { v: "usage",    label: "🛠 용도",       desc: "사용 용도 키워드 (보통 4~6)" },
+    { v: "exclude",  label: "🚫 제외",       desc: "오탐 방지 (음수, 보통 -20)" },
+  ];
+
+  const refresh = async () => {
+    setLoading(true); setErrorMsg("");
+    try {
+      const res = await fetch("/api/tenders/keywords");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setKeywords(Array.isArray(data.keywords) ? data.keywords : []);
+    } catch (e) { setErrorMsg(e?.message || String(e)); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const patchKeyword = async (key, patch) => {
+    setUpdatingKey(key);
+    try {
+      const res = await fetch(`/api/tenders/keywords/${encodeURIComponent(key)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      setKeywords(prev => prev.map(k => k.key === key ? { ...k, ...patch } : k));
+    } catch (e) {
+      alert("수정 실패: " + (e?.message || String(e)));
+    } finally { setUpdatingKey(null); }
+  };
+
+  const deleteKeyword = async (key, keyword) => {
+    if (!confirm(`"${keyword}" 키워드를 삭제할까요?\n(영구 삭제. 다시 추가하려면 + 새 키워드 입력 필요)`)) return;
+    setUpdatingKey(key);
+    try {
+      const res = await fetch(`/api/tenders/keywords/${encodeURIComponent(key)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      setKeywords(prev => prev.filter(k => k.key !== key));
+    } catch (e) {
+      alert("삭제 실패: " + (e?.message || String(e)));
+    } finally { setUpdatingKey(null); }
+  };
+
+  const addKeyword = async () => {
+    const trimmed = newKw.keyword.trim();
+    if (!trimmed) { alert("키워드를 입력하세요"); return; }
+    if (keywords.some(k => k.keyword === trimmed)) {
+      alert(`이미 등록된 키워드입니다: "${trimmed}"`); return;
+    }
+    setAdding(true);
+    try {
+      const res = await fetch("/api/tenders/keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: trimmed, category: newKw.category, weight: Number(newKw.weight) }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setKeywords(prev => [...prev, { key: data.key, isSeed: false, ...data.keyword }]);
+      setNewKw({ keyword: "", category: newKw.category, weight: 5 });
+    } catch (e) {
+      alert("추가 실패: " + (e?.message || String(e)));
+    } finally { setAdding(false); }
+  };
+
+  // 카테고리별 그룹화
+  const grouped = CATEGORIES.map(cat => ({
+    ...cat,
+    items: keywords.filter(k => k.category === cat.v),
+  }));
+
+  const activeCount = keywords.filter(k => k.isActive).length;
+  const avgWeight = keywords.length > 0
+    ? (keywords.reduce((s, k) => s + (k.weight || 0), 0) / keywords.length).toFixed(1)
+    : "—";
+
+  return (
+    <div style={{ marginTop: 14, padding: 14, background: darkMode ? "rgba(0,122,255,0.06)" : "rgba(0,122,255,0.04)", border: "1.5px dashed rgba(0,122,255,0.35)", borderRadius: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
+          🔑 키워드 관리
+          <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>
+            전체 {keywords.length}건 · 활성 {activeCount}건 · 평균 가중치 {avgWeight}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={refresh} disabled={loading}
+            style={{ padding: "4px 10px", fontSize: 11, color: "var(--text2)", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, cursor: loading ? "wait" : "pointer", fontFamily: "inherit" }}>
+            ↻ 새로고침
+          </button>
+          <button onClick={onClose}
+            style={{ padding: "4px 10px", fontSize: 11, color: "var(--text3)", background: "transparent", border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>
+            닫기
+          </button>
+        </div>
+      </div>
+
+      {errorMsg && (
+        <div style={{ padding: "8px 12px", background: "rgba(240,68,82,0.08)", border: "1px solid rgba(240,68,82,0.25)", borderRadius: 8, color: "#F04452", fontSize: 11, marginBottom: 10 }}>
+          {errorMsg}
+        </div>
+      )}
+
+      {loading && keywords.length === 0 ? (
+        <div style={{ padding: "20px", textAlign: "center", color: "var(--text3)", fontSize: 12 }}>불러오는 중...</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 14 }}>
+          {grouped.map(cat => (
+            <div key={cat.v}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span>{cat.label}</span>
+                <span style={{ color: "var(--text3)", fontWeight: 600 }}>({cat.items.length}건)</span>
+                <span style={{ color: "var(--text3)", fontWeight: 500, fontSize: 10 }}>· {cat.desc}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {cat.items.length === 0 ? (
+                  <div style={{ fontSize: 11, color: "var(--text3)", padding: "4px 8px" }}>(이 카테고리 키워드 없음)</div>
+                ) : cat.items.map(kw => (
+                  <div key={kw.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 8, opacity: kw.isActive ? 1 : 0.55 }}>
+                    {/* 활성 체크박스 */}
+                    <input type="checkbox" checked={kw.isActive} onChange={(e) => patchKeyword(kw.key, { isActive: e.target.checked })}
+                      disabled={updatingKey === kw.key}
+                      style={{ width: 14, height: 14, accentColor: "#EC6608", cursor: "pointer", flexShrink: 0 }} />
+                    {/* 키워드 텍스트 */}
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: 600, color: kw.isActive ? "var(--text1)" : "var(--text3)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {kw.keyword}
+                    </span>
+                    {/* 카테고리 변경 */}
+                    <select value={kw.category} onChange={(e) => patchKeyword(kw.key, { category: e.target.value })}
+                      disabled={updatingKey === kw.key}
+                      style={{ height: 24, fontSize: 10, padding: "0 4px", width: 90 }}>
+                      {CATEGORIES.map(c => <option key={c.v} value={c.v}>{c.label.replace(/^[^\s]+\s/, "")}</option>)}
+                    </select>
+                    {/* 가중치 인라인 편집 */}
+                    <input type="number" defaultValue={kw.weight}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (!Number.isFinite(v) || v === kw.weight) return;
+                        patchKeyword(kw.key, { weight: v });
+                      }}
+                      disabled={updatingKey === kw.key}
+                      style={{ width: 56, height: 24, fontSize: 11, padding: "0 4px", textAlign: "right" }} />
+                    {/* 시드/사용자 배지 */}
+                    {kw.isSeed ? (
+                      <span style={{ fontSize: 9, color: "var(--text3)", fontWeight: 700, padding: "2px 6px", background: "var(--surface2)", borderRadius: 4, textTransform: "uppercase" }}>SEED</span>
+                    ) : (
+                      <span style={{ fontSize: 9, color: "#0EA47A", fontWeight: 700, padding: "2px 6px", background: "rgba(14,164,122,0.10)", borderRadius: 4, textTransform: "uppercase" }}>USER</span>
+                    )}
+                    {/* 삭제 (user만) */}
+                    {kw.isSeed ? (
+                      <span style={{ width: 24 }} />
+                    ) : (
+                      <button onClick={() => deleteKeyword(kw.key, kw.keyword)}
+                        disabled={updatingKey === kw.key}
+                        title="삭제"
+                        style={{ width: 24, height: 24, padding: 0, border: "none", background: "transparent", color: "#F04452", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>×</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 새 키워드 추가 폼 */}
+      <div style={{ padding: 10, background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 8 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 6 }}>+ 새 키워드 추가</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <input value={newKw.keyword} onChange={(e) => setNewKw({ ...newKw, keyword: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter" && !adding) addKeyword(); }}
+            placeholder="키워드 (예: 화학복)"
+            style={{ flex: "1 1 160px", height: 30, fontSize: 12, padding: "0 8px" }} />
+          <select value={newKw.category} onChange={(e) => setNewKw({ ...newKw, category: e.target.value })}
+            style={{ height: 30, fontSize: 12, padding: "0 6px", width: 130 }}>
+            {CATEGORIES.map(c => <option key={c.v} value={c.v}>{c.label}</option>)}
+          </select>
+          <input type="number" value={newKw.weight} onChange={(e) => setNewKw({ ...newKw, weight: e.target.value })}
+            style={{ width: 70, height: 30, fontSize: 12, padding: "0 6px", textAlign: "right" }} />
+          <button onClick={addKeyword} disabled={adding || !newKw.keyword.trim()}
+            style={{ padding: "0 14px", height: 30, fontSize: 12, fontWeight: 700, color: "#fff", background: adding || !newKw.keyword.trim() ? "var(--text3)" : "#EC6608", border: "none", borderRadius: 8, cursor: adding ? "wait" : "pointer", fontFamily: "inherit", opacity: !newKw.keyword.trim() ? 0.5 : 1 }}>
+            {adding ? "추가 중..." : "추가"}
+          </button>
+        </div>
+        <div style={{ marginTop: 6, fontSize: 10, color: "var(--text3)" }}>
+          💡 카테고리에 맞는 가중치 권장. 제외 키워드는 음수(예: -20)로. 추가 후 다음 폴링(매일 KST 03:00)부터 적용.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 조달청 자동 수집 공고 섹션 (Phase 2 UI) ───
+// Worker의 /api/tenders/notices 라우트에서 수집된 공고를 받아와 표시.
+// 사용자가 상태(신규/검토/응찰/낙찰/유찰/제외)를 변경하면 /api/tenders/notices/{key} PATCH.
+// BidsTab 내부에서 호출되며, 수동 입력 입찰(bids 배열)과는 별도 데이터 소스.
+function TenderAutoSection({ darkMode }) {
+  const [showKeywordManager, setShowKeywordManager] = useState(false);
+  const [notices, setNotices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [updatingKey, setUpdatingKey] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("");
+
+  const refresh = async () => {
+    setLoading(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch("/api/tenders/notices");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setNotices(Array.isArray(data.notices) ? data.notices : []);
+    } catch (e) {
+      setErrorMsg(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const updateStatus = async (key, newStatus) => {
+    setUpdatingKey(key);
+    try {
+      const res = await fetch(`/api/tenders/notices/${encodeURIComponent(key)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // 낙관적 업데이트: 응답 성공 시 로컬 state 갱신
+      setNotices(prev => prev.map(n => n.key === key ? { ...n, status: newStatus } : n));
+    } catch (e) {
+      alert("상태 변경 실패: " + (e?.message || String(e)));
+    } finally {
+      setUpdatingKey(null);
+    }
+  };
+
+  // 정렬: matchScore 내림차순 → bidClseDt 임박 우선
+  const sorted = [...notices].sort((a, b) => {
+    const s = (b.matchScore || 0) - (a.matchScore || 0);
+    if (s !== 0) return s;
+    const aDt = a.bidClseDt ? new Date(a.bidClseDt).getTime() : Infinity;
+    const bDt = b.bidClseDt ? new Date(b.bidClseDt).getTime() : Infinity;
+    return aDt - bDt;
+  });
+  const filtered = statusFilter ? sorted.filter(n => n.status === statusFilter) : sorted;
+  const displayed = showAll ? filtered : filtered.slice(0, 10);
+
+  // 상태별 라벨/색상
+  const statusColors = {
+    new:      { bg: "rgba(0,122,255,0.15)",   color: "#007AFF", label: "신규" },
+    reviewed: { bg: "rgba(88,86,214,0.15)",   color: "#5856D6", label: "검토" },
+    applied:  { bg: "rgba(255,149,0,0.15)",   color: "#FF9500", label: "응찰" },
+    won:      { bg: "rgba(0,180,147,0.15)",   color: "#00B493", label: "낙찰" },
+    lost:     { bg: "rgba(240,68,82,0.12)",   color: "#F04452", label: "유찰" },
+    skipped:  { bg: "rgba(140,148,160,0.10)", color: "#8B95A1", label: "제외" },
+  };
+
+  // KPI
+  const newCount = notices.filter(n => n.status === "new").length;
+  const todayMs = Date.now();
+  const closingSoon = notices.filter(n => {
+    if (!n.bidClseDt) return false;
+    const dt = new Date(n.bidClseDt).getTime();
+    return dt >= todayMs && dt <= todayMs + 3 * 86400000 && (n.status === "new" || n.status === "reviewed");
+  }).length;
+
+  // D-day 배지 색상 (작업지시서 마감 임박 4단계)
+  const dDayBadge = (clseDt) => {
+    if (!clseDt) return null;
+    const dt = new Date(clseDt).getTime();
+    if (Number.isNaN(dt)) return null;
+    const d = Math.ceil((dt - todayMs) / 86400000);
+    if (d < 0)  return { label: "마감",   bg: "#FFE0E3", color: "#F04452" };
+    if (d <= 1) return { label: `D-${d}`, bg: "#FFE0E3", color: "#F04452" };
+    if (d <= 3) return { label: `D-${d}`, bg: "#FFE9D6", color: "#FF9500" };
+    if (d <= 7) return { label: `D-${d}`, bg: "#FEF5DC", color: "#D69E2E" };
+    return       { label: `D-${d}`, bg: "rgba(236,102,8,0.10)", color: "#EC6608" };
+  };
+
+  const fmtDateTime = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", year: "2-digit", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+
+  return (
+    <div className="card">
+      {/* 헤더 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          🤖 <span>조달청 자동 수집</span>
+          <span style={{ fontSize: 10, color: "#EC6608", fontWeight: 700, padding: "2px 7px", background: "rgba(236,102,8,0.10)", borderRadius: 4, textTransform: "uppercase", letterSpacing: 0.3 }}>BETA</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setShowKeywordManager(v => !v)}
+          style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, color: showKeywordManager ? "#fff" : "var(--text2)", background: showKeywordManager ? "#EC6608" : "transparent", border: "1px solid " + (showKeywordManager ? "#EC6608" : "var(--border)"), borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>
+          ⚙ 키워드 관리
+        </button>
+        <button onClick={refresh} disabled={loading}
+          style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, color: "var(--text2)", background: "transparent", border: "1px solid var(--border)", borderRadius: 8, cursor: loading ? "wait" : "pointer", fontFamily: "inherit" }}>
+          {loading ? "불러오는 중..." : "↻ 새로고침"}
+        </button>
+      </div>
+
+      {/* 안내 + 통계 */}
+      <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 14, lineHeight: 1.6 }}>
+        매일 KST 03:00 조달청 OpenAPI 자동 폴링 → 방염복 키워드 매칭 → KST 08:30 이메일 알림.<br />
+        총 <b style={{ color: "var(--text1)" }}>{notices.length}건</b> 누적 ·
+        검토 대기 <b style={{ color: "#007AFF" }}>{newCount}건</b> ·
+        3일 내 마감 <b style={{ color: closingSoon > 0 ? "#F04452" : "var(--text1)" }}>{closingSoon}건</b>
+      </div>
+
+      {/* 키워드 관리 패널 (토글) */}
+      {showKeywordManager && (
+        <KeywordManagerPanel darkMode={darkMode} onClose={() => setShowKeywordManager(false)} />
+      )}
+
+      {/* 상태 필터 칩 */}
+      {notices.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+          <button onClick={() => setStatusFilter("")}
+            style={{ padding: "4px 11px", borderRadius: 14, border: "1px solid var(--border)", background: statusFilter === "" ? "#EC6608" : "transparent", color: statusFilter === "" ? "#fff" : "var(--text2)", cursor: "pointer", fontSize: 11, fontFamily: "inherit", fontWeight: 600 }}>
+            전체 ({notices.length})
+          </button>
+          {Object.entries(statusColors).map(([s, sc]) => {
+            const cnt = notices.filter(n => n.status === s).length;
+            if (cnt === 0) return null;
+            return (
+              <button key={s} onClick={() => setStatusFilter(s === statusFilter ? "" : s)}
+                style={{ padding: "4px 11px", borderRadius: 14, border: "1px solid var(--border)", background: statusFilter === s ? sc.color : "transparent", color: statusFilter === s ? "#fff" : sc.color, cursor: "pointer", fontSize: 11, fontFamily: "inherit", fontWeight: 600 }}>
+                {sc.label} ({cnt})
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 에러 */}
+      {errorMsg && (
+        <div style={{ padding: "12px 14px", background: "rgba(240,68,82,0.08)", border: "1px solid rgba(240,68,82,0.25)", borderRadius: 10, color: "#F04452", fontSize: 12, marginBottom: 14 }}>
+          데이터 로드 실패: {errorMsg}
+        </div>
+      )}
+
+      {/* 리스트 */}
+      {loading && notices.length === 0 ? (
+        <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+          불러오는 중...
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7 }}>
+          {notices.length === 0
+            ? <>아직 수집된 방염복 매칭 공고가 없습니다.<br />매일 KST 03:00 자동 수집 — 방염복 입찰 빈도가 낮아 누적까지 시간이 걸릴 수 있어요.</>
+            : <>해당 상태의 공고가 없습니다</>}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {displayed.map(n => {
+            const sc = statusColors[n.status] || statusColors.new;
+            const dd = dDayBadge(n.bidClseDt);
+            return (
+              <div key={n.key} style={{ padding: "12px 14px", background: "var(--surface2)", border: "1px solid var(--divider)", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                {/* 상단: 배지 + 제목 + 기관 + 가격 */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                      <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: sc.bg, color: sc.color }}>{sc.label}</span>
+                      {dd && <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: dd.bg, color: dd.color }}>{dd.label}</span>}
+                      <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>점수 {n.matchScore}</span>
+                      {n.notifiedAt && <span style={{ fontSize: 10, color: "#00B493", fontWeight: 600 }}>📧 알림 전송됨</span>}
+                    </div>
+                    <a href={n.bidNtceUrl || "#"} target="_blank" rel="noreferrer"
+                      style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", textDecoration: "none", lineHeight: 1.4, display: "block" }}>
+                      {n.bidNtceNm || "(제목 없음)"}
+                    </a>
+                    <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <span>{n.dminsttNm || n.ntceInsttNm || "기관 미상"}</span>
+                      {(n.matchedKeywords && n.matchedKeywords.length > 0) && (
+                        <>
+                          <span style={{ color: "var(--text3)" }}>·</span>
+                          <span style={{ color: "#EC6608", fontWeight: 600 }}>{n.matchedKeywords.join(", ")}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>
+                      {n.presmptPrce ? Math.round(n.presmptPrce).toLocaleString() + "원" : "—"}
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 2 }}>
+                      마감 {fmtDateTime(n.bidClseDt)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 하단: 상태 변경 버튼 + 외부 링크 */}
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", paddingTop: 6, borderTop: "1px solid var(--divider)" }}>
+                  <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600, marginRight: 4 }}>상태:</span>
+                  {Object.entries(statusColors).map(([s, ss]) => (
+                    <button key={s} onClick={() => updateStatus(n.key, s)}
+                      disabled={updatingKey === n.key || n.status === s}
+                      style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid var(--border)", background: n.status === s ? ss.color : "transparent", color: n.status === s ? "#fff" : ss.color, cursor: n.status === s ? "default" : (updatingKey === n.key ? "wait" : "pointer"), fontSize: 10, fontFamily: "inherit", fontWeight: 600, opacity: updatingKey === n.key && n.status !== s ? 0.5 : 1 }}>
+                      {ss.label}
+                    </button>
+                  ))}
+                  <div style={{ flex: 1 }} />
+                  {n.bidNtceUrl && (
+                    <a href={n.bidNtceUrl} target="_blank" rel="noreferrer"
+                      style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #EC6608", background: "transparent", color: "#EC6608", fontSize: 10, fontFamily: "inherit", fontWeight: 600, textDecoration: "none" }}>
+                      조달청 페이지 ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* 전체 보기 토글 */}
+          {filtered.length > 10 && (
+            <button onClick={() => setShowAll(v => !v)}
+              style={{ padding: "10px 14px", background: "transparent", border: "1px dashed var(--border)", borderRadius: 10, cursor: "pointer", fontSize: 12, color: "var(--text2)", fontFamily: "inherit", fontWeight: 600 }}>
+              {showAll ? "↑ 10건만 보기" : `↓ 전체 ${filtered.length}건 보기`}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BidsTab({ bids, setBids, darkMode }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -11568,6 +12025,9 @@ function BidsTab({ bids, setBids, darkMode }) {
           <div className="kpi-num" style={{color:"#00B493",lineHeight:1}}>{Math.round(totalWonAmt).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
         </div>
       </div>
+
+      {/* 조달청 자동 수집 — Phase 2 UI 통합 (수동 입력 입찰과 별도 데이터 소스) */}
+      <TenderAutoSection darkMode={darkMode}/>
 
       {/* 컨트롤 바 */}
       <div className="card">

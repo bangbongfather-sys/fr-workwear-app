@@ -1,6 +1,7 @@
 // Cloudflare Workers 설정
-// - main: 워커 엔트리 (worker.js) — /api/notion/* 라우팅 + 정적 자산 폴백
+// - main: 워커 엔트리 (worker.js) — /api/notion/*, /api/sync/*, /api/tenders/* 라우팅 + 정적 자산 폴백
 // - assets.directory: 현재 디렉터리의 정적 파일들을 ASSETS 바인딩으로 노출
+// - triggers.crons: 매일 KST 03:00에 입찰 자동 폴링
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "fr-workwear-app",
@@ -18,8 +19,32 @@
   ],
   "vars": {
     // To Do List 데이터베이스 ID (공개되어도 무방한 값)
-    "NOTION_TODO_DSID": "2c70e386-6388-8181-b2fa-d57054595863"
+    "NOTION_TODO_DSID": "2c70e386-6388-8181-b2fa-d57054595863",
+    // 입찰 매칭 임계값. 매칭 0건이 자주 나면 5로 낮추고, 노이즈가 많으면 9~10으로 올림.
+    // 문자열로 두는 이유: wrangler.jsonc vars는 자동으로 문자열로 들어옴 → 코드에서 Number() 변환.
+    "MATCH_THRESHOLD": "5"
+  },
+  // Cron Triggers — Cloudflare가 등록된 스케줄대로 worker.scheduled() 호출.
+  // 형식: 표준 cron (5 fields: 분 시 일 월 요일), UTC 기준.
+  // worker.js의 scheduled handler에서 event.cron으로 분기 처리.
+  //
+  //   "0 18 * * *"  = UTC 18:00 = KST 03:00 매일 — 조달청 입찰 폴링
+  //   "30 23 * * *" = UTC 23:30 = KST 08:30 매일 — 이메일 알림 발송 (폴링 5.5시간 후)
+  //
+  // 다른 시각 원하면: "0 21 * * *" → KST 06:00, "30 17 * * *" → KST 02:30 등.
+  "triggers": {
+    "crons": [
+      "0 18 * * *",
+      "30 23 * * *"
+    ]
   }
-  // NOTION_TOKEN은 별도 secret으로 등록:
-  //   npx wrangler secret put NOTION_TOKEN
+  // ─── Secrets (코드/JSON에 절대 저장 X. wrangler secret put 으로만 등록) ───
+  //   NOTION_TOKEN              : npx wrangler secret put NOTION_TOKEN
+  //   FIREBASE_DB_SECRET        : npx wrangler secret put FIREBASE_DB_SECRET  (이미 등록됨)
+  //   G2B_SERVICE_KEY           : npx wrangler secret put G2B_SERVICE_KEY     (Phase 1)
+  //   RESEND_API_KEY            : npx wrangler secret put RESEND_API_KEY      ← Phase 2 사용자 작업
+  //   NOTIFICATION_EMAIL_FROM   : npx wrangler secret put NOTIFICATION_EMAIL_FROM
+  //                                예: "NJ Safety 입찰알리미 <bid@njsafety.co.kr>"
+  //   NOTIFICATION_EMAIL_TO     : npx wrangler secret put NOTIFICATION_EMAIL_TO
+  //                                예: "bangbong@njsafety.co.kr,backup@..."
 }

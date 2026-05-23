@@ -1,0 +1,39 @@
+{
+  "// 설명": "worker-src/ 모듈의 TypeScript strict 검사용. wrangler는 esbuild로 자동 빌드하므로 이 설정 없어도 동작은 함. 본 설정은 IDE 타입 검사 + tsc --noEmit 으로 빌드 전 검증 용도.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+
+    // strict 모드 — 작업지시서 원칙
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // 모듈 동작
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": false,
+
+    // 빌드는 wrangler가 담당 → tsc는 검증만
+    "noEmit": true,
+
+    // Cloudflare Workers 환경 — @cloudflare/workers-types 설치 시 typeRoots 자동 인식
+    // 미설치 상태에서도 컴파일은 됨 (글로벌 Request/Response/fetch 등은 lib ES2022로 부족 → 워커 타입 권장)
+    "types": []
+  },
+  "include": [
+    "worker-src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".wrangler",
+    "out"
+  ]
+}
