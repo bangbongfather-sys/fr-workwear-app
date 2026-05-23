@@ -8014,6 +8014,9 @@ function App() {
   const [editingQuote, setEditingQuote] = useState(false);
   const [savedQuotes, setSavedQuotes] = useState(() => load("frw_quote_history", []));
   const [viewingQuote, setViewingQuote] = useState(null);
+  // 견적 이력 검색 + hover 액션 표시용
+  const [historySearch, setHistorySearch] = useState("");
+  const [hoveredQuoteId, setHoveredQuoteId] = useState(null);
   const [quoteTitle, setQuoteTitle] = useState("");
   const [quoteClient, setQuoteClient] = useState("");
   const [quoteClientOpen, setQuoteClientOpen] = useState(null); // null | "builder" | "current"
@@ -10683,7 +10686,21 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </>
             ) : (
               <>
-                <div style={{ fontSize: 18, fontWeight: 800, color: T.text, marginBottom: 20 }}>견적 이력</div>
+                {/* 견적 이력 헤더 + 검색바 */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>견적 이력</div>
+                  {savedQuotes.length > 0 && (
+                    <div style={{ position: "relative", flex: "1 1 280px", maxWidth: 360 }}>
+                      <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", display: "inline-flex", pointerEvents: "none" }}><Icon name="search" size={14}/></span>
+                      <input value={historySearch} onChange={e=>setHistorySearch(e.target.value)} placeholder="거래처 또는 제목 검색"
+                        style={{ height: 38, fontSize: 13, paddingLeft: 34, width: "100%" }}/>
+                      {historySearch && (
+                        <button onClick={()=>setHistorySearch("")} title="검색 초기화"
+                          style={{ position:"absolute", right:8, top:"50%", transform:"translateY(-50%)", border:"none", background:"transparent", color:"var(--text3)", cursor:"pointer", fontSize:16, padding:4, lineHeight:1 }}>×</button>
+                      )}
+                    </div>
+                  )}
+                </div>
                 {savedQuotes.length === 0 ? (
                   <div className="card" style={{ padding: 64, textAlign: "center" }}>
                     <div style={{ fontSize: 48, marginBottom: 16 }}>🗂️</div>
@@ -10694,43 +10711,81 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                     {(() => {
+                      // 검색 필터
+                      const k = historySearch.trim().toLowerCase();
+                      const filtered = k
+                        ? savedQuotes.filter(q => (q.title||"").toLowerCase().includes(k) || (q.quoteClient||"").toLowerCase().includes(k))
+                        : savedQuotes;
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="card" style={{ padding: 40, textAlign: "center", color: T.empty }}>
+                            <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+                            <div style={{ fontSize: 13, color: T.text2 }}>"<b style={{color:T.text}}>{historySearch}</b>"와 일치하는 견적이 없습니다</div>
+                            <button onClick={()=>setHistorySearch("")} style={{ marginTop: 12, fontSize: 12, color: NAVY, background: "transparent", border: `1px solid ${NAVY}`, borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>전체 보기</button>
+                          </div>
+                        );
+                      }
                       // 날짜별 그룹핑
                       const groups = {};
-                      savedQuotes.forEach(q => {
+                      filtered.forEach(q => {
                         if (!groups[q.dateStr]) groups[q.dateStr] = [];
                         groups[q.dateStr].push(q);
                       });
-                      return Object.entries(groups).map(([date, items]) => (
-                        <div key={date} style={{ marginBottom: 24 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: T.text2, letterSpacing: 0.5, marginBottom: 10, padding: "0 4px", display: "flex", alignItems: "center", gap: 8 }}>
+                      return Object.entries(groups).map(([date, items]) => {
+                        const dayTotal = items.reduce((s, q) => s + (q.products||[]).reduce((ss,p)=>ss+(p.price||0),0), 0);
+                        return (
+                        <div key={date} style={{ marginBottom: 22 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: T.text2, letterSpacing: 0.5, marginBottom: 8, padding: "0 4px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                             <span style={{ display: "inline-block", width: 3, height: 12, background: NAVY, borderRadius: 2 }}/>
                             {date}
                             <span style={{ background: T.divider, color: T.text2, fontSize: 11, fontWeight: 700, padding: "1px 7px", borderRadius: 100 }}>{items.length}건</span>
+                            <span style={{ flex: 1, minWidth: 8 }}/>
+                            <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>일별 총액 <b style={{color:NAVY,fontVariantNumeric:"tabular-nums"}}>{dayTotal.toLocaleString()}원</b></span>
                           </div>
                           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-                            {items.map((q, i) => (
-                              <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: i < items.length - 1 ? "1px solid #F2F4F7" : "none", cursor: "pointer", transition: "background 0.12s" }}
-                                onMouseEnter={e => e.currentTarget.style.background = "#FAFBFC"}
-                                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                                onClick={() => setViewingQuote(q)}>
-                                <div style={{ width: 36, height: 36, borderRadius: 10, background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{q.title}</div>
-                                  <div style={{ display: "flex", gap: 8, marginTop: 3, flexWrap: "wrap" }}>
-                                    {q.products && q.products.map((p, pi) => (
-                                      <span key={pi} style={{ fontSize: 11, color: T.text2 }}>{p.name} ({p.grade}급 · {p.price.toLocaleString()}원)</span>
-                                    ))}
+                            {items.map((q, i) => {
+                              const productCount = (q.products||[]).length;
+                              const totalAmount = (q.products||[]).reduce((s,p)=>s+(p.price||0),0);
+                              const isHovered = hoveredQuoteId === q.id;
+                              return (
+                                <div key={q.id}
+                                  onMouseEnter={()=>setHoveredQuoteId(q.id)}
+                                  onMouseLeave={()=>setHoveredQuoteId(prev => prev === q.id ? null : prev)}
+                                  onClick={() => setViewingQuote(q)}
+                                  style={{ display: "flex", alignItems: "stretch", gap: 12, padding: "11px 16px", borderBottom: i < items.length - 1 ? `1px solid ${T.divider}` : "none", cursor: "pointer", background: isHovered ? (darkMode ? "rgba(236,102,8,0.05)" : "#FAFBFC") : "transparent", transition: "background 0.12s" }}>
+                                  {/* 작은 컬러 바 (이전 36px 📄 아이콘 대체 — 정보 밀도 ↑) */}
+                                  <span style={{ width: 3, alignSelf: "stretch", background: NAVY, borderRadius: 2, flexShrink: 0, opacity: 0.7 }}/>
+                                  <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "92%" }}>{q.title || "(제목 없음)"}</div>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, fontSize: 12, color: T.text2, flexWrap: "wrap" }}>
+                                      {q.quoteClient
+                                        ? <b style={{ color: T.text }}>{q.quoteClient}</b>
+                                        : <span style={{ color: "var(--text3)", fontStyle: "italic" }}>거래처 미지정</span>}
+                                      <span style={{ color: "var(--text3)" }}>·</span>
+                                      <span>제품 <b style={{ color: T.text }}>{productCount}</b>종</span>
+                                      <span style={{ color: "var(--text3)" }}>·</span>
+                                      <span style={{ fontWeight: 700, color: NAVY, fontVariantNumeric: "tabular-nums" }}>{totalAmount.toLocaleString()}원</span>
+                                    </div>
+                                  </div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                                    <span style={{ fontSize: 11, color: T.empty, fontVariantNumeric: "tabular-nums" }}>{q.timeStr}</span>
+                                    {/* hover 액션: 복사 + 삭제 (모바일은 항상 표시되도록 hover:none 미디어쿼리는 v2에서) */}
+                                    <div style={{ display: "flex", gap: 4, opacity: isHovered ? 1 : 0, transition: "opacity 0.12s", pointerEvents: isHovered ? "auto" : "none" }}>
+                                      <button onClick={e => { e.stopPropagation(); setQuote(q.quote); setQuoteTitle((q.title || "") + " (사본)"); setQuoteClient(q.quoteClient || ""); setTab("quote"); setQuoteSubTab("current"); setViewingQuote(null); }}
+                                        title="이 견적 내용으로 새 견적서 작성"
+                                        style={{ fontSize: 11, color: "#0EA47A", background: "rgba(16,185,129,0.12)", border: "none", borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>복사</button>
+                                      <button onClick={e => { e.stopPropagation(); deleteQuote(q.id); }}
+                                        title="이 견적 삭제"
+                                        style={{ fontSize: 11, color: "#F04452", background: "rgba(240,68,82,0.10)", border: "none", borderRadius: 6, padding: "4px 9px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>삭제</button>
+                                    </div>
                                   </div>
                                 </div>
-                                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
-                                  <div style={{ fontSize: 12, color: T.empty }}>{q.timeStr}</div>
-                                  <button onClick={e => { e.stopPropagation(); deleteQuote(q.id); }} style={{ fontSize: 11, color: "#F04452", background: "#FFF0F1", border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>삭제</button>
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
-                      ));
+                        );
+                      });
                     })()}
                   </div>
                 )}
