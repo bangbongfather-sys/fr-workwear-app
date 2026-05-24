@@ -8356,6 +8356,22 @@ function App() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
+  // 콜드 스타트: localStorage 제품엔 이미지가 없으므로 IndexedDB 캐시에서 복원.
+  // 클라우드 로드가 나중에 완료되면 클라우드 이미지로 갱신되며, 여기선 비어있는 이미지만 채워 충돌 없음.
+  useEffect(() => {
+    prodImgGetAll().then(map => {
+      if (!map || Object.keys(map).length === 0) return;
+      setProducts(ps => {
+        let changed = false;
+        const next = ps.map(p => {
+          if (!p.image && map[String(p.id)]) { changed = true; return { ...p, image: map[String(p.id)] }; }
+          return p;
+        });
+        return changed ? next : ps;
+      });
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
