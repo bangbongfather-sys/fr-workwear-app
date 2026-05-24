@@ -8307,9 +8307,11 @@ function App() {
       const migrated = d.products.map(migrateProduct);
       setProducts(migrated);
       setActiveProdId(prev => migrated.find(p => p.id === prev) ? prev : migrated[0].id);
+      // 클라우드에서 받은 이미지를 로컬 IndexedDB 캐시에 반영 (오프라인/콜드 스타트 대비)
+      migrated.forEach(p => { if (p.image && typeof p.image === "string" && p.image.length > 50) prodImgSet(p.id, p.image); });
     }
     if (d.apiKey !== undefined) setApiKey(d.apiKey);
-    if (d.quoteHistory !== undefined) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", d.quoteHistory); }
+    if (d.quoteHistory !== undefined) { setSavedQuotes(d.quoteHistory); save("frw_quote_history", stripQuoteImages(d.quoteHistory)); }
     if (d.orders !== undefined) setOrders(d.orders);
     if (d.clients !== undefined) setClients(d.clients);
     if (d.bids !== undefined) setBids(d.bids);
