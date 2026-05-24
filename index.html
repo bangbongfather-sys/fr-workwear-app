@@ -946,6 +946,18 @@ function save(key, value) {
   }
 }
 
+// localStorage 용량 절약: 이미지(base64)는 클라우드(원본)와 IndexedDB(로컬 캐시)에 보관하므로
+// localStorage 사본에서는 제거한다. 클라우드 동기화 페이로드는 영향 없음 → 모든 기기에서 이미지 표시 유지.
+const IMG_DATA_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[^)"'\s]+/g;
+function stripProductImages(products) {
+  return Array.isArray(products) ? products.map(p => (p && p.image) ? { ...p, image: "" } : p) : products;
+}
+function stripQuoteImages(quotes) {
+  return Array.isArray(quotes)
+    ? quotes.map(q => (q && typeof q.quote === "string" && q.quote.includes("base64,")) ? { ...q, quote: q.quote.replace(IMG_DATA_RE, "") } : q)
+    : quotes;
+}
+
 // IndexedDB (대용량 저장: 회사 필요 파일 등)
 function idbOpen() {
   return new Promise((resolve, reject) => {
