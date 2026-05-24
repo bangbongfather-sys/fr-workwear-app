@@ -981,6 +981,50 @@ async function idbSet(key, value) {
     req.onerror = () => reject(req.error);
   });
 }
+
+// ── 제품 이미지 로컬 캐시 (prodimg store) ──
+// 제품 id → 이미지 base64. localStorage 용량 초과를 막기 위해 이미지는 여기에만 로컬 저장.
+async function prodImgGetAll() {
+  try {
+    const db = await idbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("prodimg", "readonly");
+      const store = tx.objectStore("prodimg");
+      const keysReq = store.getAllKeys();
+      const valsReq = store.getAll();
+      tx.oncomplete = () => {
+        const keys = keysReq.result || [];
+        const vals = valsReq.result || [];
+        const out = {};
+        keys.forEach((k, i) => { out[String(k)] = vals[i]; });
+        resolve(out);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { return {}; }
+}
+async function prodImgSet(id, dataUrl) {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("prodimg", "readwrite");
+      tx.objectStore("prodimg").put(dataUrl, String(id));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) { console.warn("[prodImgSet] 실패", id, e); }
+}
+async function prodImgDel(id) {
+  try {
+    const db = await idbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction("prodimg", "readwrite");
+      tx.objectStore("prodimg").delete(String(id));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
 async function cloudLoad() {
   const r = await fetch(FB_URL);
   if (!r.ok) throw new Error("load failed");
