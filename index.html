@@ -9953,7 +9953,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </div>
                 <ImageUploader
                   value={activeProd.image || ""}
-                  onChange={dataUrl => setProducts(ps => ps.map(p => p.id === activeProd.id ? { ...p, image: dataUrl } : p))}
+                  onChange={dataUrl => {
+                    setProducts(ps => ps.map(p => p.id === activeProd.id ? { ...p, image: dataUrl } : p));
+                    if (dataUrl) prodImgSet(activeProd.id, dataUrl); else prodImgDel(activeProd.id);
+                  }}
                   label="제품 이미지"
                   maxWidth={1024}
                   height={160}
