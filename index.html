@@ -949,10 +949,13 @@ function save(key, value) {
 // IndexedDB (대용량 저장: 회사 필요 파일 등)
 function idbOpen() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open("frw_db", 1);
+    const req = indexedDB.open("frw_db", 2);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+      // 제품 이미지 전용 store: localStorage(5MB) 대신 여기에 캐시 (용량 수백MB).
+      // 원본은 클라우드(Firebase)에 그대로 보관 → 모든 기기에서 동기화. 여기는 로컬 캐시.
+      if (!db.objectStoreNames.contains("prodimg")) db.createObjectStore("prodimg");
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
