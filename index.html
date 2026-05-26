@@ -11799,6 +11799,9 @@ function TenderAutoSection({ darkMode }) {
   // 펼침 상태에서 편집 중인 임시 값 (Save 누르기 전까지 notices에 반영 안 함)
   const [draft, setDraft] = useState({});  // { estimatedCost, estimatedMargin, applicationMemo, skipReason }
   const [savingDraft, setSavingDraft] = useState(false);
+  // 수동 폴링(지금 수집) — cron(매일 03:00)을 기다리지 않고 즉시 수집 + 결과/에러 표시
+  const [pollRunning, setPollRunning] = useState(false);
+  const [pollResult, setPollResult] = useState(null); // { ok: boolean, text: string }
 
   const refresh = async () => {
     setLoading(true);
