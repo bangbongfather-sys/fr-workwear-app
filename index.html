@@ -11820,6 +11820,28 @@ function TenderAutoSection({ darkMode }) {
 
   useEffect(() => { refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
+  // 지금 수집: /api/tenders/poll (어제 0~24시 KST = cron과 동일 범위) 즉시 실행.
+  // 성공/실패 결과를 화면에 그대로 표시 → G2B_SERVICE_KEY 미등록·키워드 0건 등 원인을 바로 진단.
+  const runPollNow = async () => {
+    if (pollRunning) return;
+    setPollRunning(true);
+    setPollResult(null);
+    try {
+      const res = await fetch("/api/tenders/poll", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        setPollResult({ ok: false, text: data.error || data.message || `HTTP ${res.status}` });
+      } else {
+        setPollResult({ ok: true, text: `수집 완료 — 조회 ${data.fetched ?? "?"}건 · 방염복 매칭 ${data.matched ?? "?"}건 · 신규/갱신 ${data.inserted ?? "?"}건` });
+        await refresh();
+      }
+    } catch (e) {
+      setPollResult({ ok: false, text: e?.message || String(e) });
+    } finally {
+      setPollRunning(false);
+    }
+  };
+
   const updateStatus = async (key, newStatus) => {
     setUpdatingKey(key);
     try {
