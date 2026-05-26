@@ -11972,6 +11972,10 @@ function TenderAutoSection({ darkMode }) {
           <span style={{ fontSize: 10, color: "#EC6608", fontWeight: 700, padding: "2px 7px", background: "rgba(236,102,8,0.10)", borderRadius: 4, textTransform: "uppercase", letterSpacing: 0.3 }}>BETA</span>
         </div>
         <div style={{ flex: 1 }} />
+        <button onClick={runPollNow} disabled={pollRunning}
+          style={{ padding: "6px 12px", fontSize: 11, fontWeight: 700, color: "#fff", background: pollRunning ? "var(--text3)" : "#EC6608", border: "1px solid " + (pollRunning ? "var(--text3)" : "#EC6608"), borderRadius: 8, cursor: pollRunning ? "wait" : "pointer", fontFamily: "inherit" }}>
+          {pollRunning ? "수집 중..." : "▶ 지금 수집"}
+        </button>
         <button onClick={() => setShowKeywordManager(v => !v)}
           style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, color: showKeywordManager ? "#fff" : "var(--text2)", background: showKeywordManager ? "#EC6608" : "transparent", border: "1px solid " + (showKeywordManager ? "#EC6608" : "var(--border)"), borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>
           ⚙ 키워드 관리
@@ -11981,6 +11985,17 @@ function TenderAutoSection({ darkMode }) {
           {loading ? "불러오는 중..." : "↻ 새로고침"}
         </button>
       </div>
+
+      {/* 지금 수집 결과/에러 */}
+      {pollResult && (
+        <div style={{ fontSize: 12, fontWeight: 600, padding: "10px 12px", borderRadius: 8, marginBottom: 12, lineHeight: 1.5,
+          background: pollResult.ok ? "rgba(16,185,129,0.10)" : "rgba(240,68,82,0.10)",
+          color: pollResult.ok ? "#10B981" : "#F04452",
+          border: "1px solid " + (pollResult.ok ? "rgba(16,185,129,0.35)" : "rgba(240,68,82,0.35)") }}>
+          {pollResult.ok ? "✅ " : "⚠️ "}{pollResult.text}
+          {!pollResult.ok && <div style={{ marginTop: 4, color: "var(--text2)", fontWeight: 500 }}>G2B_SERVICE_KEY 미등록 또는 활성 키워드 0건이 가장 흔한 원인입니다.</div>}
+        </div>
+      )}
 
       {/* 안내 + 통계 */}
       <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 14, lineHeight: 1.6 }}>
