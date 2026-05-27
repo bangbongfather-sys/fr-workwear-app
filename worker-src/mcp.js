@@ -14,7 +14,50 @@ const SERVER_NAME = "nj-safety";
 const SERVER_VERSION = "1.0.0";
 const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 
-const ALLOWED_SECTIONS = ["clients", "suppliers", "clientAR", "ledgers", "monthlySales", "accounts"];
+const ALLOWED_SECTIONS = [
+  "clients", "suppliers", "clientAR", "ledgers", "monthlySales", "accounts",
+  "products", "materials", "laborItems", "orders", "purchaseOrders", "fabricIntakes",
+  "bids", "investments", "cashFlows", "scheduledExpenses", "todos", "notes", "recurringSchedules",
+];
+
+// 단가 계산기 로직 (index.html computeProduct와 동일 공식) ──
+const DEFAULT_MARGINS = { A: 50, B: 40, C: 30, D: 20 };
+const GRADES = ["A", "B", "C", "D"];
+
+function getActiveSpec(p) {
+  if (!p) return null;
+  if (Array.isArray(p.specs) && p.specs.length > 0) {
+    return p.specs.find((s) => s.id === p.activeSpecId) || p.specs[0];
+  }
+  return p; // 레거시 평면 구조
+}
+
+function computeProduct(p, materials, laborItems) {
+  const mats = materials || [];
+  const labor = laborItems || [];
+  const spec = getActiveSpec(p) || p;
+  const fCost = (spec.fabrics || []).reduce((s, f) => {
+    const m = f.matId !== "" && f.matId != null ? mats.find((x) => x.id == f.matId) : null;
+    return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
+  }, 0);
+  const eCost = (spec.extras || []).reduce((s, e) => {
+    const u = e.laborId !== "" && e.laborId != null ? ((labor.find((l) => l.id == e.laborId) || {}).price || 0) : parseFloat(e.price || 0);
+    return s + u * parseFloat(e.qty || 1);
+  }, 0);
+  const base = fCost + eCost;
+  const admin = base * ((spec.adminRate || 0) / 100);
+  const beforeMargin = base + admin;
+  const margins = spec.margins || DEFAULT_MARGINS;
+  const overrides = spec.priceOverrides || {};
+  const gradeList = spec.grades && spec.grades.length > 0 ? spec.grades : GRADES;
+  const grades = {};
+  for (const g of gradeList) {
+    const auto = beforeMargin * (1 + (margins[g] ?? DEFAULT_MARGINS[g] ?? 30) / 100);
+    const ov = parseFloat(overrides[g]);
+    grades[g] = !isNaN(ov) && ov > 0 ? ov : auto;
+  }
+  return { base, admin, beforeMargin, grades, gradeList, selectedGrade: spec.selectedGrade || gradeList[0] || "A" };
+}
 
 const TOOLS = [
   {
