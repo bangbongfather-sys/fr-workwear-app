@@ -237,10 +237,42 @@ async function toolGetSection(args, env) {
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
   }
-  const data = await fbGet(`/frw/${section}`, env.FIREBASE_DB_SECRET);
+  let data = await fbGet(`/frw/${section}`, env.FIREBASE_DB_SECRET);
+  // products의 base64 이미지는 응답 폭증 방지를 위해 제거 (단가는 get_pricing 사용)
+  if (section === "products" && Array.isArray(data)) {
+    data = data.map((p) => (p && p.image) ? { ...p, image: "(이미지 생략)" } : p);
+  }
   let text = JSON.stringify(data, null, 2);
   if (text.length > 60000) text = text.slice(0, 60000) + "\n... (잘림 — 데이터가 너무 큼)";
   return { content: [{ type: "text", text }] };
+}
+
+async function toolGetPricing(args, env) {
+  const [products, materials, laborItems] = await Promise.all([
+    fbGet("/frw/products", env.FIREBASE_DB_SECRET),
+    fbGet("/frw/materials", env.FIREBASE_DB_SECRET),
+    fbGet("/frw/laborItems", env.FIREBASE_DB_SECRET),
+  ]);
+  const prods = Array.isArray(products) ? products : products ? Object.values(products) : [];
+  const mats = Array.isArray(materials) ? materials : materials ? Object.values(materials) : [];
+  const labor = Array.isArray(laborItems) ? laborItems : laborItems ? Object.values(laborItems) : [];
+  const q = (args.query || "").trim().toLowerCase();
+  let filtered = prods.filter((p) => p && p.include !== false);
+  if (q) filtered = filtered.filter((p) => (p.name || "").toLowerCase().includes(q));
+  const round = (n) => Math.round(n || 0);
+  const out = filtered.map((p) => {
+    const c = computeProduct(p, mats, labor);
+    const gradePrices = {};
+    for (const g of c.gradeList) gradePrices[g] = round(c.grades[g]);
+    return {
+      제품명: p.name,
+      원가: round(c.base),
+      관리비포함원가: round(c.beforeMargin),
+      등급단가: gradePrices,
+      선택등급: c.selectedGrade,
+    };
+  });
+  return textContent({ 제품수: out.length, 제품: out });
 }
 
 async function callTool(params, env) {
