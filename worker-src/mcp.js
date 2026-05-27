@@ -149,6 +149,20 @@ function rpcRespond(request, id, result, error) {
 }
 
 export async function handleMcp(request, env, url) {
+  // 선택적 토큰 잠금: env.MCP_TOKEN이 설정돼 있으면 ?k=<토큰> 또는 Authorization: Bearer <토큰> 일치 필요.
+  // 미설정 시 authless(공개). 민감 데이터를 노출하므로 운영 시 토큰 설정 권장.
+  //   등록: npx wrangler secret put MCP_TOKEN
+  //   커넥터 URL: https://<worker>/mcp?k=<토큰>
+  if (env.MCP_TOKEN) {
+    const provided = url.searchParams.get("k") || (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    if (provided !== env.MCP_TOKEN) {
+      return new Response(JSON.stringify({ error: "unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      });
+    }
+  }
+
   // 서버 주도 SSE 스트림(GET) 미지원 — stateless.
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
