@@ -58,6 +58,11 @@ export default {
       return handleTendersApi(request, env, url);
     }
 
+    // Claude 커스텀 커넥터용 MCP 서버 (Streamable HTTP, authless)
+    if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
+      return handleMcp(request, env, url);
+    }
+
     // 그 외 모든 요청은 정적 자산 (index.html 등)
     return env.ASSETS.fetch(request);
   },
