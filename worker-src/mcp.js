@@ -55,6 +55,19 @@ const TOOLS = [
       required: ["section"],
     },
   },
+  {
+    name: "search_purchases",
+    description: "매입 현황(입고 기록)을 조회합니다. 공급처명과 매입일 기간으로 필터링하고 금액 합계(수량×단가)를 계산해 반환합니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        supplier: { type: "string", description: "공급처명 부분검색 (예: 구리공장, 짱아) — 선택" },
+        from: { type: "string", description: "시작일 YYYY-MM-DD (선택)" },
+        to: { type: "string", description: "종료일 YYYY-MM-DD, 해당일 포함 (선택)" },
+        limit: { type: "number", description: "최대 반환 라인 수 (기본 200, 최대 1000). 합계는 필터 전체 기준." },
+      },
+    },
+  },
 ];
 
 async function fbGet(node, secret) {
