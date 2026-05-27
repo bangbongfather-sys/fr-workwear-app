@@ -1,0 +1,193 @@
+// ── Claude 커스텀 커넥터용 MCP 서버 (authless, stateless Streamable HTTP) ──
+//
+// claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
+//
+// 프로토콜: JSON-RPC 2.0 over HTTP POST /mcp.
+//  - 세션/서버주도 스트리밍 없음(stateless). 단일 요청-응답만 처리.
+//  - 클라이언트가 Accept: text/event-stream 요청 시 단일 message 이벤트(SSE)로 응답, 아니면 JSON.
+//  - 인증 없음 — 개인/내부용. 민감 쓰기 도구는 추가하지 않고 읽기 전용만 노출.
+//
+// 도구는 worker가 이미 쓰는 FIREBASE_DB_SECRET으로 RTDB를 직접 읽는다.
+
+const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
+const SERVER_NAME = "nj-safety";
+const SERVER_VERSION = "1.0.0";
+const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
+
+const ALLOWED_SECTIONS = ["clients", "suppliers", "clientAR", "ledgers", "monthlySales", "accounts"];
+
+const TOOLS = [
+  {
+    name: "search_tenders",
+    description: "수집된 조달청(나라장터) 방염복 입찰 공고를 검색합니다. 공고명·발주기관 키워드와 상태로 필터링.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "공고명·발주기관 검색어 (선택)" },
+        status: { type: "string", description: "상태 필터: new, reviewing, applied, awarded, failed, skipped (선택)" },
+        limit: { type: "number", description: "최대 반환 건수 (기본 20, 최대 100)" },
+      },
+    },
+  },
+  {
+    name: "search_quotes",
+    description: "저장된 견적 이력을 검색합니다. 제목·거래처명으로 필터하며, 견적 본문은 제외하고 요약(제목/거래처/일자/품목/총액)만 반환합니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "견적 제목·거래처 검색어 (선택)" },
+        limit: { type: "number", description: "최대 반환 건수 (기본 20, 최대 100)" },
+      },
+    },
+  },
+  {
+    name: "get_business_section",
+    description: "경영 데이터 섹션을 조회합니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        section: {
+          type: "string",
+          enum: ALLOWED_SECTIONS,
+          description: "clients(거래처), suppliers(공급처), clientAR(거래처 미수금), ledgers(장부), monthlySales(월매출), accounts(통장)",
+        },
+      },
+      required: ["section"],
+    },
+  },
+];
+
+async function fbGet(node, secret) {
+  const url = `https://${FB_HOST}${node}.json?auth=${encodeURIComponent(secret)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Firebase ${res.status}`);
+  return await res.json();
+}
+
+function textContent(obj) {
+  const text = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  return { content: [{ type: "text", text }] };
+}
+function errContent(msg) {
+  return { content: [{ type: "text", text: msg }], isError: true };
+}
+
+async function toolSearchTenders(args, env) {
+  const data = await fbGet("/tenders/notices", env.FIREBASE_DB_SECRET);
+  const list = data ? Object.values(data) : [];
+  const q = (args.query || "").trim().toLowerCase();
+  const status = (args.status || "").trim();
+  const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100);
+  let filtered = list;
+  if (status) filtered = filtered.filter((n) => n.status === status);
+  if (q) filtered = filtered.filter((n) => `${n.bidNtceNm || ""} ${n.ntceInsttNm || ""} ${n.dminsttNm || ""}`.toLowerCase().includes(q));
+  filtered.sort((a, b) => String(b.bidClseDt || "").localeCompare(String(a.bidClseDt || "")));
+  const out = filtered.slice(0, limit).map((n) => ({
+    공고명: n.bidNtceNm,
+    공고번호: `${n.bidNtceNo}-${n.bidNtceOrd}`,
+    발주기관: n.ntceInsttNm || n.dminsttNm || null,
+    추정가격: n.presmptPrce ?? null,
+    마감: n.bidClseDt || null,
+    매칭점수: n.matchScore ?? null,
+    상태: n.status || null,
+    URL: n.bidNtceUrl || null,
+  }));
+  return textContent({ 총_매칭: filtered.length, 반환: out.length, 공고: out });
+}
+
+async function toolSearchQuotes(args, env) {
+  const qh = await fbGet("/frw/quoteHistory", env.FIREBASE_DB_SECRET);
+  const list = Array.isArray(qh) ? qh : qh ? Object.values(qh) : [];
+  const q = (args.query || "").trim().toLowerCase();
+  const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 100);
+  let filtered = list;
+  if (q) filtered = filtered.filter((e) => `${e.title || ""} ${e.quoteClient || ""}`.toLowerCase().includes(q));
+  const out = filtered.slice(0, limit).map((e) => ({
+    제목: e.title,
+    거래처: e.quoteClient || null,
+    일자: e.dateStr || null,
+    품목: Array.isArray(e.products) ? e.products.map((p) => p.name) : [],
+    총액: Array.isArray(e.products) ? e.products.reduce((s, p) => s + (Number(p.price) || 0), 0) : null,
+  }));
+  return textContent({ 총: filtered.length, 반환: out.length, 견적: out });
+}
+
+async function toolGetSection(args, env) {
+  const section = String(args.section || "");
+  if (!ALLOWED_SECTIONS.includes(section)) {
+    return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
+  }
+  const data = await fbGet(`/frw/${section}`, env.FIREBASE_DB_SECRET);
+  let text = JSON.stringify(data, null, 2);
+  if (text.length > 60000) text = text.slice(0, 60000) + "\n... (잘림 — 데이터가 너무 큼)";
+  return { content: [{ type: "text", text }] };
+}
+
+async function callTool(params, env) {
+  const name = params?.name;
+  const args = params?.arguments || {};
+  if (!env.FIREBASE_DB_SECRET) return errContent("FIREBASE_DB_SECRET 미설정 — worker secret 확인 필요");
+  try {
+    if (name === "search_tenders") return await toolSearchTenders(args, env);
+    if (name === "search_quotes") return await toolSearchQuotes(args, env);
+    if (name === "get_business_section") return await toolGetSection(args, env);
+    return errContent(`알 수 없는 도구: ${name}`);
+  } catch (e) {
+    return errContent(`도구 실행 오류: ${e?.message || String(e)}`);
+  }
+}
+
+function rpcRespond(request, id, result, error) {
+  const payload = error ? { jsonrpc: "2.0", id: id ?? null, error } : { jsonrpc: "2.0", id, result };
+  const accept = request.headers.get("accept") || "";
+  const cors = { "Access-Control-Allow-Origin": "*" };
+  if (accept.includes("text/event-stream")) {
+    const body = `event: message\ndata: ${JSON.stringify(payload)}\n\n`;
+    return new Response(body, { status: 200, headers: { ...cors, "Content-Type": "text/event-stream" } });
+  }
+  return new Response(JSON.stringify(payload), { status: 200, headers: { ...cors, "Content-Type": "application/json" } });
+}
+
+export async function handleMcp(request, env, url) {
+  // 서버 주도 SSE 스트림(GET) 미지원 — stateless.
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
+  }
+
+  let msg;
+  try {
+    msg = await request.json();
+  } catch {
+    return rpcRespond(request, null, undefined, { code: -32700, message: "Parse error" });
+  }
+  if (Array.isArray(msg)) {
+    return rpcRespond(request, null, undefined, { code: -32600, message: "배치 요청 미지원" });
+  }
+
+  const { id, method, params } = msg || {};
+
+  // 알림(notification: id 없음) → 본문 없이 202.
+  if (id === undefined || id === null) {
+    return new Response(null, { status: 202, headers: { "Access-Control-Allow-Origin": "*" } });
+  }
+
+  if (method === "initialize") {
+    return rpcRespond(request, id, {
+      protocolVersion: (params && params.protocolVersion) || DEFAULT_PROTOCOL_VERSION,
+      capabilities: { tools: {} },
+      serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+    });
+  }
+  if (method === "ping") {
+    return rpcRespond(request, id, {});
+  }
+  if (method === "tools/list") {
+    return rpcRespond(request, id, { tools: TOOLS });
+  }
+  if (method === "tools/call") {
+    const result = await callTool(params, env);
+    return rpcRespond(request, id, result);
+  }
+
+  return rpcRespond(request, id, undefined, { code: -32601, message: `Method not found: ${method}` });
+}
