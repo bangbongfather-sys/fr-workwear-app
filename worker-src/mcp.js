@@ -85,17 +85,28 @@ const TOOLS = [
   },
   {
     name: "get_business_section",
-    description: "경영 데이터 섹션을 조회합니다.",
+    description: "앱의 모든 데이터 탭 원본을 조회합니다. (단가 계산기의 등급 단가는 get_pricing이 더 정확)",
     inputSchema: {
       type: "object",
       properties: {
         section: {
           type: "string",
           enum: ALLOWED_SECTIONS,
-          description: "clients(거래처), suppliers(공급처), clientAR(거래처 미수금), ledgers(장부), monthlySales(월매출), accounts(통장)",
+          description:
+            "clients(거래처별 단가), suppliers(공급처), clientAR(거래처 미수금), ledgers(장부), monthlySales(월매출), accounts(통장 잔액), products(단가계산기 제품-원본), materials(원단 단가표), laborItems(공임 단가표), orders(판매), purchaseOrders(발주), fabricIntakes(매입현황), bids(입찰캘린더-수동), investments(투자), cashFlows(자금흐름), scheduledExpenses(예정지출), todos(일정), notes(메모), recurringSchedules(정기일정)",
         },
       },
       required: ["section"],
+    },
+  },
+  {
+    name: "get_pricing",
+    description: "단가 계산기의 제품별 A~D 등급 단가를 계산해 반환합니다. (원단비+공임+관리비+등급마진/오버라이드 반영)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "제품명 부분검색 (선택, 없으면 전체)" },
+      },
     },
   },
   {
