@@ -125,6 +125,59 @@ async function toolSearchQuotes(args, env) {
   return textContent({ 총: filtered.length, 반환: out.length, 견적: out });
 }
 
+function toNumber(v) {
+  return parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, "")) || 0;
+}
+// "2026-5-11", "2026/05/11", "5/11"(올해) → "2026-05-11"
+function normalizeDate(s) {
+  const str = String(s || "").trim();
+  if (!str) return "";
+  const parts = str.replace(/[./]/g, "-").split("-").map((p) => p.trim()).filter(Boolean);
+  let y, m, d;
+  if (parts.length >= 3) [y, m, d] = parts;
+  else if (parts.length === 2) { y = String(new Date().getFullYear()); [m, d] = parts; }
+  else return str;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+async function toolSearchPurchases(args, env) {
+  const fi = await fbGet("/frw/fabricIntakes", env.FIREBASE_DB_SECRET);
+  const list = Array.isArray(fi) ? fi : fi ? Object.values(fi) : [];
+  const sup = (args.supplier || "").trim();
+  const from = normalizeDate(args.from);
+  const to = normalizeDate(args.to);
+  const limit = Math.min(Math.max(Number(args.limit) || 200, 1), 1000);
+
+  let filtered = list.filter((r) => r && r.date);
+  if (sup) filtered = filtered.filter((r) => { const s = (r.supplier || "").trim(); return s.includes(sup) || sup.includes(s); });
+  if (from) filtered = filtered.filter((r) => r.date >= from);
+  if (to) filtered = filtered.filter((r) => r.date <= to);
+  filtered.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  const total = filtered.reduce((s, r) => s + toNumber(r.qty) * toNumber(r.unitPrice), 0);
+  const rows = filtered.slice(0, limit).map((r) => {
+    const amount = toNumber(r.qty) * toNumber(r.unitPrice);
+    return {
+      매입일: r.date,
+      공급처: r.supplier || null,
+      품목: r.materialName || null,
+      수량: r.qty ?? null,
+      단가: toNumber(r.unitPrice),
+      금액: amount,
+      상태: r.status || null,
+      비고: r.note || null,
+    };
+  });
+  return textContent({
+    공급처필터: sup || "(전체)",
+    기간: `${from || "처음"} ~ ${to || "끝"}`,
+    건수: filtered.length,
+    금액합계: total,
+    금액합계_표시: total.toLocaleString("ko-KR") + "원",
+    매입: rows,
+  });
+}
+
 async function toolGetSection(args, env) {
   const section = String(args.section || "");
   if (!ALLOWED_SECTIONS.includes(section)) {
