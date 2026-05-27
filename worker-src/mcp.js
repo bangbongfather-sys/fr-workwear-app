@@ -284,6 +284,7 @@ async function callTool(params, env) {
     if (name === "search_quotes") return await toolSearchQuotes(args, env);
     if (name === "get_business_section") return await toolGetSection(args, env);
     if (name === "search_purchases") return await toolSearchPurchases(args, env);
+    if (name === "get_pricing") return await toolGetPricing(args, env);
     return errContent(`알 수 없는 도구: ${name}`);
   } catch (e) {
     return errContent(`도구 실행 오류: ${e?.message || String(e)}`);
