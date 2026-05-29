@@ -11163,11 +11163,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             }} />
                           )}
 
-                          {/* 단위 */}
-                          <input style={{ flex: "0 0 80px" }} placeholder="단위" value={it.unit} onChange={e => {
+                          {/* 단위 — 드롭다운 선택 + 직접 입력 (datalist) */}
+                          <input list="po-unit-options" style={{ flex: "0 0 80px" }} placeholder="단위" value={it.unit} onChange={e => {
                             const items = [...poDraft.items]; items[idx] = { ...items[idx], unit: e.target.value };
                             setPoDraft({ ...poDraft, items });
                           }} />
+                          <datalist id="po-unit-options">
+                            {UNIT_OPTIONS.map(u => <option key={u} value={u} />)}
+                          </datalist>
 
                           {/* 수량 */}
                           <input style={{ flex: "0 0 90px" }} type="number" placeholder="수량" value={it.qty} onChange={e => {
