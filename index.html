@@ -3313,7 +3313,238 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
   );
 }
 
-function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, darkMode, focusClient, clearFocus }) {
+// ─────────────────────────────────────────────────────────────
+// 장부 → 연매출 추이 (Yearly Revenue Trend)
+// ─────────────────────────────────────────────────────────────
+function YearlyKpiCard({ label, value, sub, accent, arrow }) {
+  return (
+    <div className="card" style={{ padding: 14, minWidth: 0 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
+      <div className="kpi-num" style={{ fontSize: 22, fontWeight: 800, color: accent || "var(--text1)", letterSpacing: -0.4, lineHeight: 1.1, display: "inline-flex", alignItems: "center", gap: 4 }}>
+        {arrow && <span style={{ fontSize: 14 }}>{arrow}</span>}
+        {value}
+      </div>
+      {sub && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function YearlyBarChart({ data, darkMode }) {
+  if (!data || data.length === 0) {
+    return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
+  }
+  const W = 800, H = 280;
+  const padL = 56, padR = 16, padT = 26, padB = 38;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = Math.max(...data.map(d => d.total), 1);
+  // y축 max를 깔끔한 10억 단위로 올림 (헤드룸 10% 추가)
+  const niceMax = Math.ceil((max * 1.1) / 1e9) * 1e9;
+  const barGap = 10;
+  const barW = (innerW - barGap * (data.length - 1)) / data.length;
+  const yScale = (v) => (v / niceMax) * innerH;
+  const fmt억 = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(1)}억` : `${Math.round(n / 1e6)}백만`;
+  const gridSteps = 5;
+  const grids = Array.from({ length: gridSteps + 1 }, (_, i) => niceMax * i / gridSteps);
+  const orange = "#EC6608", orangeLight = "#FFB07A";
+  const txtColor = darkMode ? "rgba(255,255,255,0.85)" : "#1F1F2A";
+  const txt2 = darkMode ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)";
+  const grid = darkMode ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.06)";
+
+  // 최고값 강조: 최대값 막대만 진한 톤
+  const maxYear = data.reduce((m, d) => (!m || d.total > m.total) ? d : m, null)?.year;
+
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 480, height: "auto", display: "block" }}>
+        <defs>
+          <linearGradient id="yrlyBarGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={orange}/>
+            <stop offset="100%" stopColor={orangeLight}/>
+          </linearGradient>
+          <linearGradient id="yrlyBarGradTop" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#B84800"/>
+            <stop offset="100%" stopColor={orange}/>
+          </linearGradient>
+        </defs>
+        {grids.map((v, i) => {
+          const y = padT + innerH - yScale(v);
+          return (
+            <g key={i}>
+              <line x1={padL} y1={y} x2={W - padR} y2={y} stroke={grid} strokeWidth={1}/>
+              <text x={padL - 8} y={y + 3} fontSize={10} fill={txt2} textAnchor="end">{fmt억(v)}</text>
+            </g>
+          );
+        })}
+        {data.map((d, i) => {
+          const x = padL + i * (barW + barGap);
+          const h = yScale(d.total);
+          const y = padT + innerH - h;
+          const isMax = d.year === maxYear;
+          return (
+            <g key={d.year}>
+              <rect x={x} y={y} width={barW} height={h} fill={`url(#${isMax ? "yrlyBarGradTop" : "yrlyBarGrad"})`} rx={4}/>
+              <text x={x + barW / 2} y={y - 6} fontSize={10} fontWeight="700" fill={isMax ? "#B84800" : txtColor} textAnchor="middle">{fmt억(d.total)}</text>
+              <text x={x + barW / 2} y={H - padB + 18} fontSize={11} fontWeight={isMax ? 800 : 600} fill={isMax ? "#B84800" : txt2} textAnchor="middle">{d.year}</text>
+            </g>
+          );
+        })}
+        <line x1={padL} y1={padT + innerH} x2={W - padR} y2={padT + innerH} stroke={darkMode ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)"} strokeWidth={1.5}/>
+      </svg>
+    </div>
+  );
+}
+
+function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
+  const [editingYear, setEditingYear] = React.useState(null);
+  const [editValue, setEditValue] = React.useState("");
+  const [adding, setAdding] = React.useState(false);
+  const [newRow, setNewRow] = React.useState({ year: "", total: "" });
+
+  const data = React.useMemo(() => [...(yearlyRevenue || [])].sort((a, b) => a.year - b.year), [yearlyRevenue]);
+  const last = data[data.length - 1];
+  const prev = data[data.length - 2];
+  const yoyPct = (prev && prev.total) ? ((last.total - prev.total) / prev.total * 100) : null;
+  const avg = data.length > 0 ? data.reduce((s, d) => s + d.total, 0) / data.length : 0;
+  const best = data.reduce((m, d) => (!m || d.total > m.total) ? d : m, null);
+  const baseYear = data[0];
+
+  const fmt억 = (n) => `${(n / 1e8).toFixed(1)}억`;
+  const fmtWon = (n) => `₩${Math.round(n).toLocaleString()}`;
+  const parseAmt = (v) => parseFloat(String(v || "").replace(/[^0-9.]/g, "")) || 0;
+
+  const rows = data.map((d, i) => {
+    const p = i > 0 ? data[i - 1] : null;
+    const yoy = (p && p.total) ? ((d.total - p.total) / p.total * 100) : null;
+    const cum = (baseYear && baseYear.total && i > 0) ? ((d.total - baseYear.total) / baseYear.total * 100) : null;
+    return { ...d, yoy, cum };
+  });
+
+  const startEdit = (year, total) => { setEditingYear(year); setEditValue(String(total)); };
+  const commitEdit = (year) => {
+    const v = parseAmt(editValue);
+    setYearlyRevenue((prev) => (prev || []).map(d => d.year === year ? { ...d, total: v } : d));
+    setEditingYear(null);
+  };
+  const deleteYear = (year) => {
+    if (!window.confirm(`${year}년 데이터를 삭제할까요?`)) return;
+    setYearlyRevenue((prev) => (prev || []).filter(d => d.year !== year));
+  };
+  const addYear = () => {
+    const y = parseInt(newRow.year, 10);
+    const t = parseAmt(newRow.total);
+    if (!y || y < 1900 || y > 2100) { alert("연도를 올바르게 입력하세요 (예: 2026)"); return; }
+    if ((yearlyRevenue || []).some(d => d.year === y)) { alert(`${y}년은 이미 등록돼 있어요. 표에서 클릭해 수정하세요.`); return; }
+    if (t <= 0) { alert("매출 금액을 입력하세요"); return; }
+    setYearlyRevenue((prev) => ([...(prev || []), { year: y, total: t }]));
+    setAdding(false); setNewRow({ year: "", total: "" });
+  };
+
+  const thS = { padding: "10px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid var(--divider)" };
+  const tdS = { padding: "12px", color: "var(--text1)", fontSize: 13 };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 헤더 + 액션 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, verticalAlign: "middle" }}><Icon name="dashboard" size={15}/>연매출 추이</span>
+        </div>
+        <button onClick={() => setAdding(true)} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#EC6608", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 4px rgba(236,102,8,0.3)" }}>+ 연도 추가</button>
+      </div>
+
+      {/* KPI 4개 — 반응형 그리드 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
+        <YearlyKpiCard label={`${last ? last.year : ""}년 매출`} value={last ? fmt억(last.total) : "—"} sub={last ? fmtWon(last.total) : ""} accent="#EC6608" />
+        <YearlyKpiCard label="전년 대비" value={yoyPct === null ? "—" : `${yoyPct >= 0 ? "+" : ""}${yoyPct.toFixed(1)}%`} sub={prev ? `vs ${prev.year}년 (${fmt억(prev.total)})` : ""} accent={yoyPct === null ? "var(--text2)" : (yoyPct >= 0 ? "#10B981" : "#F04452")} arrow={yoyPct === null ? null : (yoyPct >= 0 ? "▲" : "▼")} />
+        <YearlyKpiCard label={`${data.length}개년 평균`} value={fmt억(avg)} sub={fmtWon(avg)} accent="#8B5CF6" />
+        <YearlyKpiCard label="최고 연도" value={best ? `${best.year}년` : "—"} sub={best ? fmt억(best.total) : ""} accent="#F59E0B" />
+      </div>
+
+      {/* 차트 */}
+      <div className="card" style={{ padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>연도별 매출</div>
+          <div style={{ fontSize: 11, color: "var(--text3)" }}>최고 연도는 진한 색으로 강조</div>
+        </div>
+        <YearlyBarChart data={data} darkMode={darkMode} />
+      </div>
+
+      {/* 세부 내역 테이블 */}
+      <div className="card" style={{ padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>세부 내역</div>
+          <div style={{ fontSize: 11, color: "var(--text3)" }}>💡 매출 숫자 클릭 → 인라인 수정 (Enter 저장 · Esc 취소)</div>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
+            <thead>
+              <tr>
+                <th style={thS}>연도</th>
+                <th style={{ ...thS, textAlign: "right" }}>매출</th>
+                <th style={{ ...thS, textAlign: "right" }}>전년 대비</th>
+                <th style={{ ...thS, textAlign: "right" }}>{baseYear ? `${baseYear.year}년 대비` : "기준 대비"}</th>
+                <th style={{ ...thS, width: 50 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => {
+                const isMax = best && r.year === best.year;
+                return (
+                  <tr key={r.year} style={{ borderBottom: "1px solid var(--divider)", background: isMax ? "rgba(245,158,11,0.05)" : "transparent" }}>
+                    <td style={{ ...tdS, fontWeight: 700 }}>{r.year}년 {isMax && <span style={{ fontSize: 10, color: "#F59E0B", marginLeft: 4 }}>★</span>}</td>
+                    <td style={{ ...tdS, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                      {editingYear === r.year ? (
+                        <input value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
+                          onKeyDown={e => { if (e.key === "Enter") commitEdit(r.year); if (e.key === "Escape") setEditingYear(null); }}
+                          onBlur={() => commitEdit(r.year)}
+                          style={{ width: 180, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--border)", textAlign: "right", fontFamily: "inherit", fontSize: 13 }} />
+                      ) : (
+                        <span onClick={() => startEdit(r.year, r.total)} style={{ cursor: "pointer", fontWeight: 600 }} title="클릭해서 수정">{fmtWon(r.total)}</span>
+                      )}
+                    </td>
+                    <td style={{ ...tdS, textAlign: "right", color: r.yoy === null ? "var(--text3)" : (r.yoy >= 0 ? "#10B981" : "#F04452"), fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+                      {r.yoy === null ? "—" : `${r.yoy >= 0 ? "▲ +" : "▼ "}${r.yoy.toFixed(1)}%`}
+                    </td>
+                    <td style={{ ...tdS, textAlign: "right", color: r.cum === null ? "var(--text3)" : (r.cum >= 0 ? "#10B981" : "#F04452"), fontVariantNumeric: "tabular-nums" }}>
+                      {r.cum === null ? "기준" : `${r.cum >= 0 ? "+" : ""}${r.cum.toFixed(1)}%`}
+                    </td>
+                    <td style={{ ...tdS, textAlign: "center", padding: "12px 6px" }}>
+                      <button onClick={() => deleteYear(r.year)} title="삭제" style={{ background: "transparent", border: "none", color: "var(--text3)", fontSize: 14, cursor: "pointer", padding: 4, lineHeight: 1, transition: "color 0.15s" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#F04452"}
+                        onMouseLeave={e => e.currentTarget.style.color = "var(--text3)"}>✕</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 연도 추가 모달 */}
+      {adding && (
+        <div onClick={() => setAdding(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", padding: 24, borderRadius: 14, minWidth: 300, width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 16, color: "var(--text1)" }}>연도 추가</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input type="number" placeholder="연도 (예: 2026)" value={newRow.year} onChange={e => setNewRow(s => ({ ...s, year: e.target.value }))} autoFocus
+                style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 14, fontFamily: "inherit", background: "var(--surface2)", color: "var(--text1)" }} />
+              <input type="text" inputMode="numeric" placeholder="매출 금액 (원)" value={newRow.total} onChange={e => setNewRow(s => ({ ...s, total: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter") addYear(); }}
+                style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 14, fontFamily: "inherit", background: "var(--surface2)", color: "var(--text1)" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
+              <button onClick={() => setAdding(false)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+              <button onClick={addYear} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#EC6608", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>추가</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, darkMode, focusClient, clearFocus }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
   const [subTab, setSubTab] = useState("monthly"); // "monthly" | "ar"
