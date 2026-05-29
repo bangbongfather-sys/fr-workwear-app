@@ -185,6 +185,99 @@ export async function runDailyPoll(env: TenderEnv): Promise<PollRunResult> {
   }
 }
 
+// ─── 진단 (매칭 0건 원인 분석용, read-only) ─────────────────────
+
+/**
+ * 매칭 0건 원인 진단. Firebase에 아무것도 쓰지 않음 (조달청에서 읽기만).
+ *
+ * 목적: "데이터엔 방염복류가 있는데 키워드가 못 잡나" vs "물품 API에 아예 없나" 판별.
+ *
+ * 흐름:
+ *  1. 지정 기간 조달청 물품공고 수집
+ *  2. 넓은 진단 키워드(제품/소재/용도/유사어)로 공고명+세부품명 부분매칭
+ *  3. 현재 활성 키워드 알고리즘 점수도 함께 계산
+ *  4. 진단 키워드별 히트 수 + 매칭된 공고 샘플 반환
+ *
+ * @returns 진단 리포트 (fetched 총수, 진단키워드별 히트, 샘플 공고, 현재 알고리즘 매칭 수)
+ */
+export async function runDiagnostic(
+  bgn: string,
+  end: string,
+  env: TenderEnv,
+): Promise<{
+  fetched: number;
+  currentAlgoMatched: number;
+  threshold: number;
+  diagHits: Record<string, number>;
+  samples: Array<{ bidNtceNm: string; prdctClsfcNoNm: string | null; hitWords: string[]; currentScore: number }>;
+  durationMs: number;
+}> {
+  validateEnv(env);
+  const startTime = Date.now();
+  const threshold = parseThreshold(env.MATCH_THRESHOLD);
+
+  // 넓은 진단 키워드 — 제품 직접 + 소재 + 용도 + 표기 변형 가능성
+  const DIAG_WORDS = [
+    // 제품 직접
+    '방염', '방화', '난연', '내열', '내염', '아라미드', 'nomex', '노멕스', 'kevlar', '케블라',
+    // 용도/유사 (조달청 표기 변형 가능성)
+    '소방', '화학보호', '보호복', '방호복', '작업복', '피복', '근무복', '제복', '기동복',
+    '특수복', '안전복', '방한복', '의류', '유니폼', '워크웨어',
+  ];
+
+  const keywords = await loadActiveKeywords(env.FIREBASE_DB_SECRET);
+  const items = await fetchAllThngTenders(bgn, end, env.G2B_SERVICE_KEY);
+
+  const diagHits: Record<string, number> = {};
+  for (const w of DIAG_WORDS) diagHits[w] = 0;
+
+  const samples: Array<{ bidNtceNm: string; prdctClsfcNoNm: string | null; hitWords: string[]; currentScore: number }> = [];
+  let currentAlgoMatched = 0;
+
+  for (const item of items) {
+    const text = `${item.bidNtceNm ?? ''} ${item.prdctClsfcNoNm ?? ''}`;
+    const lower = text.toLowerCase();
+
+    // 진단 키워드 부분매칭
+    const hitWords: string[] = [];
+    for (const w of DIAG_WORDS) {
+      if (lower.includes(w.toLowerCase())) {
+        diagHits[w] = (diagHits[w] ?? 0) + 1;
+        hitWords.push(w);
+      }
+    }
+
+    // 현재 알고리즘 점수
+    const { score } = calculateMatchScore(text, keywords);
+    if (score >= threshold) currentAlgoMatched++;
+
+    // 진단 키워드에 하나라도 걸리면 샘플로 (최대 60건)
+    if (hitWords.length > 0 && samples.length < 60) {
+      samples.push({
+        bidNtceNm: item.bidNtceNm ?? '(제목없음)',
+        prdctClsfcNoNm: item.prdctClsfcNoNm ?? null,
+        hitWords,
+        currentScore: score,
+      });
+    }
+  }
+
+  // 히트 0인 키워드는 리포트에서 제거 (가독성)
+  const filteredHits: Record<string, number> = {};
+  for (const [w, c] of Object.entries(diagHits)) {
+    if (c > 0) filteredHits[w] = c;
+  }
+
+  return {
+    fetched: items.length,
+    currentAlgoMatched,
+    threshold,
+    diagHits: filteredHits,
+    samples,
+    durationMs: Date.now() - startTime,
+  };
+}
+
 // ─── 키워드 시드 ────────────────────────────────────────────────
 
 /**

@@ -16,7 +16,7 @@
  * - POST /api/tenders/notices/:key/status — 사용자 상태 변경
  */
 
-import { runPoll, runDailyPoll, seedKeywords } from './poll';
+import { runPoll, runDailyPoll, seedKeywords, runDiagnostic } from './poll';
 import { sendTenderNotification, sendTestEmail } from './notify';
 import { runDeadlineCheck } from './deadline-check';
 import { runChangeHistoryPoll } from './change-history';
@@ -144,6 +144,18 @@ export async function handleTendersApi(
         ? await sendTestEmail(env, appUrl)
         : await sendTenderNotification(env, appUrl);
       return jsonResponse({ ok: true, mode: isTest ? 'test' : 'production', ...result });
+    }
+
+    // ─── GET /api/tenders/diag?bgn=&end= (진단 — 매칭 0건 원인 분석) ───
+    // read-only. Firebase에 안 씀. 넓은 키워드로 수집 데이터를 훑어 표기 변형/부재 판별.
+    if (path === 'diag') {
+      const bgn = url.searchParams.get('bgn');
+      const end = url.searchParams.get('end');
+      if (!bgn || !end || !isValidG2BDatetime(bgn) || !isValidG2BDatetime(end)) {
+        return errorResponse('bgn/end는 YYYYMMDDHHMM 형식 필수 (예: ?bgn=202605230000&end=202605300000)', 400);
+      }
+      const result = await runDiagnostic(bgn, end, env);
+      return jsonResponse({ ok: true, ...result });
     }
 
     // ─── POST /api/tenders/check-deadlines ───
