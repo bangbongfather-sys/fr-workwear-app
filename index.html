@@ -9082,20 +9082,26 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     }
   };
 
-  const handlePOPhotoUpload = (e) => {
-    const files = Array.from(e.target.files || []);
+  const [photoDragOver, setPhotoDragOver] = useState(false);
+  // 파일 배열을 받아 검증 후 poDraft.photos에 추가 — 파일 input과 드래그&드롭 양쪽에서 재사용
+  const addPOPhotos = (files) => {
     if (!poDraft) return;
-    const promises = files.map(file => new Promise((res, rej) => {
-      if (!file.type.startsWith("image/")) { rej(new Error("이미지 파일만 가능")); return; }
+    const list = Array.from(files || []).filter(Boolean);
+    if (list.length === 0) return;
+    const promises = list.map((file) => new Promise((res, rej) => {
+      if (!file.type || !file.type.startsWith("image/")) { rej(new Error(`${file.name || "파일"}: 이미지만 가능`)); return; }
       if (file.size > 2 * 1024 * 1024) { rej(new Error(`${file.name}: 2MB 초과`)); return; }
       const reader = new FileReader();
       reader.onload = () => res({ name: file.name, dataUrl: reader.result });
       reader.onerror = rej;
       reader.readAsDataURL(file);
     }));
-    Promise.all(promises).then(photos => {
-      setPoDraft(d => ({ ...d, photos: [...(d.photos || []), ...photos] }));
-    }).catch(err => alert("사진 업로드 실패: " + err.message));
+    Promise.all(promises).then((photos) => {
+      setPoDraft((d) => ({ ...d, photos: [...(d.photos || []), ...photos] }));
+    }).catch((err) => alert("사진 업로드 실패: " + err.message));
+  };
+  const handlePOPhotoUpload = (e) => {
+    addPOPhotos(e.target.files);
     e.target.value = "";
   };
 
