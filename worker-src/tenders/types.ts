@@ -219,6 +219,10 @@ export const SEED_KEYWORDS: Omit<TenderKeyword, 'createdAt' | 'isActive'>[] = [
   { keyword: '아라미드복',   category: 'core',     weight: 9 },
   { keyword: '내염복',       category: 'core',     weight: 8 },
   { keyword: '방염작업복',   category: 'core',     weight: 10 },
+  { keyword: '특수방화복',   category: 'core',     weight: 10 },
+  { keyword: '방화두건',     category: 'core',     weight: 8 },
+  { keyword: '소방기동복',   category: 'core',     weight: 9 },
+  { keyword: '진압복',       category: 'core',     weight: 8 },  // 산불진압복 등
 
   // 소재 키워드
   { keyword: '아라미드',     category: 'material', weight: 7 },
