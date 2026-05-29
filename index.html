@@ -11209,6 +11209,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   {(poDraft.items || []).length > 0 && (() => {
                     const subtotal = poDraft.items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
                     const tax = Math.round(subtotal * 0.1);
+                    // 단위별 수량 합계 (단위 섞여 있어도 OK — yard 600 · m 50 식으로 표시)
+                    const qtyByUnit = poDraft.items.reduce((m, it) => {
+                      const q = Number(it.qty) || 0;
+                      if (!q) return m;
+                      const u = (it.unit || "").trim() || "(단위없음)";
+                      m[u] = (m[u] || 0) + q;
+                      return m;
+                    }, {});
+                    const qtySummary = Object.entries(qtyByUnit)
+                      .map(([u, q]) => `${q.toLocaleString()}${u === "(단위없음)" ? "" : " " + u}`)
+                      .join(" · ");
                     return (
                       <div style={{
                         marginTop: 16, padding: "16px 20px",
@@ -11216,7 +11227,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                         borderRadius: 14, border: "1px solid rgba(236,102,8,0.12)",
                         display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12
                       }}>
-                        <div style={{ display: "flex", gap: 28, fontSize: 13, color: T.text2 }}>
+                        <div style={{ display: "flex", gap: 28, fontSize: 13, color: T.text2, flexWrap: "wrap" }}>
+                          {qtySummary && <span>수량 <strong style={{ color: T.text, marginLeft: 6, fontSize: 14 }}>{qtySummary}</strong></span>}
                           <span>공급가액 <strong style={{ color: T.text, marginLeft: 6, fontSize: 14 }}>{subtotal.toLocaleString()}원</strong></span>
                           <span>부가세 (10%) <strong style={{ color: T.text, marginLeft: 6, fontSize: 14 }}>{tax.toLocaleString()}원</strong></span>
                         </div>
