@@ -11240,8 +11240,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   })()}
                 </div>
 
-                {/* ③ 참고 사진 */}
-                <div className="card">
+                {/* ③ 참고 사진 — 카드 전체가 드래그&드롭 영역 (빈 상태/사진 있는 상태 모두) */}
+                <div className="card"
+                  onDragOver={(e) => { e.preventDefault(); if (!photoDragOver) setPhotoDragOver(true); }}
+                  onDragEnter={(e) => { e.preventDefault(); setPhotoDragOver(true); }}
+                  onDragLeave={(e) => { if (e.currentTarget.contains(e.relatedTarget)) return; setPhotoDragOver(false); }}
+                  onDrop={(e) => { e.preventDefault(); setPhotoDragOver(false); addPOPhotos(e.dataTransfer.files); }}
+                  style={photoDragOver ? { outline: "2px dashed #EC6608", outlineOffset: -4, background: "rgba(236,102,8,0.04)" } : undefined}
+                >
                   <div className="section-header">
                     <span className="section-header-title">참고 사진 <span className="section-sub">— Photos {(poDraft.photos || []).length > 0 ? `(${poDraft.photos.length})` : ""}</span></span>
                     <label className="btn-orange" style={{ padding: "8px 16px", fontSize: 13, display: "inline-block" }}>
@@ -11255,13 +11261,13 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       <div style={{
                         padding: "40px 20px", textAlign: "center",
                         background: "var(--row-bg)", borderRadius: 14,
-                        border: `2px dashed ${T.divider}`,
+                        border: `2px dashed ${photoDragOver ? "#EC6608" : T.divider}`,
                         transition: "all 0.15s",
                       }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = "rgba(236,102,8,0.4)"}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = T.divider}>
-                        <div style={{ fontSize: 32, marginBottom: 8 }}>📷</div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text2, marginBottom: 4 }}>사진을 첨부하면 발주서에 함께 출력됩니다</div>
+                      onMouseEnter={e => { if (!photoDragOver) e.currentTarget.style.borderColor = "rgba(236,102,8,0.4)"; }}
+                      onMouseLeave={e => { if (!photoDragOver) e.currentTarget.style.borderColor = T.divider; }}>
+                        <div style={{ fontSize: 32, marginBottom: 8 }}>{photoDragOver ? "📥" : "📷"}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: T.text2, marginBottom: 4 }}>{photoDragOver ? "여기에 놓으면 업로드돼요" : "사진을 클릭하거나 이 영역에 드래그하면 첨부됩니다"}</div>
                         <div style={{ fontSize: 11, color: T.text3 }}>JPG · PNG · GIF / 최대 2MB / 다중 선택 가능</div>
                       </div>
                     </label>
