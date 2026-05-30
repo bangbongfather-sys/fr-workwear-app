@@ -207,7 +207,7 @@ async function handleNotionApi(request, env, url) {
 //
 // 경로 매핑:
 //   /api/sync                       → /frw.json            (메인 데이터: GET/PUT/PATCH)
-//   /api/sync/backup/YYYY-MM-DD     → /frw_backup_<date>.json (일일 백업: PUT)
+//   /api/sync/backup/YYYY-MM-DD[_HH] → /frw_backup_<slot>.json (백업 스냅샷: GET/PUT, 4시간 슬롯)
 //
 // 보안: FIREBASE_DB_SECRET가 Firebase RTDB ?auth= 쿼리에 자동 부착되어, Firebase 규칙은
 // 'auth != null'로 잠가도 동작. 시크릿은 워커 환경에만 있고 클라이언트로 새지 않음.
@@ -223,7 +223,8 @@ async function handleFirebaseSync(request, env, url) {
   if (url.pathname === "/api/sync" || url.pathname === "/api/sync/") {
     fbPath = "/frw.json";
   } else {
-    const m = url.pathname.match(/^\/api\/sync\/backup\/(\d{4}-\d{2}-\d{2})\/?$/);
+    // YYYY-MM-DD (일일) 또는 YYYY-MM-DD_HH (4시간 슬롯) 둘 다 허용
+    const m = url.pathname.match(/^\/api\/sync\/backup\/(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\/?$/);
     if (!m) {
       return new Response(JSON.stringify({ error: "Not found", path: url.pathname }), { status: 404, headers: corsHeaders });
     }

@@ -1050,19 +1050,33 @@ async function cloudSave(data) {
   if (!r.ok) throw new Error("save failed");
 }
 
-// 일일 자동 백업: 하루에 한 번, 앱 첫 로드 시 현재 Firebase 상태를 별도 노드에 스냅샷.
-// 경로: /frw_backup_YYYY-MM-DD.json (frw.json과 형제 노드). 같은 날 두 번째 호출은 no-op.
-// 복구: Firebase 콘솔에서 frw_backup_<날짜>를 frw로 복사하면 그 날짜의 상태로 롤백.
+// 백업 스냅샷: 4시간 슬롯마다 1회(UTC 00/04/08/12/16/20), 별도 노드에 저장.
+// 경로: /frw_backup_YYYY-MM-DD_HH.json (frw.json과 형제). 같은 슬롯 두 번째 호출은 no-op.
+// 같은 날 작업 중 데이터 손실도 직전 슬롯으로 복구 가능. 손상/빈 데이터는 백업하지 않아
+// 정상 백업이 밀려나지 않음. 첫 로드 + 저장 성공 시 호출됨.
+// 복구: Firebase 콘솔에서 frw_backup_<슬롯>를 frw로 복사하면 그 시점 상태로 롤백.
+
+// 백업할 가치가 있는 데이터인지 최소 무결성 검증 (손상/빈 데이터가 정상 백업을 밀어내지 않게).
+function validateBackupData(d) {
+  if (!d || typeof d !== "object") return false;
+  // 핵심 키 중 최소 하나는 존재해야 (완전 빈 객체/초기화 사고 백업 방지)
+  const coreKeys = ["materials", "products", "clients", "ledgers", "orders", "yearlyRevenue"];
+  if (!coreKeys.some(k => d[k] !== undefined && d[k] !== null)) return false;
+  // 배열이어야 하는 것 타입 sanity
+  if (d.yearlyRevenue != null && !Array.isArray(d.yearlyRevenue)) return false;
+  return true;
+}
+
 async function cloudBackupDaily(data) {
-  if (!data || typeof data !== "object") return;
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC 기준)
-  const lastKey = "frw_last_backup_date";
-  if (load(lastKey, "") === today) return; // 오늘 이미 백업됨
+  if (!validateBackupData(data)) return; // 손상/빈 데이터 차단
+  const now = new Date();
+  const hh = String(Math.floor(now.getUTCHours() / 4) * 4).padStart(2, "0"); // 4시간 슬롯
+  const slot = `${now.toISOString().slice(0, 10)}_${hh}`; // YYYY-MM-DD_HH (UTC)
+  const lastKey = "frw_last_backup_slot";
+  if (load(lastKey, "") === slot) return; // 이 슬롯 이미 백업됨
   try {
-    // Worker 프록시 경로: /api/sync/backup/YYYY-MM-DD → Firebase /frw_backup_<date>.json
-    const backupUrl = `${FB_URL}/backup/${today}`;
-    const r = await fetch(backupUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
-    if (r.ok) save(lastKey, today);
+    const r = await fetch(`${FB_URL}/backup/${slot}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    if (r.ok) save(lastKey, slot);
   } catch { /* 백업 실패는 무시 — 본 동기화를 방해하지 않음 */ }
 }
 
@@ -9222,7 +9236,7 @@ function App() {
       // 저장 실패 시 백오프 재시도(2s→4s→8s, 최대 3회). 네트워크 순단으로 변경분이 영영 유실되는 것 방지.
       const doSave = (attempt) => {
         cloudSave(payload)
-          .then(() => { setSyncStatus("saved"); syncTimer.current = null; })
+          .then(() => { setSyncStatus("saved"); syncTimer.current = null; cloudBackupDaily(payload); })
           .catch(() => {
             if (attempt < 3) {
               syncTimer.current = setTimeout(() => doSave(attempt + 1), 2000 * Math.pow(2, attempt));
