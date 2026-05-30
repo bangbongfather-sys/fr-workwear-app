@@ -9218,11 +9218,36 @@ function App() {
     setSyncStatus("syncing");
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue })
-        .then(() => setSyncStatus("saved")).catch(() => setSyncStatus("error"))
-        .finally(() => { syncTimer.current = null; });
+      const payload = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue };
+      // 저장 실패 시 백오프 재시도(2s→4s→8s, 최대 3회). 네트워크 순단으로 변경분이 영영 유실되는 것 방지.
+      const doSave = (attempt) => {
+        cloudSave(payload)
+          .then(() => { setSyncStatus("saved"); syncTimer.current = null; })
+          .catch(() => {
+            if (attempt < 3) {
+              syncTimer.current = setTimeout(() => doSave(attempt + 1), 2000 * Math.pow(2, attempt));
+            } else {
+              setSyncStatus("error");
+              syncTimer.current = null;
+            }
+          });
+      };
+      doSave(0);
     }, 1500);
-  }, [materials, laborItems, products, apiKey, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue]);
+
+  // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
+  useEffect(() => {
+    const onBeforeUnload = (e) => {
+      if (syncTimer.current || syncStatus === "error") {
+        e.preventDefault();
+        e.returnValue = "";
+        return "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [syncStatus]);
 
   const rawActiveProd = products.find(p => p.id === activeProdId) || products[0];
   const activeSpec = getActiveSpec(rawActiveProd) || {};
@@ -9722,7 +9747,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       : [entry, ...purchaseOrders];
     setPurchaseOrders(next);
     save("frw_purchase_orders", next);
-    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders: next, fabricIntakes, monthlySales }).catch(() => {});
+    // 클라우드 저장은 메인 sync effect에 위임 (백오프 재시도 + 미저장 경고 보호)
     alert(`${existing ? "✏️ 발주서가 수정됐습니다" : "💾 발주서가 저장됐습니다"}!\n${entry.dateStr} ${entry.timeStr}${existing ? `\n(수정: ${dateStr} ${timeStr})` : ""}`);
     // 수정 완료 후 editId 제거
     if (existing) setPoDraft(prev => prev ? { ...prev, editId: undefined } : prev);
@@ -9751,7 +9776,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     if (!window.confirm("이 발주서를 삭제할까요?")) return;
     const next = purchaseOrders.filter(p => p.id !== id);
     setPurchaseOrders(next); save("frw_purchase_orders", next);
-    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders: next, fabricIntakes, monthlySales }).catch(() => {});
+    // 클라우드 저장은 메인 sync effect에 위임 (백오프 재시도 + 미저장 경고 보호)
     if (viewingPO && viewingPO.id === id) setViewingPO(null);
   };
 
@@ -9982,7 +10007,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     const next = [entry, ...savedQuotes];
     setSavedQuotes(next);
     save("frw_quote_history", stripQuoteImages(next));
-    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: next }).catch(() => {});
+    // 클라우드 저장은 메인 sync effect에 위임 (백오프 재시도 + 미저장 경고 보호)
     alert(`💾 견적서가 저장됐습니다!\n${dateStr} ${timeStr}`);
   };
 
@@ -9991,7 +10016,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     const next = savedQuotes.filter(q => q.id !== id);
     setSavedQuotes(next);
     save("frw_quote_history", stripQuoteImages(next));
-    cloudSave({ materials, laborItems, products, apiKey, quoteHistory: next }).catch(() => {});
+    // 클라우드 저장은 메인 sync effect에 위임 (백오프 재시도 + 미저장 경고 보호)
     if (viewingQuote && viewingQuote.id === id) setViewingQuote(null);
   };
 
