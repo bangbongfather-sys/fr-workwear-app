@@ -9001,6 +9001,28 @@ function App() {
     const v = load("frw_yearly_revenue", null);
     return (Array.isArray(v) && v.length > 0) ? v : INIT_YEARLY_REVENUE;
   });
+  // 연매출 월별 데이터 자동 보강 — Firebase/로컬에 연 총액(total)만 있고 월별(monthly)이 없는
+  // 연도는 엑셀 기준 초기값(INIT_YEARLY_REVENUE)으로 채움. 다른 기기에서 월별 없이 저장된
+  // 데이터를 복구. monthly가 이미 있으면 건드리지 않음. (cloudLoad가 total만 덮어써도 재보강)
+  useEffect(() => {
+    setYearlyRevenue(prev => {
+      if (!Array.isArray(prev) || prev.length === 0) return INIT_YEARLY_REVENUE;
+      let changed = false;
+      const fixed = prev.map(d => {
+        const hasM = Array.isArray(d.monthly) && d.monthly.some(v => Number(v) > 0);
+        if (!hasM) {
+          const init = INIT_YEARLY_REVENUE.find(i => i.year === d.year);
+          if (init) { changed = true; return { year: d.year, monthly: init.monthly.slice() }; }
+        }
+        return d;
+      });
+      // INIT에 있는데 누락된 연도(예: 2025 total조차 사라진 경우) 추가
+      INIT_YEARLY_REVENUE.forEach(i => {
+        if (!fixed.some(d => d.year === i.year)) { fixed.push({ year: i.year, monthly: i.monthly.slice() }); changed = true; }
+      });
+      return changed ? fixed.sort((a, b) => a.year - b.year) : prev;
+    });
+  }, [yearlyRevenue]);
   const [fabricDropInfo, setFabricDropInfo] = useState(null); // { id, side: 'top'|'bottom' }
   useEffect(() => {
     document.body.classList.toggle("dark", darkMode);
