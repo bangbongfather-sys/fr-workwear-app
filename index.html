@@ -3460,19 +3460,39 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
         <button onClick={() => setAdding(true)} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#EC6608", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 1px 4px rgba(236,102,8,0.3)" }}>+ 연도 추가</button>
       </div>
 
-      {/* KPI 4개 — 반응형 그리드 */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-        <YearlyKpiCard label={`${last ? last.year : ""}년 매출`} value={last ? fmt억(last.total) : "—"} sub={last ? fmtWon(last.total) : ""} accent="#EC6608" />
-        <YearlyKpiCard label="전년 대비" value={yoyPct === null ? "—" : `${yoyPct >= 0 ? "+" : ""}${yoyPct.toFixed(1)}%`} sub={prev ? `vs ${prev.year}년 (${fmt억(prev.total)})` : ""} accent={yoyPct === null ? "var(--text2)" : (yoyPct >= 0 ? "#10B981" : "#F04452")} arrow={yoyPct === null ? null : (yoyPct >= 0 ? "▲" : "▼")} />
+      {/* 히어로 — 최신 연매출 강조 */}
+      {last && (
+        <div className="card" style={{ padding: 0, overflow: "hidden", background: "linear-gradient(135deg, rgba(236,102,8,0.10), rgba(245,158,11,0.05))", border: "1px solid rgba(236,102,8,0.18)" }}>
+          <div style={{ padding: "18px 20px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text3)", marginBottom: 6 }}>{last.year}년 매출</div>
+              <div className="kpi-num" style={{ fontSize: 34, fontWeight: 900, color: "#B84800", letterSpacing: -1, lineHeight: 1 }}>{fmt억(last.total)}<span style={{ fontSize: 15, fontWeight: 700, marginLeft: 4, color: "var(--text2)" }}>원</span></div>
+              <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>{fmtWon(last.total)}</div>
+            </div>
+            {yoyPct !== null && (
+              <div style={{ textAlign: "right" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 999, fontSize: 15, fontWeight: 800, background: yoyPct >= 0 ? "rgba(16,185,129,0.14)" : "rgba(240,68,82,0.14)", color: yoyPct >= 0 ? "#10B981" : "#F04452" }}>
+                  <span style={{ fontSize: 13 }}>{yoyPct >= 0 ? "▲" : "▼"}</span>{Math.abs(yoyPct).toFixed(1)}%
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>전년({prev.year}) {fmt억(prev.total)} 대비</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 통계 3개 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
         <YearlyKpiCard label={`${data.length}개년 평균`} value={fmt억(avg)} sub={fmtWon(avg)} accent="#8B5CF6" />
-        <YearlyKpiCard label="최고 연도" value={best ? `${best.year}년` : "—"} sub={best ? fmt억(best.total) : ""} accent="#F59E0B" />
+        <YearlyKpiCard label="최고 실적" value={best ? `${best.year}년` : "—"} sub={best ? fmt억(best.total) : ""} accent="#F59E0B" />
+        <YearlyKpiCard label={baseYear ? `${baseYear.year}년 대비 성장` : "전체 성장"} value={totalGrowthPct === null ? "—" : `${totalGrowthPct >= 0 ? "+" : ""}${totalGrowthPct.toFixed(0)}%`} sub={baseYear ? `${baseYear.year} ${fmt억(baseYear.total)} → ${last ? fmt억(last.total) : ""}` : ""} accent={totalGrowthPct === null ? "var(--text2)" : (totalGrowthPct >= 0 ? "#10B981" : "#F04452")} arrow={totalGrowthPct === null ? null : (totalGrowthPct >= 0 ? "▲" : "▼")} />
       </div>
 
-      {/* 차트 */}
+      {/* 추이 차트 */}
       <div className="card" style={{ padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>연도별 매출</div>
-          <div style={{ fontSize: 11, color: "var(--text3)" }}>최고 연도는 진한 색으로 강조</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>연도별 매출 추이</div>
+          <div style={{ fontSize: 11, color: "var(--text3)" }}>● 최고 실적 연도 강조</div>
         </div>
         <YearlyBarChart data={data} darkMode={darkMode} />
       </div>
