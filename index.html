@@ -3575,7 +3575,7 @@ function YearlyBarChart({ data, darkMode }) {
   );
 }
 
-function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
+function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {}, ledgers = {}, orders = [], darkMode }) {
   const [view, setView] = React.useState("annual"); // annual | monthly | sameMonth
   const [focusYear, setFocusYear] = React.useState(null);
   const [focusMonth, setFocusMonth] = React.useState(new Date().getMonth() + 1);
@@ -3584,11 +3584,34 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
   const [adding, setAdding] = React.useState(false);
   const [newRow, setNewRow] = React.useState({ year: "", total: "" });
 
+  // 올해(진행 중인 연도)는 월별 장부와 실시간 연동 — 저장하지 않고 동적 계산.
+  const CURRENT_YEAR = new Date().getFullYear();
+  const liveMonthly = React.useMemo(() => {
+    const months12 = Array.from({ length: 12 }, (_, i) => `${CURRENT_YEAR}-${String(i + 1).padStart(2, "0")}`);
+    // 월별 매출 우선순위: 직접 입력(monthlySales) > 장부 합계(ledgers) > 발주 기록(orders)
+    // — DashboardTab의 월매출 집계 로직과 동일하게 맞춤.
+    const revOrders = {};
+    (orders || []).forEach(o => { const m = (o.date || "").slice(0, 7); revOrders[m] = (revOrders[m] || 0) + parseFloat(o.unitPrice || 0) * parseInt(o.qty || 1); });
+    const revLedger = {};
+    Object.entries(ledgers || {}).forEach(([ym, m]) => { revLedger[ym] = ((m && m.clients) || []).reduce((s, c) => s + (parseFloat(c.total) || 0), 0); });
+    return months12.map(m => {
+      const direct = monthlySales[m];
+      if (direct !== undefined && direct !== null && direct !== "") return parseFloat(direct) || 0;
+      if (revLedger[m] > 0) return revLedger[m];
+      if (revOrders[m] > 0) return revOrders[m];
+      return 0;
+    });
+  }, [monthlySales, ledgers, orders, CURRENT_YEAR]);
+
   const data = React.useMemo(() => {
-    return [...(yearlyRevenue || [])]
-      .map(d => ({ ...d, _total: yearTotalOf(d), _monthly: monthlyArrOf(d) }))
-      .sort((a, b) => a.year - b.year);
-  }, [yearlyRevenue]);
+    // 과거 연도(올해 미만)는 저장된 확정 데이터. 올해는 월별 장부 실시간 연동 행으로 대체.
+    const past = [...(yearlyRevenue || [])]
+      .filter(d => d.year < CURRENT_YEAR)
+      .map(d => ({ ...d, _total: yearTotalOf(d), _monthly: monthlyArrOf(d) }));
+    const liveTotal = liveMonthly.reduce((s, v) => s + v, 0);
+    const liveRow = { year: CURRENT_YEAR, monthly: liveMonthly, _total: liveTotal, _monthly: liveMonthly, _isLive: true };
+    return [...past, liveRow].sort((a, b) => a.year - b.year);
+  }, [yearlyRevenue, liveMonthly, CURRENT_YEAR]);
 
   const last = data[data.length - 1];
   const prev = data[data.length - 2];
@@ -3623,6 +3646,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
   });
 
   const commitYearTotal = (year) => {
+    if (year >= CURRENT_YEAR) { setEditingCell(null); return; } // 올해는 장부 연동, 수동 수정 불가
     const v = parseAmt(editValue);
     setYearlyRevenue((prev) => (prev || []).map(d => {
       if (d.year !== year) return d;
@@ -3638,6 +3662,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
     setEditingCell(null);
   };
   const commitMonth = (year, monthIdx) => {
+    if (year >= CURRENT_YEAR) { setEditingCell(null); return; } // 올해는 장부 연동, 수동 수정 불가
     const v = parseAmt(editValue);
     setYearlyRevenue((prev) => (prev || []).map(d => {
       if (d.year !== year) return d;
@@ -3648,6 +3673,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
     setEditingCell(null);
   };
   const deleteYear = (year) => {
+    if (year >= CURRENT_YEAR) { alert(`${year}년은 월별 장부와 자동 연동되는 행이라 삭제할 수 없어요.`); return; }
     if (!window.confirm(`${year}년 데이터를 삭제할까요?`)) return;
     setYearlyRevenue((prev) => (prev || []).filter(d => d.year !== year));
   };
@@ -3655,6 +3681,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
     const y = parseInt(newRow.year, 10);
     const t = parseAmt(newRow.total);
     if (!y || y < 1900 || y > 2100) { alert("연도를 올바르게 입력하세요 (예: 2026)"); return; }
+    if (y >= CURRENT_YEAR) { alert(`${y}년은 월별 장부와 자동 연동돼요. 따로 추가할 필요 없이 장부 탭에 입력하면 반영됩니다.`); return; }
     if ((yearlyRevenue || []).some(d => d.year === y)) { alert(`${y}년은 이미 등록돼 있어요. 표에서 클릭해 수정하세요.`); return; }
     if (t <= 0) { alert("매출 금액을 입력하세요"); return; }
     setYearlyRevenue((prev) => ([...(prev || []), { year: y, total: t }]));
@@ -3752,7 +3779,12 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
                       {r.year} {isMax && <span style={{ fontSize: 10, color: "#F59E0B", marginLeft: 3 }}>★</span>}{isMin && <span style={{ fontSize: 10, color: "var(--text3)", marginLeft: 3 }}>↓</span>}
                     </td>
                     <td style={{ ...tdS, textAlign: "right" }}>
-                      {editingTotal ? (
+                      {r._isLive ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end", fontWeight: 700 }} title="월별 장부에서 자동 계산되는 값이에요">
+                          {fmtWon(r._total)}
+                          <span style={{ fontSize: 9, color: "#EC6608", fontWeight: 700, padding: "1px 5px", background: "rgba(236,102,8,0.12)", borderRadius: 3, whiteSpace: "nowrap" }}>📒 장부연동</span>
+                        </span>
+                      ) : editingTotal ? (
                         <input value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
                           onKeyDown={e => { if (e.key === "Enter") commitYearTotal(r.year); if (e.key === "Escape") setEditingCell(null); }}
                           onBlur={() => commitYearTotal(r.year)}
@@ -3773,9 +3805,11 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
                       </div>
                     </td>
                     <td style={{ ...tdS, textAlign: "center", padding: "11px 6px" }}>
-                      <button onClick={e => { e.stopPropagation(); deleteYear(r.year); }} title="삭제" style={{ background: "transparent", border: "none", color: "var(--text3)", fontSize: 13, cursor: "pointer", padding: 3 }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#F04452"}
-                        onMouseLeave={e => e.currentTarget.style.color = "var(--text3)"}>✕</button>
+                      {!r._isLive && (
+                        <button onClick={e => { e.stopPropagation(); deleteYear(r.year); }} title="삭제" style={{ background: "transparent", border: "none", color: "var(--text3)", fontSize: 13, cursor: "pointer", padding: 3 }}
+                          onMouseEnter={e => e.currentTarget.style.color = "#F04452"}
+                          onMouseLeave={e => e.currentTarget.style.color = "var(--text3)"}>✕</button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -3805,8 +3839,13 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <button onClick={() => { setView("annual"); setFocusYear(null); }} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>← 연간 보기</button>
           <select value={fy} onChange={e => setFocusYear(parseInt(e.target.value, 10))} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
-            {data.map(d => <option key={d.year} value={d.year}>{d.year}년</option>)}
+            {data.map(d => <option key={d.year} value={d.year}>{d.year}년{d._isLive ? " (장부 연동)" : ""}</option>)}
           </select>
+          {yd._isLive && (
+            <span style={{ fontSize: 11, color: "#EC6608", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "rgba(236,102,8,0.1)", borderRadius: 6 }}>
+              📒 월별 장부와 자동 연동 — 장부 탭에 입력하면 자동 반영돼요
+            </span>
+          )}
         </div>
 
         <div className="card" style={{ padding: 22 }}>
@@ -3873,6 +3912,8 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
                             onKeyDown={e => { if (e.key === "Enter") commitMonth(yd.year, i); if (e.key === "Escape") setEditingCell(null); }}
                             onBlur={() => commitMonth(yd.year, i)}
                             style={{ width: 140, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)", textAlign: "right", fontFamily: "inherit", fontSize: 13, fontVariantNumeric: "tabular-nums" }}/>
+                        ) : yd._isLive ? (
+                          <span style={{ fontWeight: 600 }} title="월별 장부에서 자동 계산되는 값이에요">{v > 0 ? fmtWon(v) : "—"}</span>
                         ) : (
                           <span onClick={() => { setEditingCell({ year: yd.year, month: i }); setEditValue(String(v)); }} style={{ cursor: "pointer", fontWeight: 600 }} title="클릭해서 수정">{v > 0 ? fmtWon(v) : "—"}</span>
                         )}
@@ -4033,7 +4074,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
     </div>
   );
 }
-function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, darkMode, focusClient, clearFocus }) {
+function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, monthlySales = {}, orders = [], darkMode, focusClient, clearFocus }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
   const [subTab, setSubTab] = useState("monthly"); // "monthly" | "ar"
@@ -4582,7 +4623,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
       </div>
 
       {subTab === "yearly" && (
-        <YearlyRevenueView yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} darkMode={darkMode} />
+        <YearlyRevenueView yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} ledgers={ledgers} orders={orders} darkMode={darkMode} />
       )}
       {subTab === "ar" && (
         <ARDetailView ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} focusClient={focusClient} clearFocus={clearFocus} />
@@ -11663,7 +11704,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           />
         )}
         {tab === "ledger" && (
-          <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} darkMode={darkMode} focusClient={ledgerFocusClient} clearFocus={() => setLedgerFocusClient(null)} />
+          <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} orders={orders} darkMode={darkMode} focusClient={ledgerFocusClient} clearFocus={() => setLedgerFocusClient(null)} />
         )}
         {tab === "treasury" && (
           <TreasuryTab
