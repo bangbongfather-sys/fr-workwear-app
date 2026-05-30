@@ -3316,21 +3316,195 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 장부 → 연매출 추이 (Yearly Revenue Trend)
+// 장부 → 연매출 추이 (Yearly Revenue Trend) — CFO 스타일 대시보드
+// 뷰: annual(연간) / monthly(연도 드릴다운) / sameMonth(동월 비교)
 // ─────────────────────────────────────────────────────────────
-function YearlyKpiCard({ label, value, sub, accent, arrow }) {
+const YEARLY_MONTH_NAMES = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
+const monthlyArrOf = (d) => Array.isArray(d?.monthly) ? d.monthly : Array(12).fill(0);
+const yearTotalOf = (d) => {
+  if (!d) return 0;
+  const m = monthlyArrOf(d);
+  const sum = m.reduce((s, v) => s + (Number(v) || 0), 0);
+  return sum > 0 ? sum : (Number(d.total) || 0);
+};
+const yearHasMonthly = (d) => Array.isArray(d?.monthly) && d.monthly.some(v => Number(v) > 0);
+
+// CFO 스타일 통계 타일 — tabular-nums, 절제된 색상
+function StatTile({ label, value, sub, valueColor, kind }) {
+  const color = valueColor || (kind === "pos" ? "#10B981" : kind === "neg" ? "#F04452" : kind === "accent" ? "#EC6608" : "var(--text1)");
   return (
     <div className="card" style={{ padding: 14, minWidth: 0 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
-      <div className="kpi-num" style={{ fontSize: 22, fontWeight: 800, color: accent || "var(--text1)", letterSpacing: -0.4, lineHeight: 1.1, display: "inline-flex", alignItems: "center", gap: 4 }}>
-        {arrow && <span style={{ fontSize: 14 }}>{arrow}</span>}
-        {value}
-      </div>
-      {sub && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{sub}</div>}
+      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 7 }}>{label}</div>
+      <div className="kpi-num" style={{ fontSize: 19, fontWeight: 800, color, letterSpacing: -0.4, lineHeight: 1.1, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{sub}</div>}
     </div>
   );
 }
 
+// 인라인 미니 라인 차트 (테이블 셀용)
+function Sparkline({ values, width = 84, height = 22, color = "#EC6608" }) {
+  if (!values || values.length === 0 || values.every(v => !v)) {
+    return <span style={{ color: "var(--text3)", fontSize: 11 }}>—</span>;
+  }
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const step = values.length > 1 ? width / (values.length - 1) : 0;
+  const pts = values.map((v, i) => {
+    const x = i * step;
+    const y = height - ((v - min) / range) * (height - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ display: "block" }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+// 연도별 라인 차트 (CFO 스타일 — 그라데이션 제거, 깔끔한 그리드, 점 클릭 가능)
+function YearlyTrendChart({ data, darkMode, onYearClick }) {
+  if (!data || data.length === 0) {
+    return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
+  }
+  const W = 880, H = 280;
+  const padL = 56, padR = 22, padT = 32, padB = 38;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const values = data.map(d => d._total);
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values);
+  const niceMax = Math.ceil((max * 1.12) / 1e9) * 1e9;
+  const xStep = data.length > 1 ? innerW / (data.length - 1) : 0;
+  const xAt = (i) => padL + (data.length > 1 ? i * xStep : innerW / 2);
+  const yAt = (v) => padT + innerH - (v / niceMax) * innerH;
+  const fmt = (n) => `${(n / 1e8).toFixed(1)}억`;
+  const txt2 = darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
+  const grid = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
+  const lbl = darkMode ? "rgba(255,255,255,0.88)" : "#1F1F2A";
+  const accent = "#EC6608";
+  const grids = Array.from({ length: 5 }, (_, i) => niceMax * i / 4);
+  const pts = data.map((d, i) => ({ x: xAt(i), y: yAt(d._total), d, isMax: d._total === max, isMin: d._total === min }));
+  const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 560, height: "auto", display: "block" }}>
+        {grids.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={grid} strokeWidth={1} strokeDasharray={i === 0 ? "" : "2 4"}/>
+            <text x={padL - 8} y={yAt(v) + 3} fontSize={10} fill={txt2} textAnchor="end" fontFamily="ui-monospace, monospace">{fmt(v)}</text>
+          </g>
+        ))}
+        <path d={linePath} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>
+        {pts.map((p) => (
+          <g key={p.d.year} style={{ cursor: onYearClick ? "pointer" : "default" }} onClick={() => onYearClick && onYearClick(p.d.year)}>
+            <circle cx={p.x} cy={p.y} r={14} fill="transparent"/>
+            <circle cx={p.x} cy={p.y} r={p.isMax || p.isMin ? 5.5 : 4} fill={p.isMax ? accent : (darkMode ? "#1a1a1a" : "#fff")} stroke={accent} strokeWidth={2}/>
+            <text x={p.x} y={p.y - 11} fontSize={p.isMax ? 11 : 10} fontWeight={p.isMax ? 800 : 700} fill={p.isMax ? "#B84800" : lbl} textAnchor="middle" fontFamily="ui-monospace, monospace">{fmt(p.d._total)}</text>
+            <text x={p.x} y={H - padB + 20} fontSize={11} fontWeight={p.isMax ? 800 : 600} fill={p.isMax ? "#B84800" : txt2} textAnchor="middle" fontFamily="ui-monospace, monospace">'{String(p.d.year).slice(2)}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+// 월별 막대 차트 (전년 동월 비교 오버레이)
+function MonthlyBarChart({ months, prevMonths, darkMode }) {
+  const W = 800, H = 240, padL = 50, padR = 16, padT = 26, padB = 32;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const all = [...months, ...(prevMonths || [])].filter(v => v > 0);
+  const max = Math.max(...all, 1);
+  const niceMax = Math.ceil((max * 1.12) / 1e8) * 1e8;
+  const fmt = (n) => `${(n / 1e8).toFixed(1)}억`;
+  const txt2 = darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
+  const grid = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
+  const accent = "#EC6608";
+  const prevColor = darkMode ? "rgba(167,139,250,0.7)" : "#A78BFA";
+  const groupW = innerW / 12;
+  const showPrev = !!prevMonths && prevMonths.some(v => v > 0);
+  const barW = showPrev ? groupW * 0.36 : groupW * 0.62;
+  const gap = showPrev ? 3 : 0;
+  const yAt = (v) => padT + innerH - (v / niceMax) * innerH;
+  const grids = [0, 0.25, 0.5, 0.75, 1].map(p => niceMax * p);
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 560, height: "auto", display: "block" }}>
+        {grids.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={grid} strokeWidth={1} strokeDasharray={i === 0 ? "" : "2 4"}/>
+            <text x={padL - 8} y={yAt(v) + 3} fontSize={10} fill={txt2} textAnchor="end" fontFamily="ui-monospace, monospace">{fmt(v)}</text>
+          </g>
+        ))}
+        {months.map((v, i) => {
+          const gx = padL + i * groupW + groupW / 2;
+          const curX = showPrev ? gx + gap / 2 : gx - barW / 2;
+          const prvX = gx - barW - gap / 2;
+          const curH = innerH - (yAt(v) - padT);
+          const prvV = showPrev ? prevMonths[i] : 0;
+          const prvH = innerH - (yAt(prvV) - padT);
+          return (
+            <g key={i}>
+              {showPrev && prvV > 0 && <rect x={prvX} y={yAt(prvV)} width={barW} height={prvH} fill={prevColor} rx={2}/>}
+              {v > 0 && <rect x={curX} y={yAt(v)} width={barW} height={curH} fill={accent} rx={2}/>}
+              <text x={gx} y={H - padB + 16} fontSize={10} fill={txt2} textAnchor="middle">{i + 1}월</text>
+            </g>
+          );
+        })}
+      </svg>
+      {showPrev && (
+        <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 8, fontSize: 11, color: "var(--text2)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 10, height: 10, background: accent, borderRadius: 2 }}/>당해</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ display: "inline-block", width: 10, height: 10, background: prevColor, borderRadius: 2 }}/>전년</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 동월 비교 차트 (특정 월의 연도별 추이)
+function SameMonthChart({ series, darkMode }) {
+  if (!series || series.length === 0) {
+    return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
+  }
+  const W = 820, H = 240, padL = 56, padR = 22, padT = 32, padB = 38;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const values = series.map(s => s.val);
+  const max = Math.max(...values, 1);
+  const niceMax = Math.ceil((max * 1.12) / 1e8) * 1e8;
+  const xStep = series.length > 1 ? innerW / (series.length - 1) : 0;
+  const xAt = (i) => padL + (series.length > 1 ? i * xStep : innerW / 2);
+  const yAt = (v) => padT + innerH - (v / niceMax) * innerH;
+  const fmt = (n) => `${(n / 1e8).toFixed(1)}억`;
+  const txt2 = darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
+  const grid = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
+  const lbl = darkMode ? "rgba(255,255,255,0.88)" : "#1F1F2A";
+  const accent = "#EC6608";
+  const grids = [0, 0.25, 0.5, 0.75, 1].map(p => niceMax * p);
+  const pts = series.map((s, i) => ({ x: xAt(i), y: yAt(s.val), s, isMax: s.val === max }));
+  const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  return (
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 560, height: "auto", display: "block" }}>
+        {grids.map((v, i) => (
+          <g key={i}>
+            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={grid} strokeWidth={1} strokeDasharray={i === 0 ? "" : "2 4"}/>
+            <text x={padL - 8} y={yAt(v) + 3} fontSize={10} fill={txt2} textAnchor="end" fontFamily="ui-monospace, monospace">{fmt(v)}</text>
+          </g>
+        ))}
+        <path d={linePath} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>
+        {pts.map((p) => (
+          <g key={p.s.year}>
+            <circle cx={p.x} cy={p.y} r={p.isMax ? 5.5 : 4} fill={p.isMax ? accent : (darkMode ? "#1a1a1a" : "#fff")} stroke={accent} strokeWidth={2}/>
+            <text x={p.x} y={p.y - 11} fontSize={p.isMax ? 11 : 10} fontWeight={p.isMax ? 800 : 700} fill={p.isMax ? "#B84800" : lbl} textAnchor="middle" fontFamily="ui-monospace, monospace">{fmt(p.s.val)}</text>
+            <text x={p.x} y={H - padB + 20} fontSize={11} fontWeight={p.isMax ? 800 : 600} fill={p.isMax ? "#B84800" : txt2} textAnchor="middle" fontFamily="ui-monospace, monospace">'{String(p.s.year).slice(2)}</text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+// 이전 차트 함수 placeholder (호환성용)
 function YearlyBarChart({ data, darkMode }) {
   if (!data || data.length === 0) {
     return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
