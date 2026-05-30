@@ -222,6 +222,9 @@ async function handleFirebaseSync(request, env, url) {
   let fbPath;
   if (url.pathname === "/api/sync" || url.pathname === "/api/sync/") {
     fbPath = "/frw.json";
+  } else if (url.pathname === "/api/sync/rev") {
+    // 멀티기기 충돌 감지용 리비전 번호 (경량 GET). frw 전체를 받지 않고 _rev만 조회.
+    fbPath = "/frw/_rev.json";
   } else {
     // YYYY-MM-DD (일일) 또는 YYYY-MM-DD_HH (4시간 슬롯) 둘 다 허용
     const m = url.pathname.match(/^\/api\/sync\/backup\/(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\/?$/);

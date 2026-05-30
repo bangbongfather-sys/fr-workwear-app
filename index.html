@@ -9074,6 +9074,7 @@ function App() {
 
   const initialized = useRef(false);
   const syncTimer = useRef(null);
+  const lastKnownRev = useRef(null); // 마지막으로 본 서버 _rev — 멀티기기 동시 저장 충돌 감지용
   const prodNameRef = useRef(null);
   const dragProd = useRef(null);
   const dragFabric = useRef(null);
@@ -9178,6 +9179,8 @@ function App() {
     if (d.fabricIntakes !== undefined) setFabricIntakes(d.fabricIntakes);
     if (d.monthlySales !== undefined) setMonthlySales(d.monthlySales);
     if (d.yearlyRevenue !== undefined && Array.isArray(d.yearlyRevenue)) setYearlyRevenue(d.yearlyRevenue);
+    // 멀티기기 충돌 감지용 — 서버가 들고 있는 현재 리비전 번호 기억 (state엔 안 들어감)
+    if (typeof d._rev === "number") lastKnownRev.current = d._rev;
   };
 
   useEffect(() => {
@@ -9234,9 +9237,25 @@ function App() {
     syncTimer.current = setTimeout(() => {
       const payload = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue };
       // 저장 실패 시 백오프 재시도(2s→4s→8s, 최대 3회). 네트워크 순단으로 변경분이 영영 유실되는 것 방지.
-      const doSave = (attempt) => {
-        cloudSave(payload)
-          .then(() => { setSyncStatus("saved"); syncTimer.current = null; cloudBackupDaily(payload); })
+      let resolvedRev = null; // 첫 시도에 확정한 rev — 재시도 시 재사용 (재시도에선 충돌 재검사 안 함, 오판 방지)
+      const doSave = async (attempt) => {
+        if (attempt === 0) {
+          // 멀티기기 충돌 감지: 첫 시도에만 서버 _rev 확인. 못 읽으면 검사 스킵하고 저장(안전 우선).
+          let serverRev = null;
+          try {
+            const rr = await fetch(`${FB_URL}/rev`);
+            if (rr.ok) { const j = await rr.json(); if (typeof j === "number") serverRev = j; }
+          } catch { /* rev 못 읽으면 충돌검사 스킵하고 그냥 저장 */ }
+          // 확실한 충돌(서버 rev 읽힘 + 내가 본 rev 있음 + 불일치)만 차단. 다른 기기가 먼저 저장한 경우.
+          if (serverRev != null && lastKnownRev.current != null && serverRev !== lastKnownRev.current) {
+            setSyncStatus("conflict");
+            syncTimer.current = null;
+            return;
+          }
+          resolvedRev = (serverRev != null ? serverRev : (lastKnownRev.current || 0)) + 1;
+        }
+        cloudSave({ ...payload, _rev: resolvedRev })
+          .then(() => { lastKnownRev.current = resolvedRev; setSyncStatus("saved"); syncTimer.current = null; cloudBackupDaily(payload); })
           .catch(() => {
             if (attempt < 3) {
               syncTimer.current = setTimeout(() => doSave(attempt + 1), 2000 * Math.pow(2, attempt));
@@ -9253,7 +9272,7 @@ function App() {
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
     const onBeforeUnload = (e) => {
-      if (syncTimer.current || syncStatus === "error") {
+      if (syncTimer.current || syncStatus === "error" || syncStatus === "conflict") {
         e.preventDefault();
         e.returnValue = "";
         return "";
@@ -9989,6 +10008,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     };
     if (syncStatus === "syncing") return <div style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span style={styles.text}>저장 중</span></div>;
     if (syncStatus === "saved") return <div style={styles.wrap}><Icon name="check" size={13}/><span style={styles.text}>동기화됨</span></div>;
+    if (syncStatus === "conflict") return <div onClick={() => window.location.reload()} style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="다른 기기에서 데이터가 변경됐어요. 클릭하면 최신 데이터로 새로고침합니다 (지금 화면의 미저장 변경은 사라질 수 있어요).">⚠️<span style={styles.text}>충돌 · 새로고침</span></div>;
     return <div style={styles.wrap}><Icon name="alert" size={13}/><span style={styles.text}>연결 오류</span></div>;
   };
 
