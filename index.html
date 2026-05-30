@@ -3410,12 +3410,14 @@ function YearlyTrendChart({ data, darkMode, onYearClick }) {
 
 // 월별 막대 차트 (전년 동월 비교 오버레이)
 function MonthlyBarChart({ months, prevMonths, darkMode }) {
+  const [hovered, setHovered] = React.useState(null);
   const W = 800, H = 240, padL = 50, padR = 16, padT = 26, padB = 32;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const all = [...months, ...(prevMonths || [])].filter(v => v > 0);
   const max = Math.max(...all, 1);
   const niceMax = Math.ceil((max * 1.12) / 1e8) * 1e8;
   const fmt = (n) => `${(n / 1e8).toFixed(1)}억`;
+  const fmtWon = (n) => `₩${Math.round(n || 0).toLocaleString()}`;
   const txt2 = darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
   const grid = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
   const accent = "#EC6608";
@@ -3442,14 +3444,41 @@ function MonthlyBarChart({ months, prevMonths, darkMode }) {
           const curH = innerH - (yAt(v) - padT);
           const prvV = showPrev ? prevMonths[i] : 0;
           const prvH = innerH - (yAt(prvV) - padT);
+          const isHover = hovered === i;
           return (
             <g key={i}>
-              {showPrev && prvV > 0 && <rect x={prvX} y={yAt(prvV)} width={barW} height={prvH} fill={prevColor} rx={2}/>}
-              {v > 0 && <rect x={curX} y={yAt(v)} width={barW} height={curH} fill={accent} rx={2}/>}
-              <text x={gx} y={H - padB + 16} fontSize={10} fill={txt2} textAnchor="middle">{i + 1}월</text>
+              {/* hover 시 세로 하이라이트 */}
+              {isHover && <rect x={padL + i * groupW} y={padT} width={groupW} height={innerH} fill={accent} opacity={0.06}/>}
+              {showPrev && prvV > 0 && <rect x={prvX} y={yAt(prvV)} width={barW} height={prvH} fill={prevColor} rx={2} opacity={isHover ? 1 : 0.92}/>}
+              {v > 0 && <rect x={curX} y={yAt(v)} width={barW} height={curH} fill={accent} rx={2} opacity={isHover ? 1 : 0.92}/>}
+              <text x={gx} y={H - padB + 16} fontSize={10} fill={isHover ? accent : txt2} fontWeight={isHover ? 700 : 400} textAnchor="middle">{i + 1}월</text>
+              {/* 마우스 감지용 투명 영역 (월 전체 높이) */}
+              <rect x={padL + i * groupW} y={padT} width={groupW} height={innerH} fill="transparent"
+                onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} style={{ cursor: "pointer" }}/>
             </g>
           );
         })}
+        {/* 플로팅 툴팁 — 막대 위에 금액 표시 */}
+        {hovered !== null && (() => {
+          const v = months[hovered] || 0;
+          const prvV = showPrev ? (prevMonths[hovered] || 0) : 0;
+          const gx = padL + hovered * groupW + groupW / 2;
+          const topY = Math.min(v > 0 ? yAt(v) : padT + innerH, prvV > 0 ? yAt(prvV) : padT + innerH);
+          const lines = [{ t: `${hovered + 1}월`, c: accent, b: 700, s: 11 }, { t: `당해 ${fmtWon(v)}`, c: darkMode ? "#fff" : "#14171D", b: 600, s: 10 }];
+          if (showPrev) lines.push({ t: `전년 ${fmtWon(prvV)}`, c: prevColor, b: 600, s: 10 });
+          const boxW = 150, boxH = lines.length * 15 + 10;
+          let bx = gx - boxW / 2;
+          bx = Math.max(padL, Math.min(bx, W - padR - boxW));
+          const by = Math.max(2, topY - boxH - 8);
+          return (
+            <g pointerEvents="none">
+              <rect x={bx} y={by} width={boxW} height={boxH} rx={6} fill={darkMode ? "#1a1d24" : "#ffffff"} stroke={darkMode ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)"} strokeWidth={1}/>
+              {lines.map((ln, li) => (
+                <text key={li} x={bx + 10} y={by + 16 + li * 15} fontSize={ln.s} fontWeight={ln.b} fill={ln.c} fontVariantNumeric="tabular-nums">{ln.t}</text>
+              ))}
+            </g>
+          );
+        })()}
       </svg>
       {showPrev && (
         <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 8, fontSize: 11, color: "var(--text2)" }}>
