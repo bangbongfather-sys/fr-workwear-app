@@ -3412,6 +3412,9 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, darkMode }) {
   const avg = data.length > 0 ? data.reduce((s, d) => s + d.total, 0) / data.length : 0;
   const best = data.reduce((m, d) => (!m || d.total > m.total) ? d : m, null);
   const baseYear = data[0];
+  // 첫 해 대비 누적 성장률 (전체 추세)
+  const totalGrowthPct = (baseYear && baseYear.total && last && data.length > 1)
+    ? ((last.total - baseYear.total) / baseYear.total * 100) : null;
 
   const fmt억 = (n) => `${(n / 1e8).toFixed(1)}억`;
   const fmtWon = (n) => `₩${Math.round(n).toLocaleString()}`;
