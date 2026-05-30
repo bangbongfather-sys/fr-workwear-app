@@ -3333,41 +3333,43 @@ function YearlyBarChart({ data, darkMode }) {
   if (!data || data.length === 0) {
     return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
   }
-  const W = 800, H = 280;
-  const padL = 56, padR = 16, padT = 26, padB = 38;
+  const W = 820, H = 300;
+  const padL = 52, padR = 22, padT = 36, padB = 40;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const max = Math.max(...data.map(d => d.total), 1);
-  // y축 max를 깔끔한 10억 단위로 올림 (헤드룸 10% 추가)
-  const niceMax = Math.ceil((max * 1.1) / 1e9) * 1e9;
-  const barGap = 10;
-  const barW = (innerW - barGap * (data.length - 1)) / data.length;
-  const yScale = (v) => (v / niceMax) * innerH;
-  const fmt억 = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(1)}억` : `${Math.round(n / 1e6)}백만`;
-  const gridSteps = 5;
-  const grids = Array.from({ length: gridSteps + 1 }, (_, i) => niceMax * i / gridSteps);
-  const orange = "#EC6608", orangeLight = "#FFB07A";
-  const txtColor = darkMode ? "rgba(255,255,255,0.85)" : "#1F1F2A";
-  const txt2 = darkMode ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.55)";
-  const grid = darkMode ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.06)";
+  const niceMax = Math.ceil((max * 1.15) / 1e9) * 1e9; // 깔끔한 10억 단위 + 헤드룸
+  const xStep = data.length > 1 ? innerW / (data.length - 1) : 0;
+  const xAt = (i) => padL + (data.length > 1 ? i * xStep : innerW / 2);
+  const yAt = (v) => padT + innerH - (v / niceMax) * innerH;
+  const fmt억 = (n) => `${(n / 1e8).toFixed(1)}억`;
 
-  // 최고값 강조: 최대값 막대만 진한 톤
+  const orange = "#EC6608";
+  const txt2 = darkMode ? "rgba(255,255,255,0.55)" : "rgba(0,0,0,0.5)";
+  const grid = darkMode ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.055)";
+  const lblColor = darkMode ? "rgba(255,255,255,0.9)" : "#1F1F2A";
+
+  const gridSteps = 4;
+  const grids = Array.from({ length: gridSteps + 1 }, (_, i) => niceMax * i / gridSteps);
+  const pts = data.map((d, i) => ({ x: xAt(i), y: yAt(d.total), d }));
   const maxYear = data.reduce((m, d) => (!m || d.total > m.total) ? d : m, null)?.year;
 
+  const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const baseY = (padT + innerH).toFixed(1);
+  const areaPath = `${linePath} L ${pts[pts.length - 1].x.toFixed(1)} ${baseY} L ${pts[0].x.toFixed(1)} ${baseY} Z`;
+
+  // 라벨이 위/아래 번갈아 붙도록 — 겹침 방지
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 480, height: "auto", display: "block" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 520, height: "auto", display: "block" }}>
         <defs>
-          <linearGradient id="yrlyBarGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={orange}/>
-            <stop offset="100%" stopColor={orangeLight}/>
-          </linearGradient>
-          <linearGradient id="yrlyBarGradTop" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#B84800"/>
-            <stop offset="100%" stopColor={orange}/>
+          <linearGradient id="yrlyAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={orange} stopOpacity="0.28"/>
+            <stop offset="100%" stopColor={orange} stopOpacity="0.02"/>
           </linearGradient>
         </defs>
+        {/* 가로 격자 + y축 라벨 */}
         {grids.map((v, i) => {
-          const y = padT + innerH - yScale(v);
+          const y = yAt(v);
           return (
             <g key={i}>
               <line x1={padL} y1={y} x2={W - padR} y2={y} stroke={grid} strokeWidth={1}/>
@@ -3375,20 +3377,23 @@ function YearlyBarChart({ data, darkMode }) {
             </g>
           );
         })}
-        {data.map((d, i) => {
-          const x = padL + i * (barW + barGap);
-          const h = yScale(d.total);
-          const y = padT + innerH - h;
-          const isMax = d.year === maxYear;
+        {/* 면적 + 라인 */}
+        <path d={areaPath} fill="url(#yrlyAreaGrad)"/>
+        <path d={linePath} fill="none" stroke={orange} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round"/>
+        {/* 마커 + 값/연도 라벨 */}
+        {pts.map((p, i) => {
+          const isMax = p.d.year === maxYear;
+          const labelAbove = p.y > padT + 24; // 위쪽 공간 있으면 위에, 없으면 아래
+          const ly = labelAbove ? p.y - 12 : p.y + 20;
           return (
-            <g key={d.year}>
-              <rect x={x} y={y} width={barW} height={h} fill={`url(#${isMax ? "yrlyBarGradTop" : "yrlyBarGrad"})`} rx={4}/>
-              <text x={x + barW / 2} y={y - 6} fontSize={10} fontWeight="700" fill={isMax ? "#B84800" : txtColor} textAnchor="middle">{fmt억(d.total)}</text>
-              <text x={x + barW / 2} y={H - padB + 18} fontSize={11} fontWeight={isMax ? 800 : 600} fill={isMax ? "#B84800" : txt2} textAnchor="middle">{d.year}</text>
+            <g key={p.d.year}>
+              <circle cx={p.x} cy={p.y} r={isMax ? 6 : 4.5} fill={isMax ? "#B84800" : "#fff"} stroke={orange} strokeWidth={2.5}/>
+              <text x={p.x} y={ly} fontSize={isMax ? 11 : 10} fontWeight={isMax ? 800 : 700} fill={isMax ? "#B84800" : lblColor} textAnchor="middle">{fmt억(p.d.total)}</text>
+              <text x={p.x} y={H - padB + 20} fontSize={11} fontWeight={isMax ? 800 : 600} fill={isMax ? "#B84800" : txt2} textAnchor="middle">'{String(p.d.year).slice(2)}</text>
             </g>
           );
         })}
-        <line x1={padL} y1={padT + innerH} x2={W - padR} y2={padT + innerH} stroke={darkMode ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.2)"} strokeWidth={1.5}/>
+        <line x1={padL} y1={padT + innerH} x2={W - padR} y2={padT + innerH} stroke={darkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.15)"} strokeWidth={1.5}/>
       </svg>
     </div>
   );
