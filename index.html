@@ -649,6 +649,15 @@
       animation: fadeIn 0.18s ease;
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    /* 토스 인터랙션 — 모달 rise(아래에서 부드럽게) + 버튼 press(살짝 눌림) */
+    @keyframes frwRise { from { transform: translateY(24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .frw-rise { animation: frwRise 0.25s cubic-bezier(0,0,0.2,1); }
+    button { transition: transform 0.1s ease, filter 0.15s ease; }
+    button:active:not(:disabled) { transform: scale(0.97); }
+    @media (prefers-reduced-motion: reduce) {
+      .frw-rise { animation: none; }
+      button:active:not(:disabled) { transform: none; }
+    }
 
     /* ─── 태블릿/작은 노트북 (1024px 이하) ─── */
     @media (max-width: 1024px) {
@@ -3352,7 +3361,7 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
       display: "flex", alignItems: "center", justifyContent: "center",
       padding: 16, animation: "fadeIn 0.2s ease",
     }}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div className="frw-rise" onClick={e => e.stopPropagation()} style={{
         background: "var(--surface)", borderRadius: 16,
         width: "100%", maxWidth: 920, maxHeight: "92vh",
         display: "flex", flexDirection: "column",
@@ -4143,7 +4152,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
 
       {adding && (
         <div onClick={() => setAdding(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", padding: 24, borderRadius: 14, minWidth: 300, width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div className="frw-rise" onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", padding: 24, borderRadius: 14, minWidth: 300, width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 14, color: "var(--text1)" }}>연도 추가</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <input type="number" placeholder="연도 (예: 2026)" value={newRow.year} onChange={e => setNewRow(s => ({ ...s, year: e.target.value }))} autoFocus
@@ -14508,7 +14517,7 @@ function NotesPanel({ notes, setNotes, clients, darkMode }) {
 
       {editing && (
         <div onClick={closeModal} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.3)", border: "1px solid var(--border)" }}>
+          <div className="frw-rise" onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.3)", border: "1px solid var(--border)" }}>
             <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>{editing._isNew ? "새 메모" : "메모 편집"}</div>
               <button onClick={closeModal} style={{ width: 28, height: 28, border: "none", borderRadius: 6, background: "transparent", color: "var(--text2)", cursor: "pointer", padding: 0, fontFamily: "inherit" }}><Icon name="close" size={14}/></button>
@@ -14796,7 +14805,7 @@ function RecurringPanel({ recurringSchedules, setRecurringSchedules, darkMode })
 
       {editing && (
         <div onClick={closeModal} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.3)", border: "1px solid var(--border)" }}>
+          <div className="frw-rise" onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 50px rgba(0,0,0,0.3)", border: "1px solid var(--border)" }}>
             <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>{editing._isNew ? "새 정기 일정" : "정기 일정 편집"}</div>
               <button onClick={closeModal} style={{ width: 28, height: 28, border: "none", borderRadius: 6, background: "transparent", color: "var(--text2)", cursor: "pointer", padding: 0, fontFamily: "inherit" }}><Icon name="close" size={14}/></button>
@@ -16118,7 +16127,7 @@ function MailDetailModal({ m, darkMode, onClose, onReply, onDelete }) {
   }, [onClose]);
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.55)", backdropFilter: "none", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, width: "100%", maxWidth: 720, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 48px rgba(0,0,0,0.32)" }}>
+      <div className="frw-rise" onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, width: "100%", maxWidth: 720, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 48px rgba(0,0,0,0.32)" }}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--divider)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text1)", flex: 1, lineHeight: 1.4 }}>{m.subject}</div>
@@ -16167,7 +16176,7 @@ function MailComposeModal({ initial, darkMode, clients = [], onSend, onCancel })
   };
   return (
     <div onClick={onCancel} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.55)", backdropFilter: "none", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 48px rgba(0,0,0,0.32)" }}>
+      <div className="frw-rise" onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 48px rgba(0,0,0,0.32)" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--divider)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text1)" }}>✏️ 새 메일</div>
           <button onClick={onCancel} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
