@@ -2293,7 +2293,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
             <input list="frw-orders-prod-list" placeholder="제품 선택 또는 직접 입력 *" value={newDraft.productName} onChange={e => setNewDraft(d => ({ ...d, productName: e.target.value }))}/>
             <input type="number" placeholder="수량" value={newDraft.qty} onChange={e => setNewDraft(d => ({ ...d, qty: e.target.value }))}/>
             <input type="number" placeholder="단가(원) *" value={newDraft.unitPrice} onChange={e => setNewDraft(d => ({ ...d, unitPrice: e.target.value }))}/>
-            <input placeholder="거래처명" value={newDraft.client} onChange={e => setNewDraft(d => ({ ...d, client: e.target.value }))}/>
+            <input list="frw-clients" placeholder="거래처명" value={newDraft.client} onChange={e => setNewDraft(d => ({ ...d, client: e.target.value }))}/>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "130px 130px 1fr auto auto", gap: 8 }}>
             <input type="date" value={newDraft.paymentDue} onChange={e => setNewDraft(d => ({ ...d, paymentDue: e.target.value }))} title="결제 예정일"/>
@@ -3122,7 +3122,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                   {clients.map(c=><option key={c.id} value={c.id}>{c.name}{c.contact?` - ${c.contact}`:""}</option>)}
                 </select>
               ) : (
-                <input placeholder="거래처명" value={newOrder.client} onChange={e=>setNewOrder(o=>({...o,client:e.target.value, clientId:""}))}/>
+                <input list="frw-clients" placeholder="거래처명" value={newOrder.client} onChange={e=>setNewOrder(o=>({...o,client:e.target.value, clientId:""}))}/>
               )}
               <input placeholder={newOrder.clientId?"비고":"거래처명 직접입력 (선택)"} value={newOrder.clientId?(newOrder.note||""):(newOrder.client||"")} onChange={e=>setNewOrder(o=>o.clientId?({...o,note:e.target.value}):({...o,client:e.target.value}))}/>
             </div>
@@ -3207,7 +3207,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                           {clients.map(cl=><option key={cl.id} value={cl.id}>{cl.name}</option>)}
                         </select>
                       ) : (
-                        <input value={editOrderDraft.client||""} onChange={e=>setEditOrderDraft(d=>({...d,client:e.target.value}))} placeholder="거래처" style={{height:34,fontSize:13,padding:"0 8px"}}/>
+                        <input list="frw-clients" value={editOrderDraft.client||""} onChange={e=>setEditOrderDraft(d=>({...d,client:e.target.value}))} placeholder="거래처" style={{height:34,fontSize:13,padding:"0 8px"}}/>
                       )}
                     </td>
                     <td style={{padding:"4px 8px"}}>
@@ -4860,7 +4860,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
             <div style={{fontSize:12,fontWeight:700,color:"var(--text3)",marginBottom:10,textTransform:"uppercase",letterSpacing:0.5}}>신규 거래처 청구 등록</div>
             <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-              <input placeholder="거래처명 *" value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addClient()}/>
+              <input list="frw-clients" placeholder="거래처명 *" value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addClient()}/>
               <input type="number" placeholder="공급가액" value={draft.supply} onChange={e=>{ const s=e.target.value; setDraft(d=>({...d,supply:s, tax:String(Math.round((parseFloat(s)||0)*0.1)), total:String(Math.round((parseFloat(s)||0)*1.1))})); }}/>
               <input type="number" placeholder="부가세 (자동)" value={draft.tax} onChange={e=>setDraft(d=>({...d,tax:e.target.value}))}/>
               <input type="number" placeholder="청구합계" value={draft.total} onChange={e=>setDraft(d=>({...d,total:e.target.value}))}/>
@@ -8792,7 +8792,7 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
         <div className="card">
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 공급처 추가</div>
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1.2fr", gap: 8, marginBottom: 8 }}>
-            <input placeholder="공급처명 * (예: ○○섬유)" value={newSupplier.name} onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addSupplier()} />
+            <input list="frw-suppliers" placeholder="공급처명 * (예: ○○섬유)" value={newSupplier.name} onChange={e => setNewSupplier({ ...newSupplier, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addSupplier()} />
             <input placeholder="담당자" value={newSupplier.contact} onChange={e => setNewSupplier({ ...newSupplier, contact: e.target.value })} />
             <input placeholder="전화번호" value={newSupplier.phone} onChange={e => setNewSupplier({ ...newSupplier, phone: e.target.value })} />
             <input placeholder="이메일" value={newSupplier.email} onChange={e => setNewSupplier({ ...newSupplier, email: e.target.value })} />
@@ -10272,6 +10272,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       {wizardOpen && <QuoteWizard clients={clients} products={products} materials={materials} laborItems={laborItems} darkMode={darkMode}
         onClose={() => setWizardOpen(false)}
         onSave={(entry) => { setSavedQuotes(prev => { const next = [entry, ...prev]; save("frw_quote_history", stripQuoteImages(next)); return next; }); }} />}
+      {/* 전역 거래처/공급처 자동완성 목록 — 오타로 인한 미수금 집계 오류 방지 (input에 list= 로 참조) */}
+      <datalist id="frw-clients">{(clients || []).map((c, i) => <option key={i} value={c.name}/>)}</datalist>
+      <datalist id="frw-suppliers">{(suppliers || []).map((s, i) => <option key={i} value={s.name}/>)}</datalist>
 
       {/* ── 모바일 백드롭 ── */}
       <div className={`mobile-sidebar-backdrop no-print${mobileSidebarOpen ? " show" : ""}`} onClick={() => setMobileSidebarOpen(false)} />
