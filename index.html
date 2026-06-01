@@ -1210,7 +1210,7 @@ function ImageUploader({ value, onChange, label = "이미지", maxWidth = 1024, 
           )}
           <div style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 4 }}>
             <button onClick={() => inputRef.current?.click()} title="교체" style={{ width: 28, height: 28, borderRadius: 6, border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", fontSize: 13 }}><Icon name="edit" size={14}/></button>
-            <button onClick={() => onChange("")} title="삭제" style={{ width: 28, height: 28, borderRadius: 6, border: "none", background: "rgba(240,68,82,0.85)", color: "#fff", cursor: "pointer", fontSize: 13 }}>✕</button>
+            <button onClick={() => onChange("")} title="삭제" style={{ width: 28, height: 28, borderRadius: 6, border: "none", background: "rgba(240,68,82,0.85)", color: "#fff", cursor: "pointer", fontSize: 13 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
           </div>
         </div>
       ) : (
@@ -2418,9 +2418,9 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
                       <td style={{fontSize:12,color:"var(--text2)"}}>{o.paymentDue||"—"}</td>
                       <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                         {isPaid ? (
-                          <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(0,180,147,0.15)",color:"#00B493",fontWeight:700}} title={`결제일: ${o.paidDate}`}>✓ 완납</span>
+                          <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(0,180,147,0.15)",color:"#00B493",fontWeight:700}} title={`결제일: ${o.paidDate}`}><Icon name="check" size={10} style={{marginRight:2,verticalAlign:"-1px"}}/>완납</span>
                         ) : isOverdue ? (
-                          <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}}>⚠ 연체</span>
+                          <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}}><Icon name="alert" size={10} style={{marginRight:3,verticalAlign:"-1px"}}/>연체</span>
                         ) : isPending ? (
                           <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(255,149,0,0.15)",color:"#FF9500",fontWeight:700}}>⏰ 미수</span>
                         ) : (
@@ -2435,7 +2435,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
                       if(!window.confirm(`이 판매 기록을 삭제할까요?\n\n${o.date} · ${o.productName} · ${Math.round(total).toLocaleString()}원`)) return;
                       if(!window.confirm(`⚠️ 한 번 더 확인합니다.\n\n삭제 후 복구 불가능합니다. 정말 진행하시겠습니까?`)) return;
                       setOrders(prev=>prev.filter(x=>x.id!==o.id));
-                    }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                    }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                       </td>
                     </tr>
                   );
@@ -2794,7 +2794,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
             cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
             display: "flex", alignItems: "center", justifyContent: "center",
             opacity: 0, transition: "opacity 0.15s", zIndex: 3,
-          }}>✕</button>
+          }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6,gap:6}}>
           <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,flex:1,minWidth:0}}>{label}</div>
         </div>
@@ -3099,7 +3099,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                 setOrders([]); setSelectedOrderIds(new Set());
               }}
                 style={{padding:"8px 12px",fontSize:12,fontWeight:700,color:"#F04452",background:"transparent",border:"1.5px solid rgba(240,68,82,0.4)",borderRadius:10,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}
-                title="전체 삭제 (확인 2회)">🗑 전체 삭제</button>
+                title="전체 삭제 (확인 2회)"><Icon name="trash" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>전체 삭제</button>
             )}
             <button onClick={()=>setShowOrderForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showOrderForm?"닫기":"+ 판매 추가"}</button>
           </div>
@@ -3151,7 +3151,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
               border: `1.5px solid ${darkMode ? "rgba(236,102,8,0.45)" : "rgba(236,102,8,0.30)"}`,
               display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
             }}>
-              <span style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>✓ {selectedOrderIds.size}건 선택됨</span>
+              <span style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}><Icon name="check" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>{selectedOrderIds.size}건 선택됨</span>
               <div style={{flex:1}}/>
               <button onClick={()=>setSelectedOrderIds(new Set())}
                 style={{padding:"7px 12px",fontSize:12,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1.5px solid var(--divider)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>선택 해제</button>
@@ -3162,7 +3162,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                 setOrders(prev => prev.filter(x => !selectedOrderIds.has(x.id)));
                 setSelectedOrderIds(new Set());
               }}
-                style={{padding:"7px 14px",fontSize:12,fontWeight:700,color:"#fff",background:"var(--negative)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",boxShadow:"var(--elev-2)"}}>🗑 선택 삭제 ({selectedOrderIds.size})</button>
+                style={{padding:"7px 14px",fontSize:12,fontWeight:700,color:"#fff",background:"var(--negative)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",boxShadow:"var(--elev-2)"}}><Icon name="trash" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>선택 삭제 ({selectedOrderIds.size})</button>
             </div>
           )}
           <div style={{overflowX:"auto"}}>
@@ -3249,7 +3249,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                   <td style={{fontSize:13}}>{o.client}</td>
                   <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                     {isPaid ? (
-                      <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(0,180,147,0.15)",color:"#00B493",fontWeight:700}} title={`결제일: ${o.paidDate}`}>✓ 완납</span>
+                      <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(0,180,147,0.15)",color:"#00B493",fontWeight:700}} title={`결제일: ${o.paidDate}`}><Icon name="check" size={10} style={{marginRight:2,verticalAlign:"-1px"}}/>완납</span>
                     ) : isOverdue ? (
                       <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}} title={`예정일: ${o.paymentDue}`}>⚠ 연체</span>
                     ) : isPending ? (
@@ -3266,7 +3266,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                       if(!window.confirm(`이 판매 기록을 삭제할까요?\n\n${o.date} · ${o.productName} · ${Math.round(total).toLocaleString()}원`)) return;
                       if(!window.confirm(`⚠️ 한 번 더 확인합니다.\n\n삭제 후 복구 불가능합니다. 정말 진행하시겠습니까?`)) return;
                       setOrders(prev=>prev.filter(x=>x.id!==o.id));
-                    }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                    }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                   </td>
                 </tr>);
               })}
@@ -3365,7 +3365,7 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
             background: "var(--surface2)", color: "var(--text2)",
             cursor: "pointer", fontSize: 18, fontWeight: 600,
             display: "flex", alignItems: "center", justifyContent: "center",
-          }}>✕</button>
+          }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
         </div>
         <div style={{ flex: 1, padding: 20, minHeight: 360, position: "relative" }}>
           <canvas ref={cv} />
@@ -3897,7 +3897,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
                       {!r._isLive && (
                         <button onClick={e => { e.stopPropagation(); deleteYear(r.year); }} title="삭제" style={{ background: "transparent", border: "none", color: "var(--text3)", fontSize: 13, cursor: "pointer", padding: 3 }}
                           onMouseEnter={e => e.currentTarget.style.color = "#F04452"}
-                          onMouseLeave={e => e.currentTarget.style.color = "var(--text3)"}>✕</button>
+                          onMouseLeave={e => e.currentTarget.style.color = "var(--text3)"}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                       )}
                     </td>
                   </tr>
@@ -4806,7 +4806,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="입금완료"?"2px solid #00B493":undefined,boxShadow:statusFilter==="입금완료"?"0 4px 14px rgba(0,180,147,0.22)":undefined}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>입금완료</div>
-            {statusFilter==="입금완료" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.18)",color:"#00B493"}}>✓ 필터중</span>}
+            {statusFilter==="입금완료" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.18)",color:"#00B493"}}><Icon name="check" size={9} style={{marginRight:2,verticalAlign:"-1px"}}/>필터중</span>}
           </div>
           <div className="kpi-num" style={{color:"#00B493"}}>{paidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
           <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(paidAmt).toLocaleString()}원</div>
@@ -4817,7 +4817,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="미입금"?"2px solid #FF9500":undefined,boxShadow:statusFilter==="미입금"?"0 4px 14px rgba(255,149,0,0.22)":undefined}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
             <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>미입금</div>
-            {statusFilter==="미입금" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(255,149,0,0.18)",color:"#FF9500"}}>✓ 필터중</span>}
+            {statusFilter==="미입금" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(255,149,0,0.18)",color:"#FF9500"}}><Icon name="check" size={9} style={{marginRight:2,verticalAlign:"-1px"}}/>필터중</span>}
           </div>
           <div className="kpi-num" style={{color:unpaidCount>0?"#FF9500":"#00B493"}}>{unpaidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
           <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(unpaidAmt).toLocaleString()}원</div>
@@ -4840,7 +4840,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           </select>
           <div style={{flex:1}}/>
           {monthClients.length > 0 && (
-            <button onClick={deleteAllInMonth} style={{padding:"8px 12px",fontSize:12,fontWeight:700,color:"#F04452",background:"transparent",border:"1.5px solid rgba(240,68,82,0.4)",borderRadius:10,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}} title={`${selectedYM} 월 전체 삭제`}>🗑 월 전체 삭제</button>
+            <button onClick={deleteAllInMonth} style={{padding:"8px 12px",fontSize:12,fontWeight:700,color:"#F04452",background:"transparent",border:"1.5px solid rgba(240,68,82,0.4)",borderRadius:10,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}} title={`${selectedYM} 월 전체 삭제`}><Icon name="trash" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>월 전체 삭제</button>
           )}
           <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 거래처 추가"}</button>
         </div>
@@ -4848,10 +4848,10 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         {/* 다중 선택 액션 바 */}
         {selectedIds.size > 0 && (
           <div style={{marginBottom:14,padding:"10px 14px",borderRadius:12,background:darkMode?"rgba(236,102,8,0.16)":"rgba(236,102,8,0.08)",border:`1.5px solid ${darkMode?"rgba(236,102,8,0.45)":"rgba(236,102,8,0.3)"}`,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-            <span style={{fontSize:14,fontWeight:700,color:"#475569"}}>✓ {selectedIds.size}곳 선택됨</span>
+            <span style={{fontSize:14,fontWeight:700,color:"#475569"}}><Icon name="check" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>{selectedIds.size}곳 선택됨</span>
             <div style={{flex:1}}/>
             <button onClick={clearSelection} style={{padding:"8px 14px",fontSize:12,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1.5px solid var(--divider)",borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>선택 해제</button>
-            <button onClick={deleteSelected} style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"#fff",background:"var(--negative)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"inherit",boxShadow:"var(--elev-2)"}}>🗑 선택 삭제 ({selectedIds.size})</button>
+            <button onClick={deleteSelected} style={{padding:"8px 16px",fontSize:12,fontWeight:700,color:"#fff",background:"var(--negative)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"inherit",boxShadow:"var(--elev-2)"}}><Icon name="trash" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>선택 삭제 ({selectedIds.size})</button>
           </div>
         )}
 
@@ -5016,7 +5016,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                         <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                           <button onClick={()=>setExpandedClientId(isExpanded?null:c.id)} title="미수금 상세" style={{background:"none",border:"none",cursor:"pointer",color:"var(--text2)",fontSize:14,marginRight:6}}>{isExpanded?"▼":"▶"}</button>
                           <button onClick={()=>startEdit(c)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:4}}><Icon name="edit" size={14}/></button>
-                          <button onClick={()=>deleteOne(c.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                          <button onClick={()=>deleteOne(c.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                         </td>
                       </tr>
                       {isExpanded && (
@@ -5166,7 +5166,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                                         <td style={{fontSize:13}}>{a.desc}</td>
                                         <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
                                         <td style={{fontSize:12,color:"var(--text2)"}}>{a.date}</td>
-                                        <td style={{textAlign:"center"}}><button onClick={()=>deleteAR(c.name, a.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
+                                        <td style={{textAlign:"center"}}><button onClick={()=>deleteAR(c.name, a.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button></td>
                                       </tr>
                                     );
                                   })}
@@ -5630,7 +5630,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                                         <td style={{fontSize:12,color:"var(--text2)"}}>{a.date||"—"}</td>
                                         <td style={{textAlign:"center"}}>
                                           <button onClick={()=>startEditAR(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:13,marginRight:4}}><Icon name="edit" size={14}/></button>
-                                          <button onClick={()=>deleteAR(c.name, a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button>
+                                          <button onClick={()=>deleteAR(c.name, a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                                         </td>
                                       </tr>
                                     );
@@ -6369,7 +6369,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                       </div>
                       <div style={{display:"flex",gap:4}}>
                         <button onClick={()=>startEditAcct(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:13}}><Icon name="edit" size={14}/></button>
-                        <button onClick={()=>deleteAcct(a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button>
+                        <button onClick={()=>deleteAcct(a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                       </div>
                     </div>
                     <div style={{fontSize:22,fontWeight:800,color:a.color||"#EC6608",letterSpacing:-0.3}}>{fmt(a.balance)}<span style={{fontSize:12,marginLeft:2,color:"var(--text2)"}}>원</span></div>
@@ -6670,7 +6670,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                         <td style={{fontSize:12,color:"var(--text2)"}}>{inv.memo}</td>
                         <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                           <button onClick={()=>startEditInv(inv)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:14,marginRight:4}}><Icon name="edit" size={14}/></button>
-                          <button onClick={()=>deleteInv(inv.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}>✕</button>
+                          <button onClick={()=>deleteInv(inv.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                         </td>
                       </tr>
                     );
@@ -6835,7 +6835,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                         <td style={{textAlign:"right",fontWeight:700,color:"#FF9500"}}>{fmt(s.amount)}원</td>
                         <td style={{textAlign:"center",fontSize:13}}>매월 {s.dueDay}일</td>
                         <td style={{fontSize:12,color:"var(--text2)"}}>{s.memo}</td>
-                        <td style={{textAlign:"center"}}><button onClick={()=>deleteSched(s.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}>✕</button></td>
+                        <td style={{textAlign:"center"}}><button onClick={()=>deleteSched(s.id)} style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -8248,7 +8248,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                   <td style={{fontSize:12,color:"var(--text2)"}}>{r.note}</td>
                   <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                     <button onClick={()=>startEdit(r)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}><Icon name="edit" size={14}/></button>
-                    <button onClick={()=>{ if(window.confirm(`이 입고 기록을 삭제할까요?\n${r.date} · ${r.materialName}`)) setFabricIntakes(prev=>prev.filter(x=>x.id!==r.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}>✕</button>
+                    <button onClick={()=>{ if(window.confirm(`이 입고 기록을 삭제할까요?\n${r.date} · ${r.materialName}`)) setFabricIntakes(prev=>prev.filter(x=>x.id!==r.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                   </td>
                 </tr>);
               })}
@@ -8598,7 +8598,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
             border: `1.5px solid ${darkMode ? "rgba(236,102,8,0.45)" : "rgba(236,102,8,0.3)"}`,
             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
           }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: NAVY }}>✓ {selectedIds.size}곳 선택됨</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: NAVY }}><Icon name="check" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>{selectedIds.size}곳 선택됨</span>
             <div style={{ flex: 1 }} />
             <button onClick={clearSelection}
               style={{
@@ -8676,7 +8676,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
                         <td><input type="text" value={editDraft.note || ""} onChange={e => setEditDraft({ ...editDraft, note: e.target.value })} /></td>
                         <td style={{ textAlign: "center" }}>
                           <button onClick={saveEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "#10B981", fontSize: 16, marginRight: 8 }}>✓</button>
-                          <button onClick={cancelEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 15 }}>✕</button>
+                          <button onClick={cancelEdit} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 15 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                         </td>
                       </>
                     ) : (
@@ -8701,7 +8701,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
                         <td style={{ fontSize: 13, color: "var(--text2)" }}>{c.note}</td>
                         <td style={{ textAlign: "center" }}>
                           <button onClick={() => startEdit(c)} title="수정" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 14, marginRight: 8 }}><Icon name="edit" size={14}/></button>
-                          <button onClick={() => deleteClient(c.id)} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14 }}>✕</button>
+                          <button onClick={() => deleteClient(c.id)} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                         </td>
                       </>
                     )}
@@ -8865,7 +8865,7 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
                     <td style={{ fontSize: 12, color: "var(--text2)" }}>{s.note}</td>
                     <td style={{ textAlign: "center" }}>
                       <button onClick={() => startEdit(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "#EC6608", fontSize: 14, marginRight: 6, fontFamily: "inherit" }}><Icon name="edit" size={14}/></button>
-                      <button onClick={() => deleteSupplier(s.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}>✕</button>
+                      <button onClick={() => deleteSupplier(s.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                     </td>
                   </tr>
                 ))}
@@ -12140,7 +12140,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           <button onClick={() => setPoDraft({ ...poDraft, items: poDraft.items.filter(x => x.id !== it.id) })}
                             style={{ width: 32, height: 32, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", color: T.text3, fontSize: 14, fontFamily: "inherit", flexShrink: 0, transition: "all 0.15s" }}
                             onMouseEnter={e => { e.currentTarget.style.background = "rgba(240,68,82,0.1)"; e.currentTarget.style.color = "#F04452"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text3; }}>✕</button>
+                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = T.text3; }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                         </div>
                       ))}
                     </div>
@@ -12218,7 +12218,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                         <div key={idx} style={{ position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${T.divider}`, background: T.surface2, transition: "transform 0.15s" }}>
                           <img src={ph.dataUrl} alt={ph.name} style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} />
                           <button onClick={() => setPoDraft({ ...poDraft, photos: poDraft.photos.filter((_, i) => i !== idx) })}
-                            style={{ position: "absolute", top: 6, right: 6, width: 26, height: 26, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.65)", color: "#fff", cursor: "pointer", fontSize: 12, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "none" }}>✕</button>
+                            style={{ position: "absolute", top: 6, right: 6, width: 26, height: 26, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.65)", color: "#fff", cursor: "pointer", fontSize: 12, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", backdropFilter: "none" }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                           <div style={{ padding: "6px 10px", fontSize: 11, fontWeight: 500, color: T.text2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ph.name}</div>
                         </div>
                       ))}
@@ -12509,7 +12509,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                     <div style={{ fontSize: 14, fontWeight: 800, color: NAVY, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(po.totalAmount || 0).toLocaleString()}원</div>
                                     <div style={{ textAlign: "center", display: "flex", gap: 4, justifyContent: "center" }}>
                                       <button onClick={(e) => { e.stopPropagation(); editPOFromHistory(po); }} title="수정" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 13, fontFamily: "inherit", padding: 4, display: "inline-flex", alignItems: "center" }}><Icon name="edit" size={14}/></button>
-                                      <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}>✕</button>
+                                      <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                                     </div>
                                   </div>
                                 );
@@ -13324,7 +13324,7 @@ function BidsTab({ bids, setBids, darkMode }) {
                       </div>
                       <div style={{display:"flex",gap:6,flexShrink:0}}>
                         <button onClick={()=>editBid(b)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:16,padding:4}}><Icon name="edit" size={14}/></button>
-                        <button onClick={()=>deleteBid(b.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:16,padding:4}}>✕</button>
+                        <button onClick={()=>deleteBid(b.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:16,padding:4}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                       </div>
                     </div>
                   </div>
@@ -14030,7 +14030,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
               <input type="date" value={draftEnd} onChange={e => setDraftEnd(e.target.value)} placeholder="종료일 (선택)" min={selectedDate}
                 style={{ height: 32, padding: "0 8px", fontSize: 12, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
               {draftEnd && (
-                <button onClick={() => setDraftEnd("")} title="종료일 지우기" style={{ width: 22, height: 22, border: "none", borderRadius: 4, background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 11, fontFamily: "inherit", padding: 0 }}>✕</button>
+                <button onClick={() => setDraftEnd("")} title="종료일 지우기" style={{ width: 22, height: 22, border: "none", borderRadius: 4, background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 11, fontFamily: "inherit", padding: 0 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
               )}
               <span style={{ marginLeft: "auto", fontStyle: "italic" }}>{draftEnd ? `${Math.round((new Date(draftEnd) - new Date(selectedDate))/86400000) + 1}일간` : "단일 일자"}</span>
             </div>
@@ -15945,7 +15945,7 @@ function MailDetailModal({ m, darkMode, onClose, onReply, onDelete }) {
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--divider)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 17, fontWeight: 700, color: "var(--text1)", flex: 1, lineHeight: 1.4 }}>{m.subject}</div>
-            <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}>✕</button>
+            <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
           </div>
           <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 4 }}>{m.from}</div>
           <div style={{ fontSize: 11, color: "var(--text3)" }}>{m.date?.toLocaleString("ko-KR") || ""}</div>
@@ -15993,7 +15993,7 @@ function MailComposeModal({ initial, darkMode, clients = [], onSend, onCancel })
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 48px rgba(0,0,0,0.32)" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--divider)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text1)" }}>✏️ 새 메일</div>
-          <button onClick={onCancel} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}>✕</button>
+          <button onClick={onCancel} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
