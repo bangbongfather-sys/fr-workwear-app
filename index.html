@@ -639,6 +639,7 @@
 
     /* ─── 햄버거 메뉴 버튼 (모바일 전용) ─── */
     .mobile-menu-btn { display: none; }
+    .mobile-bottomnav { display: none; }
 
     /* ─── 모바일 사이드바 백드롭 ─── */
     .mobile-sidebar-backdrop {
@@ -683,6 +684,19 @@
 
       /* 햄버거 버튼 표시 */
       .mobile-menu-btn { display: flex !important; }
+
+      /* 하단 탭바 (모바일 핵심 4탭 — 토스식 고정 네비) */
+      .mobile-bottomnav {
+        display: flex !important;
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: #14171D;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        z-index: 97;
+        padding-bottom: env(safe-area-inset-bottom);
+        justify-content: space-around;
+        box-shadow: 0 -2px 12px rgba(0,0,0,0.15);
+      }
+      .app-main { padding-bottom: 78px !important; }
 
       /* 메인 콘텐츠 폭 활용 */
       .main-content { padding: 16px 14px !important; }
@@ -10285,6 +10299,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       <datalist id="frw-clients">{(clients || []).map((c, i) => <option key={i} value={c.name}/>)}</datalist>
       <datalist id="frw-suppliers">{(suppliers || []).map((s, i) => <option key={i} value={s.name}/>)}</datalist>
 
+      {/* ── 모바일 하단 탭바 (핵심 4탭) ── */}
+      <nav className="mobile-bottomnav no-print">
+        {[["dashboard", "대시보드", "dashboard"], ["calc", "계산기", "calc"], ["quote", "견적", "quote"], ["ledger", "장부", "ledger"]].map(([id, label, icon]) => {
+          const active = tab === id;
+          return (
+            <button key={id} onClick={() => { setTab(id); setMobileSidebarOpen(false); }} style={{
+              flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+              padding: "8px 0 6px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit",
+              color: active ? "#EC6608" : "#8B95A1", transition: "color 0.15s",
+            }}>
+              <Icon name={icon} size={21}/>
+              <span style={{ fontSize: 10, fontWeight: active ? 700 : 500 }}>{label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
       {/* ── 모바일 백드롭 ── */}
       <div className={`mobile-sidebar-backdrop no-print${mobileSidebarOpen ? " show" : ""}`} onClick={() => setMobileSidebarOpen(false)} />
 
@@ -10364,7 +10395,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       </aside>
 
       {/* ── 메인 영역 ── */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: "12px 12px 12px 12px", gap: 12 }}>
+      <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: "12px 12px 12px 12px", gap: 12 }}>
 
       {/* ── 헤더 (떠있는 카드) ── */}
       <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, position: "sticky", top: 12, zIndex: 50, boxShadow: "0 1px 2px rgba(15,17,21,0.03), 0 2px 6px rgba(15,17,21,0.04)", backdropFilter: "none", WebkitBackdropFilter: "none" }} className="no-print">
