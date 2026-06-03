@@ -2101,8 +2101,8 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
       const grades = {};
       for (const g of gradeList) {
         const price = cur.grades[g] || 0; // 납품단가 = 현재값 고정
-        const curM = curCost > 0 ? (price - curCost) / curCost * 100 : 0;
-        const simM = simCost > 0 ? (price - simCost) / simCost * 100 : 0;
+        const curM = price > 0 ? (price - curCost) / price * 100 : 0; // 납품가 대비 마진율
+        const simM = price > 0 ? (price - simCost) / price * 100 : 0;
         grades[g] = { price, curM, simM, curAmt: price - curCost, simAmt: price - simCost };
       }
       const primary = grades.A || grades[gradeList[0]] || { curM: 0, simM: 0 };
@@ -2153,8 +2153,8 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     return {
       name: detailProd.name, grade: g, gradeList: gl, adminRate, lines,
       curDirect, simDirect, curAdmin, simAdmin, curTotal, simTotal, price,
-      curM: curTotal > 0 ? (price - curTotal) / curTotal * 100 : 0,
-      simM: simTotal > 0 ? (price - simTotal) / simTotal * 100 : 0,
+      curM: price > 0 ? (price - curTotal) / price * 100 : 0, // 납품가 대비 마진율
+      simM: price > 0 ? (price - simTotal) / price * 100 : 0,
       curAmt: price - curTotal, simAmt: price - simTotal,
     };
   }, [detailProd, detailGrade, materials, laborItems, scenario]);
@@ -2197,7 +2197,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
         <b style={{ color: "#EC6608" }}>🔥 인상 시뮬레이터</b> · 원자재·공임 단가를 가상으로 올려 제품 원가·마진 변화를 미리 봅니다.
         납품단가는 <b>현재값으로 고정</b>하고 원가만 변동시켜 마진 변화를 계산합니다.
         <b style={{ color: "#00B493" }}> 실제 단가 데이터는 절대 바뀌지 않습니다.</b>
-        <br/>마진율 = (납품단가 − 총원가) ÷ 총원가 × 100 · 인상률 0% 입력 시 현재값과 동일.
+        <br/>마진율 = (납품단가 − 총원가) ÷ 납품단가 × 100 (납품가 대비) · 인상률 0% 입력 시 현재값과 동일.
       </div>
 
       {/* 인상 입력 패널 */}
