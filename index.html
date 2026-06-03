@@ -607,6 +607,7 @@
     @media (max-width: 1024px) {
       .calc-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
       .calc-grid > div:last-child { position: static !important; }
+      .sim-input-grid { grid-template-columns: 1fr !important; }
       .price-highlight { padding: 18px !important; }
     }
 
@@ -2046,6 +2047,362 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
         💡 <b>계산 방식</b>: 단위 마진 = 납품가 − 원가 · 마진율 = 단위 마진 ÷ 납품가 × 100 · 총 매출 = 실 거래가 × 판매량 (판매 기록 합산) · <b>총 마진 = 총 매출 × 마진율</b><br/>
         💡 <b>색상</b>: <span style={{color:"#00B493",fontWeight:700}}>30%↑ 우수</span> / <span style={{color:"#FF9500",fontWeight:700}}>20~30% 보통</span> / <span style={{color:"#F04452",fontWeight:700}}>20%↓ 저조</span>
       </div>
+    </div>
+  );
+}
+
+// ── 단가 인상 시뮬레이터 ──
+// 원단/부자재/공임 단가가 오를 때 각 제품의 원가·마진 변화를 가상으로 계산.
+// computeProduct를 그대로 재사용하되, materials/laborItems의 "복사본"에만 인상을 적용한다.
+// → 실데이터(state)는 절대 건드리지 않고, laborId 참조/박힌 price 규칙(§3.3)도 자동으로 따른다.
+// 납품단가는 현재값으로 고정하고 원가만 변동시켜 마진 변화를 본다 (명세서 예시와 일치).
+function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
+  const [scenario, setScenario] = React.useState({}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
+  const [threshold, setThreshold] = React.useState(20);
+  const [expandGrades, setExpandGrades] = React.useState(false);
+  const [detailId, setDetailId] = React.useState(null);
+  const [detailGrade, setDetailGrade] = React.useState("A");
+  const [bulkMat, setBulkMat] = React.useState("");
+  const [bulkLabor, setBulkLabor] = React.useState("");
+
+  const fmt = n => Math.round(n || 0).toLocaleString();
+  const marginColor = r => r >= 30 ? "#00B493" : r >= threshold ? "#FF9500" : "#F04452";
+  const gradeColors = { A: "#EC6608", B: "#10B981", C: "#F59E0B", D: "#EF4444" };
+
+  // 시나리오 한 항목을 단가에 적용 (pct: +N%, abs: 목표 단가로 치환)
+  const applyTo = (price, sc) => {
+    if (!sc || sc.value === "" || sc.value == null) return price;
+    const v = parseFloat(sc.value);
+    if (isNaN(v)) return price;
+    return sc.mode === "abs" ? v : price * (1 + v / 100);
+  };
+  const setSc = (key, patch) => setScenario(prev => ({ ...prev, [key]: { mode: prev[key]?.mode || "pct", value: "", ...patch } }));
+
+  // 인상 적용된 단가 복사본 (실데이터 불변)
+  const simMaterials = React.useMemo(
+    () => materials.map(m => ({ ...m, price: applyTo(m.price, scenario["m:" + m.id]) })),
+    [materials, scenario]
+  );
+  const simLabor = React.useMemo(
+    () => laborItems.map(l => ({ ...l, price: applyTo(l.price, scenario["l:" + l.id]) })),
+    [laborItems, scenario]
+  );
+
+  const hasScenario = Object.values(scenario).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
+
+  // 제품별 현재→인상후 (등급별). 납품단가는 현재값 고정, 원가만 변동.
+  const rows = React.useMemo(() => {
+    return products.map(p => {
+      const cur = computeProduct(p, materials, laborItems);
+      if (cur.base <= 0) return null;
+      const sim = computeProduct(p, simMaterials, simLabor);
+      const curCost = cur.beforeMargin, simCost = sim.beforeMargin;
+      const gradeList = cur.gradeList || ["A", "B", "C", "D"];
+      const grades = {};
+      for (const g of gradeList) {
+        const price = cur.grades[g] || 0; // 납품단가 = 현재값 고정
+        const curM = curCost > 0 ? (price - curCost) / curCost * 100 : 0;
+        const simM = simCost > 0 ? (price - simCost) / simCost * 100 : 0;
+        grades[g] = { price, curM, simM, curAmt: price - curCost, simAmt: price - simCost };
+      }
+      const primary = grades.A || grades[gradeList[0]] || { curM: 0, simM: 0 };
+      return { id: p.id, name: p.name, curCost, simCost, gradeList, grades, drop: primary.curM - primary.simM };
+    }).filter(Boolean).sort((a, b) => b.drop - a.drop);
+  }, [products, materials, laborItems, simMaterials, simLabor]);
+
+  // 영향받는 제품 수 (인상후 마진이 임계 이하로 떨어진 제품)
+  const atRisk = rows.filter(r => {
+    const a = r.grades.A || r.grades[r.gradeList[0]];
+    return a && a.simM < threshold;
+  }).length;
+
+  // 상세 대상
+  const detailProd = products.find(p => p.id === detailId) || null;
+  const detail = React.useMemo(() => {
+    if (!detailProd) return null;
+    const spec = getActiveSpec(detailProd) || detailProd;
+    const adminRate = spec.adminRate || 0;
+    const lines = [];
+    (spec.fabrics || []).forEach(f => {
+      if (f.matId === "" || f.matId == null) return;
+      const m = materials.find(x => x.id == f.matId); if (!m) return;
+      const qty = parseFloat(f.qty || 0);
+      const curU = m.price || 0, simU = applyTo(m.price, scenario["m:" + m.id]);
+      lines.push({ kind: "원단", name: m.name, qty, curU, simU, cur: curU * qty, sim: simU * qty });
+    });
+    (spec.extras || []).forEach(e => {
+      const qty = parseFloat(e.qty || 1);
+      if (e.laborId !== "" && e.laborId != null) {
+        const l = laborItems.find(x => x.id == e.laborId); if (!l) return;
+        const curU = l.price || 0, simU = applyTo(l.price, scenario["l:" + l.id]);
+        lines.push({ kind: "부자재·공임", name: l.name, qty, curU, simU, cur: curU * qty, sim: simU * qty });
+      } else {
+        const u = parseFloat(e.price || 0);
+        if (!u && !e.customName) return;
+        lines.push({ kind: "부자재·공임", name: e.customName || "기타", qty, curU: u, simU: u, cur: u * qty, sim: u * qty, fixed: true });
+      }
+    });
+    const curDirect = lines.reduce((s, l) => s + l.cur, 0);
+    const simDirect = lines.reduce((s, l) => s + l.sim, 0);
+    const curAdmin = curDirect * (adminRate / 100), simAdmin = simDirect * (adminRate / 100);
+    const curTotal = curDirect + curAdmin, simTotal = simDirect + simAdmin;
+    const cur = computeProduct(detailProd, materials, laborItems);
+    const gl = cur.gradeList || ["A"];
+    const g = gl.includes(detailGrade) ? detailGrade : gl[0];
+    const price = cur.grades[g] || 0;
+    return {
+      name: detailProd.name, grade: g, gradeList: gl, adminRate, lines,
+      curDirect, simDirect, curAdmin, simAdmin, curTotal, simTotal, price,
+      curM: curTotal > 0 ? (price - curTotal) / curTotal * 100 : 0,
+      simM: simTotal > 0 ? (price - simTotal) / simTotal * 100 : 0,
+      curAmt: price - curTotal, simAmt: price - simTotal,
+    };
+  }, [detailProd, detailGrade, materials, laborItems, scenario]);
+
+  const cellR = { textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+  const arrow = (cur, sim) => sim < cur ? "▼" : sim > cur ? "▲" : "";
+
+  // 단가 입력 행
+  // 일반 함수로 호출 (JSX 컴포넌트로 쓰면 매 렌더마다 새 타입이 되어 input 포커스가 풀림)
+  const renderPriceRow = (item, keyPrefix) => {
+    const key = keyPrefix + ":" + item.id;
+    const sc = scenario[key] || { mode: "pct", value: "" };
+    const newPrice = applyTo(item.price, sc);
+    const changed = Math.round(newPrice) !== Math.round(item.price || 0);
+    return (
+      <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px dashed var(--divider)" }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+        <span style={{ fontSize: 12, color: "var(--text3)", ...cellR, minWidth: 78 }}>{fmt(item.price)}원</span>
+        <div style={{ display: "flex", gap: 2 }}>
+          {["pct", "abs"].map(md => (
+            <button key={md} onClick={() => setSc(key, { mode: md })}
+              style={{ width: 26, height: 28, border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                background: sc.mode === md ? "#EC6608" : "var(--surface2)", color: sc.mode === md ? "#fff" : "var(--text2)" }}>
+              {md === "pct" ? "%" : "원"}
+            </button>
+          ))}
+        </div>
+        <input type="number" value={sc.value} placeholder={sc.mode === "pct" ? "+%" : "→원"}
+          onChange={e => setSc(key, { value: e.target.value })}
+          style={{ width: 76, height: 30, fontSize: 13, textAlign: "right", borderRadius: 8, border: `1.5px solid ${changed ? "#EC6608" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+        <span style={{ fontSize: 12, fontWeight: 700, ...cellR, minWidth: 78, color: changed ? "#EC6608" : "var(--text3)" }}>{changed ? "→ " + fmt(newPrice) : "—"}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 안내 */}
+      <div style={{ fontSize: 12, color: "var(--text3)", padding: "11px 14px", background: "var(--surface2)", borderRadius: 10, lineHeight: 1.7 }}>
+        <b style={{ color: "#EC6608" }}>🔥 인상 시뮬레이터</b> · 원자재·공임 단가를 가상으로 올려 제품 원가·마진 변화를 미리 봅니다.
+        납품단가는 <b>현재값으로 고정</b>하고 원가만 변동시켜 마진 변화를 계산합니다.
+        <b style={{ color: "#00B493" }}> 실제 단가 데이터는 절대 바뀌지 않습니다.</b>
+        <br/>마진율 = (납품단가 − 총원가) ÷ 총원가 × 100 · 인상률 0% 입력 시 현재값과 동일.
+      </div>
+
+      {/* 인상 입력 패널 */}
+      <div className="card">
+        <div className="section-header">
+          <span className="section-header-title">① 인상 시나리오 입력</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--text2)" }}>위험 임계 마진</span>
+            <input type="number" value={threshold} onChange={e => setThreshold(Math.max(0, Number(e.target.value) || 0))}
+              style={{ width: 56, height: 30, fontSize: 13, textAlign: "right", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+            <span style={{ fontSize: 12, color: "var(--text2)" }}>%</span>
+            <button onClick={() => { setScenario({}); setBulkMat(""); setBulkLabor(""); }}
+              style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <Icon name="refresh" size={13}/>초기화
+            </button>
+          </div>
+        </div>
+
+        <div className="sim-input-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+          {/* 원단 */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}>🧵 원단 ({materials.length})</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <input type="number" value={bulkMat} placeholder="+%" onChange={e => setBulkMat(e.target.value)}
+                  style={{ width: 52, height: 26, fontSize: 12, textAlign: "right", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                <button onClick={() => { const v = parseFloat(bulkMat); if (isNaN(v)) return; setScenario(prev => { const n = { ...prev }; materials.forEach(m => { n["m:" + m.id] = { mode: "pct", value: String(v) }; }); return n; }); }}
+                  style={{ height: 26, padding: "0 9px", border: "none", borderRadius: 6, background: "#EC6608", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>전체 적용</button>
+              </div>
+            </div>
+            <div style={{ maxHeight: 280, overflowY: "auto" }}>
+              {materials.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 원단이 없습니다.</div>
+                : materials.map(m => renderPriceRow(m, "m"))}
+            </div>
+          </div>
+          {/* 부자재·공임 */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}>🧰 부자재·공임 ({laborItems.length})</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <input type="number" value={bulkLabor} placeholder="+%" onChange={e => setBulkLabor(e.target.value)}
+                  style={{ width: 52, height: 26, fontSize: 12, textAlign: "right", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                <button onClick={() => { const v = parseFloat(bulkLabor); if (isNaN(v)) return; setScenario(prev => { const n = { ...prev }; laborItems.forEach(l => { n["l:" + l.id] = { mode: "pct", value: String(v) }; }); return n; }); }}
+                  style={{ height: 26, padding: "0 9px", border: "none", borderRadius: 6, background: "#EC6608", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>전체 적용</button>
+              </div>
+            </div>
+            <div style={{ maxHeight: 280, overflowY: "auto" }}>
+              {laborItems.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 부자재·공임이 없습니다.</div>
+                : laborItems.map(l => renderPriceRow(l, "l"))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 전체 요약 */}
+      <div className="card">
+        <div className="section-header">
+          <span className="section-header-title">② 전체 영향 요약</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {hasScenario && atRisk > 0 && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#F04452", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <Icon name="alert" size={13}/>{atRisk}개 제품 마진 {threshold}% 미만
+              </span>
+            )}
+            <button onClick={() => setExpandGrades(v => !v)}
+              style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: expandGrades ? "#EC6608" : "var(--surface)", color: expandGrades ? "#fff" : "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              {expandGrades ? "A등급만" : "B/C/D 펼치기"}
+            </button>
+          </div>
+        </div>
+        {rows.length === 0 ? (
+          <div style={{ fontSize: 13, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>원가가 입력된 제품이 없습니다. 단가 계산기에서 원단·공임을 입력하세요.</div>
+        ) : (
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 620 }}>
+              <thead>
+                <tr style={{ color: "var(--text3)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                  <th style={{ textAlign: "left", padding: "8px 6px" }}>제품</th>
+                  <th style={{ padding: "8px 6px", width: 44 }}>등급</th>
+                  <th style={{ ...cellR, padding: "8px 6px" }}>현재 원가</th>
+                  <th style={{ ...cellR, padding: "8px 6px" }}>인상후 원가</th>
+                  <th style={{ ...cellR, padding: "8px 6px" }}>현재 마진</th>
+                  <th style={{ ...cellR, padding: "8px 6px" }}>인상후 마진</th>
+                  <th style={{ ...cellR, padding: "8px 6px" }}>변화</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => {
+                  const gl = expandGrades ? r.gradeList : [r.gradeList.includes("A") ? "A" : r.gradeList[0]];
+                  return gl.map((g, gi) => {
+                    const cell = r.grades[g]; if (!cell) return null;
+                    const risk = cell.simM < threshold;
+                    const dp = cell.curM - cell.simM;
+                    return (
+                      <tr key={r.id + ":" + g} style={{ borderTop: "1px solid var(--divider)", background: risk && hasScenario ? (darkMode ? "rgba(240,68,82,0.12)" : "rgba(240,68,82,0.06)") : "transparent" }}>
+                        <td style={{ padding: "9px 6px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {gi === 0 ? (
+                            <button onClick={() => { setDetailId(r.id); setDetailGrade(g); }} title="상세 보기"
+                              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--text1)", fontFamily: "inherit", textAlign: "left" }}>{r.name}</button>
+                          ) : <span style={{ color: "var(--text3)" }}>↳</span>}
+                        </td>
+                        <td style={{ textAlign: "center", padding: "9px 6px" }}>
+                          <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 6px", borderRadius: 4, background: gradeColors[g] || "#888", color: "#fff" }}>{g}</span>
+                        </td>
+                        <td style={{ ...cellR, padding: "9px 6px", color: "var(--text2)" }}>{fmt(r.curCost)}</td>
+                        <td style={{ ...cellR, padding: "9px 6px", color: r.simCost > r.curCost ? "#EC6608" : "var(--text2)", fontWeight: r.simCost > r.curCost ? 700 : 400 }}>{fmt(r.simCost)}</td>
+                        <td style={{ ...cellR, padding: "9px 6px", color: marginColor(cell.curM) }}>{cell.curM.toFixed(1)}%</td>
+                        <td style={{ ...cellR, padding: "9px 6px", color: marginColor(cell.simM), fontWeight: 700 }}>{cell.simM.toFixed(1)}%</td>
+                        <td style={{ ...cellR, padding: "9px 6px", color: dp > 0.05 ? "#F04452" : dp < -0.05 ? "#00B493" : "var(--text3)", fontWeight: 700 }}>
+                          {Math.abs(dp) < 0.05 ? "—" : `${arrow(cell.curM, cell.simM)} ${Math.abs(dp).toFixed(1)}%p`}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* 개별 상세 */}
+      {detail && (
+        <div className="card" style={{ borderLeft: "3px solid #EC6608" }}>
+          <div className="section-header">
+            <span className="section-header-title">③ 원가 분해 · {detail.name}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={() => { setActiveProdId(detailId); setCalcSubTab("calculator"); }} title="이 제품을 단가 계산기에서 열기"
+                style={{ height: 30, padding: "0 10px", border: "1.5px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4, marginRight: 4 }}>
+                <Icon name="calc" size={13}/>계산기
+              </button>
+              {detail.gradeList.map(g => (
+                <button key={g} onClick={() => setDetailGrade(g)}
+                  style={{ width: 32, height: 30, border: "none", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit",
+                    background: detail.grade === g ? (gradeColors[g] || "#888") : "var(--surface2)", color: detail.grade === g ? "#fff" : "var(--text2)" }}>{g}</button>
+              ))}
+              <button onClick={() => setDetailId(null)} title="닫기"
+                style={{ width: 30, height: 30, border: "1.5px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", marginLeft: 4 }}>✕</button>
+            </div>
+          </div>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 480 }}>
+              <thead>
+                <tr style={{ color: "var(--text3)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>
+                  <th style={{ textAlign: "left", padding: "7px 6px" }}>항목</th>
+                  <th style={{ ...cellR, padding: "7px 6px" }}>현재</th>
+                  <th style={{ ...cellR, padding: "7px 6px" }}>인상후</th>
+                  <th style={{ ...cellR, padding: "7px 6px" }}>변화</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.lines.map((l, i) => {
+                  const d = l.sim - l.cur;
+                  return (
+                    <tr key={i} style={{ borderTop: "1px solid var(--divider)" }}>
+                      <td style={{ padding: "8px 6px", color: "var(--text1)" }}>
+                        <span style={{ fontSize: 10, color: "var(--text3)", marginRight: 5 }}>{l.kind}</span>{l.name}
+                        <span style={{ fontSize: 11, color: "var(--text3)" }}> ×{l.qty}</span>
+                      </td>
+                      <td style={{ ...cellR, padding: "8px 6px", color: "var(--text2)" }}>{fmt(l.cur)}</td>
+                      <td style={{ ...cellR, padding: "8px 6px", color: d > 0 ? "#EC6608" : "var(--text2)", fontWeight: d > 0 ? 700 : 400 }}>{fmt(l.sim)}</td>
+                      <td style={{ ...cellR, padding: "8px 6px", color: d > 0 ? "#F04452" : "var(--text3)" }}>{d > 0 ? "+" + fmt(d) : "0"}</td>
+                    </tr>
+                  );
+                })}
+                {[
+                  ["직접원가", detail.curDirect, detail.simDirect, true],
+                  [`관리비 (${detail.adminRate}%)`, detail.curAdmin, detail.simAdmin, false],
+                  ["총원가", detail.curTotal, detail.simTotal, true],
+                ].map(([label, c, s, strong], i) => {
+                  const d = s - c;
+                  return (
+                    <tr key={"sum" + i} style={{ borderTop: i === 0 ? "2px solid var(--divider)" : "1px solid var(--divider)", fontWeight: strong ? 800 : 600 }}>
+                      <td style={{ padding: "8px 6px", color: "var(--text1)" }}>{label}</td>
+                      <td style={{ ...cellR, padding: "8px 6px", color: "var(--text1)" }}>{fmt(c)}</td>
+                      <td style={{ ...cellR, padding: "8px 6px", color: d > 0 ? "#EC6608" : "var(--text1)" }}>{fmt(s)}</td>
+                      <td style={{ ...cellR, padding: "8px 6px", color: d > 0 ? "#F04452" : "var(--text3)" }}>{d > 0 ? "+" + fmt(d) : "0"}</td>
+                    </tr>
+                  );
+                })}
+                <tr style={{ borderTop: "2px solid var(--divider)" }}>
+                  <td style={{ padding: "8px 6px", color: "var(--text2)" }}>납품단가 ({detail.grade})</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: "var(--text2)" }}>{fmt(detail.price)}</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: "var(--text2)" }}>{fmt(detail.price)}</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: "var(--text3)" }}>고정</td>
+                </tr>
+                <tr style={{ borderTop: "1px solid var(--divider)", fontWeight: 800 }}>
+                  <td style={{ padding: "8px 6px", color: "var(--text1)" }}>마진율</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: marginColor(detail.curM) }}>{detail.curM.toFixed(1)}%</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: marginColor(detail.simM) }}>{detail.simM.toFixed(1)}%</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: detail.simM < detail.curM ? "#F04452" : "#00B493" }}>
+                    {Math.abs(detail.curM - detail.simM) < 0.05 ? "—" : `${arrow(detail.curM, detail.simM)} ${Math.abs(detail.curM - detail.simM).toFixed(1)}%p`}
+                  </td>
+                </tr>
+                <tr style={{ borderTop: "1px solid var(--divider)", fontWeight: 700 }}>
+                  <td style={{ padding: "8px 6px", color: "var(--text2)" }}>마진액</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: "var(--text2)" }}>{fmt(detail.curAmt)}</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: "var(--text2)" }}>{fmt(detail.simAmt)}</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: detail.simAmt < detail.curAmt ? "#F04452" : "#00B493" }}>{fmt(detail.simAmt - detail.curAmt)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -9263,8 +9620,8 @@ function App() {
   const PO_SUBTABS = { current: { label: "발주서 작성", icon: "purchase" }, history: { label: "발주 이력", icon: "history" } };
   const poSubOrder = useSubtabOrder("frw_po_subtab_order", ["current", "history"], "data-po-sub");
   const [calcSubTab, setCalcSubTab] = useState("calculator"); // "calculator" | "profitability"
-  const CALC_SUBTABS = { calculator: { label: "단가 계산", icon: "calc" }, profitability: { label: "제품별 수익성 분석", icon: "trendingUp" } };
-  const calcSubOrder = useSubtabOrder("frw_calc_subtab_order", ["calculator", "profitability"], "data-calc-sub");
+  const CALC_SUBTABS = { calculator: { label: "단가 계산", icon: "calc" }, profitability: { label: "제품별 수익성 분석", icon: "trendingUp" }, simulator: { label: "인상 시뮬레이터", icon: "flame" } };
+  const calcSubOrder = useSubtabOrder("frw_calc_subtab_order", ["calculator", "profitability", "simulator"], "data-calc-sub");
   const [poStyle, setPoStyle] = useState(() => load("frw_po_style", "apple")); // apple | bold | card | korean
   useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
   const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
@@ -11280,6 +11637,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             )}
             {calcSubTab === "profitability" && (
               <ProductProfitabilityView products={products} materials={materials} laborItems={laborItems} orders={orders} darkMode={darkMode} setActiveProdId={setActiveProdId} setCalcSubTab={setCalcSubTab} T={T}/>
+            )}
+            {calcSubTab === "simulator" && (
+              <PriceIncreaseSimulator products={products} materials={materials} laborItems={laborItems} darkMode={darkMode} setActiveProdId={setActiveProdId} setCalcSubTab={setCalcSubTab} T={T}/>
             )}
           </div>
         )}
