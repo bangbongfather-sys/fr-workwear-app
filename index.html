@@ -2170,22 +2170,28 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     const newPrice = applyTo(item.price, sc);
     const changed = Math.round(newPrice) !== Math.round(item.price || 0);
     return (
-      <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px dashed var(--divider)" }}>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
-        <span style={{ fontSize: 12, color: "var(--text3)", ...cellR, minWidth: 78 }}>{fmt(item.price)}원</span>
-        <div style={{ display: "flex", gap: 2 }}>
-          {["pct", "abs"].map(md => (
-            <button key={md} onClick={() => setSc(key, { mode: md })}
-              style={{ width: 26, height: 28, border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
-                background: sc.mode === md ? "#EC6608" : "var(--surface2)", color: sc.mode === md ? "#fff" : "var(--text2)" }}>
-              {md === "pct" ? "%" : "원"}
-            </button>
-          ))}
+      <div key={key} style={{ padding: "12px 2px", borderBottom: "1px solid var(--divider)" }}>
+        {/* 1줄: 품목명(full) + 현재가 */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 9 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 500, color: "var(--text1)", lineHeight: 1.4, wordBreak: "break-word" }}>{item.name}</span>
+          <span style={{ fontSize: 12, color: "var(--text3)", ...cellR, flexShrink: 0, paddingTop: 1 }}>{fmt(item.price)}원</span>
         </div>
-        <input type="number" value={sc.value} placeholder={sc.mode === "pct" ? "+%" : "→원"}
-          onChange={e => setSc(key, { value: e.target.value })}
-          style={{ width: 76, height: 30, fontSize: 13, textAlign: "right", borderRadius: 8, border: `1.5px solid ${changed ? "#EC6608" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-        <span style={{ fontSize: 12, fontWeight: 700, ...cellR, minWidth: 78, color: changed ? "#EC6608" : "var(--text3)" }}>{changed ? "→ " + fmt(newPrice) : "—"}</span>
+        {/* 2줄: %원 토글 + 입력 + 변화량 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ display: "flex", gap: 3 }}>
+            {["pct", "abs"].map(md => (
+              <button key={md} onClick={() => setSc(key, { mode: md })}
+                style={{ width: 32, height: 32, border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                  background: sc.mode === md ? "#EC6608" : "var(--surface2)", color: sc.mode === md ? "#fff" : "var(--text2)" }}>
+                {md === "pct" ? "%" : "원"}
+              </button>
+            ))}
+          </div>
+          <input type="number" value={sc.value} placeholder={sc.mode === "pct" ? "+%" : "→ 원"}
+            onChange={e => setSc(key, { value: e.target.value })}
+            style={{ width: 96, height: 34, fontSize: 13, textAlign: "right", borderRadius: 8, border: `1.5px solid ${changed ? "#EC6608" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+          <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 700, ...cellR, color: changed ? "#EC6608" : "var(--text3)" }}>{changed ? "→ " + fmt(newPrice) : "—"}</span>
+        </div>
       </div>
     );
   };
@@ -2228,7 +2234,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
                   style={{ height: 26, padding: "0 9px", border: "none", borderRadius: 6, background: "#EC6608", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>전체 적용</button>
               </div>
             </div>
-            <div style={{ maxHeight: 280, overflowY: "auto" }}>
+            <div>
               {materials.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 원단이 없습니다.</div>
                 : materials.map(m => renderPriceRow(m, "m"))}
             </div>
@@ -2244,7 +2250,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
                   style={{ height: 26, padding: "0 9px", border: "none", borderRadius: 6, background: "#EC6608", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>전체 적용</button>
               </div>
             </div>
-            <div style={{ maxHeight: 280, overflowY: "auto" }}>
+            <div>
               {laborItems.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 부자재·공임이 없습니다.</div>
                 : laborItems.map(l => renderPriceRow(l, "l"))}
             </div>
