@@ -7837,7 +7837,28 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
 }
 
 // 매입 목록 뷰 (필터 가능: 전체 또는 특정 거래처)
-function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborItems = [], darkMode, filterSupplier }) {
+function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborItems = [], purchaseDateMemos = {}, setPurchaseDateMemos, darkMode, filterSupplier }) {
+  // 날짜 그룹 메모 인라인 편집 상태
+  const [editingMemoKey, setEditingMemoKey] = React.useState(null);
+  const [memoDraft, setMemoDraft] = React.useState("");
+  const memoKeyOf = (date, supplier) => `${date}|${(supplier || "").trim()}`;
+  const saveMemo = (date, supplier) => {
+    const k = memoKeyOf(date, supplier);
+    const v = memoDraft.trim();
+    if (setPurchaseDateMemos) {
+      setPurchaseDateMemos(prev => {
+        const next = { ...(prev || {}) };
+        if (v) next[k] = v; else delete next[k];
+        return next;
+      });
+    }
+    setEditingMemoKey(null);
+  };
+  const startMemoEdit = (date, supplier) => {
+    const k = memoKeyOf(date, supplier);
+    setMemoDraft(purchaseDateMemos[k] || "");
+    setEditingMemoKey(k);
+  };
   const STATUSES = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
   const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
   // 기간 필터: 시작일/종료일 (YYYY-MM-DD). 둘 다 빈 값이면 전체 기간.
