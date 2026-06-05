@@ -8538,6 +8538,10 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                   const groupIds = group.rows.map(r => r.id);
                   const allGroupSelected = groupIds.length > 0 && groupIds.every(id => selectedIds.has(id));
                   const someGroupSelected = groupIds.some(id => selectedIds.has(id));
+                  const groupSupplier = group.rows[0]?.supplier || "";
+                  const groupMemoKey = `${group.date}|${(groupSupplier || "").trim()}`;
+                  const currentMemo = purchaseDateMemos[groupMemoKey] || "";
+                  const isEditingMemo = editingMemoKey === groupMemoKey;
                   const groupHeaderRow = (
                     <tr key={`hdr-${group.date}`} style={{background: darkMode ? "rgba(236,102,8,0.10)" : "rgba(236,102,8,0.06)", borderTop:"2px solid var(--divider)"}}>
                       <td style={{textAlign:"center", padding:"10px 6px"}}>
@@ -8551,18 +8555,48 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                           onClick={e=>e.stopPropagation()}
                           style={{width:18, height:18, accentColor:"#EC6608", cursor:"pointer"}} />
                       </td>
-                      <td colSpan={11} style={{padding:"10px 14px", cursor:"pointer", userSelect:"none"}} onClick={() => toggleDateExpand(group.date)}>
-                        <span style={{display:"inline-flex", alignItems:"center", gap:10, fontSize:13, flexWrap:"wrap"}}>
-                          <span style={{fontSize:11, color:"var(--text3)", fontFamily:"monospace", minWidth:14, display:"inline-block"}}>{isCollapsed ? "▶" : "▼"}</span>
-                          <span style={{fontSize:14}}>📅</span>
-                          <b style={{color:"var(--text1)", fontSize:14, fontVariantNumeric:"tabular-nums"}}>{group.date}</b>
-                          <span style={{color:"var(--text2)", fontSize:12}}>· <b style={{color:"var(--text1)"}}>{group.rows.length}건</b></span>
-                          {Object.keys(groupQtyByUnit).length > 0 && (
-                            <span style={{color:"var(--text3)", fontSize:11}}>· {Object.entries(groupQtyByUnit).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" + ")}</span>
-                          )}
-                          <span style={{color:"var(--text2)", fontSize:12}}>· 공급가 <b style={{color:"#EC6608", fontSize:14}}>{Math.round(groupSum).toLocaleString()}원</b></span>
-                          <span style={{color:"var(--text3)", fontSize:11}}>(VAT 포함 {Math.round(groupSum*1.1).toLocaleString()}원)</span>
-                        </span>
+                      <td colSpan={11} style={{padding:"10px 14px", userSelect:"none"}}>
+                        <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap"}}>
+                          <span style={{display:"inline-flex", alignItems:"center", gap:10, fontSize:13, flexWrap:"wrap", cursor:"pointer", flex:"1 1 auto", minWidth:0}} onClick={() => toggleDateExpand(group.date)}>
+                            <span style={{fontSize:11, color:"var(--text3)", fontFamily:"monospace", minWidth:14, display:"inline-block"}}>{isCollapsed ? "▶" : "▼"}</span>
+                            <span style={{fontSize:14}}>📅</span>
+                            <b style={{color:"var(--text1)", fontSize:14, fontVariantNumeric:"tabular-nums"}}>{group.date}</b>
+                            <span style={{color:"var(--text2)", fontSize:12}}>· <b style={{color:"var(--text1)"}}>{group.rows.length}건</b></span>
+                            {Object.keys(groupQtyByUnit).length > 0 && (
+                              <span style={{color:"var(--text3)", fontSize:11}}>· {Object.entries(groupQtyByUnit).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" + ")}</span>
+                            )}
+                            <span style={{color:"var(--text2)", fontSize:12}}>· 공급가 <b style={{color:"#EC6608", fontSize:14}}>{Math.round(groupSum).toLocaleString()}원</b></span>
+                            <span style={{color:"var(--text3)", fontSize:11}}>(VAT 포함 {Math.round(groupSum*1.1).toLocaleString()}원)</span>
+                          </span>
+                          <span style={{display:"inline-flex", alignItems:"center", gap:6, flexShrink:0}} onClick={e=>e.stopPropagation()}>
+                            {currentMemo && !isEditingMemo && (
+                              <span onClick={()=>startMemoEdit(group.date, groupSupplier)} title="메모 클릭해서 수정"
+                                style={{display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:14, background:darkMode?"rgba(255,213,76,0.16)":"rgba(245,158,11,0.13)", color:darkMode?"#FFD54C":"#B45309", fontSize:12, fontWeight:600, cursor:"pointer", maxWidth:280, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                                📝 {currentMemo}
+                              </span>
+                            )}
+                            {!isEditingMemo && (
+                              <button onClick={()=>startMemoEdit(group.date, groupSupplier)} title={currentMemo ? "메모 수정" : "메모 추가"}
+                                style={{background:"transparent", border:"1px solid var(--border)", borderRadius:6, padding:"4px 9px", fontSize:11, fontWeight:600, color:"var(--text2)", cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>
+                                {currentMemo ? "✏️ 수정" : "📝 메모"}
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                        {isEditingMemo && (
+                          <div style={{display:"flex", alignItems:"center", gap:6, marginTop:8}} onClick={e=>e.stopPropagation()}>
+                            <input value={memoDraft} onChange={e=>setMemoDraft(e.target.value)} autoFocus
+                              placeholder="이 날짜 매입에 대한 메모 (예: 현금결제, 납품 지연 등)"
+                              onKeyDown={e=>{ if(e.key==="Enter") saveMemo(group.date, groupSupplier); if(e.key==="Escape") setEditingMemoKey(null); }}
+                              style={{flex:1, height:34, fontSize:13, padding:"0 10px", borderRadius:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text1)", fontFamily:"inherit"}}/>
+                            <button onClick={()=>saveMemo(group.date, groupSupplier)} style={{background:"#007AFF", border:"none", color:"#fff", fontSize:12, fontWeight:700, borderRadius:6, padding:"7px 12px", cursor:"pointer", fontFamily:"inherit"}}>저장</button>
+                            <button onClick={()=>setEditingMemoKey(null)} style={{background:"transparent", border:"1px solid var(--border)", color:"var(--text2)", fontSize:12, fontWeight:600, borderRadius:6, padding:"6px 11px", cursor:"pointer", fontFamily:"inherit"}}>취소</button>
+                            {currentMemo && (
+                              <button onClick={()=>{ if(window.confirm("이 날짜 메모를 삭제할까요?")){ setMemoDraft(""); setTimeout(()=>saveMemo(group.date, groupSupplier),0); } }}
+                                title="메모 삭제" style={{background:"transparent", border:"1px solid var(--border)", color:"#F04452", fontSize:12, fontWeight:600, borderRadius:6, padding:"6px 11px", cursor:"pointer", fontFamily:"inherit"}}>삭제</button>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
