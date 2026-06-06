@@ -2085,13 +2085,16 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
 // 원단/부자재/공임 단가가 오를 때 각 제품의 원가·마진 변화를 가상으로 계산.
 // computeProduct를 그대로 재사용하되, materials/laborItems의 "복사본"에만 인상을 적용한다.
 // → 실데이터(state)는 절대 건드리지 않고, laborId 참조/박힌 price 규칙(§3.3)도 자동으로 따른다.
-// 납품단가는 현재값으로 고정하고 원가만 변동시켜 마진 변화를 본다 (명세서 예시와 일치).
+// 납품단가는 기본 현재값 고정 (명세서 예시와 일치) — 납품가 인상률(전역/제품별) 입력 시 인상된 납품가로 마진 계산.
 function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
   const [scenario, setScenario] = React.useState({}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
   const [threshold, setThreshold] = React.useState(20);
   const [globalFab, setGlobalFab] = React.useState(0);   // 전체 원단 인상률 %
   const [globalAux, setGlobalAux] = React.useState(0);   // 전체 부자재·공임 인상률 %
+  const [globalPrice, setGlobalPrice] = React.useState(0); // 전체 납품가 인상률 %
+  const [priceSc, setPriceSc] = React.useState({});      // productId -> 납품가 인상률 % (개별 오버라이드)
   const [showIndividual, setShowIndividual] = React.useState(false); // 품목별 개별 입력 펼침
+  const [showPriceList, setShowPriceList] = React.useState(false);   // 제품별 납품가 인상 펼침
   const [gradeFilter, setGradeFilter] = React.useState("all"); // "all"|"A"|"B"|"C"|"D"
   const [sortKey, setSortKey] = React.useState("simM");  // 기본: 인상후 마진 오름차순(위험 위로)
   const [sortDir, setSortDir] = React.useState("asc");
@@ -2119,6 +2122,12 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     return g > 0 ? { mode: "pct", value: String(g) } : null;
   };
 
+  // 제품별 납품가 인상률: 개별 입력값 > 전역 슬라이더 (빈값/비숫자 → 전역 폴백, 0 입력 = 해당 제품 인상 제외)
+  const effPriceRate = pid => {
+    const v = parseFloat(priceSc[pid]);
+    return isNaN(v) ? globalPrice : v;
+  };
+
   // 인상 적용된 단가 복사본 (실데이터 불변)
   const simMaterials = React.useMemo(
     () => materials.map(m => ({ ...m, price: applyTo(m.price, effSc("m:" + m.id)) })),
@@ -2130,7 +2139,13 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
   );
 
   const hasOverride = Object.values(scenario).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
-  const hasScenario = hasOverride || globalFab > 0 || globalAux > 0;
+  const hasPriceOverride = Object.values(priceSc).some(v => v !== "" && v != null && !isNaN(parseFloat(v)) && parseFloat(v) !== 0);
+  const hasScenario = hasOverride || globalFab > 0 || globalAux > 0 || globalPrice > 0 || hasPriceOverride;
+  const scenarioSummary = !hasScenario ? "인상 미적용" : [
+    (globalFab > 0 || globalAux > 0) ? `원단 +${globalFab}% · 부자재 +${globalAux}%` : null,
+    globalPrice > 0 ? `납품가 +${globalPrice}%` : null,
+    (hasOverride || hasPriceOverride) ? "개별 조정" : null,
+  ].filter(Boolean).join(" · ");
 
   // 제품별 현재→인상후 (등급별). 납품단가는 현재값 고정, 원가만 변동.
   const rows = React.useMemo(() => {
@@ -2140,16 +2155,18 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
       const sim = computeProduct(p, simMaterials, simLabor);
       const curCost = cur.beforeMargin, simCost = sim.beforeMargin;
       const gradeList = cur.gradeList || ["A", "B", "C", "D"];
+      const priceRate = effPriceRate(p.id); // 납품가 인상률 % (개별 > 전역, 미입력 시 0 = 현재값 고정)
       const grades = {};
       for (const g of gradeList) {
-        const price = cur.grades[g] || 0; // 납품단가 = 현재값 고정
+        const price = cur.grades[g] || 0; // 현재 납품단가
+        const simPrice = price * (1 + priceRate / 100); // 인상후 납품단가
         const curM = price > 0 ? (price - curCost) / price * 100 : 0; // 납품가 대비 마진율
-        const simM = price > 0 ? (price - simCost) / price * 100 : 0;
-        grades[g] = { price, curM, simM, curAmt: price - curCost, simAmt: price - simCost };
+        const simM = simPrice > 0 ? (simPrice - simCost) / simPrice * 100 : 0;
+        grades[g] = { price, simPrice, curM, simM, curAmt: price - curCost, simAmt: simPrice - simCost };
       }
-      return { id: p.id, name: p.name, curCost, simCost, gradeList, grades };
+      return { id: p.id, name: p.name, curCost, simCost, gradeList, grades, priceRate };
     }).filter(Boolean);
-  }, [products, materials, laborItems, simMaterials, simLabor]);
+  }, [products, materials, laborItems, simMaterials, simLabor, priceSc, globalPrice]);
 
   // ── KPI: A등급(또는 gradeList[0]) 기준, 실 BOM에서 계산 ──
   const primaryOf = r => r.grades.A || r.grades[r.gradeList[0]];
@@ -2175,7 +2192,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
         if (gradeFilter !== "all" && g !== gradeFilter) return;
         const cell = r.grades[g]; if (!cell) return;
         out.push({ id: r.id, name: r.name, grade: g, curCost: r.curCost, simCost: r.simCost,
-          curM: cell.curM, simM: cell.simM, delta: cell.simM - cell.curM, price: cell.price });
+          curM: cell.curM, simM: cell.simM, delta: cell.simM - cell.curM, price: cell.price, simPrice: cell.simPrice, priceRate: r.priceRate });
       });
     });
     const dir = sortDir === "asc" ? 1 : -1;
@@ -2192,7 +2209,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     if (sortKey === key) { setSortDir(d => d === "asc" ? "desc" : "asc"); }
     else { setSortKey(key); setSortDir("asc"); }
   };
-  const resetAll = () => { setScenario({}); setGlobalFab(0); setGlobalAux(0); setThreshold(20); };
+  const resetAll = () => { setScenario({}); setGlobalFab(0); setGlobalAux(0); setGlobalPrice(0); setPriceSc({}); setThreshold(20); };
 
   // 상세 대상
   const detailProd = products.find(p => p.id === detailId) || null;
@@ -2228,14 +2245,16 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     const gl = cur.gradeList || ["A"];
     const g = gl.includes(detailGrade) ? detailGrade : gl[0];
     const price = cur.grades[g] || 0;
+    const priceRate = effPriceRate(detailProd.id);
+    const simPrice = price * (1 + priceRate / 100);
     return {
       name: detailProd.name, grade: g, gradeList: gl, adminRate, lines,
-      curDirect, simDirect, curAdmin, simAdmin, curTotal, simTotal, price,
+      curDirect, simDirect, curAdmin, simAdmin, curTotal, simTotal, price, simPrice, priceRate,
       curM: price > 0 ? (price - curTotal) / price * 100 : 0, // 납품가 대비 마진율
-      simM: price > 0 ? (price - simTotal) / price * 100 : 0,
-      curAmt: price - curTotal, simAmt: price - simTotal,
+      simM: simPrice > 0 ? (simPrice - simTotal) / simPrice * 100 : 0,
+      curAmt: price - curTotal, simAmt: simPrice - simTotal,
     };
-  }, [detailProd, detailGrade, materials, laborItems, scenario, globalFab, globalAux]);
+  }, [detailProd, detailGrade, materials, laborItems, scenario, globalFab, globalAux, priceSc, globalPrice]);
 
   const cellR = { textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
   const arrow = (cur, sim) => sim < cur ? "▼" : sim > cur ? "▲" : "";
@@ -2274,15 +2293,15 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     );
   };
 
-  // 인상률 슬라이더 섹션 (전역 원단 / 부자재) — 일반 함수 호출 (포커스 보존 패턴)
-  const renderGlobalSlider = (label, iconName, val, setVal) => (
+  // 인상률 슬라이더 섹션 (전역 원단 / 부자재 / 납품가) — 일반 함수 호출 (포커스 보존 패턴)
+  const renderGlobalSlider = (label, iconName, val, setVal, color = "var(--accent)") => (
     <div style={{ minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)" }}><Icon name={iconName} size={13} style={{marginRight:5, verticalAlign:"-2px"}}/>{label}</span>
-        <span style={{ fontSize: 13, color: "var(--text2)" }}><b style={{ color: "var(--accent)", fontSize: 17, fontVariantNumeric: "tabular-nums" }}>+{val}%</b></span>
+        <span style={{ fontSize: 13, color: "var(--text2)" }}><b style={{ color, fontSize: 17, fontVariantNumeric: "tabular-nums" }}>+{val}%</b></span>
       </div>
       <input type="range" min={0} max={40} step={1} value={val} onChange={e => setVal(Number(e.target.value))}
-        style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer", display: "block" }} />
+        style={{ width: "100%", accentColor: color, cursor: "pointer", display: "block" }} />
       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
         {[5, 10, 15, 20].map(p => (
           <button key={p} onClick={() => setVal(p)}
@@ -2291,6 +2310,23 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
       </div>
     </div>
   );
+
+  // 제품별 납품가 인상률 행 — 일반 함수 호출 (포커스 보존 패턴). 현재가는 A등급(대표) 기준 표시.
+  const renderProductPriceRow = (r) => {
+    const basePrice = (r.grades.A || r.grades[r.gradeList[0]] || {}).price || 0;
+    const rate = r.priceRate || 0;
+    const changed = rate !== 0;
+    return (
+      <div key={"pp:" + r.id} style={{ padding: "8px 2px", borderBottom: "1px solid var(--divider)", display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.name}>{r.name}</span>
+        <span style={{ fontSize: 12, color: "var(--text3)", ...cellR, flexShrink: 0 }}>{fmt(basePrice)}원</span>
+        <input type="number" value={priceSc[r.id] ?? ""} placeholder={globalPrice > 0 ? "+" + globalPrice : "+%"}
+          onChange={e => setPriceSc(prev => ({ ...prev, [r.id]: e.target.value }))}
+          style={{ width: 64, height: 30, fontSize: 13, textAlign: "right", borderRadius: 8, border: `1.5px solid ${changed ? "#00B493" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit", flexShrink: 0 }} />
+        <span style={{ fontSize: 13, fontWeight: 700, ...cellR, color: changed ? "#00B493" : "var(--text3)", minWidth: 80, flexShrink: 0 }}>{changed ? "→ " + fmt(basePrice * (1 + rate / 100)) : "—"}</span>
+      </div>
+    );
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -2305,8 +2341,8 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
               <span style={{ fontSize: 12, color: "var(--text3)", textDecoration: "line-through", fontVariantNumeric: "tabular-nums" }}>{kpi.curAvg.toFixed(1)}%</span>
             )}
           </div>
-          <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: kpi.simAvg < kpi.curAvg - 0.05 ? "#F04452" : "var(--text3)" }}>
-            {kpi.simAvg < kpi.curAvg - 0.05 ? "▼ " + (kpi.curAvg - kpi.simAvg).toFixed(1) + "%p" : "변동 없음"}
+          <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: kpi.simAvg < kpi.curAvg - 0.05 ? "#F04452" : kpi.simAvg > kpi.curAvg + 0.05 ? "#00B493" : "var(--text3)" }}>
+            {kpi.simAvg < kpi.curAvg - 0.05 ? "▼ " + (kpi.curAvg - kpi.simAvg).toFixed(1) + "%p" : kpi.simAvg > kpi.curAvg + 0.05 ? "▲ " + (kpi.simAvg - kpi.curAvg).toFixed(1) + "%p" : "변동 없음"}
           </div>
         </div>
         {/* 2. 위험 임계 이하 제품 */}
@@ -2325,7 +2361,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
         <div className="card" style={{ padding: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>총 원가 영향 · A등급 {kpi.n}개</div>
           <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-display)", color: kpi.costImpact > 0 ? "#EC6608" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>+{fmt(kpi.costImpact)}<span style={{ fontSize: 15, fontWeight: 600 }}>원</span></div>
-          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>{!hasScenario ? "인상 미적용" : (globalFab > 0 || globalAux > 0) ? `원단 +${globalFab}% · 부자재 +${globalAux}%${hasOverride ? " · 개별 조정" : ""}` : "개별 조정 적용"}</div>
+          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>{scenarioSummary}</div>
         </div>
       </div>
 
@@ -2339,12 +2375,13 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
           </button>
         </div>
         <div style={{ fontSize: 12, color: "var(--text3)", lineHeight: 1.6, marginBottom: 16 }}>
-          납품단가는 고정 · 원가만 변동시켜 마진 변화를 계산합니다. 실제 데이터는 바뀌지 않습니다.
+          원가·납품가 인상률을 가상으로 적용해 마진 변화를 계산합니다. 납품가 인상률 미입력 시 납품단가는 현재값 고정 · 실제 데이터는 바뀌지 않습니다.
         </div>
 
         <div className="sim-input-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 22 }}>
           {renderGlobalSlider("전체 원단 인상률", "layers", globalFab, setGlobalFab)}
           {renderGlobalSlider("전체 부자재·공임 인상률", "wrench", globalAux, setGlobalAux)}
+          {renderGlobalSlider("전체 납품가 인상률", "trendingUp", globalPrice, setGlobalPrice, "#00B493")}
         </div>
 
         {/* 위험 임계 마진 슬라이더 */}
@@ -2380,6 +2417,24 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
                   {laborItems.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 부자재·공임이 없습니다.</div>
                     : laborItems.map(l => renderPriceRow(l, "l"))}
                 </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 접이식 제품별 납품가 인상률 */}
+        <div style={{ marginTop: 12, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
+          <button onClick={() => setShowPriceList(v => !v)}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#00B493", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            {showPriceList ? "−" : "＋"} 제품별 납품가 인상률 (제품 {rows.length})
+          </button>
+          {showPriceList && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 6, lineHeight: 1.6 }}>
+                현재가는 A등급(대표) 기준 · 인상률(%)은 모든 등급 납품가에 동일 적용 · 비워두면 전체 납품가 인상률({globalPrice}%) 적용, <b>0</b> 입력 시 해당 제품 인상 제외
+              </div>
+              <div className="sim-input-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 18px" }}>
+                {rows.map(r => renderProductPriceRow(r))}
               </div>
             </div>
           )}
@@ -2437,6 +2492,9 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
                       <td style={{ padding: "9px 6px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         <button onClick={() => { setDetailId(r.id); setDetailGrade(r.grade); }} title="상세 보기"
                           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--text1)", fontFamily: "inherit", textAlign: "left" }}>{r.name}</button>
+                        {(r.priceRate || 0) !== 0 && (
+                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "#00B493", background: "rgba(0,180,147,0.12)", padding: "1px 6px", borderRadius: 4, verticalAlign: "middle", whiteSpace: "nowrap" }}>납품가{r.priceRate > 0 ? "+" : ""}{r.priceRate}%</span>
+                        )}
                         {risk && hasScenario && (
                           <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: "#F04452", display: "inline-flex", alignItems: "center", gap: 2, verticalAlign: "middle" }}><Icon name="alert" size={11}/>위험</span>
                         )}
@@ -2466,7 +2524,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
           </div>
         )}
         <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 12, lineHeight: 1.6 }}>
-          마진율 = (납품단가 − 총원가) ÷ 납품단가 × 100 · 납품단가는 현재값 고정 · 데모 가정 없음(실제 요척서 BOM 기준)
+          마진율 = (납품단가 − 총원가) ÷ 납품단가 × 100 · 인상후 마진은 인상후 납품가 기준 (납품가 인상률 미입력 시 현재값 고정) · 실제 요척서 BOM 기준
         </div>
       </div>
 
@@ -2532,8 +2590,8 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
                 <tr style={{ borderTop: "2px solid var(--divider)" }}>
                   <td style={{ padding: "8px 6px", color: "var(--text2)" }}>납품단가 ({detail.grade})</td>
                   <td style={{ ...cellR, padding: "8px 6px", color: "var(--text2)" }}>{fmt(detail.price)}</td>
-                  <td style={{ ...cellR, padding: "8px 6px", color: "var(--text2)" }}>{fmt(detail.price)}</td>
-                  <td style={{ ...cellR, padding: "8px 6px", color: "var(--text3)" }}>고정</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: detail.priceRate ? "#00B493" : "var(--text2)", fontWeight: detail.priceRate ? 700 : 400 }}>{fmt(detail.simPrice)}</td>
+                  <td style={{ ...cellR, padding: "8px 6px", color: detail.priceRate ? "#00B493" : "var(--text3)" }}>{detail.priceRate ? (detail.priceRate > 0 ? "+" : "") + detail.priceRate + "%" : "고정"}</td>
                 </tr>
                 <tr style={{ borderTop: "1px solid var(--divider)", fontWeight: 800 }}>
                   <td style={{ padding: "8px 6px", color: "var(--text1)" }}>마진율</td>
