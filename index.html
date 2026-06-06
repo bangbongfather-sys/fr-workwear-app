@@ -616,6 +616,18 @@
       .price-highlight { padding: 18px !important; }
     }
 
+    /* ─── 인상 시뮬레이터 ─── */
+    .sim-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    @media (max-width: 1024px) { .sim-kpis { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 600px) { .sim-kpis { grid-template-columns: 1fr; } }
+    .sim-chip {
+      height: 28px; padding: 0 11px; border: 1.5px solid var(--border); border-radius: 8px;
+      background: var(--surface2); color: var(--text2); font-size: 12px; font-weight: 700;
+      cursor: pointer; font-family: inherit; white-space: nowrap; line-height: 1; transition: all 0.12s;
+    }
+    .sim-chip:hover { border-color: var(--accent); color: var(--accent); }
+    .sim-chip[data-active="1"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
     /* ─── 모바일 (768px 이하) ─── */
     @media (max-width: 768px) {
       body { font-size: 14px; }
@@ -2077,11 +2089,14 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
 function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
   const [scenario, setScenario] = React.useState({}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
   const [threshold, setThreshold] = React.useState(20);
-  const [expandGrades, setExpandGrades] = React.useState(false);
+  const [globalFab, setGlobalFab] = React.useState(0);   // 전체 원단 인상률 %
+  const [globalAux, setGlobalAux] = React.useState(0);   // 전체 부자재·공임 인상률 %
+  const [showIndividual, setShowIndividual] = React.useState(false); // 품목별 개별 입력 펼침
+  const [gradeFilter, setGradeFilter] = React.useState("all"); // "all"|"A"|"B"|"C"|"D"
+  const [sortKey, setSortKey] = React.useState("simM");  // 기본: 인상후 마진 오름차순(위험 위로)
+  const [sortDir, setSortDir] = React.useState("asc");
   const [detailId, setDetailId] = React.useState(null);
   const [detailGrade, setDetailGrade] = React.useState("A");
-  const [bulkMat, setBulkMat] = React.useState("");
-  const [bulkLabor, setBulkLabor] = React.useState("");
 
   const fmt = n => Math.round(n || 0).toLocaleString();
   const marginColor = r => r >= 30 ? "#00B493" : r >= threshold ? "#FF9500" : "#F04452";
@@ -2096,17 +2111,26 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
   };
   const setSc = (key, patch) => setScenario(prev => ({ ...prev, [key]: { mode: prev[key]?.mode || "pct", value: "", ...patch } }));
 
+  // 전역 + 오버라이드 우선순위: 품목별 개별 입력값이 있으면 그것을, 없으면 전역 슬라이더(%)를 적용
+  const effSc = key => {
+    const sc = scenario[key];
+    if (sc && sc.value !== "" && sc.value != null && !isNaN(parseFloat(sc.value))) return sc;
+    const g = key.charAt(0) === "m" ? globalFab : globalAux;
+    return g > 0 ? { mode: "pct", value: String(g) } : null;
+  };
+
   // 인상 적용된 단가 복사본 (실데이터 불변)
   const simMaterials = React.useMemo(
-    () => materials.map(m => ({ ...m, price: applyTo(m.price, scenario["m:" + m.id]) })),
-    [materials, scenario]
+    () => materials.map(m => ({ ...m, price: applyTo(m.price, effSc("m:" + m.id)) })),
+    [materials, scenario, globalFab, globalAux]
   );
   const simLabor = React.useMemo(
-    () => laborItems.map(l => ({ ...l, price: applyTo(l.price, scenario["l:" + l.id]) })),
-    [laborItems, scenario]
+    () => laborItems.map(l => ({ ...l, price: applyTo(l.price, effSc("l:" + l.id)) })),
+    [laborItems, scenario, globalFab, globalAux]
   );
 
-  const hasScenario = Object.values(scenario).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
+  const hasOverride = Object.values(scenario).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
+  const hasScenario = hasOverride || globalFab > 0 || globalAux > 0;
 
   // 제품별 현재→인상후 (등급별). 납품단가는 현재값 고정, 원가만 변동.
   const rows = React.useMemo(() => {
@@ -2123,16 +2147,52 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
         const simM = price > 0 ? (price - simCost) / price * 100 : 0;
         grades[g] = { price, curM, simM, curAmt: price - curCost, simAmt: price - simCost };
       }
-      const primary = grades.A || grades[gradeList[0]] || { curM: 0, simM: 0 };
-      return { id: p.id, name: p.name, curCost, simCost, gradeList, grades, drop: primary.curM - primary.simM };
-    }).filter(Boolean).sort((a, b) => b.drop - a.drop);
+      return { id: p.id, name: p.name, curCost, simCost, gradeList, grades };
+    }).filter(Boolean);
   }, [products, materials, laborItems, simMaterials, simLabor]);
 
-  // 영향받는 제품 수 (인상후 마진이 임계 이하로 떨어진 제품)
-  const atRisk = rows.filter(r => {
-    const a = r.grades.A || r.grades[r.gradeList[0]];
-    return a && a.simM < threshold;
-  }).length;
+  // ── KPI: A등급(또는 gradeList[0]) 기준, 실 BOM에서 계산 ──
+  const primaryOf = r => r.grades.A || r.grades[r.gradeList[0]];
+  const kpi = React.useMemo(() => {
+    const ps = rows.map(primaryOf).filter(Boolean);
+    const n = ps.length;
+    const avg = arr => arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+    const curAvg = avg(ps.map(p => p.curM));
+    const simAvg = avg(ps.map(p => p.simM));
+    const riskCur = ps.filter(p => p.curM < threshold).length;
+    const riskSim = ps.filter(p => p.simM < threshold).length;
+    let worst = null;
+    rows.forEach(r => { const p = primaryOf(r); if (p && (!worst || p.simM < worst.simM)) worst = { simM: p.simM, name: r.name }; });
+    const costImpact = rows.reduce((s, r) => s + (r.simCost - r.curCost), 0);
+    return { n, curAvg, simAvg, riskCur, riskSim, worst, costImpact };
+  }, [rows, threshold]);
+
+  // ── 영향 요약 테이블: 제품×등급 평탄화 → 필터 → 정렬 ──
+  const flatRows = React.useMemo(() => {
+    const out = [];
+    rows.forEach(r => {
+      r.gradeList.forEach(g => {
+        if (gradeFilter !== "all" && g !== gradeFilter) return;
+        const cell = r.grades[g]; if (!cell) return;
+        out.push({ id: r.id, name: r.name, grade: g, curCost: r.curCost, simCost: r.simCost,
+          curM: cell.curM, simM: cell.simM, delta: cell.simM - cell.curM, price: cell.price });
+      });
+    });
+    const dir = sortDir === "asc" ? 1 : -1;
+    out.sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (sortKey === "name" || sortKey === "grade") return String(av).localeCompare(String(bv)) * dir;
+      return ((av || 0) - (bv || 0)) * dir;
+    });
+    return out;
+  }, [rows, gradeFilter, sortKey, sortDir]);
+  const maxAbsDelta = React.useMemo(() => flatRows.reduce((m, r) => Math.max(m, Math.abs(r.delta)), 0), [flatRows]);
+
+  const toggleSort = key => {
+    if (sortKey === key) { setSortDir(d => d === "asc" ? "desc" : "asc"); }
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+  const resetAll = () => { setScenario({}); setGlobalFab(0); setGlobalAux(0); setThreshold(20); };
 
   // 상세 대상
   const detailProd = products.find(p => p.id === detailId) || null;
@@ -2145,14 +2205,14 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
       if (f.matId === "" || f.matId == null) return;
       const m = materials.find(x => x.id == f.matId); if (!m) return;
       const qty = parseFloat(f.qty || 0);
-      const curU = m.price || 0, simU = applyTo(m.price, scenario["m:" + m.id]);
+      const curU = m.price || 0, simU = applyTo(m.price, effSc("m:" + m.id));
       lines.push({ kind: "원단", name: m.name, qty, curU, simU, cur: curU * qty, sim: simU * qty });
     });
     (spec.extras || []).forEach(e => {
       const qty = parseFloat(e.qty || 1);
       if (e.laborId !== "" && e.laborId != null) {
         const l = laborItems.find(x => x.id == e.laborId); if (!l) return;
-        const curU = l.price || 0, simU = applyTo(l.price, scenario["l:" + l.id]);
+        const curU = l.price || 0, simU = applyTo(l.price, effSc("l:" + l.id));
         lines.push({ kind: "부자재·공임", name: l.name, qty, curU, simU, cur: curU * qty, sim: simU * qty });
       } else {
         const u = parseFloat(e.price || 0);
@@ -2175,7 +2235,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
       simM: price > 0 ? (price - simTotal) / price * 100 : 0,
       curAmt: price - curTotal, simAmt: price - simTotal,
     };
-  }, [detailProd, detailGrade, materials, laborItems, scenario]);
+  }, [detailProd, detailGrade, materials, laborItems, scenario, globalFab, globalAux]);
 
   const cellR = { textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
   const arrow = (cur, sim) => sim < cur ? "▼" : sim > cur ? "▲" : "";
@@ -2185,7 +2245,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
   const renderPriceRow = (item, keyPrefix) => {
     const key = keyPrefix + ":" + item.id;
     const sc = scenario[key] || { mode: "pct", value: "" };
-    const newPrice = applyTo(item.price, sc);
+    const newPrice = applyTo(item.price, effSc(key)); // 전역 적용 중인 품목도 변화가 보이게 effSc 기준
     const changed = Math.round(newPrice) !== Math.round(item.price || 0);
     return (
       <div key={key} style={{ padding: "8px 2px", borderBottom: "1px solid var(--divider)" }}>
@@ -2214,133 +2274,200 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     );
   };
 
+  // 인상률 슬라이더 섹션 (전역 원단 / 부자재) — 일반 함수 호출 (포커스 보존 패턴)
+  const renderGlobalSlider = (label, iconName, val, setVal) => (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)" }}><Icon name={iconName} size={13} style={{marginRight:5, verticalAlign:"-2px"}}/>{label}</span>
+        <span style={{ fontSize: 13, color: "var(--text2)" }}><b style={{ color: "var(--accent)", fontSize: 17, fontVariantNumeric: "tabular-nums" }}>+{val}%</b></span>
+      </div>
+      <input type="range" min={0} max={40} step={1} value={val} onChange={e => setVal(Number(e.target.value))}
+        style={{ width: "100%", accentColor: "var(--accent)", cursor: "pointer", display: "block" }} />
+      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        {[5, 10, 15, 20].map(p => (
+          <button key={p} onClick={() => setVal(p)}
+            className="sim-chip" data-active={val === p ? "1" : undefined}>+{p}%</button>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* 안내 */}
-      <div style={{ fontSize: 12, color: "var(--text3)", padding: "11px 14px", background: "var(--surface2)", borderRadius: 10, lineHeight: 1.7 }}>
-        <b style={{ color: "#EC6608" }}><Icon name="flame" size={12} style={{marginRight:3, verticalAlign:"-2px"}}/>인상 시뮬레이터</b> · 원자재·공임 단가를 가상으로 올려 제품 원가·마진 변화를 미리 봅니다.
-        납품단가는 <b>현재값으로 고정</b>하고 원가만 변동시켜 마진 변화를 계산합니다.
-        <b style={{ color: "#00B493" }}> 실제 단가 데이터는 절대 바뀌지 않습니다.</b>
-        <br/>마진율 = (납품단가 − 총원가) ÷ 납품단가 × 100 (납품가 대비) · 인상률 0% 입력 시 현재값과 동일.
-      </div>
-
-      {/* 인상 입력 패널 */}
-      <div className="card">
-        <div className="section-header">
-          <span className="section-header-title">① 인상 시나리오 입력</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, color: "var(--text2)" }}>위험 임계 마진</span>
-            <input type="number" value={threshold} onChange={e => setThreshold(Math.max(0, Number(e.target.value) || 0))}
-              style={{ width: 56, height: 30, fontSize: 13, textAlign: "right", borderRadius: 8, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-            <span style={{ fontSize: 12, color: "var(--text2)" }}>%</span>
-            <button onClick={() => { setScenario({}); setBulkMat(""); setBulkLabor(""); }}
-              style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
-              <Icon name="refresh" size={13}/>초기화
-            </button>
-          </div>
-        </div>
-
-        <div className="sim-input-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-          {/* 원단 */}
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}><Icon name="layers" size={12} style={{marginRight:4, verticalAlign:"-1px"}}/>원단 ({materials.length})</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <input type="number" value={bulkMat} placeholder="+%" onChange={e => setBulkMat(e.target.value)}
-                  style={{ width: 52, height: 26, fontSize: 12, textAlign: "right", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-                <button onClick={() => { const v = parseFloat(bulkMat); if (isNaN(v)) return; setScenario(prev => { const n = { ...prev }; materials.forEach(m => { n["m:" + m.id] = { mode: "pct", value: String(v) }; }); return n; }); }}
-                  style={{ height: 26, padding: "0 9px", border: "none", borderRadius: 6, background: "#EC6608", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>전체 적용</button>
-              </div>
-            </div>
-            <div>
-              {materials.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 원단이 없습니다.</div>
-                : materials.map(m => renderPriceRow(m, "m"))}
-            </div>
-          </div>
-          {/* 부자재·공임 */}
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}><Icon name="wrench" size={12} style={{marginRight:4, verticalAlign:"-1px"}}/>부자재·공임 ({laborItems.length})</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <input type="number" value={bulkLabor} placeholder="+%" onChange={e => setBulkLabor(e.target.value)}
-                  style={{ width: 52, height: 26, fontSize: 12, textAlign: "right", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-                <button onClick={() => { const v = parseFloat(bulkLabor); if (isNaN(v)) return; setScenario(prev => { const n = { ...prev }; laborItems.forEach(l => { n["l:" + l.id] = { mode: "pct", value: String(v) }; }); return n; }); }}
-                  style={{ height: 26, padding: "0 9px", border: "none", borderRadius: 6, background: "#EC6608", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>전체 적용</button>
-              </div>
-            </div>
-            <div>
-              {laborItems.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 부자재·공임이 없습니다.</div>
-                : laborItems.map(l => renderPriceRow(l, "l"))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 전체 요약 */}
-      <div className="card">
-        <div className="section-header">
-          <span className="section-header-title">② 전체 영향 요약</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {hasScenario && atRisk > 0 && (
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#F04452", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <Icon name="alert" size={13}/>{atRisk}개 제품 마진 {threshold}% 미만
-              </span>
+      {/* B. KPI 스트립 — A등급(또는 gradeList[0]) 기준 */}
+      <div className="sim-kpis">
+        {/* 1. 평균 마진 · A등급 */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>평균 마진 · A등급</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-display)", color: marginColor(kpi.simAvg), fontVariantNumeric: "tabular-nums" }}>{kpi.simAvg.toFixed(1)}%</span>
+            {Math.abs(kpi.simAvg - kpi.curAvg) >= 0.05 && (
+              <span style={{ fontSize: 12, color: "var(--text3)", textDecoration: "line-through", fontVariantNumeric: "tabular-nums" }}>{kpi.curAvg.toFixed(1)}%</span>
             )}
-            <button onClick={() => setExpandGrades(v => !v)}
-              style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: expandGrades ? "#EC6608" : "var(--surface)", color: expandGrades ? "#fff" : "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-              {expandGrades ? "A등급만" : "B/C/D 펼치기"}
-            </button>
+          </div>
+          <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: kpi.simAvg < kpi.curAvg - 0.05 ? "#F04452" : "var(--text3)" }}>
+            {kpi.simAvg < kpi.curAvg - 0.05 ? "▼ " + (kpi.curAvg - kpi.simAvg).toFixed(1) + "%p" : "변동 없음"}
           </div>
         </div>
+        {/* 2. 위험 임계 이하 제품 */}
+        <div className="card" style={{ padding: 16, position: "relative", overflow: "hidden", borderLeft: kpi.riskSim > kpi.riskCur ? "3px solid #F04452" : undefined }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>위험 임계({threshold}%) 이하 제품</div>
+          <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-display)", color: kpi.riskSim > 0 ? "#F04452" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{kpi.riskSim}<span style={{ fontSize: 15, fontWeight: 600 }}>개</span></div>
+          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>현재 기준 {kpi.riskCur}개</div>
+        </div>
+        {/* 3. 최저 마진 제품 */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>최저 마진 제품</div>
+          <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-display)", color: kpi.worst ? marginColor(kpi.worst.simM) : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{kpi.worst ? kpi.worst.simM.toFixed(1) + "%" : "—"}</div>
+          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{kpi.worst ? kpi.worst.name : "제품 없음"}</div>
+        </div>
+        {/* 4. 총 원가 영향 */}
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>총 원가 영향 · A등급 {kpi.n}개</div>
+          <div style={{ fontSize: 26, fontWeight: 800, fontFamily: "var(--font-display)", color: kpi.costImpact > 0 ? "#EC6608" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>+{fmt(kpi.costImpact)}<span style={{ fontSize: 15, fontWeight: 600 }}>원</span></div>
+          <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>{!hasScenario ? "인상 미적용" : (globalFab > 0 || globalAux > 0) ? `원단 +${globalFab}% · 부자재 +${globalAux}%${hasOverride ? " · 개별 조정" : ""}` : "개별 조정 적용"}</div>
+        </div>
+      </div>
+
+      {/* ① 인상 시나리오 패널 */}
+      <div className="card">
+        <div className="section-header">
+          <span className="section-header-title">① 인상 시나리오</span>
+          <button onClick={resetAll}
+            style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <Icon name="refresh" size={13}/>초기화
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text3)", lineHeight: 1.6, marginBottom: 16 }}>
+          납품단가는 고정 · 원가만 변동시켜 마진 변화를 계산합니다. 실제 데이터는 바뀌지 않습니다.
+        </div>
+
+        <div className="sim-input-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 22 }}>
+          {renderGlobalSlider("전체 원단 인상률", "layers", globalFab, setGlobalFab)}
+          {renderGlobalSlider("전체 부자재·공임 인상률", "wrench", globalAux, setGlobalAux)}
+        </div>
+
+        {/* 위험 임계 마진 슬라이더 */}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--divider)" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)" }}><Icon name="alert" size={13} style={{marginRight:5, verticalAlign:"-2px"}}/>위험 임계 마진</span>
+            <span><b style={{ color: "var(--warning)", fontSize: 17, fontVariantNumeric: "tabular-nums" }}>{threshold}%</b></span>
+          </div>
+          <input type="range" min={10} max={35} step={1} value={threshold} onChange={e => setThreshold(Number(e.target.value))}
+            style={{ width: "100%", accentColor: "var(--warning)", cursor: "pointer", display: "block" }} />
+        </div>
+
+        {/* 접이식 품목별 개별 입력 */}
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--divider)" }}>
+          <button onClick={() => setShowIndividual(v => !v)}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 700, color: "var(--accent)", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            {showIndividual ? "−" : "＋"} 품목별 개별 인상률 상세 입력 (원단 {materials.length} · 부자재 {laborItems.length})
+          </button>
+          {showIndividual && (
+            <div className="sim-input-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginTop: 14 }}>
+              {/* 원단 */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}><Icon name="layers" size={12} style={{marginRight:4, verticalAlign:"-1px"}}/>원단 ({materials.length})</div>
+                <div>
+                  {materials.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 원단이 없습니다.</div>
+                    : materials.map(m => renderPriceRow(m, "m"))}
+                </div>
+              </div>
+              {/* 부자재·공임 */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}><Icon name="wrench" size={12} style={{marginRight:4, verticalAlign:"-1px"}}/>부자재·공임 ({laborItems.length})</div>
+                <div>
+                  {laborItems.length === 0 ? <div style={{ fontSize: 12, color: "var(--text3)", padding: "8px 0" }}>등록된 부자재·공임이 없습니다.</div>
+                    : laborItems.map(l => renderPriceRow(l, "l"))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ② 영향 요약 테이블 */}
+      <div className="card">
+        <div className="section-header">
+          <span className="section-header-title">② 영향 요약</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 11, color: "var(--text3)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#00B493", display: "inline-block" }}/>여유 ≥30%</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#FF9500", display: "inline-block" }}/>주의 {threshold}–30%</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "#F04452", display: "inline-block" }}/>위험 &lt;{threshold}%</span>
+          </div>
+        </div>
+
+        {/* 등급 필터 칩 */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          {["all", "A", "B", "C", "D"].map(g => (
+            <button key={g} onClick={() => setGradeFilter(g)}
+              className="sim-chip" data-active={gradeFilter === g ? "1" : undefined}>{g === "all" ? "전체" : g}</button>
+          ))}
+        </div>
+
         {rows.length === 0 ? (
           <div style={{ fontSize: 13, color: "var(--text3)", padding: "16px 0", textAlign: "center" }}>원가가 입력된 제품이 없습니다. 단가 계산기에서 원단·공임을 입력하세요.</div>
         ) : (
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 620 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 640 }}>
               <thead>
                 <tr style={{ color: "var(--text3)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4 }}>
-                  <th style={{ textAlign: "left", padding: "8px 6px" }}>제품</th>
-                  <th style={{ padding: "8px 6px", width: 44 }}>등급</th>
-                  <th style={{ ...cellR, padding: "8px 6px" }}>현재 원가</th>
-                  <th style={{ ...cellR, padding: "8px 6px" }}>인상후 원가</th>
-                  <th style={{ ...cellR, padding: "8px 6px" }}>현재 마진</th>
-                  <th style={{ ...cellR, padding: "8px 6px" }}>인상후 마진</th>
-                  <th style={{ ...cellR, padding: "8px 6px" }}>변화</th>
+                  {[
+                    ["name", "제품", "left"],
+                    ["grade", "등급", "center"],
+                    ["curCost", "현재 원가", "right"],
+                    ["simCost", "인상후 원가", "right"],
+                    ["curM", "현재 마진", "right"],
+                    ["simM", "인상후 마진", "right"],
+                    ["delta", "변화", "right"],
+                  ].map(([key, label, align]) => (
+                    <th key={key} onClick={() => toggleSort(key)}
+                      style={{ textAlign: align, padding: "8px 6px", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", color: sortKey === key ? "var(--accent)" : "var(--text3)", width: key === "grade" ? 44 : undefined }}>
+                      {label}<span style={{ opacity: sortKey === key ? 1 : 0.3 }}>{sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : " ▼"}</span>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => {
-                  const gl = expandGrades ? r.gradeList : [r.gradeList.includes("A") ? "A" : r.gradeList[0]];
-                  return gl.map((g, gi) => {
-                    const cell = r.grades[g]; if (!cell) return null;
-                    const risk = cell.simM < threshold;
-                    const dp = cell.curM - cell.simM;
-                    return (
-                      <tr key={r.id + ":" + g} style={{ borderTop: "1px solid var(--divider)", background: risk && hasScenario ? (darkMode ? "rgba(240,68,82,0.12)" : "rgba(240,68,82,0.06)") : "transparent" }}>
-                        <td style={{ padding: "9px 6px", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {gi === 0 ? (
-                            <button onClick={() => { setDetailId(r.id); setDetailGrade(g); }} title="상세 보기"
-                              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--text1)", fontFamily: "inherit", textAlign: "left" }}>{r.name}</button>
-                          ) : <span style={{ color: "var(--text3)" }}>↳</span>}
-                        </td>
-                        <td style={{ textAlign: "center", padding: "9px 6px" }}>
-                          <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 6px", borderRadius: 4, background: gradeColors[g] || "#888", color: "#fff" }}>{g}</span>
-                        </td>
-                        <td style={{ ...cellR, padding: "9px 6px", color: "var(--text2)" }}>{fmt(r.curCost)}</td>
-                        <td style={{ ...cellR, padding: "9px 6px", color: r.simCost > r.curCost ? "#EC6608" : "var(--text2)", fontWeight: r.simCost > r.curCost ? 700 : 400 }}>{fmt(r.simCost)}</td>
-                        <td style={{ ...cellR, padding: "9px 6px", color: marginColor(cell.curM) }}>{cell.curM.toFixed(1)}%</td>
-                        <td style={{ ...cellR, padding: "9px 6px", color: marginColor(cell.simM), fontWeight: 700 }}>{cell.simM.toFixed(1)}%</td>
-                        <td style={{ ...cellR, padding: "9px 6px", color: dp > 0.05 ? "#F04452" : dp < -0.05 ? "#00B493" : "var(--text3)", fontWeight: 700 }}>
-                          {Math.abs(dp) < 0.05 ? "—" : `${arrow(cell.curM, cell.simM)} ${Math.abs(dp).toFixed(1)}%p`}
-                        </td>
-                      </tr>
-                    );
-                  });
+                {flatRows.map(r => {
+                  const risk = r.simM < threshold;
+                  const barW = maxAbsDelta > 0 ? Math.abs(r.delta) / maxAbsDelta * 70 : 0;
+                  return (
+                    <tr key={r.id + ":" + r.grade} style={{ borderTop: "1px solid var(--divider)", background: risk && hasScenario ? (darkMode ? "rgba(240,68,82,0.12)" : "rgba(240,68,82,0.06)") : "transparent", boxShadow: risk && hasScenario ? "inset 3px 0 0 #F04452" : undefined }}>
+                      <td style={{ padding: "9px 6px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <button onClick={() => { setDetailId(r.id); setDetailGrade(r.grade); }} title="상세 보기"
+                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "var(--text1)", fontFamily: "inherit", textAlign: "left" }}>{r.name}</button>
+                        {risk && hasScenario && (
+                          <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: "#F04452", display: "inline-flex", alignItems: "center", gap: 2, verticalAlign: "middle" }}><Icon name="alert" size={11}/>위험</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center", padding: "9px 6px" }}>
+                        <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 6px", borderRadius: 4, background: gradeColors[r.grade] || "#888", color: "#fff" }}>{r.grade}</span>
+                      </td>
+                      <td style={{ ...cellR, padding: "9px 6px", color: "var(--text2)" }}>{fmt(r.curCost)}</td>
+                      <td style={{ ...cellR, padding: "9px 6px", color: r.simCost > r.curCost ? "#EC6608" : "var(--text2)", fontWeight: r.simCost > r.curCost ? 700 : 400 }}>{fmt(r.simCost)}</td>
+                      <td style={{ ...cellR, padding: "9px 6px", color: marginColor(r.curM) }}>{r.curM.toFixed(1)}%</td>
+                      <td style={{ ...cellR, padding: "9px 6px", color: marginColor(r.simM), fontWeight: 700 }}>{r.simM.toFixed(1)}%</td>
+                      <td style={{ padding: "9px 6px", textAlign: "right", whiteSpace: "nowrap" }}>
+                        {Math.abs(r.delta) < 0.05 ? (
+                          <span style={{ color: "var(--text3)" }}>—</span>
+                        ) : (
+                          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                            <span style={{ width: barW, height: 6, borderRadius: 3, background: r.delta < 0 ? "#F04452" : "#00B493", display: "inline-block", flexShrink: 0 }}/>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: r.delta < 0 ? "#F04452" : "#00B493", minWidth: 52, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.delta < 0 ? "▼" : "▲"}{Math.abs(r.delta).toFixed(1)}%p</span>
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
                 })}
               </tbody>
             </table>
           </div>
         )}
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 12, lineHeight: 1.6 }}>
+          마진율 = (납품단가 − 총원가) ÷ 납품단가 × 100 · 납품단가는 현재값 고정 · 데모 가정 없음(실제 요척서 BOM 기준)
+        </div>
       </div>
 
       {/* 개별 상세 */}
