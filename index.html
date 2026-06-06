@@ -43,6 +43,7 @@
       --nj-orange-100: #FFE9D6; --nj-orange-50: #FFF4EC;
       --accent: #EC6608; --accent-hover: #D2540A; --accent-press: #B8480A;
       --accent-tonal: #FFF3EA;
+      --accent-strong: #B8480A; /* 토널 배경 위 텍스트용 강조 오렌지 (대비 4.85:1) */
       --overlay-scrim: rgba(18,9,2,0.5);
 
       /* Display font — brand heading/amount face (Bold). Falls back to the
@@ -86,6 +87,7 @@
       --chip-bg: #2A2F38; --chip-color: #B4BAC4; --chip-hover-bg: #404652; --chip-hover-color: #EFF1F4;
       --ghost-bg: #1F232B; --ghost-color: #B4BAC4; --ghost-border: #2A2F38; --empty-color: rgba(239,241,244,0.24);
       --accent-tonal: rgba(236,102,8,0.16);
+      --accent-strong: #FF8A3D; /* 다크 토널 위 텍스트용 (대비 6.01:1) */
       --doc-bg: #181B22; --doc-text: #EFF1F4; --doc-text2: rgba(239,241,244,0.76); --doc-text3: #B4BAC4;
       --doc-border: #2A2F38; --doc-row-border: rgba(239,241,244,0.08);
       --doc-hover: rgba(236,102,8,0.04); --doc-last: rgba(239,241,244,0.86); --doc-footer: #828A98;
@@ -183,6 +185,7 @@
       font-display: swap;
     }
     .kpi-num {
+      font-family: var(--font-display);
       font-weight: 800;
       font-size: clamp(14px, 1.7vw, 24px);
       line-height: 1.1;
@@ -291,7 +294,9 @@
 
     /* ─── 우측 패널 ─── */
     .price-highlight {
-      background: #1E293B;
+      /* 토스 토널 박스 — 토큰이 다크모드 변형까지 처리 (#FFF3EA / rgba(236,102,8,0.16)) */
+      background: var(--accent-tonal);
+      border: 1px solid rgba(236,102,8,0.18);
       border-radius: 16px; padding: 22px; text-align: center;
     }
     .row-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
@@ -968,6 +973,19 @@ const ICON_PATHS = {
   clock:      <><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>,
   shirt:      <><path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></>,
   bot:        <><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></>,
+  // 토스 ② 이모지 교체 2차분 — Lucide
+  wrench:     <><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></>,
+  layers:     <><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>,
+  target:     <><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></>,
+  cloud:      <><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></>,
+  checkCircle:<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>,
+  link:       <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></>,
+  user:       <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
+  printer:    <><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></>,
+  image:      <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></>,
+  film:       <><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></>,
+  music:      <><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></>,
+  paperclip:  <><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></>,
 };
 function Icon({ name, size = 18, strokeWidth = 1.7, style, className }) {
   const path = ICON_PATHS[name];
@@ -1254,7 +1272,7 @@ function ImageUploader({ value, onChange, label = "이미지", maxWidth = 1024, 
           }}>
           {busy ? <span><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="refresh" size={14}/>처리 중...</span></span> : (
             <>
-              <span style={{ fontSize: 22 }}>{dragOver ? "📥" : "📷"}</span>
+              <span style={{ fontSize: 22, display: "inline-flex" }}><Icon name={dragOver ? "download" : "camera"} size={22}/></span>
               <span>{dragOver ? "여기에 놓아요" : `${label} 업로드`}</span>
               <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)" }}>클릭 · 드래그 · 붙여넣기 (Ctrl+V)</span>
             </>
@@ -1712,7 +1730,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
 
       {/* 공임비 단가표 */}
       <div>
-        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}>🔧 공임비 단가표</div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14, display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="wrench" size={16}/>공임비 단가표</div>
         <div className="card" style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 공임비 추가</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 90px auto", gap: 8 }}>
@@ -1922,7 +1940,7 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#00B493", flexShrink: 0 }}>{s.marginRate.toFixed(1)}%</span>
                 </div>
               ))}
-              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}>💡 영업·마케팅 자원을 더 투입할 제품들입니다.</div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}><Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>영업·마케팅 자원을 더 투입할 제품들입니다.</div>
             </div>
           )}
           {needPriceUp.length > 0 && (
@@ -1937,7 +1955,7 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#F04452", flexShrink: 0 }}>{s.marginRate.toFixed(1)}%</span>
                 </div>
               ))}
-              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}>💡 잘 팔리지만 마진이 낮습니다 — 단계적 가격 인상 또는 원가 절감 검토.</div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}><Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>잘 팔리지만 마진이 낮습니다 — 단계적 가격 인상 또는 원가 절감 검토.</div>
             </div>
           )}
         </div>
@@ -2044,8 +2062,8 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
       </div>
 
       <div style={{ fontSize: 11, color: "var(--text3)", padding: "10px 14px", background: "var(--surface2)", borderRadius: 8, lineHeight: 1.7 }}>
-        💡 <b>계산 방식</b>: 단위 마진 = 납품가 − 원가 · 마진율 = 단위 마진 ÷ 납품가 × 100 · 총 매출 = 실 거래가 × 판매량 (판매 기록 합산) · <b>총 마진 = 총 매출 × 마진율</b><br/>
-        💡 <b>색상</b>: <span style={{color:"#00B493",fontWeight:700}}>30%↑ 우수</span> / <span style={{color:"#FF9500",fontWeight:700}}>20~30% 보통</span> / <span style={{color:"#F04452",fontWeight:700}}>20%↓ 저조</span>
+        <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/><b>계산 방식</b>: 단위 마진 = 납품가 − 원가 · 마진율 = 단위 마진 ÷ 납품가 × 100 · 총 매출 = 실 거래가 × 판매량 (판매 기록 합산) · <b>총 마진 = 총 매출 × 마진율</b><br/>
+        <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/><b>색상</b>: <span style={{color:"#00B493",fontWeight:700}}>30%↑ 우수</span> / <span style={{color:"#FF9500",fontWeight:700}}>20~30% 보통</span> / <span style={{color:"#F04452",fontWeight:700}}>20%↓ 저조</span>
       </div>
     </div>
   );
@@ -2200,7 +2218,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* 안내 */}
       <div style={{ fontSize: 12, color: "var(--text3)", padding: "11px 14px", background: "var(--surface2)", borderRadius: 10, lineHeight: 1.7 }}>
-        <b style={{ color: "#EC6608" }}>🔥 인상 시뮬레이터</b> · 원자재·공임 단가를 가상으로 올려 제품 원가·마진 변화를 미리 봅니다.
+        <b style={{ color: "#EC6608" }}><Icon name="flame" size={12} style={{marginRight:3, verticalAlign:"-2px"}}/>인상 시뮬레이터</b> · 원자재·공임 단가를 가상으로 올려 제품 원가·마진 변화를 미리 봅니다.
         납품단가는 <b>현재값으로 고정</b>하고 원가만 변동시켜 마진 변화를 계산합니다.
         <b style={{ color: "#00B493" }}> 실제 단가 데이터는 절대 바뀌지 않습니다.</b>
         <br/>마진율 = (납품단가 − 총원가) ÷ 납품단가 × 100 (납품가 대비) · 인상률 0% 입력 시 현재값과 동일.
@@ -2226,7 +2244,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
           {/* 원단 */}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}>🧵 원단 ({materials.length})</span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}><Icon name="layers" size={12} style={{marginRight:4, verticalAlign:"-1px"}}/>원단 ({materials.length})</span>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <input type="number" value={bulkMat} placeholder="+%" onChange={e => setBulkMat(e.target.value)}
                   style={{ width: 52, height: 26, fontSize: 12, textAlign: "right", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
@@ -2242,7 +2260,7 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
           {/* 부자재·공임 */}
           <div style={{ minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}>🧰 부자재·공임 ({laborItems.length})</span>
+              <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.5 }}><Icon name="wrench" size={12} style={{marginRight:4, verticalAlign:"-1px"}}/>부자재·공임 ({laborItems.length})</span>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <input type="number" value={bulkLabor} placeholder="+%" onChange={e => setBulkLabor(e.target.value)}
                   style={{ width: 52, height: 26, fontSize: 12, textAlign: "right", borderRadius: 6, border: "1.5px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
@@ -2554,7 +2572,7 @@ function SalesDetailView({ onBack, thisYear, months12, monthLabels, monthValues,
               </tfoot>
             </table>
           </div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:10}}>💡 우선순위: <b>직접 입력 → 📒 장부 합계 → 주문 자동합산</b>. 위에 있는 값이 있으면 아래 값을 덮어씁니다.</div>
+          <div style={{fontSize:11,color:"var(--text3)",marginTop:10}}><Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>우선순위: <b>직접 입력 → <Icon name="ledger" size={11} style={{verticalAlign:"-1px"}}/> 장부 합계 → 주문 자동합산</b>. 위에 있는 값이 있으면 아래 값을 덮어씁니다.</div>
         </div>
       </div>
     </div>
@@ -2689,7 +2707,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
             <button onClick={saveAdd} className="btn-primary" style={{ padding: "0 22px", height: 44, fontSize: 13 }}>저장</button>
           </div>
           <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>
-            💡 결제 완료일을 입력하면 즉시 「완납」 처리됩니다. 결제 예정일만 입력 시 「미수」로 등록됩니다.
+            <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>결제 완료일을 입력하면 즉시 「완납」 처리됩니다. 결제 예정일만 입력 시 「미수」로 등록됩니다.
           </div>
         </div>
       )}
@@ -2815,7 +2833,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
                       </td>
                       <td style={{fontSize:12,color:"var(--text2)"}}>{o.note}</td>
                       <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
-                        <button onClick={()=>togglePaid(o.id)} title={isPaid?"결제 취소":"완납 처리"} style={{background:"none",border:"none",cursor:"pointer",color:isPaid?"#FF9500":"#00B493",fontSize:14,marginRight:4}}>{isPaid?"↩":"💰"}</button>
+                        <button onClick={()=>togglePaid(o.id)} title={isPaid?"결제 취소":"완납 처리"} style={{background:"none",border:"none",cursor:"pointer",color:isPaid?"#FF9500":"#00B493",fontSize:14,marginRight:4}}>{isPaid?"↩":<Icon name="coins" size={14}/>}</button>
                         <button onClick={()=>startEdit(o)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}><Icon name="edit" size={14}/></button>
                         <button onClick={()=>{
                       if(!window.confirm(`이 판매 기록을 삭제할까요?\n\n${o.date} · ${o.productName} · ${Math.round(total).toLocaleString()}원`)) return;
@@ -3094,7 +3112,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
           tooltip:{callbacks:{
             label:ctx=>{
               const src = monthSource[ctx.dataIndex];
-              const srcLabel = src === "direct" ? "직접 입력" : src === "ledger" ? "📒 장부 합계" : src === "orders" ? "주문 기록 합산" : "";
+              const srcLabel = src === "direct" ? "직접 입력" : src === "ledger" ? "장부 합계" : src === "orders" ? "주문 기록 합산" : "";
               return [" "+Math.round(ctx.raw).toLocaleString()+"원", " 출처: "+srcLabel];
             }
           }}},
@@ -3281,14 +3299,14 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
       </div>
       {showResizeHint && (
         <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,background:"rgba(0,122,255,0.08)",border:"1px solid rgba(0,122,255,0.2)",fontSize:13,color:"var(--text1)"}}>
-          <span style={{fontSize:16}}>💡</span>
+          <Icon name="lightbulb" size={16}/>
           <span style={{flex:1}}>각 카드의 <b>우하단 ⤡ 핸들</b>을 드래그하면 자유롭게 크기를 조절할 수 있습니다. 더블클릭하면 초기화됩니다. KPI 카드 우상단 <b>✕</b>로 숨길 수 있어요.</span>
           <button onClick={dismissResizeHint} style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:11,fontFamily:"inherit",color:"var(--text2)"}}>알겠어요</button>
         </div>
       )}
       {hiddenKPIs.length > 0 && (
         <div className="no-print" style={{display:"flex",alignItems:"center",gap:10,padding:"8px 14px",borderRadius:10,background:"rgba(236,102,8,0.08)",border:"1px solid rgba(236,102,8,0.20)",fontSize:12,color:"var(--text2)"}}>
-          <span style={{fontSize:13}}>👁️</span>
+          <Icon name="eye" size={14}/>
           <span style={{flex:1}}>숨긴 KPI 카드 <b style={{color:"#EC6608"}}>{hiddenKPIs.length}개</b>가 있습니다.</span>
           <button onClick={showAllKPIs}
             style={{padding:"5px 12px",borderRadius:8,border:"1.5px solid rgba(236,102,8,0.40)",background:"transparent",color:"#EC6608",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>모두 다시 보기</button>
@@ -3325,7 +3343,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
             </div>
             <div style={{display:"flex",gap:6}}>
               <button onClick={()=>setShowMonthInput(v=>!v)} style={{fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>
-                {showMonthInput?"닫기":"✏️ 직접 입력"}
+                {showMonthInput?"닫기":<span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="edit" size={12}/>직접 입력</span>}
               </button>
               {hasAnyData && <button onClick={()=>setExpandedChart("sales")} title="확대 보기" style={{width:30,height:30,fontSize:13,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>⤢</button>}
             </div>
@@ -3637,7 +3655,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                     {isPaid ? (
                       <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(0,180,147,0.15)",color:"#00B493",fontWeight:700}} title={`결제일: ${o.paidDate}`}><Icon name="check" size={10} style={{marginRight:2,verticalAlign:"-1px"}}/>완납</span>
                     ) : isOverdue ? (
-                      <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}} title={`예정일: ${o.paymentDue}`}>⚠ 연체</span>
+                      <span style={{display:"inline-flex",alignItems:"center",gap:3,fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}} title={`예정일: ${o.paymentDue}`}><Icon name="alert" size={10}/>연체</span>
                     ) : isPending ? (
                       <span style={{display:"inline-block",fontSize:11,padding:"3px 8px",borderRadius:6,background:"rgba(255,149,0,0.15)",color:"#FF9500",fontWeight:700}} title={`예정일: ${o.paymentDue}`}>⏰ 미수</span>
                     ) : (
@@ -3646,7 +3664,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
                   </td>
                   <td style={{fontSize:12,color:"var(--text2)"}}>{o.note}</td>
                   <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
-                    <button onClick={togglePaid} title={isPaid?"결제 취소":"완납 처리"} style={{background:"none",border:"none",cursor:"pointer",color:isPaid?"#FF9500":"#00B493",fontSize:14,marginRight:4}}>{isPaid?"↩":"💰"}</button>
+                    <button onClick={togglePaid} title={isPaid?"결제 취소":"완납 처리"} style={{background:"none",border:"none",cursor:"pointer",color:isPaid?"#FF9500":"#00B493",fontSize:14,marginRight:4}}>{isPaid?"↩":<Icon name="coins" size={14}/>}</button>
                     <button onClick={()=>startEditOrder(o)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:6}}><Icon name="edit" size={14}/></button>
                     <button onClick={()=>{
                       if(!window.confirm(`이 판매 기록을 삭제할까요?\n\n${o.date} · ${o.productName} · ${Math.round(total).toLocaleString()}원`)) return;
@@ -3682,10 +3700,11 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
   const cv = React.useRef(null);
   const inst = React.useRef(null);
   const TITLES = {
-    sales: `📈 ${data.sales?.year || ""}년 월별 매출 추이`,
-    pie: "🥧 제품군별 매출 비중",
-    margin: "📊 제품별 마진율 현황",
+    sales: `${data.sales?.year || ""}년 월별 매출 추이`,
+    pie: "제품군별 매출 비중",
+    margin: "제품별 마진율 현황",
   };
+  const TITLE_ICONS = { sales: "trendingUp", pie: "pieChart", margin: "barChart" };
   React.useEffect(() => {
     if (typeof Chart === "undefined" || !cv.current) return;
     if (inst.current) { inst.current.destroy(); inst.current = null; }
@@ -3745,7 +3764,7 @@ function ChartExpandModal({ type, data, darkMode, onClose }) {
         boxShadow: "0 20px 48px rgba(0,0,0,0.32)",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid var(--divider)" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text1)" }}>{TITLES[type] || "차트"}</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 6 }}>{TITLE_ICONS[type] && <Icon name={TITLE_ICONS[type]} size={16}/>}{TITLES[type] || "차트"}</div>
           <button onClick={onClose} title="닫기 (ESC)" style={{
             width: 36, height: 36, borderRadius: 10, border: "none",
             background: "var(--surface2)", color: "var(--text2)",
@@ -4257,7 +4276,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
                       {r._isLive ? (
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end", fontWeight: 700 }} title="월별 장부에서 자동 계산되는 값이에요">
                           {fmtWon(r._total)}
-                          <span style={{ fontSize: 9, color: "#EC6608", fontWeight: 700, padding: "1px 5px", background: "rgba(236,102,8,0.12)", borderRadius: 3, whiteSpace: "nowrap" }}>📒 장부연동</span>
+                          <span style={{ fontSize: 9, color: "#EC6608", fontWeight: 700, padding: "1px 5px", background: "rgba(236,102,8,0.12)", borderRadius: 3, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="ledger" size={9}/>장부연동</span>
                         </span>
                       ) : editingTotal ? (
                         <input value={editValue} onChange={e => setEditValue(e.target.value)} autoFocus
@@ -4318,7 +4337,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
           </select>
           {yd._isLive && (
             <span style={{ fontSize: 11, color: "#EC6608", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "rgba(236,102,8,0.1)", borderRadius: 6 }}>
-              📒 월별 장부와 자동 연동 — 장부 탭에 입력하면 자동 반영돼요
+              <Icon name="ledger" size={11}/>월별 장부와 자동 연동 — 장부 탭에 입력하면 자동 반영돼요
             </span>
           )}
         </div>
@@ -5280,7 +5299,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
               background: dragActive ? (darkMode?"rgba(236,102,8,0.16)":"rgba(236,102,8,0.08)") : (darkMode?"rgba(236,102,8,0.05)":"rgba(238,242,255,0.6)"),
               cursor: "pointer", transition: "all 0.18s",
             }}>
-            <div style={{fontSize:24,lineHeight:1}}>{dragActive?"📥":"📂"}</div>
+            <div style={{fontSize:24,lineHeight:1,display:"inline-flex"}}><Icon name={dragActive?"download":"folderOpen"} size={24}/></div>
             <div style={{fontSize:13,fontWeight:700,color:dragActive?"#EC6608":(darkMode?"#FFE9D6":"#B84800")}}>
               {dragActive ? "여기에 놓으세요" : "월간 장부 엑셀 가져오기"}
             </div>
@@ -5526,7 +5545,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                             })()}
 
                             {/* 2. 수동 부분입금/조정 */}
-                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>✏️ 부분 입금/수동 조정 (선택)</div>
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6,display:"inline-flex",alignItems:"center",gap:4}}><Icon name="edit" size={11}/>부분 입금/수동 조정 (선택)</div>
                             {getAR(c.name).length === 0 ? null : (() => {
                               const arEntries = getAR(c.name);
                               const sumCharge = arEntries.filter(a => a.type === "청구").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
@@ -5973,7 +5992,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                               </table>
                             )}
                             {/* 2. 수동 부분입금/조정 */}
-                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>✏️ 부분 입금/수동 조정 (선택)</div>
+                            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6,display:"inline-flex",alignItems:"center",gap:4}}><Icon name="edit" size={11}/>부분 입금/수동 조정 (선택)</div>
                             {c.entries.length === 0 ? (
                               <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0",fontStyle:"italic"}}>수동 등록된 내역이 없습니다. 아래 폼에서 추가하세요.</div>
                             ) : (
@@ -6183,9 +6202,9 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
     if (pieRef.current) {
       if (pieInst.current) pieInst.current.destroy();
       const pieData = [
-        { l: "💰 현금/통장", v: totalBank, c: "#10B981" },
-        { l: "📈 투자자산", v: totalInvestment, c: "#EC6608" },
-        { l: "📋 미수금", v: totalAR, c: "#F59E0B" },
+        { l: "현금/통장", v: totalBank, c: "#10B981" },
+        { l: "투자자산", v: totalInvestment, c: "#EC6608" },
+        { l: "미수금", v: totalAR, c: "#F59E0B" },
       ].filter(x => x.v > 0);
       pieInst.current = new Chart(pieRef.current, {
         type: "doughnut",
@@ -6375,7 +6394,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           {/* 알림 */}
           {alerts.length > 0 && (
             <div style={{flex:1.5,minWidth:280}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>⚠ 위험 알림 / 인사이트</div>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8,display:"inline-flex",alignItems:"center",gap:4}}><Icon name="alert" size={11}/>위험 알림 / 인사이트</div>
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 {alerts.slice(0,5).map((a,i) => (
                   <div key={i} style={{padding:"8px 12px",borderRadius:8,fontSize:12,
@@ -6383,7 +6402,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                     color: a.level==="danger"?"#F04452":a.level==="warn"?"#FF9500":"#007AFF",
                     border:`1px solid ${a.level==="danger"?"rgba(240,68,82,0.3)":a.level==="warn"?"rgba(255,149,0,0.3)":"rgba(0,122,255,0.2)"}`,
                     fontWeight:600,
-                  }}>{a.level==="danger"?"🚨 ":a.level==="warn"?"⚠ ":"💡 "}{a.msg}</div>
+                  }}><Icon name={a.level==="danger"?"alert":a.level==="warn"?"alert":"lightbulb"} size={12} style={{marginRight:5, verticalAlign:"-2px"}}/>{a.msg}</div>
                 ))}
               </div>
             </div>
@@ -6587,7 +6606,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                 </tr></thead>
                 <tbody>
                   {weeks.map(w => {
-                    const status = w.balance < 0 ? {color:"#EF4444",text:"⚠ 적자",bg:"rgba(239,68,68,0.08)"} : w.balance < monthlyFixedExpense ? {color:"#F59E0B",text:"⚠ 부족",bg:"rgba(245,158,11,0.06)"} : {color:"#10B981",text:"정상",bg:"transparent"};
+                    const status = w.balance < 0 ? {color:"#EF4444",text:"적자",warn:true,bg:"rgba(239,68,68,0.08)"} : w.balance < monthlyFixedExpense ? {color:"#F59E0B",text:"부족",warn:true,bg:"rgba(245,158,11,0.06)"} : {color:"#10B981",text:"정상",warn:false,bg:"transparent"};
                     return <tr key={w.w} style={{background:status.bg}}>
                       <td style={{fontWeight:700,fontSize:13,color:"var(--text1)"}}>{w.label}</td>
                       <td style={{fontSize:12,color:"var(--text2)"}}>{w.date.toISOString().slice(5,10).replace("-",".")}</td>
@@ -6595,14 +6614,14 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                       <td style={{textAlign:"right",fontSize:12,color:"#EF4444",fontWeight:600}}>−{fmtCompact(w.outflow)}</td>
                       <td style={{textAlign:"right",fontSize:12,fontWeight:700,color:w.net>=0?"#10B981":"#EF4444"}}>{w.net>=0?"+":""}{fmtCompact(w.net)}</td>
                       <td style={{textAlign:"right",fontSize:13,fontWeight:800,color:status.color,fontVariantNumeric:"tabular-nums"}}>{fmtCompact(w.balance)}</td>
-                      <td style={{fontSize:11,fontWeight:600,color:status.color}}>{status.text}</td>
+                      <td style={{fontSize:11,fontWeight:600,color:status.color}}>{status.warn && <Icon name="alert" size={11} style={{marginRight:3, verticalAlign:"-1px"}}/>}{status.text}</td>
                     </tr>;
                   })}
                 </tbody>
               </table>
             </div>
             <div style={{marginTop:12,padding:"10px 12px",background:"var(--surface2)",borderRadius:8,fontSize:11,color:"var(--text2)",lineHeight:1.6}}>
-              💡 <strong>가정:</strong> 미수금 회수율 (30일내 80%, 60일내 50%, 90일내 30%, 90일+ 10%) · 신규 매출 70% 회수 · 정기 지출은 dueDay에 발생.
+              <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/><strong>가정:</strong> 미수금 회수율 (30일내 80%, 60일내 50%, 90일내 30%, 90일+ 10%) · 신규 매출 70% 회수 · 정기 지출은 dueDay에 발생.
               실제 수금/지급 일정은 통장 거래내역으로 보정됩니다.
             </div>
           </div>
@@ -6832,7 +6851,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                   </tbody>
                 </table>
               </div>
-              <div style={{fontSize:11,color:"var(--text3)",marginTop:8}}>💡 행을 클릭하면 아래 거래내역이 해당 거래처로 필터링됩니다.</div>
+              <div style={{fontSize:11,color:"var(--text3)",marginTop:8}}><Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>행을 클릭하면 아래 거래내역이 해당 거래처로 필터링됩니다.</div>
             </div>
           );
         })()}
@@ -7100,10 +7119,10 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                 });
                 return (
                   <>
-                    {cnt.red > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#F04452",fontWeight:700}}><span>🔴 최우선 (5천만+)</span><span>{cnt.red}건</span></div>}
-                    {cnt.orange > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#FF9500",fontWeight:700}}><span>🟠 우선 (1천만+)</span><span>{cnt.orange}건</span></div>}
-                    {cnt.yellow > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#FFB800",fontWeight:600}}><span>🟡 일반 (1백만+)</span><span>{cnt.yellow}건</span></div>}
-                    {cnt.green > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#00B493",fontWeight:600}}><span>🟢 소액</span><span>{cnt.green}건</span></div>}
+                    {cnt.red > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#F04452",fontWeight:700}}><span><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:"#F04452",marginRight:6}}/>최우선 (5천만+)</span><span>{cnt.red}건</span></div>}
+                    {cnt.orange > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#FF9500",fontWeight:700}}><span><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:"#FF9500",marginRight:6}}/>우선 (1천만+)</span><span>{cnt.orange}건</span></div>}
+                    {cnt.yellow > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#FFB800",fontWeight:600}}><span><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:"#FFB800",marginRight:6}}/>일반 (1백만+)</span><span>{cnt.yellow}건</span></div>}
+                    {cnt.green > 0 && <div style={{display:"flex",justifyContent:"space-between",color:"#00B493",fontWeight:600}}><span><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:"#00B493",marginRight:6}}/>소액</span><span>{cnt.green}건</span></div>}
                     {arList.length === 0 && <div style={{color:"var(--text3)"}}>미수금 없음</div>}
                   </>
                 );
@@ -7135,7 +7154,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                 <tbody>
                   {arList.map((c, idx) => {
                     const pct = totalAR>0?(c.balance/totalAR*100):0;
-                    const priority = c.balance > 50000000 ? "🔴 최우선" : c.balance > 10000000 ? "🟠 우선" : c.balance > 1000000 ? "🟡 일반" : "🟢 소액";
+                    const priority = c.balance > 50000000 ? {c:"#F04452",t:"최우선"} : c.balance > 10000000 ? {c:"#FF9500",t:"우선"} : c.balance > 1000000 ? {c:"#FFB800",t:"일반"} : {c:"#00B493",t:"소액"};
                     const goToLedger = () => {
                       if (setLedgerFocusClient) setLedgerFocusClient(c.name);
                       if (setTab) setTab("ledger");
@@ -7156,7 +7175,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                             <span style={{minWidth:42,textAlign:"right"}}>{pct.toFixed(1)}%</span>
                           </div>
                         </td>
-                        <td style={{fontSize:12,fontWeight:600}}>{priority}</td>
+                        <td style={{fontSize:12,fontWeight:600,color:priority.c}}><span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:priority.c,marginRight:6}}/>{priority.t}</td>
                       </tr>
                     );
                   })}
@@ -7570,7 +7589,7 @@ function PurchaseDashboardView({ fabricIntakes, dashStatusRef, dashMonthlyRef, d
       {/* 헤더 인사 */}
       <div className="card" style={{background:"var(--accent-tonal)",border:"1px solid rgba(236,102,8,0.18)"}}>
         <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-          <div style={{width:48,height:48,borderRadius:12,background:"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:22,boxShadow:"var(--elev-3)"}}>🎯</div>
+          <div style={{width:48,height:48,borderRadius:12,background:"var(--accent)",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:22,boxShadow:"var(--elev-3)"}}><Icon name="target" size={24} style={{color:"#fff"}}/></div>
           <div style={{flex:1,minWidth:200}}>
             <div style={{fontSize:18,fontWeight:800,color:"var(--text1)",letterSpacing:-0.3}}>매입 종합 대시보드</div>
             <div style={{fontSize:12,color:"var(--text2)",marginTop:2}}>원단·임가공·소모품 등 모든 매입 내역의 핵심 지표를 한눈에</div>
@@ -7655,7 +7674,7 @@ function PurchaseDashboardView({ fabricIntakes, dashStatusRef, dashMonthlyRef, d
       {/* 최근 매입 */}
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}>🕒 최근 매입 5건</div>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",display:"inline-flex",alignItems:"center",gap:6}}><Icon name="clock" size={14}/>최근 매입 5건</div>
           <button onClick={()=>setActiveSubTab("all")} style={{fontSize:11,color:"#EC6608",background:"none",border:"none",cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>전체 매입 →</button>
         </div>
         {recent.length === 0 ? (
@@ -8181,7 +8200,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
             <button onClick={deleteAll}
               style={{ padding:"8px 12px", fontSize:12, fontWeight:700, color:"#F04452", background:"transparent", border:"1.5px solid rgba(240,68,82,0.4)", borderRadius:10, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}
               title="전체 입고 기록 삭제 (확인 2회)"
-            >🗑 전체 삭제</button>
+            ><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="trash" size={12}/>전체 삭제</span></button>
           )}
           <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 입고 등록"}</button>
         </div>
@@ -8280,7 +8299,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
             <button onClick={clearSelection}
               style={{ padding:"8px 14px", fontSize:12, fontWeight:600, color:"var(--text2)", background:"transparent", border:"1.5px solid var(--divider)", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>선택 해제</button>
             <button onClick={deleteSelected}
-              style={{ padding:"8px 16px", fontSize:12, fontWeight:700, color:"#fff", background:"var(--negative)", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", boxShadow:"var(--elev-2)" }}>🗑 선택 삭제 ({selectedIds.size})</button>
+              style={{ padding:"8px 16px", fontSize:12, fontWeight:700, color:"#fff", background:"var(--negative)", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", boxShadow:"var(--elev-2)" }}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="trash" size={12}/>선택 삭제 ({selectedIds.size})</span></button>
           </div>
         )}
         {showForm&&(
@@ -8559,7 +8578,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                         <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap"}}>
                           <span style={{display:"inline-flex", alignItems:"center", gap:10, fontSize:13, flexWrap:"wrap", cursor:"pointer", flex:"1 1 auto", minWidth:0}} onClick={() => toggleDateExpand(group.date)}>
                             <span style={{fontSize:11, color:"var(--text3)", fontFamily:"monospace", minWidth:14, display:"inline-block"}}>{isCollapsed ? "▶" : "▼"}</span>
-                            <span style={{fontSize:14}}>📅</span>
+                            <Icon name="calendar" size={14}/>
                             <b style={{color:"var(--text1)", fontSize:14, fontVariantNumeric:"tabular-nums"}}>{group.date}</b>
                             <span style={{color:"var(--text2)", fontSize:12}}>· <b style={{color:"var(--text1)"}}>{group.rows.length}건</b></span>
                             {Object.keys(groupQtyByUnit).length > 0 && (
@@ -8572,13 +8591,13 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                             {currentMemo && !isEditingMemo && (
                               <span onClick={()=>startMemoEdit(group.date, groupSupplier)} title="메모 클릭해서 수정"
                                 style={{display:"inline-flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:14, background:darkMode?"rgba(255,213,76,0.16)":"rgba(245,158,11,0.13)", color:darkMode?"#FFD54C":"#B45309", fontSize:12, fontWeight:600, cursor:"pointer", maxWidth:280, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
-                                📝 {currentMemo}
+                                <Icon name="edit" size={12}/>{currentMemo}
                               </span>
                             )}
                             {!isEditingMemo && (
                               <button onClick={()=>startMemoEdit(group.date, groupSupplier)} title={currentMemo ? "메모 수정" : "메모 추가"}
                                 style={{background:"transparent", border:"1px solid var(--border)", borderRadius:6, padding:"4px 9px", fontSize:11, fontWeight:600, color:"var(--text2)", cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>
-                                {currentMemo ? "✏️ 수정" : "📝 메모"}
+                                <span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="edit" size={11}/>{currentMemo ? "수정" : "메모"}</span>
                               </button>
                             )}
                           </span>
@@ -8972,7 +8991,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
                 pointerEvents: "auto",
               }}>
               <div style={{ fontSize: 30, lineHeight: 1, transition: "transform 0.18s", transform: dragActive ? "scale(1.15)" : "scale(1)" }}>
-                {dragActive ? "📥" : "📂"}
+                <Icon name={dragActive ? "download" : "folderOpen"} size={30}/>
               </div>
               <div style={{ fontSize: 14, fontWeight: 700, color: dragActive ? "#10B981" : (darkMode ? "#34D399" : "#059669") }}>
                 {dragActive ? "여기에 놓으세요" : "엑셀 파일로 한 번에 등록"}
@@ -8989,8 +9008,8 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
       {/* 등록된 거래처 목록 */}
       <div>
         <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span>
-            📋 등록된 거래처{" "}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="clipboard" size={16}/>등록된 거래처{" "}
             <span style={{ fontSize: 13, color: "var(--text2)", fontWeight: 600 }}>
               ({search.trim() || gradeFilter !== "ALL" ? `${filteredClients.length} / ${clients.length}` : `${clients.length}곳`})
             </span>
@@ -9007,7 +9026,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
               onMouseEnter={e => { e.currentTarget.style.background = "rgba(240,68,82,0.08)"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
               title="등록된 모든 거래처를 한꺼번에 삭제 (확인 2회)"
-            >🗑 전체 삭제</button>
+            ><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="trash" size={12}/>전체 삭제</span></button>
           )}
         </div>
         {clients.length > 0 && (
@@ -9055,7 +9074,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
                 border: "none", borderRadius: 8,
                 cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
                 boxShadow: "var(--elev-2)",
-              }}>🗑 선택 삭제 ({selectedIds.size})</button>
+              }}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="trash" size={12}/>선택 삭제 ({selectedIds.size})</span></button>
           </div>
         )}
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -9132,7 +9151,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
                           {c.logo ? (
                             <img src={c.logo} alt="로고" style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 8, border: "1px solid var(--border)", background: "#fff" }} />
                           ) : (
-                            <div style={{ width: 48, height: 48, borderRadius: 8, background: "var(--surface2)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: 16 }}>🏢</div>
+                            <div style={{ width: 48, height: 48, borderRadius: 8, background: "var(--surface2)", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", fontSize: 16 }}><Icon name="building" size={20}/></div>
                           )}
                         </td>
                         <td style={{ fontWeight: 600 }}>{c.name}</td>
@@ -10666,7 +10685,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     };
     if (syncStatus === "syncing") return <div style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span style={styles.text}>저장 중</span></div>;
     if (syncStatus === "saved") return <div style={styles.wrap}><Icon name="check" size={13}/><span style={styles.text}>동기화됨</span></div>;
-    if (syncStatus === "conflict") return <div onClick={() => window.location.reload()} style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="다른 기기에서 데이터가 변경됐어요. 클릭하면 최신 데이터로 새로고침합니다 (지금 화면의 미저장 변경은 사라질 수 있어요).">⚠️<span style={styles.text}>충돌 · 새로고침</span></div>;
+    if (syncStatus === "conflict") return <div onClick={() => window.location.reload()} style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="다른 기기에서 데이터가 변경됐어요. 클릭하면 최신 데이터로 새로고침합니다 (지금 화면의 미저장 변경은 사라질 수 있어요)."><Icon name="alert" size={13}/><span style={styles.text}>충돌 · 새로고침</span></div>;
     return <div style={styles.wrap}><Icon name="alert" size={13}/><span style={styles.text}>연결 오류</span></div>;
   };
 
@@ -10858,33 +10877,33 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   const res = [];
                   clients.forEach(c => {
                     if ((c.name||"").toLowerCase().includes(q) || (c.contact||"").toLowerCase().includes(q) || (c.phone||"").includes(q) || (c.bizNo||"").includes(q)) {
-                      res.push({ type:"거래처", icon:"🏢", title:c.name, sub:`${c.contact||""} ${c.phone||""}`.trim()||c.bizNo||"-", action:()=>{setTab("clients"); setGlobalSearch("");} });
+                      res.push({ type:"거래처", icon:"building", title:c.name, sub:`${c.contact||""} ${c.phone||""}`.trim()||c.bizNo||"-", action:()=>{setTab("clients"); setGlobalSearch("");} });
                     }
                   });
                   products.forEach(p => {
                     if ((p.name||"").toLowerCase().includes(q)) {
                       const sp = getActiveSpec(p) || {};
-                      res.push({ type:"제품", icon:"👕", title:p.name, sub:`${sp.fabrics?.length||0}개 원단 / ${sp.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
+                      res.push({ type:"제품", icon:"shirt", title:p.name, sub:`${sp.fabrics?.length||0}개 원단 / ${sp.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
                     }
                   });
                   orders.forEach(o => {
                     if ((o.productName||"").toLowerCase().includes(q) || (o.client||"").toLowerCase().includes(q) || (o.note||"").toLowerCase().includes(q)) {
-                      res.push({ type:"판매", icon:"📦", title:o.productName, sub:`${o.date||""} · ${o.client||""} · ${(parseFloat(o.unitPrice||0)*parseInt(o.qty||1)).toLocaleString()}원`, action:()=>{setTab("dashboard"); setGlobalSearch("");} });
+                      res.push({ type:"판매", icon:"package", title:o.productName, sub:`${o.date||""} · ${o.client||""} · ${(parseFloat(o.unitPrice||0)*parseInt(o.qty||1)).toLocaleString()}원`, action:()=>{setTab("dashboard"); setGlobalSearch("");} });
                     }
                   });
                   materials.forEach(m => {
                     if ((m.name||"").toLowerCase().includes(q)) {
-                      res.push({ type:"원단", icon:"🧵", title:m.name, sub:`${m.price?.toLocaleString()||0}원/${m.unit||"yard"}`, action:()=>{setTab("pricedb"); setGlobalSearch("");} });
+                      res.push({ type:"원단", icon:"layers", title:m.name, sub:`${m.price?.toLocaleString()||0}원/${m.unit||"yard"}`, action:()=>{setTab("pricedb"); setGlobalSearch("");} });
                     }
                   });
                   (savedQuotes||[]).forEach(q2 => {
                     if ((q2.title||"").toLowerCase().includes(q) || (q2.quoteClient||"").toLowerCase().includes(q)) {
-                      res.push({ type:"견적", icon:"📄", title:q2.title||"무제", sub:`${q2.dateStr||""} · ${q2.quoteClient||""}`, action:()=>{setTab("history"); setGlobalSearch("");} });
+                      res.push({ type:"견적", icon:"document", title:q2.title||"무제", sub:`${q2.dateStr||""} · ${q2.quoteClient||""}`, action:()=>{setTab("history"); setGlobalSearch("");} });
                     }
                   });
                   (fabricIntakes||[]).forEach(f => {
                     if ((f.materialName||"").toLowerCase().includes(q) || (f.supplier||"").toLowerCase().includes(q)) {
-                      res.push({ type:"입고", icon:"📥", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} });
+                      res.push({ type:"입고", icon:"inbox", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} });
                     }
                   });
                   const limited = res.slice(0, 12);
@@ -10899,7 +10918,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
                               onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                             >
-                              <span style={{ fontSize: 18, flexShrink: 0 }}>{r.icon}</span>
+                              <span style={{ flexShrink: 0, color: "var(--text2)", display: "inline-flex" }}><Icon name={r.icon} size={18}/></span>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
                                 <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.sub}</div>
@@ -11004,7 +11023,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               <div className="card" style={{ padding: "14px 16px", borderLeft: "3px solid #EC6608" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: ACCENT, letterSpacing: 0.6, textTransform: "uppercase", whiteSpace: "nowrap" }}>📝 제품 메모</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: ACCENT, letterSpacing: 0.6, textTransform: "uppercase", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="edit" size={12}/>제품 메모</span>
                     <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>· {activeProd.name}</span>
                   </div>
                   <span style={{ fontSize: 10, color: "var(--text3)", whiteSpace: "nowrap" }}>{(activeProd.memo || "").length}자 · 자동 저장</span>
@@ -11130,7 +11149,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     + 추가
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩의 ✏️ 또는 더블클릭으로 이름 수정</div>
+                <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩의 <Icon name="edit" size={11} style={{verticalAlign:"-1px"}}/> 또는 더블클릭으로 이름 수정</div>
 
                 {/* ── 요척서 (spec) 관리 ── */}
                 <div style={{ marginTop: 18, padding: "14px 16px", borderRadius: 12, background: "var(--accent-tonal)", border: "1px solid rgba(236,102,8,0.14)" }}>
@@ -11185,7 +11204,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       );
                     })}
                   </div>
-                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}>💡 원단 단가가 바뀌면 [+ 요척서 추가]로 새 버전을 만들어 비교하세요. 새 요척서는 현재 활성 요척서의 값을 그대로 복사해서 시작합니다.</div>
+                  <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}><Icon name="lightbulb" size={11} style={{marginRight:4, verticalAlign:"-2px"}}/>원단 단가가 바뀌면 [+ 요척서 추가]로 새 버전을 만들어 비교하세요. 새 요척서는 현재 활성 요척서의 값을 그대로 복사해서 시작합니다.</div>
                 </div>
               </div>
 
@@ -11512,7 +11531,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     })}
                   </div>
                   <div style={{ marginTop: 12, padding: "10px 12px", background: darkMode ? "rgba(154,52,18,0.2)" : "#FFF7ED", borderRadius: 10, fontSize: 12, color: darkMode ? "#FB923C" : "#9A3412", lineHeight: 1.6 }}>
-                    💡 단가 칸이 비어있으면 마진율 기준 자동 계산값을 사용합니다. 직접 입력한 단가는 <strong style={{ color: ORANGE }}>주황색</strong>으로 표시되며 ↻ 버튼으로 초기화할 수 있습니다.
+                    <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>단가 칸이 비어있으면 마진율 기준 자동 계산값을 사용합니다. 직접 입력한 단가는 <strong style={{ color: ORANGE }}>주황색</strong>으로 표시되며 ↻ 버튼으로 초기화할 수 있습니다.
                   </div>
                 </div>
 
@@ -11672,23 +11691,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 <div style={{ padding: 12 }}>
                   <div className="price-highlight">
                     <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "rgba(249,115,22,0.95)", padding: "3px 10px", borderRadius: 100, letterSpacing: 0.5 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "var(--accent)", padding: "3px 10px", borderRadius: 100, letterSpacing: 0.5 }}>
                         {activeProd.selectedGrade || "A"}급 선택
                       </span>
                     </div>
-                    <div style={{ fontSize: 11, color: "#93C5FD", marginBottom: 4, fontWeight: 500 }}>최종 단가 (1개)</div>
-                    <div style={{ fontSize: 30, fontWeight: 900, color: "#fff", letterSpacing: -1 }}>
+                    <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 4, fontWeight: 500 }}>최종 단가 (1개)</div>
+                    <div style={{ fontSize: 30, fontWeight: 900, color: "var(--accent-strong)", letterSpacing: -1, fontFamily: "var(--font-display)" }}>
                       {finalPrice > 0 ? `${Math.round(finalPrice).toLocaleString()}원` : "—"}
                     </div>
                     {finalPrice > 0 && (
                       <>
-                        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.15)" }}>
-                          <div style={{ fontSize: 11, color: "#93C5FD", marginBottom: 4 }}>납품가 대비 마진율</div>
-                          <div style={{ fontSize: 24, fontWeight: 800, color: ORANGE }}>
+                        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(236,102,8,0.18)" }}>
+                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 4 }}>납품가 대비 마진율</div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text1)", fontFamily: "var(--font-display)" }}>
                             {(marginAmt / finalPrice * 100).toFixed(1)}%
                           </div>
                         </div>
-                        <div style={{ fontSize: 11, color: "rgba(147,197,253,0.65)", marginTop: 10, lineHeight: 1.7 }}>
+                        <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 10, lineHeight: 1.7 }}>
                           원단 {Math.round(fabricCost/finalPrice*100)}% · 공임비 {Math.round(extraCost/finalPrice*100)}%<br/>
                           관리비 {Math.round(adminAmt/finalPrice*100)}% · 마진 {Math.round(marginAmt/finalPrice*100)}%
                         </div>
@@ -12047,7 +12066,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   {(() => {
                     const matched = clients.find(c => (c.name || "").trim() === quoteClient.trim());
                     if (!matched) return quoteClient.trim() ? (
-                      <div style={{ fontSize: 11, color: "#FF9500", padding: "4px 0" }}>💡 신규 거래처 — 「거래처별 단가」 탭에서 등록하면 자동 등급 적용</div>
+                      <div style={{ fontSize: 11, color: "#FF9500", padding: "4px 0" }}><Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>신규 거래처 — 「거래처별 단가」 탭에서 등록하면 자동 등급 적용</div>
                     ) : null;
                     const gradeColors = { A: "#EC6608", B: "#10B981", C: "#F59E0B", D: "#EF4444" };
                     const gc = gradeColors[matched.grade] || "#EC6608";
@@ -12107,7 +12126,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     fontWeight: 700, cursor: (generating || baseTotal === 0) ? "not-allowed" : "pointer",
                     fontFamily: "inherit", transition: "background 0.15s",
                   }}>
-                  {generating ? "⏳ 생성 중..." : apiKey.trim() ? "✨ AI 견적서 생성" : "📄 견적서 생성"}
+                  {generating ? "⏳ 생성 중..." : apiKey.trim() ? <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="sparkles" size={14}/>AI 견적서 생성</span> : <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="document" size={14}/>견적서 생성</span>}
                 </button>
                 <div style={{ fontSize: 11, color: T.empty, marginTop: 8, textAlign: "center" }}>claude-sonnet-4-6 모델</div>
               </div>
@@ -12206,22 +12225,22 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                         color: editingQuote ? ORANGE : T.ghostColor, fontSize: 13, fontWeight: 700,
                         cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
                       }}>
-                      {editingQuote ? "✅ 완료" : "✏️ 수정"}
+                      {editingQuote ? <span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="check" size={14}/>완료</span> : <span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="edit" size={13}/>수정</span>}
                     </button>
                     {!editingQuote && (
                       <button onClick={saveQuoteToHistory} style={{
                         padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12,
                         background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700,
                         cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s",
-                      }}>💾 저장</button>
+                      }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="save" size={13}/>저장</span></button>
                     )}
-                    {!editingQuote && <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>}
+                    {!editingQuote && <button className="btn-primary" onClick={() => window.print()}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="printer" size={14}/>PDF 출력</span></button>}
                   </div>
                 </div>
                 {editingQuote ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     <div style={{ fontSize: 12, color: T.text2, padding: "8px 12px", background: darkMode ? "#2C2C2E" : "#FFF7ED", borderRadius: 10, border: darkMode ? "1px solid rgba(255,255,255,0.1)" : "1px solid #FED7AA" }}>
-                      💡 마크다운 형식으로 편집하세요. <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}># 제목</code>, <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>| 표 |</code>, <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>**굵게**</code> 사용 가능
+                      <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>마크다운 형식으로 편집하세요. <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}># 제목</code>, <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>| 표 |</code>, <code style={{ background: "#FFE4C4", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>**굵게**</code> 사용 가능
                     </div>
                     <textarea
                       value={quote}
@@ -12236,7 +12255,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     />
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                       <button onClick={() => setEditingQuote(false)} className="btn-orange" style={{ padding: "11px 24px" }}>
-                        ✅ 완료
+                        <span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="check" size={14}/>완료</span>
                       </button>
                     </div>
                   </div>
@@ -12298,9 +12317,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </>
             ) : (
               <div className="card" style={{ padding: 64, textAlign: "center" }}>
-                <div style={{ fontSize: 56, marginBottom: 16 }}>📄</div>
+                <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}><Icon name="document" size={48} style={{color:"var(--text3)"}}/></div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>견적서가 아직 없습니다</div>
-                <div style={{ fontSize: 14, color: T.empty, marginBottom: 24 }}>'🛒 제품 선택 & 생성' 탭에서 제품을 체크하고 거래처·API를 입력해 견적서를 생성하세요</div>
+                <div style={{ fontSize: 14, color: T.empty, marginBottom: 24 }}>'<Icon name="purchase" size={13} style={{verticalAlign:"-2px"}}/> 제품 선택 & 생성' 탭에서 제품을 체크하고 거래처·API를 입력해 견적서를 생성하세요</div>
                 <button className="btn-orange" style={{ padding: "12px 24px", fontSize: 14 }} onClick={() => setQuoteSubTab("builder")}>제품 선택 & 생성 →</button>
               </div>
             )}
@@ -12321,8 +12340,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => { setQuote(viewingQuote.quote); setQuoteTitle(viewingQuote.title); setTab("quote"); setQuoteSubTab("current"); setViewingQuote(null); }} style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✏️ 현재 견적서로 불러오기</button>
-                    <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>
+                    <button onClick={() => { setQuote(viewingQuote.quote); setQuoteTitle(viewingQuote.title); setTab("quote"); setQuoteSubTab("current"); setViewingQuote(null); }} style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="edit" size={13}/>현재 견적서로 불러오기</span></button>
+                    <button className="btn-primary" onClick={() => window.print()}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="printer" size={14}/>PDF 출력</span></button>
                   </div>
                 </div>
                 <div className={
@@ -12377,7 +12396,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   <div className="card" style={{ padding: 64, textAlign: "center" }}>
                     <div style={{ marginBottom: 16, color: "var(--text3)", display: "flex", justifyContent: "center" }}><Icon name="folderOpen" size={44} style={{opacity:0.5}}/></div>
                     <div style={{ fontSize: 17, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>저장된 견적서가 없습니다</div>
-                    <div style={{ fontSize: 13, color: T.empty, marginBottom: 24 }}>견적서 탭에서 💾 저장 버튼을 눌러 이력을 남겨보세요</div>
+                    <div style={{ fontSize: 13, color: T.empty, marginBottom: 24 }}>견적서 탭에서 <Icon name="save" size={13} style={{verticalAlign:"-2px"}}/> 저장 버튼을 눌러 이력을 남겨보세요</div>
                     <button className="btn-orange" style={{ padding: "12px 24px", fontSize: 14 }} onClick={() => { setTab("quote"); setQuoteSubTab("current"); }}>견적서 작성 →</button>
                   </div>
                 ) : (
@@ -12585,7 +12604,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           <div>
             {!poDraft ? (
               <div className="card" style={{ padding: 64, textAlign: "center" }}>
-                <div style={{ fontSize: 56, marginBottom: 16 }}>📦</div>
+                <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}><Icon name="package" size={48} style={{color:"var(--text3)"}}/></div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>새 발주서를 작성해보세요</div>
                 <div style={{ fontSize: 14, color: T.empty, marginBottom: 24 }}>공급처를 선택하고 발주 품목을 입력한 뒤 양식을 골라 출력할 수 있습니다</div>
                 <button className="btn-primary" style={{ padding: "12px 24px", fontSize: 14 }} onClick={startNewPO}>+ 새 발주서 작성</button>
@@ -12598,7 +12617,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 {poDraft.editId && (
                   <div style={{ padding: "12px 16px", borderRadius: 12, background: "var(--accent-tonal)", border: "1.5px solid rgba(236,102,8,0.3)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                     <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 18 }}>✏️</span>
+                      <Icon name="edit" size={18}/>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#EC6608" }}>발주서 수정 모드</div>
                         <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 2 }}>저장 시 기존 발주서가 업데이트됩니다 (덮어쓰기)</div>
@@ -12633,7 +12652,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           <button key={s.id}
                             className={"prod-chip" + (poDraft.supplier?.id === s.id ? " active" : "")}
                             onClick={() => setPoDraft({ ...poDraft, supplier: { id: s.id, name: s.name, contact: s.contact || "", phone: s.phone || "", email: s.email || "", address: s.address || "", paymentTerms: s.paymentTerms || "" } })}
-                          >🏭 {s.name}</button>
+                          ><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="factory" size={13}/>{s.name}</span></button>
                         ))}
                       </div>
                     </div>
@@ -12685,7 +12704,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     <span className="section-header-title">발주 품목 <span className="section-sub">— Items</span></span>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                       <label className="btn-orange" style={{ padding: "8px 14px", fontSize: 12, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title="엑셀(.xlsx/.csv) 파일 업로드 — 또는 이 카드 위로 드래그&드롭">
-                        📄 엑셀 가져오기
+                        <Icon name="fileSheet" size={13}/>엑셀 가져오기
                         <input type="file" accept=".xlsx,.xls,.xlsm,.csv" style={{ display: "none" }}
                           onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) importPOFromExcel(f); e.target.value = ""; }}
                         />
@@ -12695,7 +12714,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     </div>
                   </div>
                   <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(236,102,8,0.06)", border: "1px dashed rgba(236,102,8,0.30)", fontSize: 12, color: "var(--text2)", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 16 }}>📋</span>
+                    <Icon name="clipboard" size={16}/>
                     <span>엑셀 파일을 이 영역에 <b>드래그&amp;드롭</b>하면 품목을 자동 입력합니다 — 인식 컬럼: <b>품명/품목명, 수량, 단가, 단위, 비고</b> · 상단에 <b>공급처 / 발주일자 / 납기일 / 전화</b>도 자동 인식</span>
                   </div>
 
@@ -12851,7 +12870,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       }}
                       onMouseEnter={e => { if (!photoDragOver) e.currentTarget.style.borderColor = "rgba(236,102,8,0.4)"; }}
                       onMouseLeave={e => { if (!photoDragOver) e.currentTarget.style.borderColor = T.divider; }}>
-                        <div style={{ fontSize: 32, marginBottom: 8 }}>{photoDragOver ? "📥" : "📷"}</div>
+                        <div style={{ fontSize: 32, marginBottom: 8, display: "inline-flex" }}><Icon name={photoDragOver ? "download" : "camera"} size={32}/></div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: T.text2, marginBottom: 4 }}>{photoDragOver ? "여기에 놓으면 업로드돼요" : "사진을 클릭하거나 이 영역에 드래그하면 첨부됩니다"}</div>
                         <div style={{ fontSize: 11, color: T.text3 }}>JPG · PNG · GIF · HEIC / 자동 압축 — 큰 사진도 OK / 다중 선택 가능</div>
                       </div>
@@ -12903,14 +12922,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </div>
 
                 {/* 액션 바 */}
-                {poApiError && <div style={{ padding: "12px 16px", background: "rgba(255,59,48,0.08)", border: "1px solid rgba(255,59,48,0.25)", borderRadius: 12, color: "#FF3B30", fontSize: 13, fontWeight: 600 }}>⚠️ {poApiError}</div>}
+                {poApiError && <div style={{ padding: "12px 16px", background: "rgba(255,59,48,0.08)", border: "1px solid rgba(255,59,48,0.25)", borderRadius: 12, color: "#FF3B30", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}><Icon name="alert" size={13}/>{poApiError}</div>}
                 <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", paddingTop: 8, borderTop: `1px solid ${T.divider}`, marginTop: 4 }}>
                   <button onClick={() => { if (window.confirm("작성 중인 발주서를 취소할까요?")) { setPoDraft(null); save("frw_po_draft", null); } }}
                     style={{ padding: "12px 22px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>취소</button>
                   <button onClick={() => { setPoDraft({ ...poDraft, body: buildPOMarkdown(poDraft) }); }}
                     style={{ padding: "12px 22px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="edit" size={14}/>템플릿으로 생성</span></button>
                   <button onClick={generatePO} disabled={poGenerating} className="btn-primary" style={{ padding: "12px 26px", fontSize: 14 }}>
-                    {poGenerating ? "생성 중..." : (apiKey.trim() ? "🤖 AI로 생성" : "📝 생성")}
+                    {poGenerating ? "생성 중..." : (apiKey.trim() ? <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="bot" size={14}/>AI로 생성</span> : <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="edit" size={14}/>생성</span>)}
                   </button>
                 </div>
               </div>
@@ -12920,9 +12939,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, alignItems: "center" }} className="no-print">
                   <button onClick={() => setPoDraft({ ...poDraft, body: "" })} style={{ padding: "8px 14px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 10, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>← 편집으로</button>
                   <input placeholder="발주서 이름 (저장 시 사용)" value={poDraft.title || ""} onChange={e => setPoDraft({ ...poDraft, title: e.target.value })} style={{ flex: 1, minWidth: 200, height: 38 }} />
-                  <button onClick={savePOToHistory} style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>💾 이력에 저장</button>
+                  <button onClick={savePOToHistory} style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="save" size={13}/>이력에 저장</span></button>
                   <button onClick={downloadPOasPDF} style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="document" size={14}/>PDF로 저장</span></button>
-                  <button className="btn-primary" onClick={() => window.print()}>🖨️ 인쇄</button>
+                  <button className="btn-primary" onClick={() => window.print()}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="printer" size={14}/>인쇄</span></button>
                 </div>
                 <div className="no-print" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: T.text2, letterSpacing: 0.3, marginRight: 4 }}>양식</span>
@@ -12984,7 +13003,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       style={{ padding: "10px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <Icon name="edit" size={14}/> 수정
                     </button>
-                    <button className="btn-primary" onClick={() => window.print()}>🖨️ PDF 출력</button>
+                    <button className="btn-primary" onClick={() => window.print()}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="printer" size={14}/>PDF 출력</span></button>
                   </div>
                 </div>
                 <div className={
@@ -13071,7 +13090,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           {/* 거래처별 합계 카드 */}
                           <div className="card" style={{ marginBottom: 16 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                              <div style={{ fontSize: 14, fontWeight: 800, color: T.text }}>🏭 거래처별 발주 합계 ({supList.length}곳)</div>
+                              <div style={{ fontSize: 14, fontWeight: 800, color: T.text, display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="factory" size={14}/>거래처별 발주 합계 ({supList.length}곳)</div>
                               {poHistorySupFilter && (
                                 <button onClick={() => setPoHistorySupFilter("")} style={{ padding: "5px 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>필터 해제</button>
                               )}
@@ -13090,7 +13109,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       boxShadow: active ? "0 4px 14px rgba(236,102,8,0.32)" : "none",
                                       minWidth: 180,
                                     }}>
-                                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, opacity: active ? 0.9 : 1 }}>🏭 {name}</div>
+                                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, opacity: active ? 0.9 : 1, display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="factory" size={12}/>{name}</div>
                                     <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: -0.3 }}>{Number(info.amount).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 600, marginLeft: 2, opacity: 0.85 }}>원</span></div>
                                     <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>{info.count}건 · 평균 {Math.round(info.amount/info.count).toLocaleString()}원</div>
                                   </button>
@@ -13147,9 +13166,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                                   >
                                     <div style={{ fontSize: 12, fontWeight: 600, color: T.text2, fontVariantNumeric: "tabular-nums" }}>{dateDisplay}{po.updatedAt && <span title="수정됨" style={{ marginLeft: 4, fontSize: 10, color: "#EC6608", fontWeight: 700 }}>✎</span>}</div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>🏭 {po.supplier?.name || "—"}</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: T.text, display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="factory" size={13}/>{po.supplier?.name || "—"}</div>
                                     <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"}</div>
-                                    <div style={{ fontSize: 12, color: T.text2, textAlign: "right" }}>{(po.items || []).length}건{po.photos?.length > 0 ? ` · 📷${po.photos.length}` : ""}</div>
+                                    <div style={{ fontSize: 12, color: T.text2, textAlign: "right" }}>{(po.items || []).length}건{po.photos?.length > 0 ? <span> · <Icon name="camera" size={11} style={{verticalAlign:"-1px"}}/>{po.photos.length}</span> : ""}</div>
                                     <div style={{ fontSize: 14, fontWeight: 800, color: NAVY, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(po.totalAmount || 0).toLocaleString()}원</div>
                                     <div style={{ textAlign: "center", display: "flex", gap: 4, justifyContent: "center" }}>
                                       <button onClick={(e) => { e.stopPropagation(); editPOFromHistory(po); }} title="수정" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 13, fontFamily: "inherit", padding: 4, display: "inline-flex", alignItems: "center" }}><Icon name="edit" size={14}/></button>
@@ -13194,11 +13213,11 @@ function KeywordManagerPanel({ darkMode, onClose }) {
   const [adding, setAdding] = useState(false);
 
   const CATEGORIES = [
-    { v: "core",     label: "📦 핵심",       desc: "제품명 직접 매칭 (가중치 보통 8~10)" },
-    { v: "material", label: "🧵 소재",       desc: "원단/섬유 키워드 (보통 5~7)" },
-    { v: "standard", label: "📋 규격/인증",  desc: "표준·인증 키워드 (보통 7~8)" },
-    { v: "usage",    label: "🛠 용도",       desc: "사용 용도 키워드 (보통 4~6)" },
-    { v: "exclude",  label: "🚫 제외",       desc: "오탐 방지 (음수, 보통 -20)" },
+    { v: "core",     label: "핵심",       icon: "package",   desc: "제품명 직접 매칭 (가중치 보통 8~10)" },
+    { v: "material", label: "소재",       icon: "layers",    desc: "원단/섬유 키워드 (보통 5~7)" },
+    { v: "standard", label: "규격/인증",  icon: "clipboard", desc: "표준·인증 키워드 (보통 7~8)" },
+    { v: "usage",    label: "용도",       icon: "wrench",    desc: "사용 용도 키워드 (보통 4~6)" },
+    { v: "exclude",  label: "제외",       icon: "close",     desc: "오탐 방지 (음수, 보통 -20)" },
   ];
 
   const refresh = async () => {
@@ -13314,7 +13333,7 @@ function KeywordManagerPanel({ darkMode, onClose }) {
           {grouped.map(cat => (
             <div key={cat.v}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-                <span>{cat.label}</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>{cat.icon && <Icon name={cat.icon} size={12}/>}{cat.label}</span>
                 <span style={{ color: "var(--text3)", fontWeight: 600 }}>({cat.items.length}건)</span>
                 <span style={{ color: "var(--text3)", fontWeight: 500, fontSize: 10 }}>· {cat.desc}</span>
               </div>
@@ -13389,7 +13408,7 @@ function KeywordManagerPanel({ darkMode, onClose }) {
           </button>
         </div>
         <div style={{ marginTop: 6, fontSize: 10, color: "var(--text3)" }}>
-          💡 카테고리에 맞는 가중치 권장. 제외 키워드는 음수(예: -20)로. 추가 후 다음 폴링(매일 KST 03:00)부터 적용.
+          <Icon name="lightbulb" size={11} style={{marginRight:4, verticalAlign:"-2px"}}/>카테고리에 맞는 가중치 권장. 제외 키워드는 음수(예: -20)로. 추가 후 다음 폴링(매일 KST 03:00)부터 적용.
         </div>
       </div>
     </div>
@@ -13606,7 +13625,7 @@ function TenderAutoSection({ darkMode }) {
           background: pollResult.ok ? "rgba(16,185,129,0.10)" : "rgba(240,68,82,0.10)",
           color: pollResult.ok ? "#10B981" : "#F04452",
           border: "1px solid " + (pollResult.ok ? "rgba(16,185,129,0.35)" : "rgba(240,68,82,0.35)") }}>
-          {pollResult.ok ? "✅ " : "⚠️ "}{pollResult.text}
+          <Icon name={pollResult.ok ? "checkCircle" : "alert"} size={12} style={{marginRight:5, verticalAlign:"-2px"}}/>{pollResult.text}
           {!pollResult.ok && <div style={{ marginTop: 4, color: "var(--text2)", fontWeight: 500 }}>G2B_SERVICE_KEY 미등록 또는 활성 키워드 0건이 가장 흔한 원인입니다.</div>}
         </div>
       )}
@@ -13676,7 +13695,7 @@ function TenderAutoSection({ darkMode }) {
                       <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: sc.bg, color: sc.color }}>{sc.label}</span>
                       {dd && <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: dd.bg, color: dd.color }}>{dd.label}</span>}
                       <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>점수 {n.matchScore}</span>
-                      {n.notifiedAt && <span style={{ fontSize: 10, color: "#00B493", fontWeight: 600 }}>📧 알림 전송됨</span>}
+                      {n.notifiedAt && <span style={{ fontSize: 10, color: "#00B493", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="mail" size={10}/>알림 전송됨</span>}
                     </div>
                     <a href={n.bidNtceUrl || "#"} target="_blank" rel="noreferrer"
                       style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", textDecoration: "none", lineHeight: 1.4, display: "block" }}>
@@ -13716,7 +13735,7 @@ function TenderAutoSection({ darkMode }) {
                   {/* Phase 4C: 응찰 정보 펼침 토글 */}
                   <button onClick={() => toggleExpand(n.key)}
                     style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid var(--border)", background: expandedKey === n.key ? "var(--text3)" : "transparent", color: expandedKey === n.key ? "#fff" : "var(--text2)", cursor: "pointer", fontSize: 10, fontFamily: "inherit", fontWeight: 600 }}>
-                    {expandedKey === n.key ? "▴ 접기" : (n.estimatedCost || n.estimatedMargin || n.applicationMemo || n.skipReason) ? "📝 응찰정보 ✓" : "📝 응찰정보"}
+                    {expandedKey === n.key ? "▴ 접기" : (n.estimatedCost || n.estimatedMargin || n.applicationMemo || n.skipReason) ? <span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="edit" size={10}/>응찰정보 ✓</span> : <span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="edit" size={10}/>응찰정보</span>}
                   </button>
                   {n.bidNtceUrl && (
                     <a href={n.bidNtceUrl} target="_blank" rel="noreferrer"
@@ -13729,8 +13748,8 @@ function TenderAutoSection({ darkMode }) {
                 {/* Phase 4C: 응찰 정보 입력 영역 (펼침 시) */}
                 {expandedKey === n.key && (
                   <div style={{ marginTop: 8, padding: 12, background: darkMode ? "rgba(236,102,8,0.06)" : "rgba(236,102,8,0.04)", border: "1px dashed rgba(236,102,8,0.35)", borderRadius: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)" }}>
-                      📝 응찰 검토 정보
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <Icon name="edit" size={12}/>응찰 검토 정보
                       {n.reviewedAt && <span style={{ marginLeft: 8, fontSize: 10, color: "var(--text3)", fontWeight: 600 }}>검토일 {fmtDateTime(n.reviewedAt)}</span>}
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
@@ -13952,7 +13971,7 @@ function BidsTab({ bids, setBids, darkMode }) {
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
                           <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:statColor(b.status)+"22",color:statColor(b.status),fontWeight:700}}>{b.status}</span>
-                          {isClosingSoon && <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700}}>⚠ D-{daysToClose} 마감 임박</span>}
+                          {isClosingSoon && <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:"rgba(240,68,82,0.18)",color:"#F04452",fontWeight:700,display:"inline-flex",alignItems:"center",gap:4}}><Icon name="alert" size={11}/>D-{daysToClose} 마감 임박</span>}
                           {isPast && <span style={{fontSize:11,padding:"2px 8px",borderRadius:6,background:"rgba(60,60,67,0.15)",color:"#475569",fontWeight:700}}>마감 지남</span>}
                           <span style={{fontSize:14,fontWeight:700,color:"var(--text1)"}}>{b.title}</span>
                         </div>
@@ -13964,7 +13983,7 @@ function BidsTab({ bids, setBids, darkMode }) {
                           {b.amount && <span><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>{parseFloat(b.amount).toLocaleString()}원</span></span>}
                         </div>
                         {b.note && <div style={{fontSize:12,color:"var(--text2)",marginTop:6,padding:"6px 10px",background:"var(--surface2)",borderRadius:6}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="edit" size={14}/>{b.note}</span></div>}
-                        {b.url && <div style={{marginTop:6}}><a href={b.url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"#007AFF"}}>🔗 공고 페이지 열기</a></div>}
+                        {b.url && <div style={{marginTop:6}}><a href={b.url} target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:"#007AFF",display:"inline-flex",alignItems:"center",gap:4}}><Icon name="link" size={12}/>공고 페이지 열기</a></div>}
                       </div>
                       <div style={{display:"flex",gap:6,flexShrink:0}}>
                         <button onClick={()=>editBid(b)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:16,padding:4}}><Icon name="edit" size={14}/></button>
@@ -14729,7 +14748,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                     </div>
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text3)", paddingLeft: 32, cursor: "pointer" }} onClick={() => startEditDates(t)} title="업무 기간 편집">
-                      <span style={{ fontWeight: 700 }}>📅</span>
+                      <Icon name="calendar" size={12}/>
                       <span>{t.date.slice(5).replace("-",".")}</span>
                       {hasRange && (
                         <>
@@ -15229,7 +15248,7 @@ function RecurringPanel({ recurringSchedules, setRecurringSchedules, darkMode })
           <span style={{ display: "inline-flex", color: "#EC6608" }}><Icon name="refresh" size={15}/></span>
           <span>
             등록한 정기 일정은 <b style={{color:"#EC6608"}}>매월·매주·매년 도래일에 캘린더에 자동 표시</b>됩니다 (미래 3개월/연간은 1년 범위).
-            <span style={{color:"var(--text3)",marginLeft:4}}>·자동 생성된 항목은 캘린더에서 🔁 아이콘으로 표시. 노션 동기화는 "↻ 노션 일괄 동기화" 버튼으로 함께 처리됨.</span>
+            <span style={{color:"var(--text3)",marginLeft:4}}>·자동 생성된 항목은 캘린더에서 <Icon name="refresh" size={11} style={{verticalAlign:"-1px"}}/> 아이콘으로 표시. 노션 동기화는 "↻ 노션 일괄 동기화" 버튼으로 함께 처리됨.</span>
           </span>
         </div>
       )}
@@ -15418,7 +15437,7 @@ function DrivePreviewInner({ file, driveApi, T, fileIcon }) {
   if (isText) return <iframe src={blobUrl} title={file.name} style={{ flex: 1, width: "100%", minHeight: 0, border: "none", background: "#fff" }} />;
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding: 40, color: T.text2 }}>
-      <div style={{ display:"inline-flex", marginBottom: 12 }}>{fileIcon(file)}</div>
+      <div style={{ display:"inline-flex", marginBottom: 12, color: T.text2 }}><Icon name={fileIcon(file)} size={48}/></div>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>이 형식은 미리보기를 지원하지 않습니다</div>
       <div style={{ fontSize: 12 }}>다운로드하여 확인해 주세요.</div>
     </div>
@@ -15920,14 +15939,14 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
 
   const fileIcon = (f) => {
     const t = (f.type || "").toLowerCase();
-    if (t.startsWith("image/")) return "🖼";
-    if (t.includes("pdf")) return "📕";
-    if (t.includes("sheet") || t.includes("excel") || /\.xlsx?$/i.test(f.name)) return "📊";
-    if (t.includes("word") || /\.docx?$/i.test(f.name)) return "📄";
-    if (t.includes("zip") || /\.(zip|7z|rar)$/i.test(f.name)) return "🗜";
-    if (t.startsWith("video/")) return "🎬";
-    if (t.startsWith("audio/")) return "🎵";
-    return "📎";
+    if (t.startsWith("image/")) return "image";
+    if (t.includes("pdf")) return "filePdf";
+    if (t.includes("sheet") || t.includes("excel") || /\.xlsx?$/i.test(f.name)) return "fileSheet";
+    if (t.includes("word") || /\.docx?$/i.test(f.name)) return "document";
+    if (t.includes("zip") || /\.(zip|7z|rar)$/i.test(f.name)) return "archive";
+    if (t.startsWith("video/")) return "film";
+    if (t.startsWith("audio/")) return "music";
+    return "paperclip";
   };
 
   const currentList = items[activeSub] || [];
@@ -15940,16 +15959,16 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: T.text, display:"inline-flex", alignItems:"center", gap:8 }}><Icon name="files" size={18}/>회사 필요 파일{driveConnected && <span style={{ fontSize: 11, marginLeft: 10, padding: "3px 10px", borderRadius: 999, background: "#10B981", color: "#fff", fontWeight: 700, verticalAlign: "middle" }}>☁️ Drive 연동</span>}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: T.text, display:"inline-flex", alignItems:"center", gap:8 }}><Icon name="files" size={18}/>회사 필요 파일{driveConnected && <span style={{ fontSize: 11, marginLeft: 10, padding: "3px 10px", borderRadius: 999, background: "#10B981", color: "#fff", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="cloud" size={11}/>Drive 연동</span>}</div>
             <div style={{ fontSize: 12, color: T.text2, marginTop: 4 }}>{driveConnected ? `Google Drive 「${DRIVE_ROOT_NAME}」 폴더에 영구 저장 · 어디서든 동기화` : "카테고리별로 파일을 보관하세요. 우측 「Drive 연동」으로 전환하면 무제한 저장."}</div>
           </div>
           {!driveConnected ? (
             <div style={{ fontSize: 11, color: sizeWarn ? "#FF9500" : T.text2, fontWeight: 600 }}>
-              로컬 사용량 {fmtSize(totalBytes)}{sizeWarn && " · ⚠️ 한계 근접"}
+              로컬 사용량 {fmtSize(totalBytes)}{sizeWarn && <span> · <Icon name="alert" size={11} style={{verticalAlign:"-1px"}}/> 한계 근접</span>}
             </div>
           ) : (
             <div style={{ fontSize: 11, color: T.text2, fontWeight: 600, textAlign: "right" }}>
-              {driveProfile && <div>👤 {driveProfile.name || driveProfile.email}</div>}
+              {driveProfile && <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="user" size={11}/>{driveProfile.name || driveProfile.email}</div>}
               {driveBusy && <div style={{ color: "#007AFF", marginTop: 2 }}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="refresh" size={14}/>Drive 작업 중...</span></div>}
             </div>
           )}
@@ -15957,16 +15976,16 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
 
         {/* Google Drive 연동 바 */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, marginBottom: 14, background: driveConnected ? (darkMode ? "rgba(16,185,129,0.10)" : "rgba(16,185,129,0.06)") : T.surface2, border: `1.5px solid ${driveConnected ? "rgba(16,185,129,0.35)" : T.divider}`, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 22 }}>{driveConnected ? "✅" : "☁️"}</div>
+          <div style={{ display: "inline-flex", color: driveConnected ? "#10B981" : T.text2 }}><Icon name={driveConnected ? "checkCircle" : "cloud"} size={22}/></div>
           <div style={{ flex: 1, minWidth: 200 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{driveConnected ? "Google Drive 연결됨" : "Google Drive에 연결하면 무제한 저장 · 디바이스 동기화 · 공유 링크 생성"}</div>
-            {driveError && <div style={{ fontSize: 11, color: "#F04452", marginTop: 4 }}>⚠️ {driveError}</div>}
+            {driveError && <div style={{ fontSize: 11, color: "#F04452", marginTop: 4, display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="alert" size={11}/>{driveError}</div>}
             {!driveConnected && <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>연결 시 Drive 안에 「{DRIVE_ROOT_NAME}」 폴더가 자동 생성되고, 카테고리별 하위 폴더로 정리됩니다.</div>}
           </div>
           {driveConnected ? (
             <button onClick={driveSignOut} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>연결 해제</button>
           ) : (
-            <button onClick={driveSignIn} style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: "#10B981", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>🔗 Google Drive 연결</button>
+            <button onClick={driveSignIn} style={{ padding: "9px 18px", borderRadius: 8, border: "none", background: "#10B981", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="link" size={13}/>Google Drive 연결</span></button>
           )}
         </div>
 
@@ -16120,7 +16139,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
                   ) : f.thumbnailLink ? (
                     <img src={f.thumbnailLink} alt={f.name} referrerPolicy="no-referrer" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8, flexShrink: 0, background: T.surface, border: `1px solid ${T.divider}` }} />
                   ) : (
-                    <div style={{ width: 44, height: 44, borderRadius: 8, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0, border: `1px solid ${T.divider}` }}>{fileIcon(f)}</div>
+                    <div style={{ width: 44, height: 44, borderRadius: 8, background: T.surface, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, border: `1px solid ${T.divider}`, color: T.text2 }}><Icon name={fileIcon(f)} size={22}/></div>
                   )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div title={f.name} style={{ fontSize: 13, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
@@ -16153,7 +16172,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
             <div onClick={e => e.stopPropagation()}
               style={{ background: T.surface, borderRadius: 14, width: "min(1100px, 100%)", height: "92vh", maxHeight: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: `1px solid ${T.divider}` }}>
-                <div style={{ fontSize: 20 }}>{fileIcon(f)}</div>
+                <div style={{ display: "inline-flex", color: T.text2 }}><Icon name={fileIcon(f)} size={20}/></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div title={f.name} style={{ fontSize: 14, fontWeight: 700, color: T.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
                   <div style={{ fontSize: 11, color: T.text2, marginTop: 2 }}>{fmtSize(f.size)} · {new Date(f.uploadedAt).toLocaleDateString("ko-KR")}</div>
@@ -16171,7 +16190,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
                     {isPdf && <object data={f.dataUrl} type="application/pdf" style={{ flex: 1, width: "100%", minHeight: 0, border: "none", background: "#fff" }}><iframe src={f.dataUrl} title={f.name} style={{ width: "100%", height: "100%", border: "none", background: "#fff" }} /></object>}
                     {!isImg && !isPdf && (
                       <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding: 40, color: T.text2 }}>
-                        <div style={{ fontSize: 48, marginBottom: 12 }}>{fileIcon(f)}</div>
+                        <div style={{ marginBottom: 12, display: "inline-flex", color: T.text2 }}><Icon name={fileIcon(f)} size={48}/></div>
                         <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>이 형식은 미리보기를 지원하지 않습니다</div>
                         <div style={{ fontSize: 12 }}>다운로드하여 확인해 주세요.</div>
                       </div>
@@ -16203,11 +16222,11 @@ function MailTab({ darkMode, clients = [] }) {
   const tokenClientRef = React.useRef(null);
 
   const FILTERS = [
-    { id: "in:inbox", label: "📥 받은 편지함" },
-    { id: "is:unread", label: "🔵 안 읽음" },
-    { id: "is:starred", label: "⭐ 별표" },
-    { id: "in:sent", label: "📤 보낸 편지함" },
-    { id: "in:drafts", label: "📝 임시 보관" },
+    { id: "in:inbox", label: "받은 편지함", icon: "inbox" },
+    { id: "is:unread", label: "안 읽음", dot: "#007AFF" },
+    { id: "is:starred", label: "별표", icon: "star" },
+    { id: "in:sent", label: "보낸 편지함", icon: "upload" },
+    { id: "in:drafts", label: "임시 보관", icon: "edit" },
   ];
 
   // 토큰 만료 체크
@@ -16448,7 +16467,7 @@ function MailTab({ darkMode, clients = [] }) {
   if (!token) {
     return (
       <div className="card" style={{ padding: 48, textAlign: "center", maxWidth: 480, margin: "40px auto" }}>
-        <div style={{ fontSize: 56, marginBottom: 12 }}>✉️</div>
+        <div style={{ marginBottom: 12, display: "flex", justifyContent: "center", color: "var(--text3)" }}><Icon name="mail" size={48}/></div>
         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", marginBottom: 8 }}>Gmail 연동</div>
         <div style={{ fontSize: 14, color: "var(--text2)", lineHeight: 1.7, marginBottom: 24 }}>
           Google 계정으로 로그인하면 받은 메일 조회 / 검색 / 발송이 가능해요.<br/>
@@ -16475,7 +16494,7 @@ function MailTab({ darkMode, clients = [] }) {
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}><Icon name="mail" size={13} style={{marginRight:6,verticalAlign:"-2px"}}/>{profile?.emailAddress || "Gmail"}</div>
           <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>총 메일 {profile?.messagesTotal?.toLocaleString() || "—"}건</div>
         </div>
-        <button onClick={() => setComposing({ to: "", subject: "", body: "" })} className="btn-primary" style={{ padding: "8px 16px", fontSize: 13 }}>✏️ 새 메일</button>
+        <button onClick={() => setComposing({ to: "", subject: "", body: "" })} className="btn-primary" style={{ padding: "8px 16px", fontSize: 13 }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="edit" size={13}/>새 메일</span></button>
         <button onClick={() => fetchInbox(activeQ)} title="새로고침" style={{ padding: "8px 10px", color: "var(--text2)", background: "none", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center" }}><Icon name="refresh" size={14}/></button>
         <button onClick={signOut} title="로그아웃" style={{ padding: "8px 12px", fontSize: 12, color: "var(--text2)", background: "none", border: "1px solid var(--border)", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>로그아웃</button>
       </div>
@@ -16494,7 +16513,7 @@ function MailTab({ darkMode, clients = [] }) {
                 background: activeQ === f.id ? "var(--accent)" : "var(--surface2)",
                 color: activeQ === f.id ? "#fff" : "var(--text2)",
                 fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-              }}>{f.label}</button>
+              }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}>{f.dot ? <span style={{display:"inline-block",width:8,height:8,borderRadius:99,background:f.dot}}/> : <Icon name={f.icon} size={12}/>}{f.label}</span></button>
           ))}
           {clients.length > 0 && (
             <select onChange={e => { if (e.target.value) { setSearch(""); setActiveQ(`from:${e.target.value} OR to:${e.target.value}`); }}}
@@ -16513,7 +16532,7 @@ function MailTab({ darkMode, clients = [] }) {
         {loading ? (
           <div style={{ padding: 48, textAlign: "center", color: "var(--text3)" }}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="refresh" size={14}/>로딩 중...</span></div>
         ) : emails.length === 0 ? (
-          <div style={{ padding: 48, textAlign: "center", color: "var(--text3)", fontSize: 14 }}>📭 메일이 없습니다</div>
+          <div style={{ padding: 48, textAlign: "center", color: "var(--text3)", fontSize: 14 }}><span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="inbox" size={16}/>메일이 없습니다</span></div>
         ) : (
           <div>
             {emails.map(m => {
@@ -16595,7 +16614,7 @@ function MailDetailModal({ m, darkMode, onClose, onReply, onDelete }) {
           <div style={{ fontSize: 11, color: "var(--text3)" }}>{m.date?.toLocaleString("ko-KR") || ""}</div>
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button onClick={onReply} className="btn-primary" style={{ padding: "6px 14px", fontSize: 12 }}>↩ 답장</button>
-            <button onClick={onDelete} style={{ padding: "6px 14px", fontSize: 12, color: "#F04452", background: "none", border: "1px solid #F04452", borderRadius: 9, cursor: "pointer", fontFamily: "inherit" }}>🗑 삭제</button>
+            <button onClick={onDelete} style={{ padding: "6px 14px", fontSize: 12, color: "#F04452", background: "none", border: "1px solid #F04452", borderRadius: 9, cursor: "pointer", fontFamily: "inherit" }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="trash" size={12}/>삭제</span></button>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
@@ -16636,7 +16655,7 @@ function MailComposeModal({ initial, darkMode, clients = [], onSend, onCancel })
     <div onClick={onCancel} style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.55)", backdropFilter: "none", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div className="frw-rise" onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "92vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 48px rgba(0,0,0,0.32)" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--divider)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text1)" }}>✏️ 새 메일</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="edit" size={16}/>새 메일</div>
           <button onClick={onCancel} style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 16 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -16663,7 +16682,7 @@ function MailComposeModal({ initial, darkMode, clients = [], onSend, onCancel })
         </div>
         <div style={{ padding: "14px 20px", borderTop: "1px solid var(--divider)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button onClick={onCancel} style={{ padding: "10px 18px", fontSize: 13, color: "var(--text2)", background: "var(--surface2)", border: "none", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>취소</button>
-          <button onClick={handleSend} disabled={sending || !to || !subject} className="btn-primary" style={{ padding: "10px 22px", fontSize: 13, opacity: (sending || !to || !subject) ? 0.5 : 1 }}>{sending ? "⏳ 전송 중..." : "📤 보내기"}</button>
+          <button onClick={handleSend} disabled={sending || !to || !subject} className="btn-primary" style={{ padding: "10px 22px", fontSize: 13, opacity: (sending || !to || !subject) ? 0.5 : 1 }}>{sending ? "⏳ 전송 중..." : <span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="upload" size={13}/>보내기</span>}</button>
         </div>
       </div>
     </div>
