@@ -10495,9 +10495,13 @@ ${priceTable}
     const totalSum = items.reduce((s, x) => s + x.c.finalPrice, 0);
 
     // 거래처용: 제품명·단가만 전달 (등급/원가 디테일은 절대 포함 금지)
-    const productList = items.map(({ p, c }) =>
-      `- ${p.name}: ${Math.round(c.finalPrice).toLocaleString()}원`
-    ).join("\n");
+    const hasMarketPriceAI = items.some(({ p }) => p.marketPrice && parseFloat(p.marketPrice) > 0);
+    const showMarketPriceAI = includeMarketPrice && hasMarketPriceAI;
+    const productList = items.map(({ p, c }) => {
+      const mp = parseFloat(p.marketPrice);
+      const mpStr = (!isNaN(mp) && mp > 0) ? ` / 시장가 ${Math.round(mp).toLocaleString()}원` : "";
+      return `- ${p.name}: ${Math.round(c.finalPrice).toLocaleString()}원${showMarketPriceAI ? mpStr : ""}`;
+    }).join("\n");
 
     const prompt = `당신은 방염복(FR 워크웨어) 전문 업체의 견적 담당자입니다.
 거래처(고객사)에 발송할 **애플(Apple) 내부 보고서 스타일**의 견적서를 한국어로 작성해주세요.
