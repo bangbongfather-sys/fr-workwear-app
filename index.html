@@ -10426,7 +10426,8 @@ function App() {
 
     // 제품 단가 표 (제품명 / 수량 / 단가 / 시장 소비자가)
     const hasMarketPrice = items.some(({ p }) => p.marketPrice && parseFloat(p.marketPrice) > 0);
-    const priceTable = hasMarketPrice
+    const showMarketPrice = includeMarketPrice && hasMarketPrice;
+    const priceTable = showMarketPrice
       ? items.map(({ p, c }) => {
           const mp = parseFloat(p.marketPrice);
           const mpStr = (!isNaN(mp) && mp > 0) ? `${Math.round(mp).toLocaleString()}원` : `—`;
@@ -10436,7 +10437,7 @@ function App() {
           `| ${p.name} | 1 | ${Math.round(c.finalPrice).toLocaleString()}원 |`
         ).join("\n");
 
-    const tableHeader = hasMarketPrice
+    const tableHeader = showMarketPrice
       ? `| 제품명 | 수량 | 납품 단가 | 시장 소비자가 |\n|---|---|---|---|`
       : `| 제품명 | 수량 | 단가 |\n|---|---|---|`;
 
