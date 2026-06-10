@@ -17436,7 +17436,9 @@ function PWAInstallBanner() {
     // 이미 설치된 standalone 모드에서는 표시하지 않음
     if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return;
     const t = setTimeout(() => { if (window.__njDeferredPrompt) setShow(true); }, 30000);
-    return () => clearTimeout(t);
+    const onInstalled = () => setShow(false); // 헤더 버튼 등으로 설치 완료 시 배너 숨김
+    window.addEventListener("appinstalled", onInstalled);
+    return () => { clearTimeout(t); window.removeEventListener("appinstalled", onInstalled); };
   }, []);
   if (!show) return null;
   const install = async () => {
