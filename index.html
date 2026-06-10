@@ -10165,7 +10165,7 @@ function App() {
           resolvedRev = (serverRev != null ? serverRev : (lastKnownRev.current || 0)) + 1;
         }
         cloudSave({ ...payload, _rev: resolvedRev })
-          .then(() => { lastKnownRev.current = resolvedRev; setSyncStatus("saved"); syncTimer.current = null; cloudBackupDaily(payload); })
+          .then(() => { lastKnownRev.current = resolvedRev; setSyncStatus("saved"); syncTimer.current = null; save("frw_dirty", false); cloudBackupDaily(payload); })
           .catch(() => {
             if (attempt < 3) {
               syncTimer.current = setTimeout(() => doSave(attempt + 1), 2000 * Math.pow(2, attempt));
