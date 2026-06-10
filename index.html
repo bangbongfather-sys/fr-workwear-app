@@ -10116,6 +10116,17 @@ function App() {
     }).catch(() => {});
   }, []);
 
+  // 오프라인 복귀 시 미동기화 변경 자동 재전송 — 동기화 실패(error) 상태에서
+  // online 이벤트가 오면 tick을 올려 아래 저장 effect를 다시 돌린다.
+  const [onlineRetryTick, setOnlineRetryTick] = useState(0);
+  const syncStatusRef = useRef(syncStatus);
+  useEffect(() => { syncStatusRef.current = syncStatus; }, [syncStatus]);
+  useEffect(() => {
+    const onOnline = () => { if (syncStatusRef.current === "error" || syncStatusRef.current === "syncing") setOnlineRetryTick(t => t + 1); };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, []);
+
   useEffect(() => {
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
