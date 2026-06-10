@@ -10140,6 +10140,9 @@ function App() {
     save("frw_purchase_date_memos", purchaseDateMemos);
     if (!initialized.current) return;
     setSyncStatus("syncing");
+    // 클라우드 미반영 변경 표시 — 동기화 성공 전에 앱이 꺼져도 다음 시작 때
+    // 클라우드(옛 데이터)가 로컬을 덮어쓰지 않도록 보호 (오프라인 작업 유실 방지)
+    save("frw_dirty", true);
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
       const payload = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos };
