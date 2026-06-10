@@ -10079,13 +10079,28 @@ function App() {
   };
 
   useEffect(() => {
+    // 미동기화 로컬 변경(frw_dirty)이 있으면 클라우드 데이터를 적용하지 않는다 —
+    // 오프라인에서 입력 후 앱을 껐다가 온라인에서 다시 연 경우, 옛 클라우드 데이터가
+    // 로컬 입력을 덮어쓰는 유실 사고 방지. 대신 로컬 상태를 클라우드로 밀어올린다.
+    const hasUnsynced = load("frw_dirty", false);
     cloudLoad().then(d => {
-      applyCloudData(d);
-      setSyncStatus("saved");
-      // 로드 직후 데이터 그대로 일일 백업 (하루 한 번). 오늘 작업하다 실수로 덮어쓰면 어제 백업으로 복구.
-      cloudBackupDaily(d);
+      if (hasUnsynced) {
+        // 충돌 감지용 서버 리비전만 기억하고 데이터는 로컬 유지
+        if (d && typeof d._rev === "number") lastKnownRev.current = d._rev;
+        setSyncStatus("syncing");
+      } else {
+        applyCloudData(d);
+        setSyncStatus("saved");
+        // 로드 직후 데이터 그대로 일일 백업 (하루 한 번). 오늘 작업하다 실수로 덮어쓰면 어제 백업으로 복구.
+        cloudBackupDaily(d);
+      }
     })
-      .catch(() => setSyncStatus("error")).finally(() => { initialized.current = true; });
+      .catch(() => setSyncStatus("error"))
+      .finally(() => {
+        initialized.current = true;
+        // 미동기화 변경이 있으면 저장 effect를 깨워 로컬 → 클라우드 푸시
+        if (hasUnsynced) setOnlineRetryTick(t => t + 1);
+      });
   }, []);
 
   // visibility 핸들러: 백그라운드 → 포그라운드 복귀 시 cloud 재로드
