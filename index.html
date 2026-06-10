@@ -9753,8 +9753,9 @@ function App() {
   const [editingSpec, setEditingSpec] = useState(null);
   const [editingGradeName, setEditingGradeName] = useState(null);
   const [syncStatus, setSyncStatus] = useState("syncing");
-  // PWA 설치 프롬프트
-  const [installPromptEvt, setInstallPromptEvt] = useState(null);
+  // PWA 설치 프롬프트 — head에서 미리 잡아둔 전역 이벤트(__njDeferredPrompt)로 초기화
+  // (beforeinstallprompt가 React 마운트 전에 발생하면 여기 리스너로는 못 잡으므로)
+  const [installPromptEvt, setInstallPromptEvt] = useState(() => window.__njDeferredPrompt || null);
   const [installed, setInstalled] = useState(false);
   useEffect(() => {
     const onPrompt = (e) => { e.preventDefault(); setInstallPromptEvt(e); };
