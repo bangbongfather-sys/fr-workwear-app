@@ -15163,8 +15163,25 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                       <span title="정기 일정에서 자동 생성됨"
                         style={{ opacity: 0.8, flexShrink: 0, display: "inline-flex" }}><Icon name="refresh" size={12}/></span>
                     )}
-                    <input value={t.text} onChange={e => updateTodo(t.id, e.target.value)}
-                      style={{ flex: 1, height: "auto", padding: "4px 8px", fontSize: 13, background: "transparent", border: "none", textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text3)" : "var(--text1)", borderRadius: 6 }} />
+                    <div onClick={() => openDetail(t)} title="눌러서 상세 보기/편집" style={{ flex: 1, minWidth: 0, cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>
+                      <div style={{
+                        fontSize: 13, lineHeight: 1.45,
+                        textDecoration: t.done ? "line-through" : "none",
+                        color: t.done ? "var(--text3)" : "var(--text1)",
+                        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                        overflow: "hidden", whiteSpace: "normal", wordBreak: "break-all",
+                      }}>{t.text}</div>
+                      {t.memo && (
+                        <div style={{
+                          fontSize: 11, color: "var(--text3)", marginTop: 2,
+                          display: "flex", alignItems: "center", gap: 4,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          <Icon name="document" size={11} style={{ flexShrink: 0 }}/>
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{t.memo.split("\n")[0]}</span>
+                        </div>
+                      )}
+                    </div>
                     <button onClick={() => removeTodo(t.id)} title="삭제"
                       style={{ width: 26, height: 26, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 14, padding: 0, fontFamily: "inherit", flexShrink: 0 }}
                       onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "#EF4444"; }}
