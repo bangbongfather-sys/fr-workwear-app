@@ -17400,6 +17400,65 @@ function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
           </div>
         )}
       </div>
+      <OfflineBanner />
+      <PWAInstallBanner />
+    </div>
+  );
+}
+
+// ── 오프라인 인디케이터 — navigator.onLine 기준, 상단 고정 오렌지 배너 ──
+function OfflineBanner() {
+  const [offline, setOffline] = React.useState(!navigator.onLine);
+  React.useEffect(() => {
+    const on = () => setOffline(false), off = () => setOffline(true);
+    window.addEventListener("online", on); window.addEventListener("offline", off);
+    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+  }, []);
+  if (!offline) return null;
+  return (
+    <div className="no-print" style={{
+      position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
+      background: "#EC6608", color: "#fff", textAlign: "center",
+      padding: "7px 16px", fontSize: 13, fontWeight: 700,
+      boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
+    }}>
+      오프라인 모드 — 저장된 데이터만 표시됩니다 · 입력 내용은 기기에 저장되고 온라인 복귀 시 자동 동기화됩니다
+    </div>
+  );
+}
+
+// ── PWA 설치 배너 — 30초 후 표시, 닫으면 다시 안 띄움 (frw_pwa_banner_dismissed) ──
+function PWAInstallBanner() {
+  const [show, setShow] = React.useState(false);
+  React.useEffect(() => {
+    if (load("frw_pwa_banner_dismissed", false)) return;
+    // 이미 설치된 standalone 모드에서는 표시하지 않음
+    if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) return;
+    const t = setTimeout(() => { if (window.__njDeferredPrompt) setShow(true); }, 30000);
+    return () => clearTimeout(t);
+  }, []);
+  if (!show) return null;
+  const install = async () => {
+    const dp = window.__njDeferredPrompt;
+    setShow(false);
+    if (!dp) return;
+    dp.prompt();
+    try { await dp.userChoice; } catch {}
+    window.__njDeferredPrompt = null;
+  };
+  const dismiss = () => { setShow(false); save("frw_pwa_banner_dismissed", true); };
+  return (
+    <div className="no-print" style={{
+      position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 9999,
+      background: "#191F28", color: "#fff", borderRadius: 14, padding: "12px 16px",
+      display: "flex", alignItems: "center", gap: 12,
+      boxShadow: "0 8px 24px rgba(0,0,0,0.28)", maxWidth: "calc(100vw - 32px)",
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        앱으로 설치하면 홈 화면에서 바로 열 수 있어요
+      </span>
+      <button onClick={install} style={{ background: "#EC6608", color: "#fff", border: "none", borderRadius: 9, padding: "8px 14px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>설치</button>
+      <button onClick={dismiss} aria-label="닫기" style={{ background: "transparent", color: "#8B95A1", border: "none", fontSize: 16, cursor: "pointer", padding: 4, lineHeight: 1, flexShrink: 0 }}>✕</button>
     </div>
   );
 }
