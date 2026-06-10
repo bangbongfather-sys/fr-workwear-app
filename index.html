@@ -17473,8 +17473,10 @@ function Root() {
     }
   }, [pendingTab]);
 
-  if (!authed) return <LoginScreen onSuccess={() => setAuthed(true)} />;
-  if (!welcomeSeen) return <WelcomeScreen
+  // 어떤 화면(로그인/웰컴/앱)에서든 오프라인 인디케이터·설치 배너가 보이도록 Root에서 함께 렌더링
+  let body;
+  if (!authed) body = <LoginScreen onSuccess={() => setAuthed(true)} />;
+  else if (!welcomeSeen) body = <WelcomeScreen
     orders={(() => { try { return JSON.parse(localStorage.getItem("frw_orders") || "[]"); } catch { return []; } })()}
     ledgers={(() => { try { return JSON.parse(localStorage.getItem("frw_ledgers") || "{}"); } catch { return {}; } })()}
     products={(() => { try { return JSON.parse(localStorage.getItem("frw_products") || "[]"); } catch { return []; } })()}
@@ -17485,7 +17487,8 @@ function Root() {
       setWelcomeSeen(true);
     }}
   />;
-  return <App />;
+  else body = <App />;
+  return <>{body}<OfflineBanner /><PWAInstallBanner /></>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
