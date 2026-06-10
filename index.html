@@ -10110,7 +10110,8 @@ function App() {
       if (document.visibilityState !== "visible") return;
       if (!initialized.current) return;
       // syncTimer 활성 = 로컬 변경분이 cloud 로 저장 대기 중 → reload 하면 덮어씀 → 스킵
-      if (syncTimer.current) return;
+      // frw_dirty = 동기화 실패(오프라인 등)로 클라우드 미반영 변경 있음 → 마찬가지로 스킵
+      if (syncTimer.current || load("frw_dirty", false)) return;
       setSyncStatus("syncing");
       cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error"));
     };
