@@ -32,6 +32,13 @@
         navigator.serviceWorker.register("/sw.js").catch(() => {});
       });
     }
+    // PWA 설치 프롬프트는 React 마운트 전에 발생할 수 있어 여기서 미리 잡아둔다.
+    // (기본 미니 인포바 차단 → 앱 내 "설치" 배너에서 prompt() 호출)
+    window.__njDeferredPrompt = null;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      window.__njDeferredPrompt = e;
+    });
   </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
 
