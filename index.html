@@ -9769,14 +9769,16 @@ function App() {
     };
   }, []);
   const promptInstall = async () => {
-    if (!installPromptEvt) {
+    const evt = installPromptEvt || window.__njDeferredPrompt;
+    if (!evt) {
       alert("설치 안내\n\n[Chrome / Edge]\n주소창 우측의 ⊞ 아이콘 클릭 → '앱 설치'\n또는 메뉴 → '앱 설치'\n\n[Safari (iOS)]\n공유 → '홈 화면에 추가'\n\n[Safari (Mac)]\n파일 → '도크에 추가'");
       return;
     }
-    installPromptEvt.prompt();
-    const { outcome } = await installPromptEvt.userChoice;
+    evt.prompt();
+    const { outcome } = await evt.userChoice;
     if (outcome === "accepted") setInstalled(true);
     setInstallPromptEvt(null);
+    window.__njDeferredPrompt = null;
   };
   const [quote, setQuote] = useState("");
   const [generating, setGenerating] = useState(false);
