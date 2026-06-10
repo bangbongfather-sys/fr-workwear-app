@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>FR Workwear App — 진단 리포트</title>
+<style>
+  :root {
+    --navy: #1B2B4B;
+    --orange: #EC6608;
+    --orange-light: #FFF3E8;
+    --green: #10B981;
+    --green-light: #ECFDF5;
+    --red: #EF4444;
+    --red-light: #FEF2F2;
+    --yellow: #F59E0B;
+    --yellow-light: #FFFBEB;
+    --blue: #3B82F6;
+    --blue-light: #EFF6FF;
+    --purple: #8B5CF6;
+    --purple-light: #F5F3FF;
+    --text: #1E293B;
+    --text2: #64748B;
+    --bg: #F8FAFC;
+    --card: #FFFFFF;
+    --border: #E2E8F0;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, var(--navy) 0%, #2D4A7A 100%);
+    color: white;
+    padding: 48px 40px;
+    position: relative;
+    overflow: hidden;
+  }
+  .header::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 80% 50%, rgba(236,102,8,0.18) 0%, transparent 60%);
+  }
+  .header-inner { max-width: 1100px; margin: 0 auto; position: relative; }
+  .header-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(236,102,8,0.25); border: 1px solid rgba(236,102,8,0.5);
+    color: #FFD4A8; padding: 5px 14px; border-radius: 100px; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 16px;
+  }
+  .header h1 { font-size: 32px; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.02em; }
+  .header p { font-size: 15px; color: rgba(255,255,255,0.72); max-width: 600px; }
+  .header-meta {
+    margin-top: 24px; display: flex; gap: 24px; flex-wrap: wrap;
+  }
+  .header-meta-item {
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .header-meta-item .label { font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.05em; }
+  .header-meta-item .value { font-size: 15px; font-weight: 700; color: white; }
+
+  /* ── Layout ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 48px; }
+  .section-title {
+    font-size: 20px; font-weight: 800; color: var(--navy);
+    margin-bottom: 20px; padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+    letter-spacing: -0.02em;
+  }
+  .section-title .icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; flex-shrink: 0;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .card-grid { display: grid; gap: 16px; }
+  .card-grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .card-grid-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 768px) {
+    .card-grid-2, .card-grid-3 { grid-template-columns: 1fr; }
+  }
+
+  /* ── Timeline (최근 작업) ── */
+  .timeline { display: flex; flex-direction: column; gap: 0; }
+  .tl-item {
+    display: flex; gap: 20px; padding-bottom: 28px; position: relative;
+  }
+  .tl-item:last-child { padding-bottom: 0; }
+  .tl-item::before {
+    content: '';
+    position: absolute; left: 15px; top: 32px; bottom: 0;
+    width: 2px; background: var(--border);
+  }
+  .tl-item:last-child::before { display: none; }
+  .tl-dot {
+    width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; position: relative; z-index: 1;
+    border: 2px solid white; box-shadow: 0 0 0 2px var(--border);
+  }
+  .tl-content { flex: 1; min-width: 0; }
+  .tl-date { font-size: 11px; color: var(--text2); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .tl-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .tl-desc { font-size: 13px; color: var(--text2); line-height: 1.55; }
+  .tl-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .tag {
+    font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 100px;
+    letter-spacing: 0.02em;
+  }
+  .tag-orange { background: var(--orange-light); color: var(--orange); }
+  .tag-blue { background: var(--blue-light); color: var(--blue); }
+  .tag-green { background: var(--green-light); color: var(--green); }
+  .tag-purple { background: var(--purple-light); color: var(--purple); }
+
+  /* ── App Overview ── */
+  .tab-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  @media (max-width: 600px) { .tab-grid { grid-template-columns: 1fr 1fr; } }
+  .tab-card {
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+    display: flex; align-items: center; gap: 10px; transition: all 0.15s;
+  }
+  .tab-card:hover { border-color: var(--orange); background: var(--orange-light); }
+  .tab-icon { font-size: 18px; }
+  .tab-name { font-size: 13px; font-weight: 700; color: var(--text); }
+  .tab-sub { font-size: 11px; color: var(--text2); margin-top: 1px; }
+
+  /* ── Diagnosis ── */
+  .issue-card {
+    border-radius: var(--radius); padding: 20px 22px; margin-bottom: 14px;
+    border-left: 4px solid;
+    display: grid; gap: 4px;
+  }
+  .issue-card.critical { background: #FEF2F2; border-color: var(--red); }
+  .issue-card.warning { background: #FFFBEB; border-color: var(--yellow); }
+  .issue-card.info { background: var(--blue-light); border-color: var(--blue); }
+  .issue-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .issue-badge {
+    font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: 100px;
+    text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0;
+  }
+  .badge-critical { background: var(--red); color: white; }
+  .badge-warning { background: var(--yellow); color: white; }
+  .badge-info { background: var(--blue); color: white; }
+  .issue-title { font-size: 15px; font-weight: 700; }
+  .issue-desc { font-size: 13px; color: var(--text2); line-height: 1.55; }
+  .issue-fix { font-size: 12px; margin-top: 8px; }
+  .issue-fix strong { color: var(--navy); }
+
+  /* ── Feature Recommendations ── */
+  .feature-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 22px 24px; margin-bottom: 14px;
+    transition: box-shadow 0.15s;
+  }
+  .feature-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+  .feature-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 10px; }
+  .feature-num {
+    width: 28px; height: 28px; border-radius: 8px; background: var(--navy);
+    color: white; font-size: 12px; font-weight: 800; display: flex;
+    align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+  }
+  .feature-title { font-size: 16px; font-weight: 800; color: var(--navy); margin-bottom: 4px; }
+  .feature-why { font-size: 13px; color: var(--text2); line-height: 1.55; }
+  .feature-priority {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 700; padding: 3px 10px;
+    border-radius: 100px; margin-bottom: 12px;
+  }
+  .priority-high { background: #FEE2E2; color: #DC2626; }
+  .priority-med { background: #FEF3C7; color: #D97706; }
+  .priority-low { background: #DCFCE7; color: #16A34A; }
+
+  /* ── Lovable Prompts ── */
+  .prompt-box {
+    background: #0F172A; border-radius: 10px; padding: 18px 20px;
+    margin-top: 14px; position: relative;
+  }
+  .prompt-box::before {
+    content: 'LOVABLE PROMPT';
+    position: absolute; top: -9px; left: 16px;
+    background: var(--orange); color: white;
+    font-size: 9px; font-weight: 800; padding: 2px 10px;
+    border-radius: 100px; letter-spacing: 0.08em;
+  }
+  .prompt-text {
+    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: 12.5px; color: #E2E8F0; line-height: 1.7;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .copy-btn {
+    position: absolute; top: 10px; right: 12px;
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.7); border-radius: 6px; padding: 4px 10px;
+    font-size: 11px; cursor: pointer; font-family: inherit; transition: all 0.15s;
+  }
+  .copy-btn:hover { background: rgba(255,255,255,0.2); color: white; }
+
+  /* ── Stats ── */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 768px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+  .stat-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px; text-align: center;
+  }
+  .stat-num { font-size: 28px; font-weight: 800; color: var(--navy); letter-spacing: -0.03em; }
+  .stat-label { font-size: 12px; color: var(--text2); font-weight: 600; margin-top: 2px; }
+
+  /* ── Footer ── */
+  .footer {
+    text-align: center; padding: 32px 24px; color: var(--text2);
+    font-size: 13px; border-top: 1px solid var(--border); margin-top: 40px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ══ HEADER ══ -->
+<div class="header">
+  <div class="header-inner">
+    <div class="header-badge">🔍 App Diagnosis Report</div>
+    <h1>FR Workwear App — 진단 리포트</h1>
+    <p>단일 HTML 파일 기반 작업복 사업 관리 앱 전체 진단 및 개선 제안</p>
+    <div class="header-meta">
+      <div class="header-meta-item">
+        <span class="label">리포트 생성일</span>
+        <span class="value">2026-06-10</span>
+      </div>
+      <div class="header-meta-item">
+        <span class="label">분석 대상</span>
+        <span class="value">index.html (17,441 lines)</span>
+      </div>
+      <div class="header-meta-item">
+        <span class="label">주요 탭</span>
+        <span class="value">15개</span>
+      </div>
+      <div class="header-meta-item">
+        <span class="label">localStorage 키</span>
+        <span class="value">50개+</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- ══ 앱 개요 ══ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon" style="background:#EEF4FF;">📊</div>
+      앱 구조 개요
+    </div>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num">17,441</div><div class="stat-label">HTML 코드 라인</div></div>
+        <div class="stat-card"><div class="stat-num">15</div><div class="stat-label">메인 탭</div></div>
+        <div class="stat-card"><div class="stat-num">50+</div><div class="stat-label">localStorage 키</div></div>
+        <div class="stat-card"><div class="stat-num">3</div><div class="stat-label">외부 연동 (Firebase, Notion, Drive)</div></div>
+      </div>
+    </div>
+    <div class="tab-grid">
+      <div class="tab-card"><span class="tab-icon">📋</span><div><div class="tab-name">단가표</div><div class="tab-sub">원단·노무비 DB</div></div></div>
+      <div class="tab-card"><span class="tab-icon">🧮</span><div><div class="tab-name">단가 계산기</div><div class="tab-sub">제품별 원가 계산</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📄</span><div><div class="tab-name">견적 관리</div><div class="tab-sub">AI 견적서 생성·이력</div></div></div>
+      <div class="tab-card"><span class="tab-icon">🛒</span><div><div class="tab-name">발주 관리</div><div class="tab-sub">발주서 작성·이력</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📈</span><div><div class="tab-name">경영 대시보드</div><div class="tab-sub">KPI·매출·수익성</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📒</span><div><div class="tab-name">장부</div><div class="tab-sub">월별·거래처 미수금·연매출</div></div></div>
+      <div class="tab-card"><span class="tab-icon">💰</span><div><div class="tab-name">자금 운용</div><div class="tab-sub">통장·투자·정기지출</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📦</span><div><div class="tab-name">매입 현황</div><div class="tab-sub">원단 매입 기록·분석</div></div></div>
+      <div class="tab-card"><span class="tab-icon">🏢</span><div><div class="tab-name">거래처별 단가</div><div class="tab-sub">거래처 CRM + 단가 관리</div></div></div>
+      <div class="tab-card"><span class="tab-icon">🏭</span><div><div class="tab-name">공급처 관리</div><div class="tab-sub">원단 공급처 DB</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📅</span><div><div class="tab-name">일정</div><div class="tab-sub">To-Do·노트·반복 일정</div></div></div>
+      <div class="tab-card"><span class="tab-icon">🎯</span><div><div class="tab-name">입찰 캘린더</div><div class="tab-sub">나라장터 키워드 알림</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📁</span><div><div class="tab-name">회사 필요 파일</div><div class="tab-sub">파일 링크 관리</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📧</span><div><div class="tab-name">메일</div><div class="tab-sub">Gmail 연동</div></div></div>
+      <div class="tab-card"><span class="tab-icon">📰</span><div><div class="tab-name">뉴스</div><div class="tab-sub">업계 뉴스 피드</div></div></div>
+    </div>
+  </div>
+
+  <!-- ══ 최근 작업 내역 ══ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon" style="background:#FFF3E8;">🕐</div>
+      최근 작업 내역
+    </div>
+    <div class="card">
+      <div class="timeline">
+
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#FFF3E8;">🛒</div>
+          <div class="tl-content">
+            <div class="tl-date">2026-06-08 (최신)</div>
+            <div class="tl-title">견적서 "시장 소비자가 포함" 옵션 추가</div>
+            <div class="tl-desc">
+              단가 계산기에서 제품별 시장가(marketPrice)를 입력하면, 견적서 생성 시 4번째 컬럼으로 소비자가를 함께 표시하는 체크박스 옵션 추가.<br>
+              • AI 견적서 프롬프트에 시장가 컬럼 자동 반영 (showMarketPrice)<br>
+              • 소비자가 입력 시 납품가 비율·할인율 실시간 표시<br>
+              • localStorage에 설정값 유지 (frw_quote_include_market_price)
+            </div>
+            <div class="tl-tags">
+              <span class="tag tag-orange">견적 관리</span>
+              <span class="tag tag-blue">단가 계산기</span>
+              <span class="tag tag-green">완료</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#F0FDF4;">📈</div>
+          <div class="tl-content">
+            <div class="tl-date">2026-06-06</div>
+            <div class="tl-title">인상 시뮬레이터 전면 재설계</div>
+            <div class="tl-desc">
+              단가 계산기 서브탭 "인상 시뮬레이터" 완전 재설계.<br>
+              • KPI 스트립: 현재 총 매출·납품가 인상 후 총 매출·증가액 3개 카드 상단 표시<br>
+              • 전역 슬라이더: 모든 제품 일괄 %/원 인상 조절<br>
+              • 제품별 세부 조절: 정렬 가능한 테이블 (이름·현재 납품가·조정값·예상 납품가·변화율)<br>
+              • %/원(목표가) 토글 모드: 인상률 대신 목표 납품가를 직접 입력 가능
+            </div>
+            <div class="tl-tags">
+              <span class="tag tag-orange">인상 시뮬레이터</span>
+              <span class="tag tag-purple">UX 개선</span>
+              <span class="tag tag-green">완료</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#F5F3FF;">🎨</div>
+          <div class="tl-content">
+            <div class="tl-date">2026-06-06</div>
+            <div class="tl-title">Toss-style UI Phase 1b 적용</div>
+            <div class="tl-desc">
+              전체 앱 디자인 시스템 업그레이드.<br>
+              • Elice 디스플레이 폰트 → Pretendard로 통일 (KPI 숫자 포함)<br>
+              • 이모지 → Lucide 아이콘 교체 (일관성·선명도 향상)<br>
+              • 단가 계산기 패널 토널(tonal) 컬러 처리<br>
+              • fix: .kpi-num 클래스 폰트 Pretendard 복원
+            </div>
+            <div class="tl-tags">
+              <span class="tag tag-purple">디자인</span>
+              <span class="tag tag-blue">폰트</span>
+              <span class="tag tag-green">완료</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="tl-item">
+          <div class="tl-dot" style="background:#EFF6FF;">🏢</div>
+          <div class="tl-content">
+            <div class="tl-date">2026-05-14</div>
+            <div class="tl-title">PR #4 병합: 총 미수금 장부 연동</div>
+            <div class="tl-desc">
+              경영 대시보드 "총 미수금" KPI를 장부→거래처별 미수금과 동일 계산식으로 변경.<br>
+              • orders 기반 → clientAR + ledgers 기반으로 전환<br>
+              • 두 화면의 미수금 값 항상 일치 보장
+            </div>
+            <div class="tl-tags">
+              <span class="tag tag-orange">경영 대시보드</span>
+              <span class="tag tag-blue">장부</span>
+              <span class="tag tag-green">병합됨</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 진단: 수정 필요 사항 ══ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon" style="background:#FEF2F2;">🔧</div>
+      진단 — 수정 필요 사항
+    </div>
+
+    <div class="issue-card critical">
+      <div class="issue-header">
+        <span class="issue-badge badge-critical">Critical</span>
+        <span class="issue-title">localStorage 5MB 한도 초과 위험</span>
+      </div>
+      <div class="issue-desc">
+        현재 50개+ localStorage 키에 제품 이미지(base64), 장부, 매입 이력, 견적 이력 등 대용량 데이터를 저장 중입니다.
+        IndexedDB로 이미지는 이미 분리했지만, 나머지 데이터가 누적되면 쓰기 실패(QuotaExceededError) 시
+        <strong>사용자가 모르는 사이에 데이터가 저장 안 될 수 있습니다</strong>.
+        현재 save() 함수는 실패 시 console.warn만 합니다.
+      </div>
+      <div class="issue-fix">
+        ✅ <strong>수정안:</strong> localStorage 사용량을 실시간 모니터링하는 상태 표시기 추가. 80% 초과 시 경고 배너 표시.
+        Firebase/Cloudflare 클라우드 동기화를 메인 스토리지로 올리고 localStorage는 캐시로 강등.
+      </div>
+    </div>
+
+    <div class="issue-card critical">
+      <div class="issue-header">
+        <span class="issue-badge badge-critical">Critical</span>
+        <span class="issue-title">API 키·Drive 토큰 localStorage 노출</span>
+      </div>
+      <div class="issue-desc">
+        Claude API 키(frw_apikey), Google Drive OAuth 토큰(frw_drive_token), Gmail 토큰(frw_gmail_token)이
+        localStorage에 평문 저장됩니다. 같은 기기를 다른 사람이 사용하거나 XSS 공격 시 탈취 가능합니다.
+      </div>
+      <div class="issue-fix">
+        ✅ <strong>수정안:</strong> Claude API 호출은 Cloudflare Worker 프록시로 서버사이드화.
+        OAuth 토큰은 httpOnly 쿠키 또는 sessionStorage + 자동 갱신 구조로 변경.
+      </div>
+    </div>
+
+    <div class="issue-card warning">
+      <div class="issue-header">
+        <span class="issue-badge badge-warning">Warning</span>
+        <span class="issue-title">17,441 라인 단일 파일 — 성능·유지보수</span>
+      </div>
+      <div class="issue-desc">
+        모든 기능이 index.html 한 파일에 집중되어 있어 초기 로딩 시 전체 파싱이 필요합니다.
+        Vite/React 빌드 시스템으로 전환하면 코드 스플리팅, 트리쉐이킹으로 초기 로드 60%+ 개선 가능합니다.
+        현재 파일 수정 시 의도치 않은 영역 충돌 위험도 높습니다.
+      </div>
+      <div class="issue-fix">
+        ✅ <strong>수정안 (Lovable 적합):</strong> Vite + React로 마이그레이션. 탭별 lazy import 적용.
+      </div>
+    </div>
+
+    <div class="issue-card warning">
+      <div class="issue-header">
+        <span class="issue-badge badge-warning">Warning</span>
+        <span class="issue-title">모바일 UX — 복잡한 테이블/입력폼 미최적화</span>
+      </div>
+      <div class="issue-desc">
+        viewport 메타태그·기본 media query는 설정되어 있지만, 장부·매입현황·견적서 작성 등
+        복잡한 테이블이 모바일에서 가로 스크롤만으로 처리됩니다.
+        하단 네비게이션(mobile-bottomnav)이 선언되어 있지만 실제 렌더링 조건이 불명확합니다.
+      </div>
+      <div class="issue-fix">
+        ✅ <strong>수정안:</strong> 768px 이하에서 카드형 레이아웃 전환. 하단 탭 바 활성화.
+        입력 폼에 large hit target(최소 44px) 적용.
+      </div>
+    </div>
+
+    <div class="issue-card warning">
+      <div class="issue-header">
+        <span class="issue-badge badge-warning">Warning</span>
+        <span class="issue-title">자동 저장 커밋 메시지 — 변경 추적 불가</span>
+      </div>
+      <div class="issue-desc">
+        "auto: 2026-06-08 11:09" 형태의 자동저장 커밋이 실제 작업 내용을 숨깁니다.
+        채팅이 끊기면 어디까지 작업했는지 파악하는 데 시간이 걸립니다.
+        (이번 세션 재개 시 직접 경험한 문제)
+      </div>
+      <div class="issue-fix">
+        ✅ <strong>수정안:</strong> auto-commit 메시지에 변경된 함수명·섹션 포함.
+        또는 세션 시작 시 이전 auto 커밋들을 squash하여 의미 있는 커밋으로 정리.
+      </div>
+    </div>
+
+    <div class="issue-card info">
+      <div class="issue-header">
+        <span class="issue-badge badge-info">Info</span>
+        <span class="issue-title">오프라인 지원 없음</span>
+      </div>
+      <div class="issue-desc">
+        현재 네트워크 없이는 Firebase 동기화, AI 견적서 생성, 나라장터 크롤링, 뉴스 피드 모두 불가합니다.
+        Service Worker를 추가하면 기본 입력/조회는 오프라인에서도 가능합니다.
+      </div>
+      <div class="issue-fix">
+        ✅ <strong>수정안:</strong> Workbox 기반 Service Worker 추가. 핵심 기능(단가 계산·장부 조회)은 오프라인 캐시.
+      </div>
+    </div>
+
+    <div class="issue-card info">
+      <div class="issue-header">
+        <span class="issue-badge badge-info">Info</span>
+        <span class="issue-title">데이터 전체 내보내기/복원 UI 없음</span>
+      </div>
+      <div class="issue-desc">
+        Firebase 백업 슬롯(backup/slot)이 있지만 사용자가 직접 JSON을 내보내거나
+        특정 날짜로 롤백하는 UI가 없습니다. 데이터 손실 시 복구 방법이 불명확합니다.
+      </div>
+      <div class="issue-fix">
+        ✅ <strong>수정안:</strong> 설정 페이지에 "전체 데이터 JSON 내보내기" 버튼 + 백업 타임라인 복원 UI 추가.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══ 추가하면 좋은 기능 ══ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon" style="background:#F0FDF4;">✨</div>
+      추가하면 좋은 기능 + Lovable 프롬프트
+    </div>
+
+    <!-- Feature 1 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">1</div>
+        <div>
+          <div class="feature-title">미수금 자동 알림 센터</div>
+          <span class="feature-priority priority-high">🔴 High Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        현재 거래처별 미수금은 장부에서 수동 확인만 가능합니다. D+30, D+60, D+90 기준
+        연체 거래처를 자동으로 분류하고, 이메일 초안을 생성하거나 카카오톡 문자 문구를 만들어 주면
+        미수금 회수율이 크게 올라갈 것입니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">In our FR workwear management app (single index.html, React + vanilla JS), add an "AR Alert Center" feature to the existing AR (미수금) section.
+
+Requirements:
+1. Auto-classify overdue clients into 3 buckets: D+30 (yellow ⚠️), D+60 (orange 🔶), D+90+ (red 🚨) based on the invoice date in ledgers
+2. Add a notification badge on the sidebar tab showing total overdue count
+3. For each overdue client, show: client name, overdue amount (formatted Korean won), days overdue, last payment date
+4. Add a "Generate reminder message" button per client that produces a polite Korean SMS/email draft mentioning the amount and days overdue
+5. Add a summary KPI card on the dashboard showing "이번 달 회수 목표 vs 실적"
+
+Use the existing T (theme) object and darkMode prop for styling. Match the existing orange (#EC6608) accent color. No new dependencies.</div>
+      </div>
+    </div>
+
+    <!-- Feature 2 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">2</div>
+        <div>
+          <div class="feature-title">견적서 → 수주 원클릭 전환</div>
+          <span class="feature-priority priority-high">🔴 High Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        현재 견적서를 보내고 수주가 확정되면 장부에 별도 수기 입력이 필요합니다.
+        "견적 확정" 버튼으로 수주 기록(orders)과 장부 청구 항목(ledgers)을 자동 생성하면
+        이중 입력 오류와 시간을 크게 줄일 수 있습니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">In our React-based workwear app, add a "Confirm Order" workflow that bridges the quote and order systems.
+
+1. In the quote history tab (견적 이력), add a "수주 확정" button on each saved quote
+2. Clicking it opens a modal with pre-filled fields: client name (from quoteClient), products list, total amount, delivery date input (required)
+3. On confirm:
+   - Create a new entry in orders[] with status "confirmed"
+   - Create a new ledger entry in ledgers[clientName] with type "청구", amount = quote total, date = today
+   - Mark the quote as "confirmed" (add a confirmedAt timestamp) — show a green "수주완료" badge in history
+4. Add a filter toggle in quote history to show "전체 / 미확정 / 수주완료"
+
+The modal should follow the existing modal patterns in the codebase (absolute positioned overlay, white card, orange confirm button).</div>
+      </div>
+    </div>
+
+    <!-- Feature 3 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">3</div>
+        <div>
+          <div class="feature-title">제품 QR 코드 생성 & 스캔</div>
+          <span class="feature-priority priority-med">🟡 Medium Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        창고에서 제품을 관리할 때 QR 코드를 스캔하면 단가·원가·재고 정보를 즉시 조회할 수 있습니다.
+        발주서에 QR을 인쇄하면 공급처도 제품 정보를 빠르게 확인 가능합니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">Add QR code generation to the product calculator tab (단가 계산기) in our React single-file app.
+
+1. Add a "QR 생성" button in the product detail panel (next to the existing print/export buttons)
+2. Use the qrcode.js CDN library (https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js) — add the script tag to <head>
+3. The QR encodes a JSON payload: { id, name, deliveryPrice, costPrice, marginRate }
+4. Show a modal with: the QR image (256x256), product name, a "PNG 저장" button (canvas toDataURL), a "인쇄" button
+5. In the purchase order (발주서) print view, optionally show the QR next to each line item if the product has one
+
+Keep the modal style consistent with the rest of the app (darkMode aware, T.surface / T.text).</div>
+      </div>
+    </div>
+
+    <!-- Feature 4 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">4</div>
+        <div>
+          <div class="feature-title">매출 예측 AI (3개월 추세)</div>
+          <span class="feature-priority priority-med">🟡 Medium Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        경영 대시보드에 과거 월매출 데이터(monthlySales)가 있지만 앞으로 예측이 없습니다.
+        Claude API (이미 apiKey 보유)로 간단한 추세 분석 + 다음 3개월 예측을 추가하면
+        자금 계획에 큰 도움이 됩니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">Add a "Sales Forecast" section to the DashboardTab component in our React workwear app.
+
+Context: we have monthlySales (array of { ym: "YYYY-MM", amount: number }) and apiKey (Claude API key) already in state.
+
+Implementation:
+1. Add a "매출 예측 (AI)" collapsible card below the existing monthly chart
+2. A "예측 생성" button calls Claude API (claude-haiku-4-5-20251001 for speed/cost) with the last 12 months of sales data
+3. Prompt Claude to return JSON: { forecast: [{ym, low, mid, high}] } for next 3 months (low/mid/high = pessimistic/base/optimistic)
+4. Render a Chart.js line chart: solid line for historical, dashed line with shaded band (low–high) for forecast
+5. Below the chart, show 3 insight bullets generated by Claude (e.g., "성수기 10월 대비 현재 -23% 수준")
+6. Cache the forecast in localStorage (frw_sales_forecast) with a 24h TTL — show "마지막 분석: N시간 전" label
+
+Use the existing chart color scheme (navy #1B2B4B, orange #EC6608). Handle API errors gracefully.</div>
+      </div>
+    </div>
+
+    <!-- Feature 5 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">5</div>
+        <div>
+          <div class="feature-title">PWA + 오프라인 모드</div>
+          <span class="feature-priority priority-med">🟡 Medium Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        현장·창고에서 인터넷 없이 제품 단가 확인, 장부 조회가 필요할 때가 있습니다.
+        Service Worker를 추가하면 앱 아이콘으로 설치하고 오프라인에서도 기본 기능 사용 가능합니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">Convert our static index.html workwear app into a Progressive Web App (PWA) with offline support.
+
+Steps:
+1. Create a manifest.json with: name "NJ SAFETY 작업복 관리", short_name "NJ SAFETY", theme_color "#1B2B4B", background_color "#F8FAFC", display "standalone", start_url "/", icons array (use the existing base64 apple-touch-icon, convert to 192x192 and 512x512 PNG files)
+2. Create a service-worker.js using the Cache-first strategy for index.html and all CDN assets (React, Chart.js, jsPDF, Lucide). Network-first for /api/* routes
+3. In index.html <head>, add the manifest link and register the service worker
+4. Add a small "설치" banner (dismissible, appears after 30s) that calls deferredPrompt.prompt()
+5. Add an offline indicator: when navigator.onLine is false, show a subtle orange banner "오프라인 모드 — 저장된 데이터만 표시됩니다"
+
+The service worker should NOT cache Firebase/Cloudflare sync requests (let them fail silently offline).</div>
+      </div>
+    </div>
+
+    <!-- Feature 6 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">6</div>
+        <div>
+          <div class="feature-title">거래처 CRM 강화 — 상담 이력 & 연락처 카드</div>
+          <span class="feature-priority priority-med">🟡 Medium Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        현재 거래처별 단가 탭에는 단가 정보만 있습니다. 상담 메모, 최근 연락일, 계약 만료일 등
+        CRM 기능을 추가하면 영업 관리가 체계화됩니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">Enhance the ClientsTab component (거래처별 단가) with CRM features.
+
+Each client object currently has: id, name, contact, phone, bizNo, address, note, prices[].
+Add to the client schema (with backward-compatible defaults):
+  - memos: [] — array of { id, date, content, type: "call"|"visit"|"email"|"etc" }
+  - contractExpiry: "" — date string YYYY-MM-DD
+  - lastContactDate: "" — auto-updated when memo is added
+  - grade: "A"|"B"|"C" — client tier
+
+UI changes:
+1. In the client detail panel, add a "상담 이력" section with a timeline of memos (date, icon per type, content). Add memo via a simple textarea + type selector
+2. Show contractExpiry with a countdown badge: "D-30" in orange if expiring soon
+3. Add a grade badge (A/B/C) next to the client name, editable via dropdown
+4. In the client list, add sortable columns: 최근 연락일, 미수금, 등급
+5. Add a "이번 주 follow-up 필요" section at the top showing clients not contacted in 30+ days
+
+Persist changes to the existing clients state via setClients.</div>
+      </div>
+    </div>
+
+    <!-- Feature 7 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">7</div>
+        <div>
+          <div class="feature-title">데이터 전체 내보내기 / 복원 UI</div>
+          <span class="feature-priority priority-high">🔴 High Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        Firebase 백업이 있지만 사용자가 직접 특정 시점으로 롤백하거나 엑셀로 내보내는 UI가 없습니다.
+        중요한 사업 데이터이므로 사용자 친화적인 백업·복원 UI가 필수입니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">Add a "데이터 백업 & 복원" panel to the settings/cloud sync section of our app.
+
+1. "전체 내보내기 (JSON)" button: serializes all state (products, materials, laborItems, orders, clients, ledgers, etc.) to a single JSON file and triggers download as frw-backup-YYYY-MM-DD.json
+2. "JSON 가져오기" button: file input that reads the JSON, validates the schema, then calls setProducts/setClients/etc to restore — show a confirmation modal listing what will be overwritten
+3. "Excel 내보내기" button: uses SheetJS (xlsx CDN) to export key tables as multi-sheet Excel:
+   - Sheet 1: 제품 목록 (name, deliveryPrice, costPrice, marginRate)
+   - Sheet 2: 장부 요약 (거래처별 미수금)
+   - Sheet 3: 매입 이력
+4. Firebase backup timeline: fetch the 3 backup slots from Firebase, show each with its timestamp, a "복원" button per slot with a confirmation dialog
+
+Add this as a new sub-section within the existing cloud sync settings panel (near the Google Drive / Notion sync area).</div>
+      </div>
+    </div>
+
+    <!-- Feature 8 -->
+    <div class="feature-card">
+      <div class="feature-header">
+        <div class="feature-num">8</div>
+        <div>
+          <div class="feature-title">나라장터 입찰 알림 강화 — 마감 D-day 카운트다운</div>
+          <span class="feature-priority priority-low">🟢 Low Priority</span>
+        </div>
+      </div>
+      <div class="feature-why">
+        현재 입찰 캘린더에 공고가 표시되지만 마감 임박 알림이 없습니다.
+        D-3 이내 마감 공고를 달력 위에 빨간색 카드로 강조하면 중요한 공고를 놓치지 않게 됩니다.
+      </div>
+      <div class="prompt-box">
+        <button class="copy-btn" onclick="copyPrompt(this)">복사</button>
+        <div class="prompt-text">Improve the BidsTab (입찰 캘린더) with deadline urgency indicators.
+
+1. At the top of BidsTab, add a "마감 임박" strip: show bids where dueDate is within 3 days as horizontally scrollable cards with a red "D-N" badge, bid title, and estimated amount
+2. In the calendar grid, add color coding to bid tiles:
+   - D-0 to D-3: red background + pulsing dot animation
+   - D-4 to D-7: orange background
+   - D-8+: default style
+3. Add a "입찰 준비 체크리스트" per bid: a collapsible checklist with default items ["서류 검토", "단가 계산", "견적서 준비", "제출"]. Persist per-bid checklist state in the bid object
+4. Add a badge on the sidebar nav item showing count of D-7 bids
+5. Add a browser Notification (Web Notifications API, request permission on first bid add) that fires at 9 AM on D-1 for each upcoming bid
+
+Keep all styling consistent with the existing orange accent theme.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══ 종합 요약 ══ -->
+  <div class="section">
+    <div class="section-title">
+      <div class="icon" style="background:#F0FDF4;">📋</div>
+      종합 요약 — 우선순위별 액션 플랜
+    </div>
+    <div class="card">
+      <table style="width:100%; border-collapse:collapse; font-size:14px;">
+        <thead>
+          <tr style="background:#F8FAFC;">
+            <th style="padding:12px 14px; text-align:left; border-bottom:2px solid #E2E8F0; font-weight:800; color:#1B2B4B;">우선순위</th>
+            <th style="padding:12px 14px; text-align:left; border-bottom:2px solid #E2E8F0; font-weight:800; color:#1B2B4B;">항목</th>
+            <th style="padding:12px 14px; text-align:left; border-bottom:2px solid #E2E8F0; font-weight:800; color:#1B2B4B;">예상 효과</th>
+            <th style="padding:12px 14px; text-align:left; border-bottom:2px solid #E2E8F0; font-weight:800; color:#1B2B4B;">난이도</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:12px 14px;"><span style="background:#FEE2E2;color:#DC2626;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🔴 즉시</span></td>
+            <td style="padding:12px 14px; font-weight:600;">데이터 전체 내보내기/복원 UI</td>
+            <td style="padding:12px 14px; color:#64748B;">데이터 손실 방지</td>
+            <td style="padding:12px 14px;"><span style="background:#DCFCE7;color:#16A34A;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">쉬움</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:12px 14px;"><span style="background:#FEE2E2;color:#DC2626;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🔴 즉시</span></td>
+            <td style="padding:12px 14px; font-weight:600;">미수금 자동 알림 센터</td>
+            <td style="padding:12px 14px; color:#64748B;">미수금 회수율 향상</td>
+            <td style="padding:12px 14px;"><span style="background:#DCFCE7;color:#16A34A;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">쉬움</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:12px 14px;"><span style="background:#FEE2E2;color:#DC2626;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🔴 즉시</span></td>
+            <td style="padding:12px 14px; font-weight:600;">견적 → 수주 원클릭 전환</td>
+            <td style="padding:12px 14px; color:#64748B;">이중 입력 제거</td>
+            <td style="padding:12px 14px;"><span style="background:#FEF3C7;color:#D97706;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">중간</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:12px 14px;"><span style="background:#FEF3C7;color:#D97706;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🟡 단기</span></td>
+            <td style="padding:12px 14px; font-weight:600;">PWA + 오프라인 모드</td>
+            <td style="padding:12px 14px; color:#64748B;">현장 사용성</td>
+            <td style="padding:12px 14px;"><span style="background:#FEF3C7;color:#D97706;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">중간</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:12px 14px;"><span style="background:#FEF3C7;color:#D97706;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🟡 단기</span></td>
+            <td style="padding:12px 14px; font-weight:600;">모바일 UX 개선</td>
+            <td style="padding:12px 14px; color:#64748B;">스마트폰 사용성</td>
+            <td style="padding:12px 14px;"><span style="background:#FEF3C7;color:#D97706;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">중간</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:12px 14px;"><span style="background:#FEF3C7;color:#D97706;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🟡 단기</span></td>
+            <td style="padding:12px 14px; font-weight:600;">매출 예측 AI</td>
+            <td style="padding:12px 14px; color:#64748B;">자금 계획 지원</td>
+            <td style="padding:12px 14px;"><span style="background:#FEF3C7;color:#D97706;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">중간</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid #F1F5F9;">
+            <td style="padding:12px 14px;"><span style="background:#DCFCE7;color:#16A34A;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🟢 중장기</span></td>
+            <td style="padding:12px 14px; font-weight:600;">API 키 서버사이드화</td>
+            <td style="padding:12px 14px; color:#64748B;">보안 강화</td>
+            <td style="padding:12px 14px;"><span style="background:#FEE2E2;color:#DC2626;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">어려움</span></td>
+          </tr>
+          <tr>
+            <td style="padding:12px 14px;"><span style="background:#DCFCE7;color:#16A34A;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">🟢 중장기</span></td>
+            <td style="padding:12px 14px; font-weight:600;">Vite + React 마이그레이션</td>
+            <td style="padding:12px 14px; color:#64748B;">성능·유지보수성</td>
+            <td style="padding:12px 14px;"><span style="background:#FEE2E2;color:#DC2626;padding:2px 8px;border-radius:100px;font-size:11px;font-weight:700;">어려움</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  FR Workwear App — 진단 리포트 · 생성일 2026-06-10 · bangbongfather-sys/fr-workwear-app
+</div>
+
+<script>
+  function copyPrompt(btn) {
+    const text = btn.nextElementSibling.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = '✓ 복사됨';
+      btn.style.color = '#4ade80';
+      setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 1800);
+    });
+  }
+</script>
+</body>
+</html>
