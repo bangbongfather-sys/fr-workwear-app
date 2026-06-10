@@ -14793,6 +14793,26 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   };
   const cancelEditDates = () => { setEditingId(null); setEditDate(""); setEditEnd(""); };
 
+  // ── 일정 상세 모달 (노션 스타일: 제목 + 내용 메모) ──
+  const [detail, setDetail] = React.useState(null); // { id, text, memo, date, endDate } — 편집 중 드래프트
+  const openDetail = (t) => setDetail({ id: t.id, text: t.text, memo: t.memo || "", date: t.date, endDate: t.endDate || "" });
+  const closeDetail = (saveIt = true) => {
+    if (saveIt && detail) {
+      let start = detail.date, end = detail.endDate;
+      if (end && end < start) { const tmp = start; start = end; end = tmp; }
+      const text = detail.text.trim() || "(제목 없음)";
+      const memo = detail.memo;
+      let target = null;
+      setTodos(prev => prev.map(t => {
+        if (t.id !== detail.id) return t;
+        target = { ...t, text, memo, date: start, endDate: end || "" };
+        return target;
+      }));
+      if (target?.notionPageId) notionPatch(target.notionPageId, { text, date: start, endDate: end || null });
+    }
+    setDetail(null);
+  };
+
   // 기존 todo (notionPageId 없는 것) 일괄 동기화
   const bulkSyncToNotion = async () => {
     const pending = todos.filter(t => !t.notionPageId);
