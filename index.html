@@ -3328,7 +3328,7 @@ function DashboardTab({ products, setProducts, materials, laborItems, orders, se
   const computed = products.map(p => computeProduct(p, materials, laborItems)).filter(c => c.base > 0);
   const avgMarginSell = computed.length > 0 ? computed.reduce((s,c) => s + (c.finalPrice-c.beforeMargin)/c.finalPrice*100, 0)/computed.length : 0;
   const productSales = {};
-  orders.forEach(o => { productSales[o.productName] = (productSales[o.productName]||0) + parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
+  orders.forEach(o => { if (!o.productName) return; productSales[o.productName] = (productSales[o.productName]||0) + parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
   const topProduct = Object.entries(productSales).sort((a,b)=>b[1]-a[1])[0];
 
   const prodLabels = Object.keys(productSales);
