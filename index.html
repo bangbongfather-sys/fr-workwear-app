@@ -11035,6 +11035,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           const tabInfo = TABS.find(t => t[0] === id);
           if (!tabInfo) return null;
           const [, label, icon] = tabInfo;
+          // 필 폭 절약: 하단 네비에선 축약 라벨 사용
+          const SHORT = { pricedb: "단가표", calc: "계산기", quote: "견적", purchase: "발주", dashboard: "대시보드", ledger: "장부", treasury: "자금", inventory: "매입", clients: "거래처", suppliers: "공급처", schedule: "일정", bids: "입찰", files: "파일", mail: "메일", news: "뉴스" };
+          const shortLabel = SHORT[id] || label;
           const active = tab === id;
           return (
             <button key={id} onClick={() => { setTab(id); setMobileSidebarOpen(false); }} style={{
