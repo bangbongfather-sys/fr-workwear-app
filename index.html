@@ -10808,7 +10808,15 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     setFabricIntakes(prev => [...prev, ...rows]);
     setPurchaseOrders(prev => prev.map(p => p.id === po.id ? { ...p, transferredToInventory: true } : p));
     setViewingPO(v => (v && v.id === po.id ? { ...v, transferredToInventory: true } : v));
-    if (window.confirm(`📦 매입 현황으로 ${rows.length}건 전송했습니다!\n매입 현황 탭으로 이동할까요?`)) setTab("inventory");
+    // 거래처 서브탭 자동 생성 (없을 때만) → 매입 탭이 해당 거래처로 바로 열리게 포커스 지정
+    const supName = (po.supplier?.name || "").trim();
+    if (supName) {
+      setPurchaseSubTabs(prev => (prev || []).some(t => t.name === supName) ? prev : [...(prev || []), { id: uid(), name: supName }]);
+      setInventoryFocusSupplier(supName);
+    }
+    // 매입 현황 탭으로 바로 이동 — 어디 갔는지 못 찾던 문제 해결 (거래처 탭에 착지)
+    setTab("inventory");
+    alert(`📦 매입 현황으로 ${rows.length}건 전송 완료!\n${supName ? `'${supName}' 거래처 탭` : "매입 현황"}으로 이동합니다.`);
   };
 
   // 발주서 복제 — 작성 화면에 같은 내용 새 초안(editId 없음). 발주일·본문은 비워 재확인 유도.
