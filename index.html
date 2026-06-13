@@ -10789,6 +10789,41 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     if (viewingPO && viewingPO.id === id) setViewingPO(null);
   };
 
+  // 발주서 → 매입 현황(fabricIntakes) 전송. 품목을 1:1 매핑, transferredToInventory 플래그로 중복 방지.
+  const transferPOToInventory = (po) => {
+    const items = (po.items || []).filter(it => (it.name || "").trim() && Number(it.qty) > 0);
+    if (items.length === 0) { alert("전송할 품목이 없습니다 (품목명 + 수량 필요)."); return; }
+    if (po.transferredToInventory) {
+      if (!window.confirm("이미 매입 현황으로 전송한 발주서입니다.\n또 전송하면 매입에 중복 등록됩니다. 계속할까요?")) return;
+    }
+    const date = po.orderDate || (po.dateStr || "").replaceAll(".", "-") || new Date().toISOString().slice(0, 10);
+    const rows = items.map(it => ({
+      id: uid(), date, supplier: po.supplier?.name || "", inspector: "",
+      materialName: (it.name || "").trim(), qty: it.qty, unit: it.unit || "",
+      unitPrice: it.unitPrice || "", status: "주문완료",
+      note: po.title ? `발주서: ${po.title}` : "", sourcePoId: po.id,
+    }));
+    setFabricIntakes(prev => [...prev, ...rows]);
+    setPurchaseOrders(prev => prev.map(p => p.id === po.id ? { ...p, transferredToInventory: true } : p));
+    setViewingPO(v => (v && v.id === po.id ? { ...v, transferredToInventory: true } : v));
+    if (window.confirm(`📦 매입 현황으로 ${rows.length}건 전송했습니다!\n매입 현황 탭으로 이동할까요?`)) setTab("inventory");
+  };
+
+  // 발주서 복제 — 작성 화면에 같은 내용 새 초안(editId 없음). 발주일·본문은 비워 재확인 유도.
+  const duplicatePO = (po) => {
+    setPoDraft({
+      title: ((po.title || "") + " (복사)").trim(),
+      supplier: { ...(po.supplier || {}) },
+      items: (po.items || []).map(it => ({ ...it, id: uid() })),
+      photos: (po.photos || []).map(ph => ({ ...ph })),
+      orderDate: "", deliveryDate: po.deliveryDate || "",
+      paymentTerms: po.paymentTerms || "", deliveryPlace: po.deliveryPlace || "",
+      memo: po.memo || "",
+    });
+    setViewingPO(null);
+    setPoSubTab("current");
+  };
+
   const startNewPO = () => {
     setPoDraft({
       title: "",
@@ -13180,7 +13215,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             <select style={{ flex: "2 1 200px", minWidth: 160 }} value={it.name} onChange={e => {
                               const m = materials.find(mm => mm.name === e.target.value);
                               const items = [...poDraft.items];
-                              items[idx] = { ...items[idx], name: e.target.value, unitPrice: m ? String(m.unitPrice || "") : items[idx].unitPrice };
+                              items[idx] = { ...items[idx], name: e.target.value, unit: m && m.unit ? m.unit : items[idx].unit, unitPrice: m ? String(m.price ?? "") : items[idx].unitPrice };
                               setPoDraft({ ...poDraft, items });
                             }}>
                               <option value="">원단 선택...</option>
@@ -13190,7 +13225,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             <select style={{ flex: "2 1 200px", minWidth: 160 }} value={it.name} onChange={e => {
                               const l = laborItems.find(ll => ll.name === e.target.value);
                               const items = [...poDraft.items];
-                              items[idx] = { ...items[idx], name: e.target.value, unit: l ? (l.unit || items[idx].unit) : items[idx].unit, unitPrice: l ? String(l.unitPrice || "") : items[idx].unitPrice };
+                              items[idx] = { ...items[idx], name: e.target.value, unit: l ? (l.unit || items[idx].unit) : items[idx].unit, unitPrice: l ? String(l.price ?? "") : items[idx].unitPrice };
                               setPoDraft({ ...poDraft, items });
                             }}>
                               <option value="">공임 선택...</option>
@@ -13571,7 +13606,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           ) : (
                             <div className="card" style={{ padding: 0, overflow: "hidden" }}>
                               {/* 목록 헤더 */}
-                              <div style={{ display: "grid", gridTemplateColumns: "120px 1.2fr 1.5fr 80px 200px 90px", gap: 12, padding: "10px 16px", background: "var(--surface2)", borderBottom: `1px solid ${T.divider}`, fontSize: 11, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "108px 1.1fr 1.4fr 62px 158px 132px", gap: 12, padding: "10px 16px", background: "var(--surface2)", borderBottom: `1px solid ${T.divider}`, fontSize: 11, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>
                                 <div>발주일자</div>
                                 <div>거래처</div>
                                 <div>품목 / 제목</div>
@@ -13587,7 +13622,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   <div key={po.id}
                                     onClick={() => setViewingPO(po)}
                                     style={{
-                                      display: "grid", gridTemplateColumns: "120px 1.2fr 1.5fr 80px 200px 90px", gap: 12,
+                                      display: "grid", gridTemplateColumns: "108px 1.1fr 1.4fr 62px 158px 132px", gap: 12,
                                       padding: "12px 16px", borderBottom: idx < sorted.length - 1 ? `1px solid ${T.divider}` : "none",
                                       cursor: "pointer", alignItems: "center",
                                       transition: "background 0.12s",
@@ -13600,7 +13635,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                     <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"}</div>
                                     <div style={{ fontSize: 12, color: T.text2, textAlign: "right" }}>{(po.items || []).length}건{po.photos?.length > 0 ? <span> · <Icon name="camera" size={11} style={{verticalAlign:"-1px"}}/>{po.photos.length}</span> : ""}</div>
                                     <div style={{ fontSize: 14, fontWeight: 800, color: NAVY, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Number(po.totalAmount || 0).toLocaleString()}원</div>
-                                    <div style={{ textAlign: "center", display: "flex", gap: 4, justifyContent: "center" }}>
+                                    <div style={{ textAlign: "center", display: "flex", gap: 2, justifyContent: "center" }}>
+                                      <button onClick={(e) => { e.stopPropagation(); transferPOToInventory(po); }} title={po.transferredToInventory ? "이미 매입 전송됨 (다시 전송)" : "매입 현황으로 전송"} style={{ background: "none", border: "none", cursor: "pointer", color: po.transferredToInventory ? "#00B493" : "var(--text2)", fontSize: 13, fontFamily: "inherit", padding: 4, display: "inline-flex", alignItems: "center" }}><Icon name={po.transferredToInventory ? "check" : "inventory"} size={14}/></button>
+                                      <button onClick={(e) => { e.stopPropagation(); duplicatePO(po); }} title="복제 (재발주)" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 13, fontFamily: "inherit", padding: 4, display: "inline-flex", alignItems: "center" }}><Icon name="layers" size={14}/></button>
                                       <button onClick={(e) => { e.stopPropagation(); editPOFromHistory(po); }} title="수정" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text2)", fontSize: 13, fontFamily: "inherit", padding: 4, display: "inline-flex", alignItems: "center" }}><Icon name="edit" size={14}/></button>
                                       <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                                     </div>
