@@ -7813,7 +7813,7 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
       {activeSubTab === "dashboard"
         ? <PurchaseDashboardView fabricIntakes={fabricIntakes} dashStatusRef={dashStatusRef} dashMonthlyRef={dashMonthlyRef} dashSupTopRef={dashSupTopRef} dashItemTopRef={dashItemTopRef} darkMode={darkMode} setActiveSubTab={setActiveSubTab} />
         : activeSubTab === "summary"
-          ? <PurchaseSummaryView fabricIntakes={fabricIntakes} totalSumRef={totalSumRef} monthlyTrendRef={monthlyTrendRef} matPieRef={matPieRef} darkMode={darkMode} />
+          ? <PurchaseSummaryView fabricIntakes={fabricIntakes} totalSumRef={totalSumRef} monthlyTrendRef={monthlyTrendRef} matPieRef={matPieRef} darkMode={darkMode} setActiveSubTab={setActiveSubTab} />
           : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} laborItems={laborItems} purchaseDateMemos={purchaseDateMemos} setPurchaseDateMemos={setPurchaseDateMemos} darkMode={darkMode} filterSupplier={activeSubTab === "all" ? "" : activeSubTab} />
       }
     </div>
@@ -7970,7 +7970,7 @@ function PurchaseDashboardView({ fabricIntakes, dashStatusRef, dashMonthlyRef, d
 }
 
 // 매입 총합계 뷰
-function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matPieRef, darkMode }) {
+function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matPieRef, darkMode, setActiveSubTab }) {
   const totalAmount = fabricIntakes.reduce((s,r) => s + parseFloat(r.unitPrice||0)*parseFloat(r.qty||0), 0);
   const totalQty = fabricIntakes.reduce((s,r) => s + parseFloat(r.qty||0), 0);
   const supSet = new Set(fabricIntakes.map(r => (r.supplier||"").trim()).filter(Boolean));
@@ -8080,9 +8080,13 @@ function PurchaseSummaryView({ fabricIntakes, totalSumRef, monthlyTrendRef, matP
                   const pct = totalAmount > 0 ? (info.amount/totalAmount*100) : 0;
                   const avgPrice = info.qty > 0 ? info.amount/info.qty : 0;
                   return (
-                    <tr key={sup}>
+                    <tr key={sup} onClick={() => sup !== "(미지정)" && setActiveSubTab && setActiveSubTab(sup)}
+                      style={{ cursor: sup !== "(미지정)" ? "pointer" : "default", transition: "background 0.12s" }}
+                      title={sup !== "(미지정)" ? `${sup} 거래만 보기` : ""}
+                      onMouseEnter={e => { if (sup !== "(미지정)") e.currentTarget.style.background = darkMode ? "rgba(236,102,8,0.10)" : "rgba(236,102,8,0.05)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}>
                       <td style={{textAlign:"center",fontSize:12,fontWeight:700,color:"var(--text2)"}}>{idx+1}</td>
-                      <td style={{fontSize:13,fontWeight:600}}>{sup}</td>
+                      <td style={{fontSize:13,fontWeight:600,color:sup !== "(미지정)" ? "#EC6608" : "var(--text1)"}}>{sup}{sup !== "(미지정)" && <span style={{fontSize:11,opacity:0.55,fontWeight:700,marginLeft:4}}>›</span>}</td>
                       <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:"#EC6608"}}>{Math.round(info.amount).toLocaleString()}원</td>
                       <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#D85800"}}>{Math.round(info.amount*1.1).toLocaleString()}원</td>
                       <td style={{textAlign:"right",fontSize:12,color:"var(--text2)"}}>
