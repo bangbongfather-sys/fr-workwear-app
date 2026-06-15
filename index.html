@@ -4773,6 +4773,134 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
     );
   };
 
+  const renderYTD = () => {
+    const mi = focusMonth - 1; // 0-based
+    const ytdSeries = data.map(d => ({
+      year: d.year,
+      ytd: d._monthly.slice(0, focusMonth).reduce((s, v) => s + (v || 0), 0),
+      single: d._monthly[mi] || 0,
+      _isLive: d._isLive,
+    }));
+    const withYtd = ytdSeries.filter(s => s.ytd > 0);
+    const ytdVals = withYtd.map(s => s.ytd);
+    const ytdMax = ytdVals.length ? Math.max(...ytdVals) : 0;
+    const ytdMin = ytdVals.length ? Math.min(...ytdVals) : 0;
+    const ytdAvg = ytdVals.length ? ytdVals.reduce((s, v) => s + v, 0) / ytdVals.length : 0;
+    const ytdMaxYear = withYtd.find(s => s.ytd === ytdMax)?.year;
+    const ytdMinYear = withYtd.find(s => s.ytd === ytdMin)?.year;
+    const firstW = withYtd[0], lastW = withYtd[withYtd.length - 1];
+    const ytdCagr = (firstW && lastW && firstW.ytd > 0 && withYtd.length > 1)
+      ? (Math.pow(lastW.ytd / firstW.ytd, 1 / (withYtd.length - 1)) - 1) * 100 : null;
+    const prev2 = ytdSeries[ytdSeries.length - 2];
+    const last2 = ytdSeries[ytdSeries.length - 1];
+    const ytdYoY = (prev2 && prev2.ytd > 0 && last2 && last2.ytd > 0)
+      ? ((last2.ytd - prev2.ytd) / prev2.ytd * 100) : null;
+    const singleYoY = (prev2 && prev2.single > 0 && last2 && last2.single > 0)
+      ? ((last2.single - prev2.single) / prev2.single * 100) : null;
+    const barMax = ytdMax || 1;
+    return (
+      <>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.6 }}>기준월</span>
+          <select value={focusMonth} onChange={e => setFocusMonth(parseInt(e.target.value, 10))} style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer" }}>
+            {YEARLY_MONTH_NAMES.map((nm, i) => <option key={i} value={i + 1}>{nm}</option>)}
+          </select>
+          <span style={{ fontSize: 11, color: "var(--text3)" }}>선택월까지의 누적 매출(1~{focusMonth}월)과 해당월 단독 매출을 연도별로 비교합니다</span>
+        </div>
+
+        {last2 && (
+          <div className="card" style={{ padding: 20 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>{last2.year}년 1~{focusMonth}월 누적</div>
+                <div className="kpi-num" style={{ fontSize: 28, fontWeight: 900, color: "var(--text1)", letterSpacing: -0.8, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                  ₩{(last2.ytd / 1e8).toFixed(2)}<span style={{ fontSize: 13, fontWeight: 700, marginLeft: 2, color: "var(--text2)" }}>억</span>
+                </div>
+                {ytdYoY !== null && (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: ytdYoY >= 0 ? "#10B981" : "#F04452", marginTop: 6 }}>
+                    {ytdYoY >= 0 ? "▲ +" : "▼ "}{ytdYoY.toFixed(1)}% vs {prev2.year}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 }}>{last2.year}년 {focusMonth}월 단독</div>
+                <div className="kpi-num" style={{ fontSize: 28, fontWeight: 900, color: "var(--text1)", letterSpacing: -0.8, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                  ₩{(last2.single / 1e8).toFixed(2)}<span style={{ fontSize: 13, fontWeight: 700, marginLeft: 2, color: "var(--text2)" }}>억</span>
+                </div>
+                {singleYoY !== null && (
+                  <div style={{ fontSize: 12, fontWeight: 700, color: singleYoY >= 0 ? "#10B981" : "#F04452", marginTop: 6 }}>
+                    {singleYoY >= 0 ? "▲ +" : "▼ "}{singleYoY.toFixed(1)}% vs {prev2.year}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+          <StatTile label={`1~${focusMonth}월 평균`} value={fmt억_1(ytdAvg)} sub={`${withYtd.length}개년`} kind="neutral"/>
+          <StatTile label="누적 최고" value={ytdMaxYear ? `${ytdMaxYear}년` : "—"} sub={fmt억_1(ytdMax)} kind="accent"/>
+          <StatTile label="누적 최저" value={ytdMinYear ? `${ytdMinYear}년` : "—"} sub={fmt억_1(ytdMin)} kind="neutral"/>
+          <StatTile label={`1~${focusMonth}월 CAGR`} value={ytdCagr === null ? "—" : `${ytdCagr >= 0 ? "+" : ""}${ytdCagr.toFixed(1)}%`} sub="연복리 성장" kind={ytdCagr === null ? "neutral" : ytdCagr >= 0 ? "pos" : "neg"}/>
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 14 }}>연도별 누적 바 차트 (1~{focusMonth}월)</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {ytdSeries.slice().reverse().map(s => {
+              const pct = barMax > 0 ? (s.ytd / barMax * 100) : 0;
+              const isLast = s.year === last2?.year;
+              return (
+                <div key={s.year} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: 44, fontSize: 11, fontWeight: 700, color: isLast ? "#EC6608" : "var(--text2)", flexShrink: 0, textAlign: "right" }}>{s.year}</div>
+                  <div style={{ flex: 1, height: 20, background: "var(--surface2)", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: isLast ? "#EC6608" : "var(--accent-muted, rgba(236,102,8,0.4))", borderRadius: 4, transition: "width 0.4s ease", minWidth: s.ytd > 0 ? 4 : 0 }}/>
+                  </div>
+                  <div style={{ width: 72, fontSize: 11, fontWeight: 600, color: "var(--text2)", flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.ytd > 0 ? fmt억_1(s.ytd) : "—"}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 12 }}>연도별 상세 비교</div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 480 }}>
+              <thead>
+                <tr>
+                  <th style={thS}>Year</th>
+                  <th style={{ ...thS, textAlign: "right" }}>1~{focusMonth}월 누적</th>
+                  <th style={{ ...thS, textAlign: "right" }}>누적 전년비</th>
+                  <th style={{ ...thS, textAlign: "right" }}>{focusMonth}월 단독</th>
+                  <th style={{ ...thS, textAlign: "right" }}>단독 전년비</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ytdSeries.map((s, idx) => {
+                  const p = idx > 0 ? ytdSeries[idx - 1] : null;
+                  const ytdYoy = (p && p.ytd > 0 && s.ytd > 0) ? ((s.ytd - p.ytd) / p.ytd * 100) : null;
+                  const singleYoy = (p && p.single > 0 && s.single > 0) ? ((s.single - p.single) / p.single * 100) : null;
+                  const isMax = s.ytd === ytdMax && s.ytd > 0;
+                  const isLast = s.year === last2?.year;
+                  return (
+                    <tr key={s.year} style={{ borderBottom: "1px solid var(--divider)", background: isMax ? "rgba(245,158,11,0.04)" : "transparent" }}>
+                      <td style={{ ...tdS, fontWeight: 700, color: isLast ? "#EC6608" : undefined }}>{s.year} {s._isLive && <span style={{ fontSize: 9, fontWeight: 700, color: "#10B981", background: "rgba(16,185,129,0.12)", borderRadius: 4, padding: "1px 5px", marginLeft: 3 }}>진행중</span>}{isMax && <span style={{ fontSize: 10, color: "#F59E0B", marginLeft: 3 }}>★</span>}</td>
+                      <td style={{ ...tdS, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.ytd > 0 ? fmtWon(s.ytd) : "—"}</td>
+                      <td style={{ ...tdS, textAlign: "right", color: ytdYoy === null ? "var(--text3)" : (ytdYoy >= 0 ? "#10B981" : "#F04452"), fontWeight: 700 }}>{ytdYoy === null ? "—" : `${ytdYoy >= 0 ? "+" : ""}${ytdYoy.toFixed(1)}%`}</td>
+                      <td style={{ ...tdS, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.single > 0 ? fmtWon(s.single) : "—"}</td>
+                      <td style={{ ...tdS, textAlign: "right", color: singleYoy === null ? "var(--text3)" : (singleYoy >= 0 ? "#10B981" : "#F04452"), fontWeight: 700 }}>{singleYoy === null ? "—" : `${singleYoy >= 0 ? "+" : ""}${singleYoy.toFixed(1)}%`}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -4781,7 +4909,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "inline-flex", padding: 3, background: "var(--surface2)", borderRadius: 8 }}>
-            {[["annual", "연간"], ["monthly", "월별"], ["sameMonth", "동월 비교"]].map(([id, label]) => (
+            {[["annual", "연간"], ["monthly", "월별"], ["sameMonth", "동월 비교"], ["ytd", "누적 비교"]].map(([id, label]) => (
               <button key={id} onClick={() => { setView(id); if (id !== "monthly") setFocusYear(null); }}
                 style={{
                   padding: "7px 14px", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
@@ -4800,6 +4928,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
       {view === "annual" && renderAnnual()}
       {view === "monthly" && renderMonthly()}
       {view === "sameMonth" && renderSameMonth()}
+      {view === "ytd" && renderYTD()}
 
       {adding && (
         <div onClick={() => setAdding(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 20 }}>
