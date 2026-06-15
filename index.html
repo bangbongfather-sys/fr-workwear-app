@@ -4841,7 +4841,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   const [dragActive, setDragActive] = useState(false);
   const [expandedClientId, setExpandedClientId] = useState(null);
   const [draft, setDraft] = useState({ name:"", supply:"", tax:"", total:"", status:"미입금", memo:"" });
-  const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
+  const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:new Date().toLocaleDateString("en-CA") });
   const [showPaidHistory, setShowPaidHistory] = useState(() => new Set()); // 완납 내역 펼친 거래처 id 목록
 
   // 거래처별 AR 헬퍼: 거래처명을 키로 사용 → 모든 월에서 공유됨
@@ -5194,7 +5194,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
       const cur = prev[key] || { entries: [] };
       return { ...prev, [key]: { ...cur, entries: [...(cur.entries||[]), newEntry] } };
     });
-    setArDraft({ type:"청구", desc:"", amount:"", date:"" });
+    setArDraft({ type:"청구", desc:"", amount:"", date:new Date().toLocaleDateString("en-CA") });
   };
   const deleteAR = (clientName, arId) => {
     const key = (clientName || "").trim();
@@ -5918,7 +5918,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
       if (clearFocus) setTimeout(() => clearFocus(), 800);
     }
   }, [focusClient]);
-  const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
+  const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:new Date().toLocaleDateString("en-CA") });
   const [editArId, setEditArId] = useState(null);
   const [editArDraft, setEditArDraft] = useState(null);
   const [showPaidHistory, setShowPaidHistory] = useState(() => new Set()); // 완납 내역 펼친 거래처 목록
@@ -6026,7 +6026,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
       const cur = prev[key] || { entries: [] };
       return { ...prev, [key]: { ...cur, entries: [...(cur.entries||[]), newE] } };
     });
-    setArDraft({ type:"청구", desc:"", amount:"", date:"" });
+    setArDraft({ type:"청구", desc:"", amount:"", date:new Date().toLocaleDateString("en-CA") });
   };
   const deleteAR = (name, arId) => {
     if (!window.confirm("이 내역을 삭제할까요?")) return;
