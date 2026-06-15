@@ -11417,24 +11417,33 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </button>
             );
           })}
-          {/* 제품 카탈로그 — 외부 catalog-app 링크 (새 탭). 마이크로프론트엔드식 메뉴 연결 */}
-          <button onClick={() => window.open("https://catalog-app.njsafety91.workers.dev/", "_blank", "noopener,noreferrer")}
-            title="제품 카탈로그 — 새 탭에서 열립니다" style={{
-              display: "flex", alignItems: "center", gap: 12, marginTop: 4,
-              width: "100%", padding: sidebarCollapsed ? "11px 0" : "10px 14px",
-              border: "none", borderRadius: 10, background: "transparent",
-              color: "#B4BAC4", cursor: "pointer", fontFamily: "inherit", fontSize: 13,
-              fontWeight: 500, letterSpacing: -0.1, transition: "background 0.15s, color 0.15s",
-              justifyContent: sidebarCollapsed ? "center" : "flex-start", textAlign: "left",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#E5E8ED"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#B4BAC4"; }}>
-            <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center", color: "#B4BAC4" }}>
-              <Icon name="image" size={18} strokeWidth={1.7}/>
-            </span>
-            {!sidebarCollapsed && <span style={{ whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 }}>제품 카탈로그 <span style={{ fontSize: 11, opacity: 0.55 }}>↗</span></span>}
-          </button>
         </nav>
+        {/* 제품 카탈로그 — 외부 앱(catalog-app). 일반 탭과 헷갈리지 않게 구분선 + 오렌지 박스로 하단 분리·고정 */}
+        <div style={{ padding: sidebarCollapsed ? "10px 8px" : "10px 12px", borderTop: "1px solid rgba(255,255,255,0.09)", flexShrink: 0 }}>
+          <button onClick={() => window.open("https://catalog-app.njsafety91.workers.dev/", "_blank", "noopener,noreferrer")}
+            title="제품 카탈로그 — 새 탭에서 열립니다"
+            style={{
+              display: "flex", alignItems: "center", gap: 10, width: "100%",
+              padding: sidebarCollapsed ? "10px 0" : "10px 12px",
+              border: "1px solid rgba(236,102,8,0.28)", borderRadius: 10,
+              background: "rgba(236,102,8,0.08)", color: "#EC6608",
+              cursor: "pointer", fontFamily: "inherit",
+              justifyContent: sidebarCollapsed ? "center" : "flex-start", textAlign: "left",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(236,102,8,0.16)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "rgba(236,102,8,0.08)"; }}>
+            <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center" }}>
+              <Icon name="image" size={18} strokeWidth={1.8}/>
+            </span>
+            {!sidebarCollapsed && (
+              <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>제품 카탈로그 <span style={{ fontSize: 11, opacity: 0.7 }}>↗</span></span>
+                <span style={{ fontSize: 10, color: "rgba(236,102,8,0.7)", fontWeight: 500 }}>외부 카탈로그 앱 · 새 탭</span>
+              </span>
+            )}
+          </button>
+        </div>
         <div style={{ padding: sidebarCollapsed ? "12px 8px" : "12px 14px", borderTop: "1px solid var(--divider)", fontSize: 10, color: "var(--text3)", textAlign: "center", fontWeight: 500, letterSpacing: 0.4 }}>
           {sidebarCollapsed ? "v2" : "NJ SAFETY · v2"}
         </div>
