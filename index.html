@@ -11353,6 +11353,25 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury"] },
     { label: "일정·외부", ids: ["schedule", "bids", "files", "mail", "news"] },
   ];
+  // 화면별 페이지 헤더 부제 (토스 핸드오프 — 제목은 TABS label, 부제는 아래 맵)
+  const PAGE_SUBTITLES = {
+    pricedb: "원단·부자재 단가 기준 관리",
+    calc: "원가에서 납품단가까지 자동 산출",
+    quote: "견적서 작성·발행·이력 관리",
+    purchase: "생산 발주·진행 현황 추적",
+    dashboard: "한눈에 보는 매출·마진·미수금 현황",
+    ledger: "매출·매입·수금 거래 내역",
+    treasury: "현금 흐름·계좌·자금 계획",
+    inventory: "원단 입고·매입 내역 관리",
+    clients: "거래처별 납품 단가·등급 관리",
+    suppliers: "원단·부자재 공급처 정보",
+    schedule: "납기·미팅·생산 일정 관리",
+    bids: "조달청 입찰 공고·응찰 일정",
+    files: "서류·양식·자료 보관",
+    mail: "거래처 메일 확인·발송",
+    news: "업계·시장 동향",
+    history: "발행한 견적서 보관함",
+  };
 
   const saveQuoteToHistory = () => {
     if (!quote) return;
@@ -11790,6 +11809,22 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       </div>
 
       <div className="main-content" style={{ padding: "0 8px", flex: 1, overflow: "auto" }}>
+
+        {/* ── 페이지 헤더 (토스 핸드오프 — 화면별 제목+부제) ── */}
+        {(() => {
+          const meta = TABS.find(t => t[0] === tab);
+          if (!meta) return null;
+          const subtitle = PAGE_SUBTITLES[tab];
+          return (
+            <div className="page-header no-print" style={{ display: "flex", alignItems: "center", gap: 13, padding: "18px 10px 14px" }}>
+              <span style={{ width: 44, height: 44, borderRadius: 12, background: "var(--accent-soft, rgba(236,102,8,0.12))", color: "var(--accent)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name={meta[2]} size={22}/></span>
+              <div style={{ minWidth: 0 }}>
+                <h1 style={{ margin: 0, fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700, color: "var(--text1)", lineHeight: 1.2, letterSpacing: "-0.01em" }}>{meta[1]}</h1>
+                {subtitle && <p style={{ margin: "3px 0 0", fontSize: 13, color: "var(--text2)" }}>{subtitle}</p>}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── 단가표 탭 ── */}
         {tab === "pricedb" && (
