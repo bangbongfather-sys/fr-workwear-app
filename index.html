@@ -11057,8 +11057,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     save("frw_purchase_orders", next);
     // 클라우드 저장은 메인 sync effect에 위임 (백오프 재시도 + 미저장 경고 보호)
     alert(`${existing ? "✏️ 발주서가 수정됐습니다" : "💾 발주서가 저장됐습니다"}!\n${entry.dateStr} ${entry.timeStr}${existing ? `\n(수정: ${dateStr} ${timeStr})` : ""}`);
-    // 수정 완료 후 editId 제거
-    if (existing) setPoDraft(prev => prev ? { ...prev, editId: undefined } : prev);
+    // 저장 완료 → 작성 draft 초기화 (발주서 작성 초기 화면으로 복귀)
+    setPoDraft(null);
+    save("frw_po_draft", null);
+    // 방금 저장한 발주서를 이력 탭에서 바로 확인할 수 있게 이동
+    setPoSubTab("history");
+    setViewingPO(entry);
   };
 
   const editPOFromHistory = (po) => {
