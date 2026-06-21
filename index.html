@@ -2128,11 +2128,80 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
   );
 }
 
+// 시뮬레이션 설정(config) 1개를 현재 제품/원가 기준으로 평가해 요약 지표를 반환.
+// 저장된 시나리오 프로젝트 비교에 사용 — 컴포넌트 내부 KPI 계산과 동일한 규칙(A등급 대표).
+function simulateScenarioKPI(config, products, materials, laborItems, fallbackThreshold = 20) {
+  const c = config || {};
+  const scenario = c.scenario || {};
+  const globalFab = c.globalFab || 0, globalAux = c.globalAux || 0, globalPrice = c.globalPrice || 0;
+  const priceSc = c.priceSc || {};
+  const threshold = c.threshold ?? fallbackThreshold;
+  const applyTo = (price, sc) => {
+    if (!sc || sc.value === "" || sc.value == null) return price;
+    const v = parseFloat(sc.value); if (isNaN(v)) return price;
+    return sc.mode === "abs" ? v : price * (1 + v / 100);
+  };
+  const effSc = key => {
+    const sc = scenario[key];
+    if (sc && sc.value !== "" && sc.value != null && !isNaN(parseFloat(sc.value))) return sc;
+    const g = key.charAt(0) === "m" ? globalFab : globalAux;
+    return g > 0 ? { mode: "pct", value: String(g) } : null;
+  };
+  const effPriceRate = (pid, basePrice) => {
+    const sc = priceSc[pid];
+    const v = sc ? parseFloat(sc.value) : NaN;
+    if (!isNaN(v)) return sc.mode === "abs" ? (basePrice > 0 ? (v / basePrice - 1) * 100 : 0) : v;
+    return globalPrice;
+  };
+  const simMaterials = materials.map(m => ({ ...m, price: applyTo(m.price, effSc("m:" + m.id)) }));
+  const simLabor = laborItems.map(l => ({ ...l, price: applyTo(l.price, effSc("l:" + l.id)) }));
+  const rows = products.map(p => {
+    const cur = computeProduct(p, materials, laborItems);
+    if (cur.base <= 0) return null;
+    const sim = computeProduct(p, simMaterials, simLabor);
+    const gradeList = cur.gradeList || ["A", "B", "C", "D"];
+    const primaryG = gradeList.includes("A") ? "A" : gradeList[0];
+    const price = cur.grades[primaryG] || 0;
+    const priceRate = effPriceRate(p.id, price);
+    const simPrice = price * (1 + priceRate / 100);
+    const curM = price > 0 ? (price - cur.beforeMargin) / price * 100 : 0;
+    const simM = simPrice > 0 ? (simPrice - sim.beforeMargin) / simPrice * 100 : 0;
+    return { name: p.name, curM, simM, curCost: cur.beforeMargin, simCost: sim.beforeMargin };
+  }).filter(Boolean);
+  const n = rows.length;
+  const avg = arr => arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+  const simAvg = avg(rows.map(r => r.simM));
+  const curAvg = avg(rows.map(r => r.curM));
+  const riskSim = rows.filter(r => r.simM < threshold).length;
+  const riskCur = rows.filter(r => r.curM < threshold).length;
+  let worst = null;
+  rows.forEach(r => { if (!worst || r.simM < worst.simM) worst = { simM: r.simM, name: r.name }; });
+  const costImpact = rows.reduce((s, r) => s + (r.simCost - r.curCost), 0);
+  return { n, curAvg, simAvg, riskCur, riskSim, worst, costImpact, threshold };
+}
+
+// 시나리오 설정 → 짧은 한 줄 요약 ("원단+10% · 부자재+5% · 납품가+3% · 개별조정")
+function simConfigSummary(config) {
+  const c = config || {};
+  const parts = [];
+  if (c.globalFab > 0) parts.push(`원단+${c.globalFab}%`);
+  if (c.globalAux > 0) parts.push(`부자재+${c.globalAux}%`);
+  if (c.globalPrice > 0) parts.push(`납품가+${c.globalPrice}%`);
+  const hasItemOv = Object.values(c.scenario || {}).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
+  const hasPriceOv = Object.values(c.priceSc || {}).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
+  if (hasItemOv || hasPriceOv) parts.push("개별조정");
+  return parts.length ? parts.join(" · ") : "인상 미적용";
+}
+
+const SIM_LAST_KEY = "frw_sim_last";       // 마지막 작업 상태(자동 저장/복원)
+const SIM_PROJECTS_KEY = "frw_sim_projects"; // 저장된 시나리오 프로젝트 목록
+
 // ── 단가 인상 시뮬레이터 ──
 // 원단/부자재/공임 단가가 오를 때 각 제품의 원가·마진 변화를 가상으로 계산.
 // computeProduct를 그대로 재사용하되, materials/laborItems의 "복사본"에만 인상을 적용한다.
 // → 실데이터(state)는 절대 건드리지 않고, laborId 참조/박힌 price 규칙(§3.3)도 자동으로 따른다.
 // 납품단가는 기본 현재값 고정 (명세서 예시와 일치) — 납품가 인상률(전역/제품별) 입력 시 인상된 납품가로 마진 계산.
+// 작업 상태는 frw_sim_last 에 자동 저장되어 탭/앱을 다시 열어도 복원된다.
 function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
   const [scenario, setScenario] = React.useState({}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
   const [threshold, setThreshold] = React.useState(20);
