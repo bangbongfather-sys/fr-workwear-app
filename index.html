@@ -2203,12 +2203,14 @@ const SIM_PROJECTS_KEY = "frw_sim_projects"; // 저장된 시나리오 프로젝
 // 납품단가는 기본 현재값 고정 (명세서 예시와 일치) — 납품가 인상률(전역/제품별) 입력 시 인상된 납품가로 마진 계산.
 // 작업 상태는 frw_sim_last 에 자동 저장되어 탭/앱을 다시 열어도 복원된다.
 function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
-  const [scenario, setScenario] = React.useState({}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
-  const [threshold, setThreshold] = React.useState(20);
-  const [globalFab, setGlobalFab] = React.useState(0);   // 전체 원단 인상률 %
-  const [globalAux, setGlobalAux] = React.useState(0);   // 전체 부자재·공임 인상률 %
-  const [globalPrice, setGlobalPrice] = React.useState(0); // 전체 납품가 인상률 %
-  const [priceSc, setPriceSc] = React.useState({});      // productId -> 납품가 인상률 % (개별 오버라이드)
+  // 마지막 작업 상태 복원 (없으면 기본값)
+  const _last = React.useMemo(() => load(SIM_LAST_KEY, {}), []);
+  const [scenario, setScenario] = React.useState(_last.scenario || {}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
+  const [threshold, setThreshold] = React.useState(_last.threshold ?? 20);
+  const [globalFab, setGlobalFab] = React.useState(_last.globalFab ?? 0);   // 전체 원단 인상률 %
+  const [globalAux, setGlobalAux] = React.useState(_last.globalAux ?? 0);   // 전체 부자재·공임 인상률 %
+  const [globalPrice, setGlobalPrice] = React.useState(_last.globalPrice ?? 0); // 전체 납품가 인상률 %
+  const [priceSc, setPriceSc] = React.useState(_last.priceSc || {});      // productId -> 납품가 인상률 % (개별 오버라이드)
   const [showIndividual, setShowIndividual] = React.useState(false); // 품목별 개별 입력 펼침
   const [showPriceList, setShowPriceList] = React.useState(false);   // 제품별 납품가 인상 펼침
   const [gradeFilter, setGradeFilter] = React.useState("all"); // "all"|"A"|"B"|"C"|"D"
@@ -2216,6 +2218,56 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
   const [sortDir, setSortDir] = React.useState("asc");
   const [detailId, setDetailId] = React.useState(null);
   const [detailGrade, setDetailGrade] = React.useState("A");
+
+  // 시나리오 프로젝트 저장·비교
+  const [projects, setProjects] = React.useState(() => load(SIM_PROJECTS_KEY, []));
+  const [showCompare, setShowCompare] = React.useState(false);
+  const [compareIds, setCompareIds] = React.useState([]); // 비교에 포함할 프로젝트 id (빈 배열 = 전체)
+
+  // 작업 상태 자동 저장 (마지막 인상 설정 복원용)
+  React.useEffect(() => {
+    save(SIM_LAST_KEY, { scenario, threshold, globalFab, globalAux, globalPrice, priceSc });
+  }, [scenario, threshold, globalFab, globalAux, globalPrice, priceSc]);
+  React.useEffect(() => { save(SIM_PROJECTS_KEY, projects); }, [projects]);
+
+  const currentConfig = () => ({ scenario, threshold, globalFab, globalAux, globalPrice, priceSc });
+  const applyConfig = (c) => {
+    const cfg = c || {};
+    setScenario(cfg.scenario || {});
+    setThreshold(cfg.threshold ?? 20);
+    setGlobalFab(cfg.globalFab ?? 0);
+    setGlobalAux(cfg.globalAux ?? 0);
+    setGlobalPrice(cfg.globalPrice ?? 0);
+    setPriceSc(cfg.priceSc || {});
+  };
+  const saveProject = () => {
+    const name = window.prompt("시나리오 프로젝트 이름을 입력하세요", `시나리오 ${projects.length + 1}`);
+    if (name == null) return;
+    const nm = name.trim() || `시나리오 ${projects.length + 1}`;
+    setProjects(prev => [...prev, { id: uid(), name: nm, savedAt: Date.now(), config: currentConfig() }]);
+    setShowCompare(true);
+  };
+  const updateProject = (id) => setProjects(prev => prev.map(p => p.id === id ? { ...p, config: currentConfig(), savedAt: Date.now() } : p));
+  const renameProject = (id) => {
+    const p = projects.find(x => x.id === id); if (!p) return;
+    const name = window.prompt("이름 변경", p.name);
+    if (name == null) return;
+    const nm = name.trim(); if (!nm) return;
+    setProjects(prev => prev.map(x => x.id === id ? { ...x, name: nm } : x));
+  };
+  const deleteProject = (id) => {
+    if (!window.confirm("이 시나리오 프로젝트를 삭제할까요?")) return;
+    setProjects(prev => prev.filter(p => p.id !== id));
+    setCompareIds(prev => prev.filter(x => x !== id));
+  };
+  const toggleCompareId = (id) => setCompareIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  // 비교 대상: 체크된 게 있으면 그것만, 없으면 전체 프로젝트. 항상 "현재 작업중" 열을 맨 앞에.
+  const compareCols = React.useMemo(() => {
+    const picked = compareIds.length ? projects.filter(p => compareIds.includes(p.id)) : projects;
+    const cur = { id: "__current__", name: "현재 작업중", config: currentConfig(), _live: true };
+    return [cur, ...picked].map(p => ({ ...p, kpi: simulateScenarioKPI(p.config, products, materials, laborItems, threshold) }));
+  }, [projects, compareIds, products, materials, laborItems, scenario, threshold, globalFab, globalAux, globalPrice, priceSc]);
 
   const fmt = n => Math.round(n || 0).toLocaleString();
   const marginColor = r => r >= 30 ? "#00B493" : r >= threshold ? "#FF9500" : "#F04452";
