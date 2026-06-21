@@ -2128,18 +2128,89 @@ function ProductProfitabilityView({ products, materials, laborItems, orders, dar
   );
 }
 
+// 시뮬레이션 설정(config) 1개를 현재 제품/원가 기준으로 평가해 요약 지표를 반환.
+// 저장된 시나리오 프로젝트 비교에 사용 — 컴포넌트 내부 KPI 계산과 동일한 규칙(A등급 대표).
+function simulateScenarioKPI(config, products, materials, laborItems, fallbackThreshold = 20) {
+  const c = config || {};
+  const scenario = c.scenario || {};
+  const globalFab = c.globalFab || 0, globalAux = c.globalAux || 0, globalPrice = c.globalPrice || 0;
+  const priceSc = c.priceSc || {};
+  const threshold = c.threshold ?? fallbackThreshold;
+  const applyTo = (price, sc) => {
+    if (!sc || sc.value === "" || sc.value == null) return price;
+    const v = parseFloat(sc.value); if (isNaN(v)) return price;
+    return sc.mode === "abs" ? v : price * (1 + v / 100);
+  };
+  const effSc = key => {
+    const sc = scenario[key];
+    if (sc && sc.value !== "" && sc.value != null && !isNaN(parseFloat(sc.value))) return sc;
+    const g = key.charAt(0) === "m" ? globalFab : globalAux;
+    return g > 0 ? { mode: "pct", value: String(g) } : null;
+  };
+  const effPriceRate = (pid, basePrice) => {
+    const sc = priceSc[pid];
+    const v = sc ? parseFloat(sc.value) : NaN;
+    if (!isNaN(v)) return sc.mode === "abs" ? (basePrice > 0 ? (v / basePrice - 1) * 100 : 0) : v;
+    return globalPrice;
+  };
+  const simMaterials = materials.map(m => ({ ...m, price: applyTo(m.price, effSc("m:" + m.id)) }));
+  const simLabor = laborItems.map(l => ({ ...l, price: applyTo(l.price, effSc("l:" + l.id)) }));
+  const rows = products.map(p => {
+    const cur = computeProduct(p, materials, laborItems);
+    if (cur.base <= 0) return null;
+    const sim = computeProduct(p, simMaterials, simLabor);
+    const gradeList = cur.gradeList || ["A", "B", "C", "D"];
+    const primaryG = gradeList.includes("A") ? "A" : gradeList[0];
+    const price = cur.grades[primaryG] || 0;
+    const priceRate = effPriceRate(p.id, price);
+    const simPrice = price * (1 + priceRate / 100);
+    const curM = price > 0 ? (price - cur.beforeMargin) / price * 100 : 0;
+    const simM = simPrice > 0 ? (simPrice - sim.beforeMargin) / simPrice * 100 : 0;
+    return { name: p.name, curM, simM, curCost: cur.beforeMargin, simCost: sim.beforeMargin };
+  }).filter(Boolean);
+  const n = rows.length;
+  const avg = arr => arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+  const simAvg = avg(rows.map(r => r.simM));
+  const curAvg = avg(rows.map(r => r.curM));
+  const riskSim = rows.filter(r => r.simM < threshold).length;
+  const riskCur = rows.filter(r => r.curM < threshold).length;
+  let worst = null;
+  rows.forEach(r => { if (!worst || r.simM < worst.simM) worst = { simM: r.simM, name: r.name }; });
+  const costImpact = rows.reduce((s, r) => s + (r.simCost - r.curCost), 0);
+  return { n, curAvg, simAvg, riskCur, riskSim, worst, costImpact, threshold };
+}
+
+// 시나리오 설정 → 짧은 한 줄 요약 ("원단+10% · 부자재+5% · 납품가+3% · 개별조정")
+function simConfigSummary(config) {
+  const c = config || {};
+  const parts = [];
+  if (c.globalFab > 0) parts.push(`원단+${c.globalFab}%`);
+  if (c.globalAux > 0) parts.push(`부자재+${c.globalAux}%`);
+  if (c.globalPrice > 0) parts.push(`납품가+${c.globalPrice}%`);
+  const hasItemOv = Object.values(c.scenario || {}).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
+  const hasPriceOv = Object.values(c.priceSc || {}).some(s => s && s.value !== "" && s.value != null && !isNaN(parseFloat(s.value)));
+  if (hasItemOv || hasPriceOv) parts.push("개별조정");
+  return parts.length ? parts.join(" · ") : "인상 미적용";
+}
+
+const SIM_LAST_KEY = "frw_sim_last";       // 마지막 작업 상태(자동 저장/복원)
+const SIM_PROJECTS_KEY = "frw_sim_projects"; // 저장된 시나리오 프로젝트 목록
+
 // ── 단가 인상 시뮬레이터 ──
 // 원단/부자재/공임 단가가 오를 때 각 제품의 원가·마진 변화를 가상으로 계산.
 // computeProduct를 그대로 재사용하되, materials/laborItems의 "복사본"에만 인상을 적용한다.
 // → 실데이터(state)는 절대 건드리지 않고, laborId 참조/박힌 price 규칙(§3.3)도 자동으로 따른다.
 // 납품단가는 기본 현재값 고정 (명세서 예시와 일치) — 납품가 인상률(전역/제품별) 입력 시 인상된 납품가로 마진 계산.
+// 작업 상태는 frw_sim_last 에 자동 저장되어 탭/앱을 다시 열어도 복원된다.
 function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
-  const [scenario, setScenario] = React.useState({}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
-  const [threshold, setThreshold] = React.useState(20);
-  const [globalFab, setGlobalFab] = React.useState(0);   // 전체 원단 인상률 %
-  const [globalAux, setGlobalAux] = React.useState(0);   // 전체 부자재·공임 인상률 %
-  const [globalPrice, setGlobalPrice] = React.useState(0); // 전체 납품가 인상률 %
-  const [priceSc, setPriceSc] = React.useState({});      // productId -> 납품가 인상률 % (개별 오버라이드)
+  // 마지막 작업 상태 복원 (없으면 기본값)
+  const _last = React.useMemo(() => load(SIM_LAST_KEY, {}), []);
+  const [scenario, setScenario] = React.useState(_last.scenario || {}); // "m:<id>" | "l:<id>" -> { mode:"pct"|"abs", value:"" }
+  const [threshold, setThreshold] = React.useState(_last.threshold ?? 20);
+  const [globalFab, setGlobalFab] = React.useState(_last.globalFab ?? 0);   // 전체 원단 인상률 %
+  const [globalAux, setGlobalAux] = React.useState(_last.globalAux ?? 0);   // 전체 부자재·공임 인상률 %
+  const [globalPrice, setGlobalPrice] = React.useState(_last.globalPrice ?? 0); // 전체 납품가 인상률 %
+  const [priceSc, setPriceSc] = React.useState(_last.priceSc || {});      // productId -> 납품가 인상률 % (개별 오버라이드)
   const [showIndividual, setShowIndividual] = React.useState(false); // 품목별 개별 입력 펼침
   const [showPriceList, setShowPriceList] = React.useState(false);   // 제품별 납품가 인상 펼침
   const [gradeFilter, setGradeFilter] = React.useState("all"); // "all"|"A"|"B"|"C"|"D"
@@ -2147,6 +2218,56 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
   const [sortDir, setSortDir] = React.useState("asc");
   const [detailId, setDetailId] = React.useState(null);
   const [detailGrade, setDetailGrade] = React.useState("A");
+
+  // 시나리오 프로젝트 저장·비교
+  const [projects, setProjects] = React.useState(() => load(SIM_PROJECTS_KEY, []));
+  const [showCompare, setShowCompare] = React.useState(false);
+  const [compareIds, setCompareIds] = React.useState([]); // 비교에 포함할 프로젝트 id (빈 배열 = 전체)
+
+  // 작업 상태 자동 저장 (마지막 인상 설정 복원용)
+  React.useEffect(() => {
+    save(SIM_LAST_KEY, { scenario, threshold, globalFab, globalAux, globalPrice, priceSc });
+  }, [scenario, threshold, globalFab, globalAux, globalPrice, priceSc]);
+  React.useEffect(() => { save(SIM_PROJECTS_KEY, projects); }, [projects]);
+
+  const currentConfig = () => ({ scenario, threshold, globalFab, globalAux, globalPrice, priceSc });
+  const applyConfig = (c) => {
+    const cfg = c || {};
+    setScenario(cfg.scenario || {});
+    setThreshold(cfg.threshold ?? 20);
+    setGlobalFab(cfg.globalFab ?? 0);
+    setGlobalAux(cfg.globalAux ?? 0);
+    setGlobalPrice(cfg.globalPrice ?? 0);
+    setPriceSc(cfg.priceSc || {});
+  };
+  const saveProject = () => {
+    const name = window.prompt("시나리오 프로젝트 이름을 입력하세요", `시나리오 ${projects.length + 1}`);
+    if (name == null) return;
+    const nm = name.trim() || `시나리오 ${projects.length + 1}`;
+    setProjects(prev => [...prev, { id: uid(), name: nm, savedAt: Date.now(), config: currentConfig() }]);
+    setShowCompare(true);
+  };
+  const updateProject = (id) => setProjects(prev => prev.map(p => p.id === id ? { ...p, config: currentConfig(), savedAt: Date.now() } : p));
+  const renameProject = (id) => {
+    const p = projects.find(x => x.id === id); if (!p) return;
+    const name = window.prompt("이름 변경", p.name);
+    if (name == null) return;
+    const nm = name.trim(); if (!nm) return;
+    setProjects(prev => prev.map(x => x.id === id ? { ...x, name: nm } : x));
+  };
+  const deleteProject = (id) => {
+    if (!window.confirm("이 시나리오 프로젝트를 삭제할까요?")) return;
+    setProjects(prev => prev.filter(p => p.id !== id));
+    setCompareIds(prev => prev.filter(x => x !== id));
+  };
+  const toggleCompareId = (id) => setCompareIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  // 비교 대상: 체크된 게 있으면 그것만, 없으면 전체 프로젝트. 항상 "현재 작업중" 열을 맨 앞에.
+  const compareCols = React.useMemo(() => {
+    const picked = compareIds.length ? projects.filter(p => compareIds.includes(p.id)) : projects;
+    const cur = { id: "__current__", name: "현재 작업중", config: currentConfig(), _live: true };
+    return [cur, ...picked].map(p => ({ ...p, kpi: simulateScenarioKPI(p.config, products, materials, laborItems, threshold) }));
+  }, [projects, compareIds, products, materials, laborItems, scenario, threshold, globalFab, globalAux, globalPrice, priceSc]);
 
   const fmt = n => Math.round(n || 0).toLocaleString();
   const marginColor = r => r >= 30 ? "#00B493" : r >= threshold ? "#FF9500" : "#F04452";
@@ -2398,8 +2519,100 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     );
   };
 
+  const fmtSavedAt = (ts) => { try { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; } catch { return ""; } };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* ⓪ 시나리오 프로젝트 — 저장 · 불러오기 · 비교 */}
+      <div className="card">
+        <div className="section-header">
+          <span className="section-header-title">시나리오 프로젝트 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)" }}>({projects.length})</span></span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {projects.length >= 1 && (
+              <button onClick={() => setShowCompare(v => !v)}
+                style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: showCompare ? "var(--accent)" : "var(--surface)", color: showCompare ? "#fff" : "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <Icon name="dashboard" size={13}/>{showCompare ? "비교 닫기" : "비교"}
+              </button>
+            )}
+            <button onClick={saveProject}
+              style={{ height: 30, padding: "0 12px", border: "none", borderRadius: 8, background: "#EC6608", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5, boxShadow: "var(--elev-1)" }}>
+              <Icon name="save" size={13}/>현재 시나리오 저장
+            </button>
+          </div>
+        </div>
+
+        {projects.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--text3)", lineHeight: 1.6 }}>
+            저장된 시나리오가 없습니다. 인상률을 설정한 뒤 <b style={{ color: "var(--text2)" }}>현재 시나리오 저장</b>을 누르면, 나중에 불러오거나 여러 시나리오의 마진·원가 영향을 나란히 비교할 수 있어요.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {projects.map(p => {
+              const checked = compareIds.includes(p.id);
+              return (
+                <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface2)" }}>
+                  {showCompare && (
+                    <input type="checkbox" checked={checked} onChange={() => toggleCompareId(p.id)} title="비교에 포함"
+                      style={{ width: 16, height: 16, accentColor: "#EC6608", cursor: "pointer", flexShrink: 0 }} />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => applyConfig(p.config)} title="이 시나리오 불러오기">
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{simConfigSummary(p.config)} · {fmtSavedAt(p.savedAt)}</div>
+                  </div>
+                  <button onClick={() => applyConfig(p.config)} title="불러오기"
+                    style={{ height: 28, padding: "0 10px", border: "1.5px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text1)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>불러오기</button>
+                  <button onClick={() => updateProject(p.id)} title="현재 작업 상태로 덮어쓰기"
+                    style={{ width: 28, height: 28, border: "1.5px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text2)", cursor: "pointer", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="save" size={13}/></button>
+                  <button onClick={() => renameProject(p.id)} title="이름 변경"
+                    style={{ width: 28, height: 28, border: "1.5px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "var(--text2)", cursor: "pointer", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="edit" size={13}/></button>
+                  <button onClick={() => deleteProject(p.id)} title="삭제"
+                    style={{ width: 28, height: 28, border: "1.5px solid var(--border)", borderRadius: 7, background: "var(--surface)", color: "#F04452", cursor: "pointer", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="trash" size={13}/></button>
+                </div>
+              );
+            })}
+
+            {showCompare && (
+              <div style={{ marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--divider)" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", marginBottom: 10 }}>
+                  시나리오 비교 <span style={{ fontWeight: 600, color: "var(--text3)" }}>· {compareIds.length ? `선택 ${compareIds.length}개` : "전체"} + 현재</span>
+                </div>
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 360 }}>
+                    <thead>
+                      <tr style={{ color: "var(--text3)", fontSize: 11 }}>
+                        <th style={{ textAlign: "left", padding: "7px 8px", position: "sticky", left: 0, background: "var(--surface)", zIndex: 1 }}>지표</th>
+                        {compareCols.map(col => (
+                          <th key={col.id} style={{ textAlign: "right", padding: "7px 8px", minWidth: 96, whiteSpace: "nowrap", color: col._live ? "#EC6608" : "var(--text2)", fontWeight: 700 }}>{col.name}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ["평균 마진 (A)", col => `${col.kpi.simAvg.toFixed(1)}%`, col => marginColor(col.kpi.simAvg)],
+                        [`위험(${threshold}%↓) 제품`, col => `${col.kpi.riskSim}개`, col => col.kpi.riskSim > 0 ? "#F04452" : "var(--text1)"],
+                        ["총 원가 영향", col => `+${fmt(col.kpi.costImpact)}`, col => col.kpi.costImpact > 0 ? "#EC6608" : "var(--text1)"],
+                        ["최저 마진", col => col.kpi.worst ? `${col.kpi.worst.simM.toFixed(1)}%` : "—", col => col.kpi.worst ? marginColor(col.kpi.worst.simM) : "var(--text1)"],
+                        ["내용", col => simConfigSummary(col.config), () => "var(--text3)"],
+                      ].map(([label, getVal, getColor], ri) => (
+                        <tr key={ri} style={{ borderTop: "1px solid var(--divider)" }}>
+                          <td style={{ textAlign: "left", padding: "8px 8px", color: "var(--text2)", fontWeight: 600, whiteSpace: "nowrap", position: "sticky", left: 0, background: "var(--surface)" }}>{label}</td>
+                          {compareCols.map(col => (
+                            <td key={col.id} style={{ textAlign: ri === 4 ? "right" : "right", padding: "8px 8px", color: getColor(col), fontWeight: ri === 4 ? 500 : 700, fontVariantNumeric: "tabular-nums", fontSize: ri === 4 ? 11 : 12.5, whiteSpace: ri === 4 ? "normal" : "nowrap", maxWidth: ri === 4 ? 140 : undefined }}>{getVal(col)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}>
+                  ※ 각 시나리오를 <b>현재 제품·원가</b>에 적용했을 때의 결과입니다. 행 왼쪽 체크박스로 비교 대상을 고를 수 있어요.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* B. KPI 스트립 — A등급(또는 gradeList[0]) 기준 */}
       <div className="sim-kpis">
         {/* 1. 평균 마진 · A등급 */}
