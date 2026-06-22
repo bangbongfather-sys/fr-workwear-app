@@ -2528,6 +2528,12 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
         <div className="section-header">
           <span className="section-header-title">시나리오 프로젝트 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)" }}>({projects.length})</span></span>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => { if (hasScenario && !window.confirm("현재 입력한 인상안을 모두 지우고 처음 상태로 초기화할까요?\n(저장된 시나리오 프로젝트는 유지됩니다)")) return; resetAll(); }}
+              disabled={!hasScenario}
+              title={hasScenario ? "현재 작업을 처음 상태로 초기화" : "초기화할 입력이 없습니다"}
+              style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: "var(--surface)", color: hasScenario ? "var(--text1)" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: hasScenario ? "pointer" : "default", opacity: hasScenario ? 1 : 0.5, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <Icon name="refresh" size={13}/>초기화
+            </button>
             {projects.length >= 1 && (
               <button onClick={() => setShowCompare(v => !v)}
                 style={{ height: 30, padding: "0 12px", border: "1.5px solid var(--border)", borderRadius: 8, background: showCompare ? "var(--accent)" : "var(--surface)", color: showCompare ? "#fff" : "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
