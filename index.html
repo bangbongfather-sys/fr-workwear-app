@@ -6350,7 +6350,10 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                               </select>
                               <input placeholder="내역 (예: 부분 입금 / 조정)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)"}}/>
                               <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",textAlign:"right",border:"1px solid var(--border)",background:"var(--surface)"}}/>
-                              <input type="text" placeholder="날짜" title="날짜 선택" value={arDraft.date} onFocus={e=>{e.target.type="date";}} onBlur={e=>{if(!e.target.value)e.target.type="text";}} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)"}}/>
+                              <div style={{position:"relative",display:"inline-flex",alignItems:"center"}}>
+                                {!arDraft.date && <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"var(--text3)",pointerEvents:"none",zIndex:1}}>날짜</span>}
+                                <input type="date" title="날짜 선택" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)",color:arDraft.date?"var(--text1)":"transparent",WebkitTextFillColor:arDraft.date?"var(--text1)":"transparent",width:"100%"}}/>
+                              </div>
                               <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:36,fontSize:12}}>+ 추가</button>
                             </div>
 
@@ -6828,7 +6831,10 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                               </select>
                               <input placeholder="내역 (예: 부분 입금 / 분기 조정)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)"}}/>
                               <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",textAlign:"right",border:"1px solid var(--border)",background:"var(--surface)"}}/>
-                              <input type="text" placeholder="날짜" title="날짜 선택" value={arDraft.date} onFocus={e=>{e.target.type="date";}} onBlur={e=>{if(!e.target.value)e.target.type="text";}} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)"}}/>
+                              <div style={{position:"relative",display:"inline-flex",alignItems:"center"}}>
+                                {!arDraft.date && <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"var(--text3)",pointerEvents:"none",zIndex:1}}>날짜</span>}
+                                <input type="date" title="날짜 선택" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)",color:arDraft.date?"var(--text1)":"transparent",WebkitTextFillColor:arDraft.date?"var(--text1)":"transparent",width:"100%"}}/>
+                              </div>
                               <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:36,fontSize:12}}>+ 추가</button>
                             </div>
                             {/* 최종 잔액 카드 */}
