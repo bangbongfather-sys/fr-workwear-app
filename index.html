@@ -12655,9 +12655,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 6, lineHeight: 1.5 }}>견적서에 자동 삽입됩니다. 자동 1024px로 압축돼요 (~50-150KB).</div>
               </div>
               <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-                <div style={{ padding: "18px 20px", borderBottom: `1px solid ${T.divider}`, background: "var(--accent)" }}>
-                  <div style={{ fontSize: 11, color: "rgba(147,197,253,0.8)", marginBottom: 4, fontWeight: 600, letterSpacing: 0.5 }}>원가 요약</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: "#fff", letterSpacing: -0.3 }}>FR {activeProd.name}</div>
+                {/* 상단: 제품명 + 최종 단가 히어로 */}
+                <div style={{ padding: "18px 20px", borderBottom: `1px solid ${T.divider}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>통합 원가 결과</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text2)", marginBottom: 12 }}>FR {activeProd.name}</div>
+                  <div style={{ fontSize: 38, fontWeight: 800, color: "var(--accent)", letterSpacing: -1, fontVariantNumeric: "tabular-nums", fontFeatureSettings: '"tnum" 1', lineHeight: 1.1 }}>
+                    {finalPrice > 0 ? `${Math.round(finalPrice).toLocaleString()}원` : "—"}
+                  </div>
+                  {finalPrice > 0 && (
+                    <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "var(--accent)", padding: "3px 10px", borderRadius: 100, letterSpacing: 0.3 }}>
+                        {activeProd.selectedGrade || "A"}등급
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>
+                        마진 {(marginAmt / finalPrice * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {activeProd.fabrics.some(f => f.matId && f.qty) && (
