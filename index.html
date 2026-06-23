@@ -12772,34 +12772,42 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   </div>
                 </div>
 
-                {/* 최종 단가 (선택된 등급) */}
-                <div style={{ padding: 12 }}>
-                  <div className="price-highlight">
-                    <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: "var(--accent)", padding: "3px 10px", borderRadius: 100, letterSpacing: 0.5 }}>
-                        {activeProd.selectedGrade || "A"}급 선택
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 4, fontWeight: 500 }}>최종 단가 (1개)</div>
-                    <div style={{ fontSize: 30, fontWeight: 900, color: "var(--accent-strong)", letterSpacing: -1, fontFamily: "var(--font-display)" }}>
-                      {finalPrice > 0 ? `${Math.round(finalPrice).toLocaleString()}원` : "—"}
-                    </div>
-                    {finalPrice > 0 && (
-                      <>
-                        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(249,115,22,0.18)" }}>
-                          <div style={{ fontSize: 11, color: "var(--text2)", marginBottom: 4 }}>납품가 대비 마진율</div>
-                          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text1)", fontFamily: "var(--font-display)" }}>
-                            {(marginAmt / finalPrice * 100).toFixed(1)}%
+                {/* 원가 구성 스택 바 */}
+                {finalPrice > 0 && (
+                  <div style={{ padding: "14px 20px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>원가 구성 비율</div>
+                    {(() => {
+                      const fabPct = Math.round(fabricCost / finalPrice * 100);
+                      const extPct = Math.round(extraCost / finalPrice * 100);
+                      const admPct = Math.round(adminAmt / finalPrice * 100);
+                      const marPct = Math.max(0, 100 - fabPct - extPct - admPct);
+                      const bars = [
+                        { label: "① 원단", pct: fabPct, color: "#f97316" },
+                        { label: "② 공임", pct: extPct, color: "#ea6306" },
+                        { label: "③ 관리비", pct: admPct, color: "#a234c7" },
+                        { label: "마진", pct: marPct, color: "#03b26c" },
+                      ].filter(b => b.pct > 0);
+                      return (
+                        <>
+                          <div style={{ display: "flex", height: 12, borderRadius: 6, overflow: "hidden", gap: 1, marginBottom: 10 }}>
+                            {bars.map(b => (
+                              <div key={b.label} style={{ width: `${b.pct}%`, background: b.color, minWidth: b.pct > 0 ? 4 : 0 }} title={`${b.label}: ${b.pct}%`} />
+                            ))}
                           </div>
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 10, lineHeight: 1.7 }}>
-                          원단 {Math.round(fabricCost/finalPrice*100)}% · 공임비 {Math.round(extraCost/finalPrice*100)}%<br/>
-                          관리비 {Math.round(adminAmt/finalPrice*100)}% · 마진 {Math.round(marginAmt/finalPrice*100)}%
-                        </div>
-                      </>
-                    )}
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
+                            {bars.map(b => (
+                              <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <div style={{ width: 8, height: 8, borderRadius: 2, background: b.color, flexShrink: 0 }} />
+                                <span style={{ fontSize: 11, color: "var(--text3)" }}>{b.label}</span>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{b.pct}%</span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>
