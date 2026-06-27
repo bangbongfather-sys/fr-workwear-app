@@ -10620,6 +10620,9 @@ function App() {
 
   const applyCloudData = (d) => {
     if (!d) return;
+    // 클라우드 데이터를 state에 반영하면 저장 effect가 깨어나지만, 이는 사용자 입력이 아니므로
+    // 다시 클라우드로 푸시하지 않도록 1회 억제 (무한 왕복·불필요 쓰기 방지). 호출처(로드/폴링/복귀) 공통.
+    skipPush.current = true;
     // 모든 필드 `!== undefined` 체크 (빈 배열/객체도 정상 데이터로 인정)
     // 이전 버그: `if (d.xxx)` 패턴이 빈 배열/객체를 falsy 로 무시 → 삭제·초기화 작업이 동기화 안 되는 문제
     if (d.materials !== undefined) setMaterials(d.materials);
