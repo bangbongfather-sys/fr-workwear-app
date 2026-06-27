@@ -8786,6 +8786,12 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const resetBatch = () => setNewBatch({ date: new Date().toISOString().slice(0,10), supplier: filterSupplier || "", inspector: "", items: [blankItem()] });
   const batchTotal = newBatch.items.reduce((s,it) => s + (parseFloat(it.unitPrice||0) * parseFloat(it.qty||0)), 0);
   const batchValidCount = newBatch.items.filter(it => (it.materialName === "__custom__" ? it.customMaterial : it.materialName) && it.qty).length;
+  // 거래처(공급업체) 검색 후보 — 기존 매입기록의 고유 공급업체명에서 추출
+  const supplierOptions = React.useMemo(() => {
+    const set = new Set();
+    fabricIntakes.forEach(r => { const s = (r.supplier || "").trim(); if (s) set.add(s); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "ko"));
+  }, [fabricIntakes]);
 
   // ─── 붙여넣기 일괄 입력 (ERP/엑셀 표 자동 파싱) ───
   // 사용 시나리오: ERP에서 거래내역 표를 복사(Ctrl+C) → 여기 textarea에 paste →
