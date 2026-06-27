@@ -10670,6 +10670,9 @@ function App() {
       if (hasUnsynced) {
         // 충돌 감지용 서버 리비전만 기억하고 데이터는 로컬 유지
         if (d && typeof d._rev === "number") lastKnownRev.current = d._rev;
+        if (d && d._revs && typeof d._revs === "object") knownRevs.current = { ...d._revs };
+        // 오프라인 미동기화 변경은 어느 섹션인지 알 수 없으므로 전 섹션을 dirty로 표시 → 전부 재푸시
+        dirtySections.current = new Set(CLOUD_SECTIONS);
         setSyncStatus("syncing");
       } else {
         applyCloudData(d);
