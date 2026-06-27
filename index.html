@@ -10705,28 +10705,31 @@ function App() {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
-  // 실시간 폴링: 탭이 켜져 있고 로컬 변경이 없을 때 8초마다 서버 _rev만 가볍게 확인.
-  // 다른 기기가 저장해 rev가 올라갔을 때만 전체 데이터를 받아와 반영 → 멀티기기 변경이 자동 반영됨.
+  // 실시간 폴링: 탭이 켜져 있고 로컬 변경이 없을 때 8초마다 서버 섹션별 rev(_revs)만 가볍게 확인.
+  // 어떤 섹션이든 내가 아는 rev보다 서버가 최신이면 전체 데이터를 받아와 반영 → 멀티기기 변경 자동 반영.
   // (입력 중·저장 대기·오프라인 미동기화 상태에선 스킵해서 내 작업이 덮어쓰이지 않게 보호)
   useEffect(() => {
     const POLL_MS = 8000;
     const tick = async () => {
       if (document.visibilityState !== "visible") return;
       if (!initialized.current) return;
-      if (syncTimer.current || load("frw_dirty", false)) return; // 로컬 변경 대기/미동기화 → 스킵
+      if (syncTimer.current || load("frw_dirty", false) || dirtySections.current.size > 0) return;
       try {
-        const rr = await fetch(`${FB_URL}/rev`);
+        const rr = await fetch(`${FB_URL}/revs`);
         if (!rr.ok) return;
-        const serverRev = await rr.json();
-        if (typeof serverRev !== "number") return;
-        // 내가 아는 rev보다 서버가 더 최신일 때만 받아오기 (변경 없으면 네트워크/리렌더 없음)
-        if (lastKnownRev.current == null || serverRev <= lastKnownRev.current) return;
+        const serverRevs = await rr.json();
+        if (!serverRevs || typeof serverRevs !== "object") return;
+        // 내가 아는 것보다 더 최신인 섹션이 하나라도 있으면 받아오기 (없으면 네트워크/리렌더 없음)
+        const newer = CLOUD_SECTIONS.some(k => {
+          const srv = serverRevs[k], kn = knownRevs.current[k];
+          return srv != null && (kn == null || srv > kn);
+        });
+        if (!newer) return;
         // 받아오는 사이 사용자가 입력을 시작했으면 중단 (로컬 우선)
-        if (syncTimer.current || load("frw_dirty", false)) return;
+        if (syncTimer.current || load("frw_dirty", false) || dirtySections.current.size > 0) return;
         const d = await cloudLoad();
-        if (syncTimer.current || load("frw_dirty", false)) return;
-        skipPush.current = true;
-        applyCloudData(d);
+        if (syncTimer.current || load("frw_dirty", false) || dirtySections.current.size > 0) return;
+        applyCloudData(d); // skipPush·knownRevs 내부에서 갱신
         setSyncStatus("saved");
       } catch { /* 폴링 실패는 조용히 무시 — 다음 주기에 재시도 */ }
     };
