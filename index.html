@@ -10772,37 +10772,72 @@ function App() {
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
-    if (!initialized.current) return;
+    // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos };
+    if (!initialized.current) { prevSnapshot.current = cur; return; }
     // 폴링/포그라운드 복귀로 받아온 클라우드 데이터를 state에 반영하면 이 effect가 실행되는데,
-    // 그건 사용자 입력이 아니므로 다시 클라우드로 푸시하면 안 됨(무한 왕복·불필요 쓰기 방지). 1회 억제.
-    if (skipPush.current) { skipPush.current = false; setSyncStatus("saved"); return; }
+    // 그건 사용자 입력이 아니므로 다시 푸시하면 안 됨(무한 왕복·불필요 쓰기 방지). baseline만 갱신하고 1회 억제.
+    if (skipPush.current) { skipPush.current = false; prevSnapshot.current = cur; setSyncStatus("saved"); return; }
+    // 직전 스냅샷과 참조 비교로 "바뀐 섹션"만 골라낸다 (setX는 항상 새 참조를 만들므로 신뢰 가능).
+    if (prevSnapshot.current) {
+      for (const k of CLOUD_SECTIONS) if (cur[k] !== prevSnapshot.current[k]) dirtySections.current.add(k);
+    }
+    prevSnapshot.current = cur;
+    if (dirtySections.current.size === 0) return; // 실제로 바뀐 섹션 없음 → 푸시 안 함
     setSyncStatus("syncing");
     // 클라우드 미반영 변경 표시 — 동기화 성공 전에 앱이 꺼져도 다음 시작 때
     // 클라우드(옛 데이터)가 로컬을 덮어쓰지 않도록 보호 (오프라인 작업 유실 방지)
     save("frw_dirty", true);
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => {
-      const payload = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos };
-      // 저장 실패 시 백오프 재시도(2s→4s→8s, 최대 3회). 네트워크 순단으로 변경분이 영영 유실되는 것 방지.
-      let resolvedRev = null; // 첫 시도에 확정한 rev — 재시도 시 재사용 (재시도에선 충돌 재검사 안 함, 오판 방지)
+      let resolved = null; // 첫 시도에 확정한 {payload, bumped, pushable, conflicts} — 재시도 시 재사용
       const doSave = async (attempt) => {
         if (attempt === 0) {
-          // 멀티기기 충돌 감지: 첫 시도에만 서버 _rev 확인. 못 읽으면 검사 스킵하고 저장(안전 우선).
-          let serverRev = null;
+          const sections = Array.from(dirtySections.current);
+          // 섹션별 충돌 감지: 서버의 섹션별 rev(_revs)를 읽어, 내가 동기화한 이후 그 섹션이 서버에서 또 바뀌었는지 확인.
+          let serverRevs = null;
           try {
-            const rr = await fetch(`${FB_URL}/rev`);
-            if (rr.ok) { const j = await rr.json(); if (typeof j === "number") serverRev = j; }
-          } catch { /* rev 못 읽으면 충돌검사 스킵하고 그냥 저장 */ }
-          // 확실한 충돌(서버 rev 읽힘 + 내가 본 rev 있음 + 불일치)만 차단. 다른 기기가 먼저 저장한 경우.
-          if (serverRev != null && lastKnownRev.current != null && serverRev !== lastKnownRev.current) {
+            const rr = await fetch(`${FB_URL}/revs`);
+            if (rr.ok) { const j = await rr.json(); if (j && typeof j === "object") serverRevs = j; }
+          } catch { /* _revs 못 읽으면 충돌검사 스킵하고 그냥 저장(안전 우선) */ }
+          const conflicts = [], pushable = [];
+          for (const s of sections) {
+            const known = knownRevs.current[s];
+            const srv = serverRevs ? serverRevs[s] : undefined;
+            // 같은 섹션이 다른 기기에서 내 동기화 이후 바뀐 경우에만 충돌. 그 외(다른 섹션)는 자동 병합.
+            if (serverRevs && known != null && srv != null && srv !== known) conflicts.push(s);
+            else pushable.push(s);
+          }
+          if (pushable.length === 0) {
+            // dirty 섹션 전부가 같은-섹션 충돌 → 푸시 보류, 충돌 표시 (사용자가 새로고침으로 결정)
             setSyncStatus("conflict");
             syncTimer.current = null;
             return;
           }
-          resolvedRev = (serverRev != null ? serverRev : (lastKnownRev.current || 0)) + 1;
+          // 부분 PATCH 페이로드: 바꿀 섹션 데이터 + 그 섹션 rev만 deep-path("_revs/<섹션>")로 +1.
+          // Firebase update는 슬래시 키를 중첩 경로로 처리 → 다른 섹션 rev는 건드리지 않음.
+          const payload = {}, bumped = {};
+          for (const s of pushable) {
+            payload[s] = cur[s];
+            const base = (serverRevs && serverRevs[s] != null) ? serverRevs[s] : (knownRevs.current[s] || 0);
+            bumped[s] = base + 1;
+            payload[`_revs/${s}`] = base + 1;
+          }
+          resolved = { payload, bumped, pushable, conflicts };
         }
-        cloudSave({ ...payload, _rev: resolvedRev })
-          .then(() => { lastKnownRev.current = resolvedRev; setSyncStatus("saved"); syncTimer.current = null; save("frw_dirty", false); cloudBackupDaily(payload); })
+        cloudSave(resolved.payload)
+          .then(() => {
+            for (const s of resolved.pushable) { knownRevs.current[s] = resolved.bumped[s]; dirtySections.current.delete(s); }
+            syncTimer.current = null;
+            if (resolved.conflicts.length > 0) {
+              // 일부 섹션은 자동 병합 저장됐고, 같은-섹션 충돌만 남음 → 충돌 표시 유지(dirty 유지)
+              setSyncStatus("conflict");
+            } else {
+              setSyncStatus("saved");
+              save("frw_dirty", false);
+            }
+            cloudBackupDaily(cur); // 백업은 항상 전체 로컬 스냅샷으로 (부분 페이로드 아님)
+          })
           .catch(() => {
             if (attempt < 3) {
               syncTimer.current = setTimeout(() => doSave(attempt + 1), 2000 * Math.pow(2, attempt));
