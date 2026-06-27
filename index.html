@@ -10832,7 +10832,9 @@ function App() {
             for (const s of resolved.pushable) { knownRevs.current[s] = resolved.bumped[s]; dirtySections.current.delete(s); }
             syncTimer.current = null;
             if (resolved.conflicts.length > 0) {
-              // 일부 섹션은 자동 병합 저장됐고, 같은-섹션 충돌만 남음 → 충돌 표시 유지(dirty 유지)
+              // 일부 섹션은 자동 병합 저장됐고, 같은-섹션 충돌만 남음 → 충돌 표시.
+              // 푸시된 섹션은 이미 안전하고 남은 건 충돌뿐이므로 dirty=false (새로고침 시 서버 최신본 적용).
+              save("frw_dirty", false);
               setSyncStatus("conflict");
             } else {
               setSyncStatus("saved");
