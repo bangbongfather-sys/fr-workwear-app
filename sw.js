@@ -7,7 +7,7 @@
 //    (버전 고정 URL이라 불변 — 한 번 받으면 재다운로드 불필요. 이게 없으면 오프라인에서 앱이 아예 안 뜸)
 //  - /api/* (Notion·입찰·동기화 프록시): 캐시 안 함 — 오프라인이면 실패하고 앱이 자체 처리
 //  - Firebase·Google 인증 등 그 외 외부 도메인: 개입하지 않음 (조용히 실패하도록)
-const VERSION = 'nj-safety-v2';
+const VERSION = 'nj-safety-v3';
 
 const SHELL = [
   '/',
