@@ -9180,7 +9180,15 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 <label style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3}}>공급업체 *</label>
-                <input placeholder="예: ㈜OO직물" value={newBatch.supplier} onChange={e=>setBatchField("supplier", e.target.value)} style={{height:38}}/>
+                <ComboBox
+                  value={newBatch.supplier}
+                  placeholder="거래처 검색·선택 (직접 입력 가능)"
+                  inputStyle={{height:38}}
+                  groups={[{ label:"거래처", options: supplierOptions.map(s=>({ value:s, label:s })) }]}
+                  onChange={text=>setBatchField("supplier", text)}
+                  onPick={o=>setBatchField("supplier", o.value)}
+                  emptyText="등록된 거래처 없음 — 입력값으로 새 거래처 등록"
+                />
               </div>
               <div style={{display:"flex",flexDirection:"column",gap:4}}>
                 <label style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.3}}>검수 담당자 (선택)</label>
