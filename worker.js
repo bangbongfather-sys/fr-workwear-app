@@ -223,8 +223,11 @@ async function handleFirebaseSync(request, env, url) {
   if (url.pathname === "/api/sync" || url.pathname === "/api/sync/") {
     fbPath = "/frw.json";
   } else if (url.pathname === "/api/sync/rev") {
-    // 멀티기기 충돌 감지용 리비전 번호 (경량 GET). frw 전체를 받지 않고 _rev만 조회.
+    // (레거시) 전역 리비전 번호 — _revs 도입 후 미사용. 하위호환 위해 경로 유지.
     fbPath = "/frw/_rev.json";
+  } else if (url.pathname === "/api/sync/revs") {
+    // 섹션별 충돌 감지용 리비전 맵 (경량 GET). frw 전체를 받지 않고 _revs 객체만 조회.
+    fbPath = "/frw/_revs.json";
   } else {
     // YYYY-MM-DD (일일) 또는 YYYY-MM-DD_HH (4시간 슬롯) 둘 다 허용
     const m = url.pathname.match(/^\/api\/sync\/backup\/(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\/?$/);
