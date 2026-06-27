@@ -9315,29 +9315,18 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
               {newBatch.items.map((it, idx) => (
                 <div key={it.id} style={{display:"grid",gridTemplateColumns:"28px 1fr 80px 80px 110px 110px 1fr 32px",gap:6,alignItems:"center"}}>
                   <div style={{textAlign:"center",fontSize:12,color:"var(--text3)",fontWeight:700}}>{idx+1}</div>
-                  {it.materialName==="__custom__" ? (
-                    <input placeholder="품목명 직접 입력 (기타)" value={it.customMaterial} onChange={e=>setItemField(it.id,"customMaterial",e.target.value)} style={{height:38}}/>
-                  ) : (
-                    <select value={it.materialName} onChange={e=>{
-                      const nm = e.target.value;
-                      // 자재(materials) 우선, 없으면 공임(laborItems)에서 찾기
-                      const found = materials.find(m=>m.name===nm) || laborItems.find(l=>l.name===nm);
-                      setItemField(it.id, "materialName", nm, found ? { unitPrice: String(found.price ?? ""), unit: found.unit || it.unit } : null);
-                    }} style={{height:38,fontSize:13}}>
-                      <option value="">품목 선택...</option>
-                      {materials.length > 0 && (
-                        <optgroup label="📦 원단/자재 (단가표)">
-                          {materials.map(m=><option key={`mat-${m.id}`} value={m.name}>{m.name}</option>)}
-                        </optgroup>
-                      )}
-                      {laborItems.length > 0 && (
-                        <optgroup label="🛠 공임/임가공">
-                          {laborItems.map(l=><option key={`lab-${l.id}`} value={l.name}>{l.name}</option>)}
-                        </optgroup>
-                      )}
-                      <option value="__custom__">직접 입력 (기타)</option>
-                    </select>
-                  )}
+                  <ComboBox
+                    value={it.materialName==="__custom__" ? it.customMaterial : it.materialName}
+                    placeholder="품목 검색·선택"
+                    inputStyle={{height:38,fontSize:13}}
+                    groups={[
+                      ...(materials.length ? [{ label:"📦 원단/자재 (단가표)", options: materials.map(m=>({ value:m.name, label:m.name, meta: m.price?Number(m.price).toLocaleString()+"원":"", _src:m })) }] : []),
+                      ...(laborItems.length ? [{ label:"🛠 공임/임가공", options: laborItems.map(l=>({ value:l.name, label:l.name, meta: l.price?Number(l.price).toLocaleString()+"원":"", _src:l })) }] : []),
+                    ]}
+                    onChange={text=>setItemField(it.id,"materialName",text)}
+                    onPick={o=>setItemField(it.id,"materialName",o.value,{ unitPrice:String(o._src?.price ?? ""), unit:o._src?.unit || it.unit })}
+                    emptyText="단가표에 없음 — 입력값으로 직접 등록됩니다"
+                  />
                   <input type="number" placeholder="수량" value={it.qty} onChange={e=>setItemField(it.id,"qty",e.target.value)} style={{height:38}}/>
                   <select value={it.unit} onChange={e=>setItemField(it.id,"unit",e.target.value)} style={{height:38,fontSize:13}}>
                     <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
