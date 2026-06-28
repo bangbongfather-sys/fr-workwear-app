@@ -10622,6 +10622,10 @@ function App() {
   const knownRevs = useRef({}); // 섹션별 마지막 동기화 rev — { sectionKey: number }. 섹션 단위 충돌 감지의 기준.
   const dirtySections = useRef(new Set()); // 마지막 동기화 이후 로컬에서 바뀐 섹션 key 집합 (이것만 푸시)
   const prevSnapshot = useRef(null); // 직전 렌더의 섹션별 값(참조) — 무엇이 바뀌었는지 참조 비교로 판별
+  // dirty 플래그와 dirty 섹션 목록을 localStorage에 함께 보존 → 오프라인 작업 후 앱을 껐다 켜도
+  // (특히 오프라인 상태로 재시작해 cloudLoad가 실패해도) 복원돼 재연결 시 정상 푸시됨.
+  const markDirtyPersist = () => { save("frw_dirty", true); save("frw_dirty_sections", Array.from(dirtySections.current)); };
+  const clearDirtyPersist = () => { save("frw_dirty", false); save("frw_dirty_sections", []); };
   const prodNameRef = useRef(null);
   const dragProd = useRef(null);
   const dragFabric = useRef(null);
