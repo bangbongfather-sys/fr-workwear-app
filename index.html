@@ -7496,16 +7496,16 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           {/* 거래 입력 폼 */}
           {showCfForm && (
             <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              {/* 거래처 자동완성용 datalist (clients + suppliers + 기존 cashFlow의 거래처명 모두) */}
-              <datalist id="cf-client-list">
-                {Array.from(new Set([
-                  ...clients.map(c => c.name),
-                  ...suppliers.map(s => s.name),
-                  ...cashFlows.map(c => c.client).filter(Boolean),
-                ])).filter(Boolean).sort().map(n => <option key={n} value={n}/>)}
-              </datalist>
               <div style={{display:"grid",gridTemplateColumns:"1.6fr 100px 180px 140px 1fr auto",gap:8}}>
-                <input list="cf-client-list" placeholder="거래처명 *" value={cfDraft.client} onChange={e=>setCfDraft(d=>({...d,client:e.target.value}))} style={{fontWeight:600}}/>
+                <ComboBox
+                  value={cfDraft.client}
+                  placeholder="거래처명 검색·선택 *"
+                  inputStyle={{fontWeight:600}}
+                  groups={[{ label:"거래처", options: cfClientOptions.map(n=>({ value:n, label:n })) }]}
+                  onChange={text=>setCfDraft(d=>({...d,client:text}))}
+                  onPick={o=>setCfDraft(d=>({...d,client:o.value}))}
+                  emptyText="목록에 없음 — 입력값으로 새 거래처 저장"
+                />
                 <select value={cfDraft.type} onChange={e=>setCfDraft(d=>({...d,type:e.target.value}))} style={{height:44}}>
                   <option value="입금">입금</option><option value="출금">출금</option>
                 </select>
