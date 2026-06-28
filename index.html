@@ -10745,13 +10745,17 @@ function App() {
     // 오프라인에서 입력 후 앱을 껐다가 온라인에서 다시 연 경우, 옛 클라우드 데이터가
     // 로컬 입력을 덮어쓰는 유실 사고 방지. 대신 로컬 상태를 클라우드로 밀어올린다.
     const hasUnsynced = load("frw_dirty", false);
+    if (hasUnsynced) {
+      // 재시작 전 미동기화 변경 복원 — cloudLoad 성공 여부와 무관하게(=오프라인 재시작에도) 먼저 복원.
+      // 저장해둔 dirty 섹션 목록 사용. 목록이 없으면(레거시) 안전하게 전 섹션을 dirty 처리.
+      const savedDirty = load("frw_dirty_sections", []);
+      dirtySections.current = new Set(Array.isArray(savedDirty) && savedDirty.length ? savedDirty : CLOUD_SECTIONS);
+    }
     cloudLoad().then(d => {
       if (hasUnsynced) {
         // 충돌 감지용 서버 리비전만 기억하고 데이터는 로컬 유지
         if (d && typeof d._rev === "number") lastKnownRev.current = d._rev;
         if (d && d._revs && typeof d._revs === "object") knownRevs.current = { ...d._revs };
-        // 오프라인 미동기화 변경은 어느 섹션인지 알 수 없으므로 전 섹션을 dirty로 표시 → 전부 재푸시
-        dirtySections.current = new Set(CLOUD_SECTIONS);
         setSyncStatus("syncing");
       } else {
         applyCloudData(d);
