@@ -6886,6 +6886,12 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const [showCfForm, setShowCfForm] = useState(false);
   const [cfDraft, setCfDraft] = useState({ accountId:"", client:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
   const [cfClientFilter, setCfClientFilter] = useState(""); // 거래처별 합산 보기 — 선택된 거래처
+  // 거래처 검색 후보 — 거래처(clients)+공급처(suppliers)+기존 현금흐름 거래처명 통합
+  const cfClientOptions = React.useMemo(() => Array.from(new Set([
+    ...clients.map(c => c.name),
+    ...suppliers.map(s => s.name),
+    ...cashFlows.map(c => c.client).filter(Boolean),
+  ])).filter(Boolean).sort((a, b) => a.localeCompare(b, "ko")), [clients, suppliers, cashFlows]);
   const [editCfId, setEditCfId] = useState(null);
   const [editCfDraft, setEditCfDraft] = useState(null);
   const startEditCf = (cf) => { setEditCfId(cf.id); setEditCfDraft({ ...cf, amount: String(cf.amount || "") }); };
