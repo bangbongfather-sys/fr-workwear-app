@@ -8854,6 +8854,50 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const [pasteAutoPrefix, setPasteAutoPrefix] = useState(true); // "공임비 - " 자동 prefix + " 제작" 제거
   const [pasteDefaultUnit, setPasteDefaultUnit] = useState("벌");
   const [pasteDefaultStatus, setPasteDefaultStatus] = useState("입고완료");
+
+  // ─── ERP 화면 캡쳐 이미지로 입력 (Claude 비전 OCR) ───
+  // 이미지(파일 선택/붙여넣기/드래그) → Claude 비전이 표를 TSV(품목명·수량·단가·합계)로 추출
+  // → 기존 텍스트 파싱 파이프라인(pasteText)에 그대로 투입 → 미리보기·단가표 매칭 재사용.
+  const [imgParsing, setImgParsing] = useState(false);
+  const imgInputRef = useRef(null);
+  const parseImageFile = async (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    if (!apiKey.trim()) {
+      alert("이미지 인식에는 Claude API 키가 필요합니다.\n\n견적 관리 탭에서 API 키(sk-ant-...)를 먼저 입력해 주세요.\n키가 한 번 저장되면 모든 기기에서 사용됩니다.");
+      return;
+    }
+    setImgParsing(true);
+    try {
+      // 캡쳐 이미지를 OCR 친화 크기로 압축 (너무 줄이면 글자 뭉개짐 → 1600px/0.85)
+      const dataUrl = await compressImage(file, 1600, 0.85);
+      const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
+      if (!m) throw new Error("이미지 변환 실패");
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6", max_tokens: 3000,
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
+            { type: "text", text: "이 이미지는 ERP/엑셀의 거래내역 표 캡쳐입니다. 각 데이터 행을 아래 형식의 탭 구분 텍스트(TSV)로 추출하세요.\n\n형식(한 줄에 한 품목): 품목명\\t수량\\t단가\\t합계\n\n규칙:\n- 헤더 행, 합계/소계 행, 부가세 행은 제외\n- 숫자는 콤마·원 없이 순수 숫자만\n- 합계 컬럼이 이미지에 없으면 수량×단가를 계산해서 넣기\n- 품목명에 사이즈 표기(예: 105, XL)가 별도 컬럼이면 품목명 끝에 붙이지 말고 무시\n- 표가 아니거나 품목을 찾을 수 없으면 정확히 NONE 만 출력\n- 다른 설명 없이 TSV 텍스트만 출력" },
+          ]}],
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || `API 오류 (HTTP ${res.status})`);
+      }
+      const data = await res.json();
+      const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+      if (!text || text === "NONE") { alert("이미지에서 거래내역 표를 찾지 못했습니다.\n표가 선명하게 보이도록 다시 캡쳐해 주세요."); return; }
+      setPasteText(text); // → 기존 파싱·미리보기·단가표 매칭 파이프라인이 이어받음
+    } catch (e) {
+      alert("이미지 인식 실패: " + (e.message || e));
+    } finally {
+      setImgParsing(false);
+      if (imgInputRef.current) imgInputRef.current.value = "";
+    }
+  };
   const parsePasteText = React.useCallback((text) => {
     const lines = (text||"").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     const rows = [];
