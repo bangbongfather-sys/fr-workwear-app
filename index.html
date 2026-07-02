@@ -13462,6 +13462,57 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   })()}
                 </div>
 
+                {/* 직전 견적가 대비 변동 경고 — 같은 거래처·같은 제품의 마지막 저장 견적가와 비교 (읽기 전용, savedQuotes 조회만) */}
+                {(() => {
+                  const cname = quoteClient.trim().toLowerCase();
+                  if (!cname) return null;
+                  const past = (savedQuotes || [])
+                    .filter(sq => (sq.quoteClient || "").trim().toLowerCase() === cname)
+                    .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+                  if (past.length === 0) return null;
+                  const rows = [];
+                  getQuotedProducts().forEach(({ p, c }) => {
+                    let prev = null;
+                    for (const sq of past) {
+                      const hit = (sq.products || []).find(x => (x.name || "").trim() === (p.name || "").trim());
+                      if (hit && hit.price > 0) { prev = { grade: hit.grade || "A", price: hit.price, dateStr: sq.dateStr }; break; }
+                    }
+                    if (!prev) return;
+                    const cur = Math.round(c.finalPrice);
+                    rows.push({ name: p.name, prev, cur, curGrade: c.selectedGrade || "A", diff: cur - prev.price });
+                  });
+                  if (rows.length === 0) return null;
+                  const rank = r => r.diff < 0 ? 0 : r.diff > 0 ? 1 : 2; // 인하(위험) 먼저
+                  rows.sort((a, b) => rank(a) - rank(b));
+                  const down = rows.filter(r => r.diff < 0).length, up = rows.filter(r => r.diff > 0).length;
+                  return (
+                    <div style={{ marginBottom: 12, borderRadius: 10, border: down > 0 ? "1px solid rgba(240,68,82,0.4)" : "1px solid var(--divider)", background: "var(--surface2)", padding: "10px 12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700, color: "var(--text2)", marginBottom: 8 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="history" size={12}/>직전 견적 대비</span>
+                        {down > 0 && <span style={{ color: "#F04452" }}>인하 {down}</span>}
+                        {up > 0 && <span style={{ color: "#F59E0B" }}>인상 {up}</span>}
+                        {down === 0 && up === 0 && <span style={{ color: "#10B981" }}>전 품목 동일</span>}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 170, overflowY: "auto" }}>
+                        {rows.map((r, i) => {
+                          const col = r.diff < 0 ? "#F04452" : r.diff > 0 ? "#F59E0B" : "var(--text3)";
+                          const pct = r.prev.price > 0 ? (r.diff / r.prev.price) * 100 : 0;
+                          return (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12 }}>
+                              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text1)", fontWeight: 600 }}>{r.name}</span>
+                              <span style={{ color: "var(--text3)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }} title={`직전 견적 ${r.prev.dateStr || ""}`}>{r.prev.grade !== r.curGrade ? `${r.prev.grade}급 ` : ""}{r.prev.price.toLocaleString()}</span>
+                              <span style={{ color: "var(--text3)", flexShrink: 0 }}>→</span>
+                              <span style={{ color: "var(--text1)", fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.prev.grade !== r.curGrade ? `${r.curGrade}급 ` : ""}{r.cur.toLocaleString()}</span>
+                              <span style={{ flexShrink: 0, minWidth: 50, textAlign: "right", fontWeight: 800, color: col, fontVariantNumeric: "tabular-nums" }}>{r.diff === 0 ? "동일" : `${r.diff > 0 ? "+" : ""}${pct.toFixed(1)}%`}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {down > 0 && <div style={{ marginTop: 8, fontSize: 11, color: "#F04452", fontWeight: 600 }}><Icon name="alert" size={11} style={{ marginRight: 4, verticalAlign: "-1px" }}/>직전보다 낮은 단가가 있어요 — 이 가격이 새 기준가가 될 수 있어요</div>}
+                    </div>
+                  );
+                })()}
+
                 <div style={{ fontSize: 13, color: T.text2, marginBottom: 12 }}>
                   API 키 없이도 즉시 생성됩니다. 키 입력 시 AI가 더 풍부하게 작성합니다.
                 </div>
