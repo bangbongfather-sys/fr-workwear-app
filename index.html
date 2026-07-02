@@ -9299,10 +9299,29 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                   <div style={{fontSize:12,fontWeight:700,color:"var(--text1)"}}>
                     <Icon name="clipboard" size={14} style={{marginRight:6}}/>ERP/엑셀 표 붙여넣기 <span style={{color:"var(--text3)",fontWeight:600,marginLeft:4}}>· 자동 파싱</span>
                   </div>
-                  <button onClick={()=>{setPasteOpen(false);setPasteText("");}}
-                    style={{padding:"4px 10px",fontSize:11,color:"var(--text3)",background:"transparent",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>닫기</button>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <input ref={imgInputRef} type="file" accept="image/*" style={{display:"none"}}
+                      onChange={e=>{ const f=e.target.files?.[0]; if(f) parseImageFile(f); }}/>
+                    <button onClick={()=>imgInputRef.current?.click()} disabled={imgParsing}
+                      title="ERP 화면을 캡쳐한 이미지를 올리면 AI가 표를 읽어 자동 입력합니다 (Claude API 키 필요)"
+                      style={{padding:"5px 12px",fontSize:11,fontWeight:700,color:imgParsing?"var(--text3)":"#fff",background:imgParsing?"var(--surface2)":"#f97316",border:"none",borderRadius:6,cursor:imgParsing?"wait":"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5}}>
+                      <Icon name="camera" size={12}/>{imgParsing?"이미지 분석 중...":"캡쳐 이미지 인식"}
+                    </button>
+                    <button onClick={()=>{setPasteOpen(false);setPasteText("");}}
+                      style={{padding:"4px 10px",fontSize:11,color:"var(--text3)",background:"transparent",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>닫기</button>
+                  </div>
                 </div>
                 <textarea value={pasteText} onChange={e=>setPasteText(e.target.value)}
+                  onPaste={e=>{
+                    // 클립보드에 이미지가 있으면 (스크린샷 복사 후 Ctrl+V) 바로 이미지 인식으로
+                    const item = Array.from(e.clipboardData?.items || []).find(it => it.type.startsWith("image/"));
+                    if (item) { e.preventDefault(); parseImageFile(item.getAsFile()); }
+                  }}
+                  onDragOver={e=>e.preventDefault()}
+                  onDrop={e=>{
+                    const f = Array.from(e.dataTransfer?.files || []).find(x => x.type.startsWith("image/"));
+                    if (f) { e.preventDefault(); parseImageFile(f); }
+                  }}
                   placeholder={"ERP에서 표를 그대로 복사·붙여넣기 (Tab 구분 / 공백 구분 모두 OK)\n\n예시:\n00044  하계 남방 임가공 제작  105  50  15,500  775,000  77,500\n00041  하복 하의 임가공 제작   28  13  16,000  208,000  20,800\n\n파싱 규칙:\n- 수량 × 단가 = 합계 매칭으로 수량/단가 자동 식별\n- 한글이 가장 긴 컬럼 = 품목명\n- 1~3자리 정수 (앞이 0이 아닌) = 사이즈\n- 부가세(=합계×0.1)는 자동 제외"}
                   rows={6}
                   style={{width:"100%",padding:10,fontSize:12,borderRadius:8,fontFamily:"'D2 Coding', Consolas, monospace",resize:"vertical",lineHeight:1.5}}/>
