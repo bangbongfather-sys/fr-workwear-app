@@ -8274,8 +8274,9 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
   const [sortKey, setSortKey] = useState("qtyAsc"); // qtyAsc | qtyDesc | name | value
   const [preview, setPreview] = useState(null); // { items, fileName } — 업로드 미리보기
   const [parseErr, setParseErr] = useState("");
-  const [dragOver, setDragOver] = useState(false);
+  const [winDrag, setWinDrag] = useState(false); // 파일을 화면 위로 드래그 중 (풀스크린 드롭 오버레이)
   const fileRef = useRef(null);
+  const handleFileRef = useRef(null); // window 드롭 리스너에서 최신 handleFile 참조
 
   const itemKey = (it) => it.code || (it.name + "|" + (it.spec || ""));
   const priceOf = (it) => {
