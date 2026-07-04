@@ -3926,6 +3926,87 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
           </div>
         );
       })()}
+      {/* ─── 원가 레이더: 실매입가 vs 단가표 괴리 + 마진 침식 경보 ─── */}
+      {(() => {
+        const { drifts, impacts } = computeCostDrift(materials, laborItems, fabricIntakes, products);
+        if (drifts.length === 0) return null; // 괴리 3% 미만 → 조용히 숨김
+        const applyDrift = (d) => {
+          const newPrice = Math.round(d.actualPrice);
+          if (!window.confirm(`'${d.name}' 단가표 가격을 실매입가로 업데이트할까요?\n\n${Math.round(d.basePrice).toLocaleString()}원 → ${newPrice.toLocaleString()}원\n\n※ 이후 단가 계산기·견적의 원가에 즉시 반영됩니다.`)) return;
+          if (d.kind === "material") setMaterials(ms => ms.map(m => m.id === d.id ? { ...m, price: newPrice } : m));
+          else setLaborItems(ls => ls.map(l => l.id === d.id ? { ...l, price: newPrice } : l));
+        };
+        const fmtW = (n) => Math.round(n).toLocaleString();
+        const worst = impacts[0];
+        return (
+          <div className="card" style={{ borderLeft: "3px solid #F04452", padding: "18px 20px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", display: "flex", alignItems: "center", gap: 8 }}>
+                <Icon name="alert" size={16}/>원가 레이더
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#F04452", background: "rgba(240,68,82,0.1)", padding: "2px 8px", borderRadius: 100 }}>{drifts.length}개 자재 괴리</span>
+              </div>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>최근 90일 실매입가 vs 단가표 (±3% 이상만 표시)</span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 12 }}>
+              단가표에 등록된 기준가와 실제 매입가가 벌어졌습니다.
+              {worst && worst.deltaM < 0 && <> 이대로면 <b style={{ color: "var(--text1)" }}>{worst.name}</b> 실질 마진이 <b style={{ color: "#F04452" }}>{worst.curM.toFixed(1)}% → {worst.realM.toFixed(1)}%</b>로 떨어집니다.</>}
+            </div>
+            {/* 자재별 괴리 */}
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                <thead><tr style={{ color: "var(--text3)" }}>
+                  <th style={{ textAlign: "left", padding: "6px 8px", fontWeight: 700 }}>자재/공임</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700 }}>단가표</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700 }}>실매입가(가중평균)</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700 }}>괴리</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px", fontWeight: 700 }}>최근 매입</th>
+                  <th style={{ width: 70 }}/>
+                </tr></thead>
+                <tbody>
+                  {drifts.slice(0, 6).map(d => (
+                    <tr key={d.kind + d.id} style={{ borderTop: "1px solid var(--divider)" }}>
+                      <td style={{ padding: "7px 8px", fontWeight: 600, color: "var(--text1)" }}>
+                        <span style={{ fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 4, marginRight: 6, background: d.kind === "material" ? "rgba(249,115,22,0.12)" : "rgba(20,165,165,0.12)", color: d.kind === "material" ? "#f97316" : "#18a5a5" }}>{d.kind === "material" ? "자재" : "공임"}</span>
+                        {d.name}
+                      </td>
+                      <td style={{ textAlign: "right", padding: "7px 8px", color: "var(--text2)" }}>{fmtW(d.basePrice)}원</td>
+                      <td style={{ textAlign: "right", padding: "7px 8px", fontWeight: 700, color: "var(--text1)" }}>{fmtW(d.actualPrice)}원</td>
+                      <td style={{ textAlign: "right", padding: "7px 8px", fontWeight: 800, color: d.pct > 0 ? "#F04452" : "#00B493" }}>{d.pct > 0 ? "▲" : "▼"} {Math.abs(d.pct).toFixed(1)}%</td>
+                      <td style={{ textAlign: "right", padding: "7px 8px", color: "var(--text3)", whiteSpace: "nowrap" }}>{d.lastDate.slice(5)} · {d.count}건</td>
+                      <td style={{ textAlign: "right", padding: "7px 4px" }}>
+                        <button onClick={() => applyDrift(d)} title="단가표 가격을 실매입가로 업데이트"
+                          style={{ padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#f97316", background: "transparent", border: "1.5px solid rgba(249,115,22,0.4)", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>반영</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {drifts.length > 6 && <div style={{ fontSize: 11, color: "var(--text3)", padding: "6px 8px" }}>외 {drifts.length - 6}건 — 단가표 탭에서 확인</div>}
+            </div>
+            {/* 제품별 마진 영향 */}
+            {impacts.length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px dashed var(--divider)" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>제품별 실질 마진 (납품가 유지 가정)</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {impacts.slice(0, 6).map(im => (
+                    <button key={im.id} onClick={() => { setActiveProdId(im.id); setTab("calc"); }} title="단가 계산기에서 열기"
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface2)", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>
+                      <span style={{ fontWeight: 700, color: "var(--text1)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{im.name}</span>
+                      <span style={{ color: "var(--text3)", fontSize: 10 }}>{im.grade}급</span>
+                      <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 800, color: im.deltaM < 0 ? "#F04452" : "#00B493" }}>
+                        {im.curM.toFixed(1)}% → {im.realM.toFixed(1)}%
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>
+                  제품을 누르면 단가 계산기로 이동합니다. 인상이 필요하면 계산기 탭의 <b>인상 시뮬레이터</b>로 시나리오를 비교하세요.
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
       <div style={{display:"flex",flexWrap:"wrap",gap:16,alignItems:"stretch"}}>
         <div className="card rcard" data-card-key="sales" style={{ ...cardLayoutStyle("sales"), position: "relative", minWidth: 280, flex: cardLayouts["sales"] ? "0 0 auto" : "1 1 380px", overflow: "hidden" }}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:6}}>
