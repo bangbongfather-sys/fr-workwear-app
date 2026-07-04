@@ -8350,26 +8350,24 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
       return (a.name || "").localeCompare(b.name || "", "ko");
     });
 
-  // 종류별 그룹 (필터·정렬 유지한 채 카테고리로 묶기). 그룹 순서: 규칙 순서 → 기타 마지막, 엑셀 분류는 이름순
+  // 품명별 그룹 — 같은 제품(사이즈 변형)을 한 묶음으로. 필터·정렬 유지.
+  // 그룹 순서는 현재 정렬 기준의 그룹 집계값으로 (수량 적은 순 = 그룹 합계 수량 오름차순 등)
   const groups = React.useMemo(() => {
     if (!grouped) return null;
     const m = new Map();
     for (const it of visible) {
-      const c = stockCatOf(it);
-      if (!m.has(c)) m.set(c, []);
-      m.get(c).push(it);
+      const k = stockBaseName(it.name);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(it);
     }
-    const ruleOrder = STOCK_CAT_RULES.map(r => r[0]);
+    const agg = (list, f) => list.reduce((s, x) => s + f(x), 0);
     return Array.from(m.entries()).sort((a, b) => {
-      if (a[0] === "기타") return 1;
-      if (b[0] === "기타") return -1;
-      const ai = ruleOrder.indexOf(a[0]), bi = ruleOrder.indexOf(b[0]);
-      if (ai >= 0 && bi >= 0) return ai - bi;
-      if (ai >= 0) return -1;
-      if (bi >= 0) return 1;
+      if (sortKey === "qtyAsc") return agg(a[1], x => x.qty) - agg(b[1], x => x.qty);
+      if (sortKey === "qtyDesc") return agg(b[1], x => x.qty) - agg(a[1], x => x.qty);
+      if (sortKey === "value") return agg(b[1], x => x.qty > 0 ? x.qty * priceOf(x) : 0) - agg(a[1], x => x.qty > 0 ? x.qty * priceOf(x) : 0);
       return a[0].localeCompare(b[0], "ko");
     });
-  }, [grouped, visible]);
+  }, [grouped, visible, sortKey]);
   const toggleCat = (c) => setCollapsedCats(prev => { const n = new Set(prev); n.has(c) ? n.delete(c) : n.add(c); return n; });
 
   // ── 엑셀 업로드 ──
