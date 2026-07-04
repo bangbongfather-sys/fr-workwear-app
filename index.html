@@ -8319,6 +8319,32 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
       if (fileRef.current) fileRef.current.value = "";
     }
   };
+  handleFileRef.current = handleFile;
+
+  // 화면 전체 드래그앤드롭 — 재고 탭 어디에 떨어뜨려도 업로드.
+  // window 레벨에서 preventDefault 하지 않으면 브라우저가 엑셀 파일을 직접 열어 앱을 벗어나므로 필수.
+  useEffect(() => {
+    const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onDragOver = (e) => { if (!isFileDrag(e)) return; e.preventDefault(); setWinDrag(true); };
+    const onDragLeave = (e) => { if (!e.relatedTarget) setWinDrag(false); }; // 창 밖으로 나감
+    const onDrop = (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      setWinDrag(false);
+      const files = Array.from(e.dataTransfer.files || []);
+      const f = files.find(x => /\.(xlsx|xls|csv)$/i.test(x.name || ""));
+      if (f) handleFileRef.current?.(f);
+      else if (files.length) setParseErr("엑셀 파일(.xlsx/.xls/.csv)만 업로드할 수 있습니다: " + (files[0].name || ""));
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
   const applyPreview = () => {
     if (!preview) return;
     // 안전재고 유지: 기존 항목과 code(없으면 이름+규격)로 매칭
