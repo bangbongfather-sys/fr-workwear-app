@@ -8605,6 +8605,10 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
               <option value="name">이름순</option>
               <option value="value">평가액 높은 순</option>
             </select>
+            <button onClick={() => setGrouped(g => !g)} title="품목을 종류(분류)별로 묶어서 보기"
+              style={{ height: 36, padding: "0 14px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: grouped ? "none" : "1.5px solid var(--border)", background: grouped ? "var(--accent)" : "transparent", color: grouped ? "#fff" : "var(--text2)", cursor: "pointer", fontFamily: "inherit" }}>
+              종류별
+            </button>
           </div>
         </div>
         {items.length === 0 ? (
@@ -8622,8 +8626,8 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
                 <th style={{ textAlign: "right", padding: "7px 8px" }} title="단가표에 같은 이름이 있으면 수량×단가로 추정">평가액</th>
                 <th style={{ textAlign: "right", padding: "7px 8px", width: 90 }} title="이 수량 아래로 내려가면 '안전재고 미달' 경보">안전재고</th>
               </tr></thead>
-              <tbody>
-                {visible.slice(0, 200).map(it => {
+              {(() => {
+                const itemRow = (it) => {
                   const val = it.qty > 0 ? it.qty * priceOf(it) : 0;
                   return (
                     <tr key={it.id} style={{ borderTop: "1px solid var(--divider)", background: it.qty < 0 ? "rgba(240,68,82,0.05)" : undefined }}>
@@ -8639,10 +8643,34 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
                       </td>
                     </tr>
                   );
-                })}
-              </tbody>
+                };
+                if (!grouped) return <tbody>{visible.slice(0, 200).map(itemRow)}</tbody>;
+                // 종류별 그룹: 헤더 행(소계 포함, 클릭으로 접기/펼치기) + 항목 행
+                return groups.map(([cat, list]) => {
+                  const gMinus = list.filter(x => x.qty < 0).length;
+                  const gValue = list.reduce((s, x) => s + (x.qty > 0 ? x.qty * priceOf(x) : 0), 0);
+                  const isCollapsed = collapsedCats.has(cat);
+                  return (
+                    <tbody key={cat}>
+                      <tr onClick={() => toggleCat(cat)} style={{ cursor: "pointer", background: "var(--surface2)" }} title={isCollapsed ? "펼치기" : "접기"}>
+                        <td colSpan={6} style={{ padding: "9px 10px", borderTop: "2px solid var(--divider)" }}>
+                          <span style={{ fontSize: 11, color: "var(--text3)", marginRight: 8, display: "inline-block", width: 12 }}>{isCollapsed ? "▶" : "▼"}</span>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{cat}</span>
+                          <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: 10 }}>{list.length}개</span>
+                          {gMinus > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#F04452", background: "rgba(240,68,82,0.1)", padding: "2px 8px", borderRadius: 100, marginLeft: 8 }}>마이너스 {gMinus}건</span>}
+                          {gValue > 0 && <span style={{ fontSize: 12, color: "var(--text2)", marginLeft: 10, fontVariantNumeric: "tabular-nums" }}>평가액 {Math.round(gValue).toLocaleString()}원</span>}
+                        </td>
+                      </tr>
+                      {!isCollapsed && list.slice(0, 200).map(itemRow)}
+                      {!isCollapsed && list.length > 200 && (
+                        <tr><td colSpan={6} style={{ padding: "6px 10px", fontSize: 12, color: "var(--text3)" }}>외 {list.length - 200}개 — 검색으로 좁혀보세요</td></tr>
+                      )}
+                    </tbody>
+                  );
+                });
+              })()}
             </table>
-            {visible.length > 200 && <div style={{ padding: "8px", fontSize: 12, color: "var(--text3)" }}>외 {visible.length - 200}개 — 검색으로 좁혀보세요</div>}
+            {!grouped && visible.length > 200 && <div style={{ padding: "8px", fontSize: 12, color: "var(--text3)" }}>외 {visible.length - 200}개 — 검색으로 좁혀보세요</div>}
           </div>
         )}
       </div>
