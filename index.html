@@ -8446,10 +8446,12 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
       `<th style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;width:100px;color:#4E5968;">재고수량</th>` +
       `</tr></thead><tbody>` +
       minusTop.map((it, i) =>
-        `<tr>` +
-        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:center;color:#8B95A1;">${i + 1}</td>` +
-        `<td style="padding:9px 8px;border:1px solid #E5E8EB;font-weight:600;">${esc(it.name)}${it.spec && it.spec !== it.name ? ` <span style="color:#8B95A1;font-weight:400;">(${esc(it.spec)})</span>` : ""}</td>` +
-        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;font-weight:800;color:#F04452;font-variant-numeric:tabular-nums;">${it.qty.toLocaleString()}${it.unit ? " " + esc(it.unit) : ""}</td>` +
+        // 주의: 모든 셀에 color/background 인라인 명시 — 다크모드 전역 td 색상(흰 글자)이
+        // 스며들면 흰 배경 위 흰 글자가 되어 이미지에서 안 보임
+        `<tr style="background:#ffffff;">` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:center;color:#8B95A1;background:#ffffff;">${i + 1}</td>` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;font-weight:600;color:#191F28;background:#ffffff;">${esc(it.name)}${it.spec && it.spec !== it.name ? ` <span style="color:#8B95A1;font-weight:400;">(${esc(it.spec)})</span>` : ""}</td>` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;font-weight:800;color:#F04452;background:#ffffff;font-variant-numeric:tabular-nums;">${it.qty.toLocaleString()}${it.unit ? " " + esc(it.unit) : ""}</td>` +
         `</tr>`
       ).join("") +
       `</tbody></table>`;
