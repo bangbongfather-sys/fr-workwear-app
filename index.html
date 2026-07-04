@@ -8319,9 +8319,17 @@ function stockBaseName(name) {
   return n || (name || "").trim();
 }
 
-function StockTab({ stock, setStock, materials = [], darkMode }) {
+function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch }) {
   const items = stock?.items || [];
   const [search, setSearch] = useState("");
+  const listRef = useRef(null); // 전체 재고 카드 — 통합검색 진입 시 스크롤 목적지
+  // 통합 검색에서 재고 결과 클릭 → 검색어 미리 채우고 목록으로 스크롤
+  useEffect(() => {
+    if (focusSearch == null) return;
+    setSearch(focusSearch);
+    if (clearFocusSearch) clearFocusSearch();
+    setTimeout(() => { try { listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 150);
+  }, [focusSearch]);
   const [sortKey, setSortKey] = useState("qtyAsc"); // qtyAsc | qtyDesc | name | value
   const [grouped, setGrouped] = useState(true); // 종류별 묶어 보기
   const [collapsedCats, setCollapsedCats] = useState(() => new Set()); // 접힌 그룹
