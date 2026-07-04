@@ -8356,24 +8356,27 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
       return (a.name || "").localeCompare(b.name || "", "ko");
     });
 
-  // 품명별 그룹 — 같은 제품(사이즈 변형)을 한 묶음으로. 필터·정렬 유지.
-  // 그룹 순서는 현재 정렬 기준의 그룹 집계값으로 (수량 적은 순 = 그룹 합계 수량 오름차순 등)
+  // 품명별 그룹 — 같은 제품(사이즈 변형)을 한 묶음으로.
+  // 묶기 모드에서는 카탈로그처럼 "이름순"으로 고정 정렬 — 수량순으로 섞으면 같은 계열이
+  // 뿔뿔이 흩어지고, 사이즈 1개짜리 품목이 다른 그룹 사이에 끼어 섞여 보이는 문제가 생김.
+  // 그룹 키는 정규화(소문자·공백 축약)해서 "(Melange)" / 이중 공백 같은 표기 차이도 같은 그룹으로.
   const groups = React.useMemo(() => {
     if (!grouped) return null;
-    const m = new Map();
+    const m = new Map(); // normKey → { label, list }
     for (const it of visible) {
-      const k = stockBaseName(it.name);
-      if (!m.has(k)) m.set(k, []);
-      m.get(k).push(it);
+      const label = stockBaseName(it.name);
+      const k = label.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!m.has(k)) m.set(k, { label, list: [] });
+      m.get(k).list.push(it);
     }
-    const agg = (list, f) => list.reduce((s, x) => s + f(x), 0);
-    return Array.from(m.entries()).sort((a, b) => {
-      if (sortKey === "qtyAsc") return agg(a[1], x => x.qty) - agg(b[1], x => x.qty);
-      if (sortKey === "qtyDesc") return agg(b[1], x => x.qty) - agg(a[1], x => x.qty);
-      if (sortKey === "value") return agg(b[1], x => x.qty > 0 ? x.qty * priceOf(x) : 0) - agg(a[1], x => x.qty > 0 ? x.qty * priceOf(x) : 0);
-      return a[0].localeCompare(b[0], "ko");
-    });
-  }, [grouped, visible, sortKey]);
+    return Array.from(m.values())
+      .map(g => {
+        // 그룹 안은 사이즈(이름) 자연 순: [095] → [100] → [105] → [110]
+        g.list.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko", { numeric: true }));
+        return [g.label, g.list];
+      })
+      .sort((a, b) => a[0].localeCompare(b[0], "ko", { numeric: true }));
+  }, [grouped, visible]);
   const toggleCat = (c) => setCollapsedCats(prev => { const n = new Set(prev); n.has(c) ? n.delete(c) : n.add(c); return n; });
 
   // ── 엑셀 업로드 ──
