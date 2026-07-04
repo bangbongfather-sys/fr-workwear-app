@@ -8225,6 +8225,316 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   );
 }
 
+// ─── 재고 현황 탭 ───
+// 이카운트 ERP 재고 엑셀(.xlsx/.xls/.csv)을 업로드하면 전체 재고를 스냅샷으로 교체.
+// 헤더 행 자동 탐지(품목명+수량 계열 컬럼), 합계/소계 행 제외, 안전재고는 재업로드에도 유지.
+function stockParseWorkbook(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error("시트를 찾을 수 없습니다");
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  let hi = -1, map = null;
+  for (let i = 0; i < Math.min(rows.length, 25); i++) {
+    const cells = (rows[i] || []).map(c => String(c).replace(/\s/g, ""));
+    const nameIdx = cells.findIndex(c => /^(품목명|품명|자재명|상품명|품목)$/.test(c));
+    const qtyIdx = cells.findIndex(c => /(재고수량|현재고|기말수량|기말재고|^재고$|^수량$)/.test(c));
+    if (nameIdx >= 0 && qtyIdx >= 0) {
+      hi = i;
+      map = {
+        name: nameIdx, qty: qtyIdx,
+        code: cells.findIndex(c => /(품목코드|^코드$|품번)/.test(c)),
+        spec: cells.findIndex(c => /(규격|스펙)/.test(c)),
+        unit: cells.findIndex(c => /^단위$/.test(c)),
+      };
+      break;
+    }
+  }
+  if (hi < 0) throw new Error("헤더 행을 찾지 못했습니다. 엑셀에 '품목명'과 '재고수량(또는 수량)' 컬럼이 필요합니다.");
+  const items = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i] || [];
+    const name = String(r[map.name] || "").trim();
+    if (!name || /^(합계|총계|소계|계)$/.test(name)) continue;
+    const qty = parseFloat(String(r[map.qty]).replace(/[,\s원]/g, ""));
+    if (isNaN(qty)) continue;
+    items.push({
+      name,
+      qty,
+      code: map.code >= 0 ? String(r[map.code] || "").trim() : "",
+      spec: map.spec >= 0 ? String(r[map.spec] || "").trim() : "",
+      unit: map.unit >= 0 ? String(r[map.unit] || "").trim() : "",
+    });
+  }
+  return items;
+}
+
+function StockTab({ stock, setStock, materials = [], darkMode }) {
+  const items = stock?.items || [];
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState("qtyAsc"); // qtyAsc | qtyDesc | name | value
+  const [preview, setPreview] = useState(null); // { items, fileName } — 업로드 미리보기
+  const [parseErr, setParseErr] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef(null);
+
+  const itemKey = (it) => it.code || (it.name + "|" + (it.spec || ""));
+  const priceOf = (it) => {
+    const m = materials.find(x => (x.name || "").trim() === (it.name || "").trim());
+    return m ? parseFloat(m.price) || 0 : 0;
+  };
+
+  // ── 집계 ──
+  const minus = items.filter(it => it.qty < 0).sort((a, b) => a.qty - b.qty);
+  const minusTop = minus.slice(0, 10);
+  const lowSafe = items.filter(it => it.qty >= 0 && parseFloat(it.safeQty) > 0 && it.qty < parseFloat(it.safeQty))
+    .sort((a, b) => (a.qty / parseFloat(a.safeQty)) - (b.qty / parseFloat(b.safeQty)));
+  const totalValue = items.reduce((s, it) => s + (it.qty > 0 ? it.qty * priceOf(it) : 0), 0);
+  const valuedCount = items.filter(it => it.qty > 0 && priceOf(it) > 0).length;
+
+  // ── 목록 필터·정렬 ──
+  const q = search.trim().toLowerCase();
+  const visible = items
+    .filter(it => !q || (it.name || "").toLowerCase().includes(q) || (it.code || "").toLowerCase().includes(q) || (it.spec || "").toLowerCase().includes(q))
+    .sort((a, b) => {
+      if (sortKey === "qtyAsc") return a.qty - b.qty;
+      if (sortKey === "qtyDesc") return b.qty - a.qty;
+      if (sortKey === "value") return (b.qty * priceOf(b)) - (a.qty * priceOf(a));
+      return (a.name || "").localeCompare(b.name || "", "ko");
+    });
+
+  // ── 엑셀 업로드 ──
+  const handleFile = async (file) => {
+    if (!file) return;
+    setParseErr("");
+    try {
+      const ab = await file.arrayBuffer();
+      const parsed = stockParseWorkbook(ab);
+      if (parsed.length === 0) throw new Error("데이터 행이 없습니다");
+      setPreview({ items: parsed, fileName: file.name });
+    } catch (e) {
+      setParseErr(e.message || String(e));
+      setPreview(null);
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+  const applyPreview = () => {
+    if (!preview) return;
+    // 안전재고 유지: 기존 항목과 code(없으면 이름+규격)로 매칭
+    const oldSafe = {};
+    items.forEach(it => { const k = itemKey(it); if (parseFloat(it.safeQty) > 0) oldSafe[k] = it.safeQty; });
+    const newItems = preview.items.map(it => ({ ...it, id: uid(), safeQty: oldSafe[itemKey(it)] || "" }));
+    setStock({ items: newItems, updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "), fileName: preview.fileName });
+    setPreview(null);
+  };
+  const setSafeQty = (id, val) => setStock(s => ({ ...s, items: (s.items || []).map(it => it.id === id ? { ...it, safeQty: val } : it) }));
+
+  // ── 마이너스 TOP 10 공유 (모바일: 카톡/문자 네이티브 공유 시트) ──
+  const shareMinus = async () => {
+    if (minus.length === 0) return;
+    const lines = minusTop.map((it, i) => `${i + 1}. ${it.name}${it.spec ? ` (${it.spec})` : ""}: ${it.qty.toLocaleString()}${it.unit || ""}`);
+    const text = [
+      `📦 마이너스 재고 TOP ${minusTop.length} — NJ SAFETY`,
+      `기준: ${stock.updatedAt || "-"}${minus.length > 10 ? ` · 전체 ${minus.length}건 중 상위 10` : ""}`,
+      "",
+      ...lines,
+    ].join("\n");
+    if (navigator.share) {
+      try { await navigator.share({ title: "마이너스 재고 TOP 10", text }); return; } catch (e) { if (e.name === "AbortError") return; }
+    }
+    try { await navigator.clipboard.writeText(text); alert("공유가 지원되지 않는 브라우저라 클립보드에 복사했습니다.\n카톡/문자에 붙여넣기 하세요."); }
+    catch { alert("복사 실패 — 아래 내용을 직접 복사하세요:\n\n" + text); }
+  };
+
+  const fmtQty = (it) => `${it.qty.toLocaleString()}${it.unit ? " " + it.unit : ""}`;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* KPI */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+        <div className="card">
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>총 품목</div>
+          <div className="kpi-num" style={{ color: "var(--text1)" }}>{items.length.toLocaleString()}<span style={{ fontSize: 13, marginLeft: 2 }}>개</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{stock.updatedAt ? `${stock.updatedAt} 기준` : "엑셀 업로드 필요"}</div>
+        </div>
+        <div className="card" style={minus.length > 0 ? { borderColor: "rgba(240,68,82,0.35)", background: "rgba(240,68,82,0.04)" } : {}}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>마이너스 재고</div>
+          <div className="kpi-num" style={{ color: minus.length > 0 ? "#F04452" : "#00B493" }}>{minus.length}<span style={{ fontSize: 13, marginLeft: 2 }}>건</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{minus.length > 0 ? "즉시 확인 필요" : "정상"}</div>
+        </div>
+        <div className="card" style={lowSafe.length > 0 ? { borderColor: "rgba(255,149,0,0.35)", background: "rgba(255,149,0,0.04)" } : {}}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>안전재고 미달</div>
+          <div className="kpi-num" style={{ color: lowSafe.length > 0 ? "#FF9500" : "var(--text1)" }}>{lowSafe.length}<span style={{ fontSize: 13, marginLeft: 2 }}>건</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>발주 검토 대상</div>
+        </div>
+        <div className="card">
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>재고 평가액 (단가표 매칭)</div>
+          <div className="kpi-num" style={{ color: "var(--text1)" }}>{Math.round(totalValue).toLocaleString()}<span style={{ fontSize: 13, marginLeft: 2 }}>원</span></div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{valuedCount}개 품목 단가 매칭됨</div>
+        </div>
+      </div>
+
+      {/* 엑셀 업로드 */}
+      <div className="card"
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer?.files?.[0]; if (f) handleFile(f); }}
+        style={dragOver ? { outline: "2.5px dashed #f97316", outlineOffset: -2 } : {}}>
+        <div className="section-header">
+          <span className="section-header-title"><Icon name="inbox" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>이카운트 재고 엑셀 업로드</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {stock.updatedAt && <span className="info-pill" title={stock.fileName}>마지막 업데이트 {stock.updatedAt}</span>}
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => handleFile(e.target.files?.[0])}/>
+            <button className="btn-primary" onClick={() => fileRef.current?.click()} style={{ padding: "8px 16px", fontSize: 13 }}>파일 선택</button>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7 }}>
+          이카운트에서 <b>재고현황 → 엑셀 다운로드</b>한 파일(.xlsx/.xls/.csv)을 그대로 올리거나 여기에 드래그하세요.
+          '품목명'과 '재고수량(수량)' 컬럼을 자동으로 찾아 <b>전체 재고를 교체</b>합니다. 직접 설정한 안전재고는 유지됩니다.
+        </div>
+        {parseErr && <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(240,68,82,0.08)", border: "1px solid rgba(240,68,82,0.25)", fontSize: 12, color: "#F04452", fontWeight: 600 }}>⚠️ {parseErr}</div>}
+        {preview && (
+          <div style={{ marginTop: 12, padding: 14, borderRadius: 12, background: "var(--surface2)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{preview.fileName} — <b style={{ color: "#f97316" }}>{preview.items.length}개</b> 품목 인식</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setPreview(null)} style={{ padding: "7px 14px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>취소</button>
+                <button className="btn-primary" onClick={applyPreview} style={{ padding: "7px 16px", fontSize: 12 }}>전체 반영 ({preview.items.length}개)</button>
+              </div>
+            </div>
+            <div style={{ maxHeight: 200, overflowY: "auto", borderRadius: 8, background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <table style={{ width: "100%", fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
+                <thead style={{ position: "sticky", top: 0, background: "var(--surface2)" }}><tr>
+                  <th style={{ textAlign: "left", padding: "6px 8px" }}>코드</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px" }}>품목명</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px" }}>규격</th>
+                  <th style={{ textAlign: "right", padding: "6px 8px" }}>재고수량</th>
+                </tr></thead>
+                <tbody>
+                  {preview.items.slice(0, 30).map((it, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid var(--divider)" }}>
+                      <td style={{ padding: "4px 8px", color: "var(--text3)" }}>{it.code || "—"}</td>
+                      <td style={{ padding: "4px 8px", fontWeight: 600 }}>{it.name}</td>
+                      <td style={{ padding: "4px 8px", color: "var(--text2)" }}>{it.spec || "—"}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: 700, color: it.qty < 0 ? "#F04452" : "var(--text1)" }}>{it.qty.toLocaleString()}{it.unit ? " " + it.unit : ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {preview.items.length > 30 && <div style={{ padding: "6px 8px", fontSize: 11, color: "var(--text3)" }}>외 {preview.items.length - 30}개…</div>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 마이너스 재고 TOP 10 */}
+      {minus.length > 0 && (
+        <div className="card" style={{ borderLeft: "3px solid #F04452" }}>
+          <div className="section-header">
+            <span className="section-header-title" style={{ color: "#F04452" }}>마이너스 재고 TOP 10 <span className="section-sub">— 전체 {minus.length}건</span></span>
+            <button onClick={shareMinus} title="카톡·문자 등으로 공유"
+              style={{ padding: "7px 14px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: "1.5px solid rgba(240,68,82,0.4)", background: "transparent", color: "#F04452", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <Icon name="send" size={13}/>공유
+            </button>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+              <thead><tr style={{ color: "var(--text3)", fontSize: 11 }}>
+                <th style={{ textAlign: "left", padding: "6px 8px", width: 30 }}>#</th>
+                <th style={{ textAlign: "left", padding: "6px 8px" }}>품목명</th>
+                <th style={{ textAlign: "left", padding: "6px 8px" }}>규격</th>
+                <th style={{ textAlign: "right", padding: "6px 8px" }}>재고수량</th>
+              </tr></thead>
+              <tbody>
+                {minusTop.map((it, i) => (
+                  <tr key={it.id} style={{ borderTop: "1px solid var(--divider)" }}>
+                    <td style={{ padding: "8px", color: "var(--text3)", fontWeight: 700 }}>{i + 1}</td>
+                    <td style={{ padding: "8px", fontWeight: 700, color: "var(--text1)" }}>{it.name}</td>
+                    <td style={{ padding: "8px", color: "var(--text2)", fontSize: 12 }}>{it.spec || "—"}</td>
+                    <td style={{ padding: "8px", textAlign: "right", fontWeight: 800, color: "#F04452" }}>{fmtQty(it)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 안전재고 미달 */}
+      {lowSafe.length > 0 && (
+        <div className="card" style={{ borderLeft: "3px solid #FF9500" }}>
+          <div className="section-header">
+            <span className="section-header-title" style={{ color: "#FF9500" }}>안전재고 미달 <span className="section-sub">— 발주 검토 {lowSafe.length}건</span></span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {lowSafe.slice(0, 12).map(it => (
+              <div key={it.id} style={{ padding: "7px 12px", borderRadius: 10, border: "1px solid rgba(255,149,0,0.3)", background: "rgba(255,149,0,0.06)", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontWeight: 700, color: "var(--text1)" }}>{it.name}</span>
+                <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 800, color: "#FF9500" }}>{fmtQty(it)}</span>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>/ 안전 {parseFloat(it.safeQty).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 전체 재고 목록 */}
+      <div className="card">
+        <div className="section-header">
+          <span className="section-header-title">전체 재고 <span className="section-sub">— {visible.length}개{q ? ` / ${items.length}개` : ""}</span></span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input placeholder="품목명·코드·규격 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ height: 36, fontSize: 13, width: 200 }}/>
+            <select value={sortKey} onChange={e => setSortKey(e.target.value)} style={{ height: 36, fontSize: 12, width: 130 }}>
+              <option value="qtyAsc">수량 적은 순</option>
+              <option value="qtyDesc">수량 많은 순</option>
+              <option value="name">이름순</option>
+              <option value="value">평가액 높은 순</option>
+            </select>
+          </div>
+        </div>
+        {items.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "40px 24px", color: "var(--text3)", fontSize: 14, lineHeight: 1.8 }}>
+            재고 데이터가 없습니다.<br/>위에서 이카운트 재고 엑셀을 업로드하세요.
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+              <thead><tr style={{ color: "var(--text3)", fontSize: 11 }}>
+                <th style={{ textAlign: "left", padding: "7px 8px" }}>코드</th>
+                <th style={{ textAlign: "left", padding: "7px 8px" }}>품목명</th>
+                <th style={{ textAlign: "left", padding: "7px 8px" }}>규격</th>
+                <th style={{ textAlign: "right", padding: "7px 8px" }}>재고수량</th>
+                <th style={{ textAlign: "right", padding: "7px 8px" }} title="단가표에 같은 이름이 있으면 수량×단가로 추정">평가액</th>
+                <th style={{ textAlign: "right", padding: "7px 8px", width: 90 }} title="이 수량 아래로 내려가면 '안전재고 미달' 경보">안전재고</th>
+              </tr></thead>
+              <tbody>
+                {visible.slice(0, 200).map(it => {
+                  const val = it.qty > 0 ? it.qty * priceOf(it) : 0;
+                  return (
+                    <tr key={it.id} style={{ borderTop: "1px solid var(--divider)", background: it.qty < 0 ? "rgba(240,68,82,0.05)" : undefined }}>
+                      <td style={{ padding: "7px 8px", color: "var(--text3)", fontSize: 12 }}>{it.code || "—"}</td>
+                      <td style={{ padding: "7px 8px", fontWeight: 600, color: "var(--text1)" }}>{it.name}</td>
+                      <td className="allow-wrap" style={{ padding: "7px 8px", color: "var(--text2)", fontSize: 12 }}>{it.spec || "—"}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: it.qty < 0 ? "#F04452" : it.qty === 0 ? "var(--text3)" : "var(--text1)" }}>{fmtQty(it)}</td>
+                      <td style={{ padding: "7px 8px", textAlign: "right", color: val > 0 ? "var(--text2)" : "var(--text3)", fontSize: 12 }}>{val > 0 ? Math.round(val).toLocaleString() + "원" : "—"}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>
+                        <input type="number" value={it.safeQty || ""} placeholder="—"
+                          onChange={e => setSafeQty(it.id, e.target.value)}
+                          style={{ width: 74, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px" }}/>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {visible.length > 200 && <div style={{ padding: "8px", fontSize: 12, color: "var(--text3)" }}>외 {visible.length - 200}개 — 검색으로 좁혀보세요</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems = [], purchaseSubTabs = [], setPurchaseSubTabs, purchaseDateMemos = {}, setPurchaseDateMemos, focusSupplier = null, clearFocusSupplier, darkMode, apiKey = "" }) {
   // 매입 서브탭: "dashboard" (종합 대시보드) | "all" (전체) | supplier name | "summary" (총합계)
   const [activeSubTab, setActiveSubTab] = useState("dashboard");
