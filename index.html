@@ -12894,6 +12894,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       res.push({ type:"입고", icon:"inbox", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} });
                     }
                   });
+                  // 재고 — 클릭하면 재고 탭으로 이동 + 해당 품목이 검색된 상태로 열림
+                  ((stock && stock.items) || []).forEach(it => {
+                    if ((it.name||"").toLowerCase().includes(q) || (it.code||"").toLowerCase().includes(q) || (it.spec||"").toLowerCase().includes(q)) {
+                      res.push({ type:"재고", icon:"layers", title:it.name,
+                        sub:`재고 ${(it.qty??0).toLocaleString()}${it.unit||""}${it.qty<0?" ⚠️ 마이너스":""}${it.code?` · ${it.code}`:""}`,
+                        action:()=>{ setStockFocusSearch(globalSearch.trim()); setTab("stock"); setGlobalSearch(""); } });
+                    }
+                  });
                   const limited = res.slice(0, 12);
                   return (
                     <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 10, marginTop: 6, maxHeight: 380, overflowY: "auto", zIndex: 1000, boxShadow: "0 8px 28px rgba(0,0,0,0.18)" }}>
