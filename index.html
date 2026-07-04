@@ -8429,21 +8429,56 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
   };
   const setSafeQty = (id, val) => setStock(s => ({ ...s, items: (s.items || []).map(it => it.id === id ? { ...it, safeQty: val } : it) }));
 
-  // ── 마이너스 TOP 10 공유 (모바일: 카톡/문자 네이티브 공유 시트) ──
+  // ── 마이너스 TOP 10 공유 — 표를 이미지(PNG)로 렌더해 카톡/문자 공유 시트로 전송.
+  // 텍스트 표는 카톡·문자에서 정렬이 깨지므로, 흰 배경 표 이미지를 만들어 파일 공유한다.
   const shareMinus = async () => {
     if (minus.length === 0) return;
-    const lines = minusTop.map((it, i) => `${i + 1}. ${it.name}${it.spec ? ` (${it.spec})` : ""}: ${it.qty.toLocaleString()}${it.unit || ""}`);
-    const text = [
-      `📦 마이너스 재고 TOP ${minusTop.length} — NJ SAFETY`,
-      `기준: ${stock.updatedAt || "-"}${minus.length > 10 ? ` · 전체 ${minus.length}건 중 상위 10` : ""}`,
-      "",
-      ...lines,
-    ].join("\n");
-    if (navigator.share) {
-      try { await navigator.share({ title: "마이너스 재고 TOP 10", text }); return; } catch (e) { if (e.name === "AbortError") return; }
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const node = document.createElement("div");
+    node.style.cssText = "position:fixed;left:-10000px;top:0;width:560px;background:#ffffff;color:#191F28;font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;padding:26px;";
+    node.innerHTML =
+      `<div style="font-size:19px;font-weight:800;margin-bottom:3px;">📦 마이너스 재고 TOP ${minusTop.length}</div>` +
+      `<div style="font-size:12px;color:#8B95A1;margin-bottom:14px;">NJ SAFETY · 기준 ${esc(stock.updatedAt || "-")}${minus.length > 10 ? ` · 전체 ${minus.length}건 중 상위 10` : ""}</div>` +
+      `<table style="width:100%;border-collapse:collapse;font-size:13px;">` +
+      `<thead><tr style="background:#F2F4F6;">` +
+      `<th style="padding:9px 8px;border:1px solid #E5E8EB;text-align:center;width:34px;color:#4E5968;">#</th>` +
+      `<th style="padding:9px 8px;border:1px solid #E5E8EB;text-align:left;color:#4E5968;">품목명</th>` +
+      `<th style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;width:100px;color:#4E5968;">재고수량</th>` +
+      `</tr></thead><tbody>` +
+      minusTop.map((it, i) =>
+        `<tr>` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:center;color:#8B95A1;">${i + 1}</td>` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;font-weight:600;">${esc(it.name)}${it.spec && it.spec !== it.name ? ` <span style="color:#8B95A1;font-weight:400;">(${esc(it.spec)})</span>` : ""}</td>` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;font-weight:800;color:#F04452;font-variant-numeric:tabular-nums;">${it.qty.toLocaleString()}${it.unit ? " " + esc(it.unit) : ""}</td>` +
+        `</tr>`
+      ).join("") +
+      `</tbody></table>`;
+    try {
+      document.body.appendChild(node);
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+      document.body.removeChild(node);
+      const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+      if (!blob) throw new Error("이미지 생성 실패");
+      const fname = `마이너스재고_TOP${minusTop.length}_${(stock.updatedAt || "").slice(0, 10) || "오늘"}.png`;
+      const file = new File([blob], fname, { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: "마이너스 재고 TOP 10" }); return; }
+        catch (e) { if (e.name === "AbortError") return; }
+      }
+      // 파일 공유 미지원 (PC 브라우저 등) → 표 이미지 다운로드
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = fname; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      alert("이 브라우저는 직접 공유가 안 돼서 표 이미지를 다운로드했습니다.\n카톡/문자에 사진으로 첨부해 보내세요.");
+    } catch (err) {
+      try { document.body.removeChild(node); } catch {}
+      // 이미지 렌더 실패 시 최후 폴백: 텍스트 공유
+      const text = [`📦 마이너스 재고 TOP ${minusTop.length} — NJ SAFETY`, `기준: ${stock.updatedAt || "-"}`, ""]
+        .concat(minusTop.map((it, i) => `${i + 1}. ${it.name}${it.spec && it.spec !== it.name ? ` (${it.spec})` : ""}: ${it.qty.toLocaleString()}${it.unit || ""}`)).join("\n");
+      if (navigator.share) { try { await navigator.share({ title: "마이너스 재고 TOP 10", text }); return; } catch (e) { if (e.name === "AbortError") return; } }
+      try { await navigator.clipboard.writeText(text); alert("클립보드에 복사했습니다. 카톡/문자에 붙여넣기 하세요."); } catch { alert(text); }
     }
-    try { await navigator.clipboard.writeText(text); alert("공유가 지원되지 않는 브라우저라 클립보드에 복사했습니다.\n카톡/문자에 붙여넣기 하세요."); }
-    catch { alert("복사 실패 — 아래 내용을 직접 복사하세요:\n\n" + text); }
   };
 
   const fmtQty = (it) => `${it.qty.toLocaleString()}${it.unit ? " " + it.unit : ""}`;
