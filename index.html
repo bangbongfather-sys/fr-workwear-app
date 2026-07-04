@@ -8295,9 +8295,27 @@ function stockParseWorkbook(arrayBuffer) {
       code: map.code >= 0 ? String(r[map.code] || "").trim() : "",
       spec: map.spec >= 0 ? String(r[map.spec] || "").trim() : "",
       unit: map.unit >= 0 ? String(r[map.unit] || "").trim() : "",
+      cat: map.cat >= 0 ? String(r[map.cat] || "").trim() : "",
     });
   }
   return items;
+}
+
+// 재고 종류 자동 분류 — 엑셀에 분류 컬럼이 없을 때 품명 키워드로 추정 (첫 매칭 우선)
+const STOCK_CAT_RULES = [
+  ["겉감", /겉감/],
+  ["안감", /안감/],
+  ["원단", /원단|생지|원사|아라미드|ARAMID/i],
+  ["니트", /니트|저지|매쉬|망사|스판/],
+  ["완제품(의류)", /자켓|점퍼|잠바|바지|하의|상의|조끼|셔츠|티셔츠|근무복|작업복|유니폼|방한복|우의/],
+  ["부자재", /지퍼|단추|벨크로|테이프|고무줄|라벨|와펜|심지|스냅|버클|밴드|실켓/],
+  ["공임/임가공", /공임|임가공|가공/],
+];
+function stockCatOf(it) {
+  if (it.cat) return it.cat; // 엑셀 분류 컬럼 우선
+  const nm = it.name || "";
+  for (const [cat, re] of STOCK_CAT_RULES) if (re.test(nm)) return cat;
+  return "기타";
 }
 
 function StockTab({ stock, setStock, materials = [], darkMode }) {
