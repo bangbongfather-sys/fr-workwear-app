@@ -8306,10 +8306,16 @@ function stockParseWorkbook(arrayBuffer) {
 // 예: "방염 하계 조끼 105" → "방염 하계 조끼", "방염 동계 솜바지-2XL" → "방염 동계 솜바지"
 // (사이즈가 규격 컬럼에 있고 품명이 동일한 경우는 자연히 같은 그룹)
 const STOCK_SIZE_RE = /[\s\-\/\(\[]+((?:[2-5]?XL|XXL|XXXL|[SML])|1[0-2]\d|[8-9]\d)[\)\]]?$/i;
+// 괄호로 감싼 끝 사이즈: [105] [34] (90) 등 — 괄호 안 2~3자리 숫자는 허리(28~44) 포함 전부 사이즈로 간주
+const STOCK_SIZE_BRACKET_RE = /\s*[\(\[]((?:[2-5]?XL|XXL|XXXL|[SML])|\d{2,3})[\)\]]$/i;
 function stockBaseName(name) {
   let n = (name || "").trim();
   let prev;
-  do { prev = n; n = n.replace(STOCK_SIZE_RE, "").trim(); } while (n !== prev && n.length > 2);
+  do {
+    prev = n;
+    n = n.replace(STOCK_SIZE_BRACKET_RE, "").trim();
+    n = n.replace(STOCK_SIZE_RE, "").trim();
+  } while (n !== prev && n.length > 2);
   return n || (name || "").trim();
 }
 
