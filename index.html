@@ -8412,11 +8412,7 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
       </div>
 
       {/* 엑셀 업로드 */}
-      <div className="card"
-        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer?.files?.[0]; if (f) handleFile(f); }}
-        style={dragOver ? { outline: "2.5px dashed #f97316", outlineOffset: -2 } : {}}>
+      <div className="card">
         <div className="section-header">
           <span className="section-header-title"><Icon name="inbox" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>이카운트 재고 엑셀 업로드</span>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -8425,9 +8421,17 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
             <button className="btn-primary" onClick={() => fileRef.current?.click()} style={{ padding: "8px 16px", fontSize: 13 }}>파일 선택</button>
           </div>
         </div>
+        {/* 드롭존 — 클릭해도 파일 선택. 실제 드롭은 화면 전체 어디서나 가능 */}
+        <div onClick={() => fileRef.current?.click()}
+          style={{ padding: "24px 16px", borderRadius: 12, border: `2px dashed ${winDrag ? "#f97316" : "var(--border)"}`, background: winDrag ? "rgba(249,115,22,0.06)" : "var(--surface2)", textAlign: "center", cursor: "pointer", transition: "all 0.15s", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
+            <Icon name="inbox" size={16} style={{ marginRight: 8, verticalAlign: "-3px", color: "#f97316" }}/>엑셀 파일을 여기(화면 아무 곳)로 드래그하거나 클릭해서 선택
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>.xlsx · .xls · .csv</div>
+        </div>
         <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7 }}>
-          이카운트에서 <b>재고현황 → 엑셀 다운로드</b>한 파일(.xlsx/.xls/.csv)을 그대로 올리거나 여기에 드래그하세요.
-          '품목명'과 '재고수량(수량)' 컬럼을 자동으로 찾아 <b>전체 재고를 교체</b>합니다. 직접 설정한 안전재고는 유지됩니다.
+          이카운트에서 <b>재고현황 → 엑셀 다운로드</b>한 파일을 그대로 올리면 '품목명'과 '재고수량(수량)' 컬럼을
+          자동으로 찾아 <b>전체 재고를 교체</b>합니다. 직접 설정한 안전재고는 유지됩니다.
         </div>
         {parseErr && <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(240,68,82,0.08)", border: "1px solid rgba(240,68,82,0.25)", fontSize: 12, color: "#F04452", fontWeight: 600 }}>⚠️ {parseErr}</div>}
         {preview && (
