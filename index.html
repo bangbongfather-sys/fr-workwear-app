@@ -8688,8 +8688,8 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
                 if (!grouped) return <tbody>{visible.slice(0, 200).map(itemRow)}</tbody>;
                 // 품명별 그룹: 같은 제품의 사이즈들을 헤더 행(합계 포함) 아래로 — 클릭으로 접기/펼치기
                 return groups.map(([base, list]) => {
-                  // 사이즈 1개뿐인 품목은 헤더 없이 일반 행으로 (불필요한 이중 표시 방지)
-                  if (list.length === 1) return <tbody key={"single-" + list[0].id}>{itemRow(list[0])}</tbody>;
+                  // 사이즈 1개뿐인 품목은 헤더 없이 일반 행으로 — 굵은 상단 구분선으로 블록 경계 표시
+                  if (list.length === 1) return <tbody key={"single-" + list[0].id}>{itemRow(list[0], true)}</tbody>;
                   const gMinus = list.filter(x => x.qty < 0).length;
                   const gValue = list.reduce((s, x) => s + (x.qty > 0 ? x.qty * priceOf(x) : 0), 0);
                   const gQty = list.reduce((s, x) => s + x.qty, 0);
