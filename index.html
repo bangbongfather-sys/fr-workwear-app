@@ -1603,6 +1603,65 @@ function computeProduct(p, materials, laborItems) {
   };
 }
 
+// ─── 원가 레이더: 단가표 기준가 vs 실제 매입가 괴리 감지 + 제품 마진 침식 계산 ───
+// 매입 현황(fabricIntakes)의 최근 windowDays일 실매입가(수량 가중 평균, 최근 8건)를
+// 단가표(materials/laborItems) 기준가와 비교. thresholdPct 이상 괴리난 항목만 보고.
+// 제품 영향: 실매입가를 패치해 computeProduct 재계산 — 납품가(등급 단가)는 고정으로 두고
+// "지금 단가로 팔면 실질 마진이 몇 %인가"를 계산 (조용한 마진 침식의 조기 경보).
+function computeCostDrift(materials, laborItems, fabricIntakes, products, { thresholdPct = 3, windowDays = 90 } = {}) {
+  const cutoff = new Date(Date.now() - windowDays * 86400000).toISOString().slice(0, 10);
+  const recentByName = {};
+  for (const r of (fabricIntakes || [])) {
+    const name = (r.materialName || "").trim();
+    const price = parseFloat(r.unitPrice || 0);
+    if (!name || !(price > 0)) continue;
+    if ((r.date || "") < cutoff) continue;
+    const qty = parseFloat(r.qty || 0);
+    (recentByName[name] = recentByName[name] || []).push({ date: r.date || "", price, qty: qty > 0 ? qty : 1 });
+  }
+  const actualOf = (name) => {
+    const rows = recentByName[(name || "").trim()];
+    if (!rows || rows.length === 0) return null;
+    rows.sort((a, b) => b.date.localeCompare(a.date));
+    const take = rows.slice(0, 8); // 최근 8건 수량 가중 평균 — 단발 이상치 완화
+    const wsum = take.reduce((s, x) => s + x.qty, 0);
+    return { avg: take.reduce((s, x) => s + x.price * x.qty, 0) / wsum, lastDate: take[0].date, count: rows.length };
+  };
+  const drifts = [];
+  const scan = (items, kind) => {
+    for (const it of (items || [])) {
+      const base = parseFloat(it.price);
+      if (!(base > 0)) continue;
+      const a = actualOf(it.name);
+      if (!a) continue;
+      const pct = (a.avg - base) / base * 100;
+      if (Math.abs(pct) >= thresholdPct) drifts.push({ kind, id: it.id, name: it.name, basePrice: base, actualPrice: a.avg, pct, lastDate: a.lastDate, count: a.count });
+    }
+  };
+  scan(materials, "material");
+  scan(laborItems, "labor");
+  drifts.sort((a, b) => Math.abs(b.pct) - Math.abs(a.pct));
+
+  const impacts = [];
+  if (drifts.length > 0) {
+    const patchedMat = materials.map(m => { const d = drifts.find(x => x.kind === "material" && x.id === m.id); return d ? { ...m, price: d.actualPrice } : m; });
+    const patchedLab = laborItems.map(l => { const d = drifts.find(x => x.kind === "labor" && x.id === l.id); return d ? { ...l, price: d.actualPrice } : l; });
+    for (const p of (products || [])) {
+      const std = computeProduct(p, materials, laborItems);
+      if (!(std.base > 0) || !(std.finalPrice > 0)) continue;
+      const act = computeProduct(p, patchedMat, patchedLab);
+      const costDelta = act.beforeMargin - std.beforeMargin;
+      if (Math.abs(costDelta) < 1) continue; // 괴리 자재를 안 쓰는 제품
+      const price = std.finalPrice; // 납품가 고정 (현재 팔고 있는 가격)
+      const curM = (price - std.beforeMargin) / price * 100;
+      const realM = (price - act.beforeMargin) / price * 100;
+      impacts.push({ id: p.id, name: p.name, grade: std.selectedGrade, price, costDelta, curM, realM, deltaM: realM - curM });
+    }
+    impacts.sort((a, b) => a.deltaM - b.deltaM); // 마진 침식 큰 순
+  }
+  return { drifts, impacts };
+}
+
 // 간이 마크다운 → JSX (애플 도큐먼트 스타일)
 function AppleMarkdown({ text }) {
   if (!text) return null;
