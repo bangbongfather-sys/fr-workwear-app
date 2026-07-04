@@ -8301,21 +8301,16 @@ function stockParseWorkbook(arrayBuffer) {
   return items;
 }
 
-// 재고 종류 자동 분류 — 엑셀에 분류 컬럼이 없을 때 품명 키워드로 추정 (첫 매칭 우선)
-const STOCK_CAT_RULES = [
-  ["겉감", /겉감/],
-  ["안감", /안감/],
-  ["원단", /원단|생지|원사|아라미드|ARAMID/i],
-  ["니트", /니트|저지|매쉬|망사|스판/],
-  ["완제품(의류)", /자켓|점퍼|잠바|바지|하의|상의|조끼|셔츠|티셔츠|근무복|작업복|유니폼|방한복|우의/],
-  ["부자재", /지퍼|단추|벨크로|테이프|고무줄|라벨|와펜|심지|스냅|버클|밴드|실켓/],
-  ["공임/임가공", /공임|임가공|가공/],
-];
-function stockCatOf(it) {
-  if (it.cat) return it.cat; // 엑셀 분류 컬럼 우선
-  const nm = it.name || "";
-  for (const [cat, re] of STOCK_CAT_RULES) if (re.test(nm)) return cat;
-  return "기타";
+// 재고 그룹 키 — 같은 제품의 사이즈 변형을 한 묶음으로.
+// 품명 끝의 사이즈 토큰(85~129 / S·M·L·XL·2XL 등)을 반복 제거해 기본 품명을 얻는다.
+// 예: "방염 하계 조끼 105" → "방염 하계 조끼", "방염 동계 솜바지-2XL" → "방염 동계 솜바지"
+// (사이즈가 규격 컬럼에 있고 품명이 동일한 경우는 자연히 같은 그룹)
+const STOCK_SIZE_RE = /[\s\-\/\(\[]+((?:[2-5]?XL|XXL|XXXL|[SML])|1[0-2]\d|[8-9]\d)[\)\]]?$/i;
+function stockBaseName(name) {
+  let n = (name || "").trim();
+  let prev;
+  do { prev = n; n = n.replace(STOCK_SIZE_RE, "").trim(); } while (n !== prev && n.length > 2);
+  return n || (name || "").trim();
 }
 
 function StockTab({ stock, setStock, materials = [], darkMode }) {
