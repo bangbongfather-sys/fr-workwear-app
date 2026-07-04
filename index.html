@@ -8638,7 +8638,9 @@ function StockTab({ stock, setStock, materials = [], darkMode }) {
           <span className="section-header-title">전체 재고 <span className="section-sub">— {visible.length}개{q ? ` / ${items.length}개` : ""}</span></span>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input placeholder="품목명·코드·규격 검색" value={search} onChange={e => setSearch(e.target.value)} style={{ height: 36, fontSize: 13, width: 200 }}/>
-            <select value={sortKey} onChange={e => setSortKey(e.target.value)} style={{ height: 36, fontSize: 12, width: 130 }}>
+            <select value={sortKey} onChange={e => setSortKey(e.target.value)} disabled={grouped}
+              title={grouped ? "품명별 묶기 중에는 이름순으로 고정됩니다 (묶기를 끄면 정렬 선택 가능)" : ""}
+              style={{ height: 36, fontSize: 12, width: 130, opacity: grouped ? 0.45 : 1, cursor: grouped ? "not-allowed" : "pointer" }}>
               <option value="qtyAsc">수량 적은 순</option>
               <option value="qtyDesc">수량 많은 순</option>
               <option value="name">이름순</option>
