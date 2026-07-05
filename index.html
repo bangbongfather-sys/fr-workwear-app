@@ -8666,6 +8666,36 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
         </div>
       )}
 
+      {/* 지난 업로드 대비 변동 — 소진 속도 파악 */}
+      {prevSnap && items.length > 0 && (
+        <div className="card" style={{ borderLeft: "3px solid #FF9500" }}>
+          <div className="section-header">
+            <span className="section-header-title">재고 변동 <span className="section-sub">— 지난 업로드({(prevSnap.updatedAt || "이전").slice(0, 16)}) 대비</span></span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span className="info-pill">감소 {consumed.length}개</span>
+              <span className="info-pill">증가 {restocked.length}개</span>
+              {newCount > 0 && <span className="info-pill">신규 {newCount}개</span>}
+            </div>
+          </div>
+          {consumed.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--text3)", padding: "6px 0" }}>지난 업로드 이후 감소한 품목이 없습니다.</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>소진 TOP {Math.min(consumed.length, 8)} — 빠르게 빠지는 품목</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {consumed.slice(0, 8).map(({ it, d }) => (
+                  <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 10, border: "1px solid rgba(255,149,0,0.3)", background: "rgba(255,149,0,0.06)", fontSize: 12 }}>
+                    <span style={{ fontWeight: 700, color: "var(--text1)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}{it.spec && it.spec !== it.name ? ` (${it.spec})` : ""}</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 800, color: "#FF9500" }}>▼{Math.abs(d).toLocaleString()}{it.unit || ""}</span>
+                    <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>→ 현재 {it.qty.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {/* 전체 재고 목록 */}
       <div className="card" ref={listRef}>
         <div className="section-header">
