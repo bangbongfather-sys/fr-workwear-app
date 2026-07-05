@@ -8759,12 +8759,14 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                   const gMinus = list.filter(x => x.qty < 0).length;
                   const gValue = list.reduce((s, x) => s + (x.qty > 0 ? x.qty * priceOf(x) : 0), 0);
                   const gQty = list.reduce((s, x) => s + x.qty, 0);
+                  // 그룹 변동 소계 — 숫자 증감만 합산 (신규/비교불가 제외)
+                  const gDelta = prevSnap ? list.reduce((s, x) => { const d = deltaOf(x); return s + (typeof d === "number" ? d : 0); }, 0) : null;
                   const units = Array.from(new Set(list.map(x => x.unit).filter(Boolean)));
                   const isCollapsed = collapsedCats.has(base);
                   return (
                     <tbody key={base}>
                       <tr onClick={() => toggleCat(base)} style={{ cursor: "pointer", background: "var(--surface2)" }} title={isCollapsed ? "펼치기" : "접기"}>
-                        <td colSpan={6} style={{ padding: "9px 10px", borderTop: "2px solid var(--divider)" }}>
+                        <td colSpan={7} style={{ padding: "9px 10px", borderTop: "2px solid var(--divider)" }}>
                           <span style={{ fontSize: 11, color: "var(--text3)", marginRight: 8, display: "inline-block", width: 12 }}>{isCollapsed ? "▶" : "▼"}</span>
                           <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{base}</span>
                           <span style={{ fontSize: 12, color: "var(--text3)", marginLeft: 10 }}>사이즈 {list.length}종</span>
