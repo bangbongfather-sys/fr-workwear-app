@@ -8435,8 +8435,34 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
     const oldSafe = {};
     items.forEach(it => { const k = itemKey(it); if (parseFloat(it.safeQty) > 0) oldSafe[k] = it.safeQty; });
     const newItems = preview.items.map(it => ({ ...it, id: uid(), safeQty: oldSafe[itemKey(it)] || "" }));
-    setStock({ items: newItems, updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "), fileName: preview.fileName });
+    // 증감 비교용 스냅샷 이력 — 교체 직전 상태(품목키→수량)를 보관, 최근 8회
+    let history = Array.isArray(stock.history) ? stock.history.slice() : [];
+    if (items.length > 0) {
+      const qtyMap = {};
+      items.forEach(it => { qtyMap[itemKey(it)] = it.qty; });
+      history.push({ updatedAt: stock.updatedAt || "", fileName: stock.fileName || "", qty: qtyMap });
+      if (history.length > 8) history = history.slice(-8);
+    }
+    setStock({ items: newItems, updatedAt: new Date().toISOString().slice(0, 16).replace("T", " "), fileName: preview.fileName, history });
     setPreview(null);
+  };
+
+  // ── 지난 업로드 대비 증감 ──
+  const prevSnap = (Array.isArray(stock.history) && stock.history.length > 0) ? stock.history[stock.history.length - 1] : null;
+  const deltaOf = (it) => {
+    if (!prevSnap || !prevSnap.qty) return null;
+    const pq = prevSnap.qty[itemKey(it)];
+    return pq === undefined ? "new" : it.qty - pq;
+  };
+  const deltas = prevSnap ? items.map(it => ({ it, d: deltaOf(it) })) : [];
+  const consumed = deltas.filter(x => typeof x.d === "number" && x.d < 0).sort((a, b) => a.d - b.d); // 감소(소진) 큰 순
+  const restocked = deltas.filter(x => typeof x.d === "number" && x.d > 0);
+  const newCount = deltas.filter(x => x.d === "new").length;
+  const deltaCell = (d) => {
+    if (d === null) return <span style={{ color: "var(--text3)" }}>—</span>;
+    if (d === "new") return <span style={{ fontSize: 10, fontWeight: 800, color: "#18a5a5", background: "rgba(24,165,165,0.12)", padding: "2px 6px", borderRadius: 4 }}>신규</span>;
+    if (d === 0) return <span style={{ color: "var(--text3)" }}>—</span>;
+    return <span style={{ fontWeight: 800, color: d < 0 ? "#FF9500" : "#00B493" }}>{d < 0 ? "▼" : "▲"}{Math.abs(d).toLocaleString()}</span>;
   };
   const setSafeQty = (id, val) => setStock(s => ({ ...s, items: (s.items || []).map(it => it.id === id ? { ...it, safeQty: val } : it) }));
 
