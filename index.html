@@ -219,6 +219,32 @@
     }
     /* 텍스트 선택 색 — 브랜드 톤 */
     ::selection { background: rgba(255,65,3,0.16); }
+    /* ─── 토스트 ─── */
+    #frw-toast-host {
+      position: fixed; top: 16px; right: 16px; z-index: 10000;
+      display: flex; flex-direction: column; gap: 10px;
+      max-width: min(420px, calc(100vw - 32px));
+      pointer-events: none;
+    }
+    .frw-toast {
+      pointer-events: auto; cursor: pointer;
+      padding: 13px 16px; border-radius: 12px;
+      background: #06202E; color: #F4F8FA;
+      font-size: 13px; font-weight: 600; line-height: 1.55;
+      white-space: pre-line; word-break: keep-all;
+      box-shadow: 0 8px 28px rgba(0,8,13,0.35), inset 0 0 0 1px rgba(255,255,255,0.07);
+      border-left: 3px solid #8FA6B2;
+      animation: frwToastIn 0.28s cubic-bezier(0, 0, 0.2, 1);
+    }
+    .frw-toast-success { border-left-color: #00B493; }
+    .frw-toast-error { border-left-color: #F04452; }
+    .frw-toast-info { border-left-color: #FF4103; }
+    .frw-toast-out { opacity: 0; transform: translateY(-6px); transition: opacity 0.3s, transform 0.3s; }
+    @keyframes frwToastIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+    @media (max-width: 768px) {
+      #frw-toast-host { top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; max-width: none; }
+      @keyframes frwToastIn { from { opacity: 0; transform: translateY(-16px); } to { opacity: 1; transform: none; } }
+    }
 
     /* ─── KPI 큰 숫자 반응형 ─── */
     /* 자금/경영 대시보드 등에서 "3,017,252,308원" 같은 긴 숫자가 카드 폭을 넘어
@@ -963,7 +989,31 @@
   </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div style="display:flex;min-height:100vh;background:#F9FAFB">
+  <div class="frw-boot-side" style="width:232px;flex-shrink:0;background:#001621;border-radius:16px;margin:12px 0 12px 12px"></div>
+  <div style="flex:1;padding:12px;display:flex;flex-direction:column;gap:14px;min-width:0">
+    <div class="frw-sk" style="height:64px;border-radius:14px"></div>
+    <div class="frw-sk" style="height:88px;width:40%;min-width:220px;border-radius:14px"></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      <div class="frw-sk" style="height:110px;border-radius:16px"></div>
+      <div class="frw-sk" style="height:110px;border-radius:16px"></div>
+      <div class="frw-sk" style="height:110px;border-radius:16px"></div>
+      <div class="frw-sk" style="height:110px;border-radius:16px"></div>
+    </div>
+    <div class="frw-sk" style="height:280px;border-radius:16px"></div>
+    <div class="frw-sk" style="height:200px;border-radius:16px"></div>
+  </div>
+</div>
+<style>
+.frw-sk{background:linear-gradient(100deg,#EEF1F4 40%,#F7F9FA 50%,#EEF1F4 60%);background-size:200% 100%;animation:frwShimmer 1.4s ease-in-out infinite}
+@keyframes frwShimmer{from{background-position:120% 0}to{background-position:-80% 0}}
+@media (max-width:768px){.frw-boot-side{display:none}}
+@media (prefers-color-scheme:dark){
+  #root>div{background:#001621 !important}
+  .frw-sk{background:linear-gradient(100deg,#0C2836 40%,#123240 50%,#0C2836 60%);background-size:200% 100%}
+  .frw-boot-side{background:#06202E !important}
+}
+</style></div>
 <div id="frw-err-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:99999; background:#F04452; color:#fff; padding:14px 18px; font:13px/1.5 -apple-system,BlinkMacSystemFont,sans-serif; white-space:pre-wrap; max-height:50vh; overflow:auto; box-shadow:0 4px 16px rgba(0,0,0,0.3);"></div>
 <script>
 (function(){
@@ -1157,6 +1207,29 @@ const ORANGE = "#F59E0B";
 // 여기 순서/이름이 Firebase /frw 의 top-level key 및 _revs 키와 1:1 대응한다.
 const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock"];
 
+
+// ─── 토스트 알림 (alert 대체) ───
+// React 밖 vanilla 구현 — 모듈 레벨 어디서든 호출 가능. 클릭하면 닫힘, 최대 4개 유지.
+// type 미지정 시 메시지 키워드로 성공/오류/안내 자동 판별.
+function showToast(message, type) {
+  try {
+    const msg = String(message ?? "");
+    if (!msg) return;
+    if (!type) type = /실패|오류|불가|없습니다|필요합니다|초과|잘못|않|에러|⚠/.test(msg) ? "error"
+      : /완료|저장|성공|반영|추가|전송|업데이트|복사|삭제/.test(msg) ? "success" : "info";
+    let host = document.getElementById("frw-toast-host");
+    if (!host) { host = document.createElement("div"); host.id = "frw-toast-host"; document.body.appendChild(host); }
+    const el = document.createElement("div");
+    el.className = "frw-toast frw-toast-" + type;
+    el.textContent = msg;
+    el.addEventListener("click", () => el.remove());
+    host.appendChild(el);
+    while (host.children.length > 4) host.firstChild.remove();
+    const dur = Math.min(9000, Math.max(3400, msg.length * 60)); // 긴 안내문은 오래 표시
+    setTimeout(() => { el.classList.add("frw-toast-out"); setTimeout(() => el.remove(), 350); }, dur);
+  } catch { /* 토스트 실패는 조용히 무시 */ }
+}
+
 function load(key, fallback) {
   try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
 }
@@ -1173,7 +1246,7 @@ function save(key, value) {
       // alert 은 렌더 흐름 안에서 부담스러우니 setTimeout 으로
       setTimeout(() => {
         try {
-          alert("⚠️ 브라우저 저장 공간이 부족합니다.\n\n오래된 견적/이미지를 삭제하거나 사용 중인 다른 사이트의 데이터를 정리해 주세요.\n클라우드 동기화는 정상 작동합니다.");
+          showToast("⚠️ 브라우저 저장 공간이 부족합니다.\n\n오래된 견적/이미지를 삭제하거나 사용 중인 다른 사이트의 데이터를 정리해 주세요.\n클라우드 동기화는 정상 작동합니다.");
         } catch {}
       }, 100);
     }
@@ -1353,12 +1426,12 @@ function ImageUploader({ value, onChange, label = "이미지", maxWidth = 1024, 
   const [dragOver, setDragOver] = React.useState(false);
   const handleFile = async (file) => {
     if (!file) return;
-    if (!file.type || !file.type.startsWith("image/")) { alert("이미지 파일만 업로드 가능해요"); return; }
+    if (!file.type || !file.type.startsWith("image/")) { showToast("이미지 파일만 업로드 가능해요"); return; }
     setBusy(true);
     try {
       const dataUrl = await compressImage(file, maxWidth);
       onChange(dataUrl);
-    } catch (e) { alert("이미지 처리 실패: " + e.message); }
+    } catch (e) { showToast("이미지 처리 실패: " + e.message); }
     finally { setBusy(false); }
   };
   const onDrop = (e) => {
@@ -3221,7 +3294,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
   };
   const cancelAdd = () => { setAddingNew(false); };
   const saveAdd = () => {
-    if (!newDraft.productName || !newDraft.unitPrice) { alert("제품명과 단가는 필수입니다"); return; }
+    if (!newDraft.productName || !newDraft.unitPrice) { showToast("제품명과 단가는 필수입니다"); return; }
     const newOrder = {
       id: uid(),
       date: newDraft.date || todayStr,
@@ -4870,17 +4943,17 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
     setEditingCell(null);
   };
   const deleteYear = (year) => {
-    if (year >= CURRENT_YEAR) { alert(`${year}년은 월별 장부와 자동 연동되는 행이라 삭제할 수 없어요.`); return; }
+    if (year >= CURRENT_YEAR) { showToast(`${year}년은 월별 장부와 자동 연동되는 행이라 삭제할 수 없어요.`); return; }
     if (!window.confirm(`${year}년 데이터를 삭제할까요?`)) return;
     setYearlyRevenue((prev) => (prev || []).filter(d => d.year !== year));
   };
   const addYear = () => {
     const y = parseInt(newRow.year, 10);
     const t = parseAmt(newRow.total);
-    if (!y || y < 1900 || y > 2100) { alert("연도를 올바르게 입력하세요 (예: 2026)"); return; }
-    if (y >= CURRENT_YEAR) { alert(`${y}년은 월별 장부와 자동 연동돼요. 따로 추가할 필요 없이 장부 탭에 입력하면 반영됩니다.`); return; }
-    if ((yearlyRevenue || []).some(d => d.year === y)) { alert(`${y}년은 이미 등록돼 있어요. 표에서 클릭해 수정하세요.`); return; }
-    if (t <= 0) { alert("매출 금액을 입력하세요"); return; }
+    if (!y || y < 1900 || y > 2100) { showToast("연도를 올바르게 입력하세요 (예: 2026)"); return; }
+    if (y >= CURRENT_YEAR) { showToast(`${y}년은 월별 장부와 자동 연동돼요. 따로 추가할 필요 없이 장부 탭에 입력하면 반영됩니다.`); return; }
+    if ((yearlyRevenue || []).some(d => d.year === y)) { showToast(`${y}년은 이미 등록돼 있어요. 표에서 클릭해 수정하세요.`); return; }
+    if (t <= 0) { showToast("매출 금액을 입력하세요"); return; }
     setYearlyRevenue((prev) => ([...(prev || []), { year: y, total: t }]));
     setAdding(false); setNewRow({ year: "", total: "" });
   };
@@ -5656,7 +5729,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   };
 
   const addClient = () => {
-    if (!draft.name.trim()) { alert("거래처명은 필수입니다"); return; }
+    if (!draft.name.trim()) { showToast("거래처명은 필수입니다"); return; }
     const supply = parseFloat(draft.supply) || 0;
     const tax = parseFloat(draft.tax) || (supply * 0.1);
     const total = parseFloat(draft.total) || (supply + tax);
@@ -5677,7 +5750,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   const startEdit = (c) => { setEditId(c.id); setEditDraft({ ...c }); };
   const cancelEdit = () => { setEditId(null); setEditDraft(null); };
   const saveEdit = () => {
-    if (!editDraft || !editDraft.name) { alert("거래처명은 필수입니다"); return; }
+    if (!editDraft || !editDraft.name) { showToast("거래처명은 필수입니다"); return; }
     const supply = parseFloat(editDraft.supply) || 0;
     const tax = parseFloat(editDraft.tax) || 0;
     const total = parseFloat(editDraft.total) || (supply + tax);
@@ -5706,7 +5779,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
 
   // ── 엑셀/PDF 다운로드 ──
   const exportLedgerExcel = (ym, clients) => {
-    if (!clients || clients.length === 0) { alert("내보낼 데이터가 없습니다."); return; }
+    if (!clients || clients.length === 0) { showToast("내보낼 데이터가 없습니다."); return; }
     const [yr, mo] = ym.split("-").map(Number);
     const title = `${yr}년 ${mo}월 장부`;
     const totalSupply = clients.reduce((s,c)=>s+(parseFloat(c.supply)||0),0);
@@ -5792,7 +5865,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   };
 
   const exportLedgerPDF = async (ym, clients) => {
-    if (!clients || clients.length === 0) { alert("내보낼 데이터가 없습니다."); return; }
+    if (!clients || clients.length === 0) { showToast("내보낼 데이터가 없습니다."); return; }
     const [yr, mo] = ym.split("-").map(Number);
     const totalSupply = clients.reduce((s,c)=>s+(parseFloat(c.supply)||0),0);
     const totalTax = clients.reduce((s,c)=>s+(parseFloat(c.tax)||0),0);
@@ -5908,7 +5981,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
       }
       pdf.save(`장부_${yr}년${String(mo).padStart(2,"0")}월.pdf`);
     } catch (e) {
-      alert("PDF 생성 실패: " + (e.message || e));
+      showToast("PDF 생성 실패: " + (e.message || e));
     } finally {
       document.body.removeChild(container);
     }
@@ -5916,7 +5989,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
 
   // 미수금 (AR): 거래처명 키 기준으로 clientAR에 저장 → 모든 월에서 공유됨
   const addAR = (clientName) => {
-    if (!arDraft.amount) { alert("금액 필수"); return; }
+    if (!arDraft.amount) { showToast("금액 필수"); return; }
     const key = (clientName || "").trim();
     if (!key) return;
     const newEntry = { id: uid(), ...arDraft, amount: parseFloat(arDraft.amount) };
@@ -5948,8 +6021,8 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   // 엑셀 import
   const processExcelFile = (file) => {
     if (!file) return;
-    if (!/\.(xlsx|xls)$/i.test(file.name)) { alert("엑셀 파일(.xlsx/.xls)만 지원"); return; }
-    if (typeof XLSX === "undefined") { alert("엑셀 라이브러리 로딩 중. 잠시 후 다시 시도"); return; }
+    if (!/\.(xlsx|xls)$/i.test(file.name)) { showToast("엑셀 파일(.xlsx/.xls)만 지원"); return; }
+    if (typeof XLSX === "undefined") { showToast("엑셀 라이브러리 로딩 중. 잠시 후 다시 시도"); return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -5986,7 +6059,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
             bestRow = i; bestScore = score; bestCols = found;
           }
         }
-        if (bestRow < 0) { alert("거래처명/공급가액/청구합계 헤더를 찾을 수 없습니다.\n메인 테이블 헤더가 한 행에 모여 있는지 확인하세요."); return; }
+        if (bestRow < 0) { showToast("거래처명/공급가액/청구합계 헤더를 찾을 수 없습니다.\n메인 테이블 헤더가 한 행에 모여 있는지 확인하세요."); return; }
         const headerIdx = bestRow;
         const nameCol   = bestCols.name;
         const supplyCol = (bestCols.supply ?? -1);
@@ -5994,7 +6067,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         const totalCol  = (bestCols.total ?? -1);
         const statusCol = (bestCols.status ?? -1);
         const memoCol   = (bestCols.memo ?? -1);
-        if (nameCol < 0) { alert("거래처명 컬럼을 찾을 수 없습니다."); return; }
+        if (nameCol < 0) { showToast("거래처명 컬럼을 찾을 수 없습니다."); return; }
 
         // 년/월 자동 감지: 헤더 위쪽 텍스트에서 YYYY년 MM월 패턴 찾기
         let importedYM = selectedYM;
@@ -6055,13 +6128,13 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           }
         }
 
-        if (newClients.length === 0) { alert("가져올 데이터가 없습니다."); return; }
+        if (newClients.length === 0) { showToast("가져올 데이터가 없습니다."); return; }
         if (!window.confirm(`📂 ${file.name}\n${importedYM}에 ${newClients.length}곳을 가져옵니다.\n${ledgers[importedYM] ? "(기존 데이터를 덮어씁니다)" : ""}\n진행할까요?`)) return;
         setLedgers(prev => ({ ...prev, [importedYM]: { clients: newClients } }));
         setSelectedYM(importedYM);
-        alert(`✅ ${importedYM}에 ${newClients.length}곳 가져왔습니다!`);
+        showToast(`✅ ${importedYM}에 ${newClients.length}곳 가져왔습니다!`);
       } catch (err) {
-        alert("엑셀 처리 실패: " + err.message);
+        showToast("엑셀 처리 실패: " + err.message);
       }
     };
     reader.readAsArrayBuffer(file);
@@ -6745,7 +6818,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
   const selPaid = selectedSummary.reduce((s,c) => s + c.paid, 0);
 
   const addAR = (name) => {
-    if (!arDraft.amount) { alert("금액 필수"); return; }
+    if (!arDraft.amount) { showToast("금액 필수"); return; }
     const key = (name||"").trim();
     if (!key) return;
     const newE = { id: uid(), ...arDraft, amount: parseFloat(arDraft.amount) };
@@ -6766,7 +6839,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
   const startEditAR = (e) => { setEditArId(e.id); setEditArDraft({ ...e }); };
   const cancelEditAR = () => { setEditArId(null); setEditArDraft(null); };
   const saveEditAR = (name) => {
-    if (!editArDraft || !editArDraft.amount) { alert("금액 필수"); return; }
+    if (!editArDraft || !editArDraft.amount) { showToast("금액 필수"); return; }
     setClientAR(prev => {
       const cur = prev[name];
       if (!cur) return prev;
@@ -7111,7 +7184,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const startEditCf = (cf) => { setEditCfId(cf.id); setEditCfDraft({ ...cf, amount: String(cf.amount || "") }); };
   const cancelEditCf = () => { setEditCfId(null); setEditCfDraft(null); };
   const saveEditCf = () => {
-    if (!editCfDraft || !editCfDraft.client?.trim() || !editCfDraft.amount) { alert("거래처명 + 금액 필수"); return; }
+    if (!editCfDraft || !editCfDraft.client?.trim() || !editCfDraft.amount) { showToast("거래처명 + 금액 필수"); return; }
     const amt = parseFloat(editCfDraft.amount) || 0;
     setCashFlows(prev => prev.map(c => c.id === editCfId ? { ...editCfDraft, client: editCfDraft.client.trim(), amount: amt } : c));
     cancelEditCf();
@@ -7253,7 +7326,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
 
   // ── 액션 ──
   const addAcct = () => {
-    if (!acctDraft.name.trim()) { alert("계좌명 필수"); return; }
+    if (!acctDraft.name.trim()) { showToast("계좌명 필수"); return; }
     setAccounts(prev => [...prev, { id: uid(), ...acctDraft, balance: parseFloat(acctDraft.balance)||0, createdAt: Date.now() }]);
     setAcctDraft({ name:"", bank:"", balance:"", color:"#FF4103", memo:"" });
     setShowAcctForm(false);
@@ -7266,7 +7339,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const deleteAcct = (id) => { if (window.confirm("이 계좌를 삭제할까요?")) setAccounts(prev => prev.filter(a => a.id !== id)); };
 
   const addInv = () => {
-    if (!invDraft.name.trim()) { alert("투자명 필수"); return; }
+    if (!invDraft.name.trim()) { showToast("투자명 필수"); return; }
     setInvestments(prev => [...prev, { id: uid(), ...invDraft, principal: parseFloat(invDraft.principal)||0, currentValue: parseFloat(invDraft.currentValue)||parseFloat(invDraft.principal)||0, expectedRate: parseFloat(invDraft.expectedRate)||0 }]);
     setInvDraft({ type:"예금", name:"", principal:"", currentValue:"", startDate:"", maturityDate:"", expectedRate:"", memo:"" });
     setShowInvForm(false);
@@ -7279,7 +7352,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const deleteInv = (id) => { if (window.confirm("삭제할까요?")) setInvestments(prev => prev.filter(i => i.id !== id)); };
 
   const addCf = () => {
-    if (!cfDraft.amount || !cfDraft.client?.trim()) { alert("거래처명 + 금액 필수"); return; }
+    if (!cfDraft.amount || !cfDraft.client?.trim()) { showToast("거래처명 + 금액 필수"); return; }
     const amt = parseFloat(cfDraft.amount)||0;
     setCashFlows(prev => [...prev, { id: uid(), ...cfDraft, client: cfDraft.client.trim(), amount: amt }]);
     // 계좌가 선택돼 있으면 잔액 자동 업데이트
@@ -7295,7 +7368,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   };
 
   const addSched = () => {
-    if (!schedDraft.name.trim() || !schedDraft.amount) { alert("이름 + 금액 필수"); return; }
+    if (!schedDraft.name.trim() || !schedDraft.amount) { showToast("이름 + 금액 필수"); return; }
     setScheduledExpenses(prev => [...prev, { id: uid(), ...schedDraft, amount: parseFloat(schedDraft.amount)||0, dueDay: parseInt(schedDraft.dueDay)||10 }]);
     setSchedDraft({ name:"", amount:"", category:"임대료", dueDay:"10", memo:"" });
     setShowSchedForm(false);
@@ -8537,14 +8610,14 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
       const a = document.createElement("a");
       a.href = url; a.download = fname; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      alert("이 브라우저는 직접 공유가 안 돼서 표 이미지를 다운로드했습니다.\n카톡/문자에 사진으로 첨부해 보내세요.");
+      showToast("이 브라우저는 직접 공유가 안 돼서 표 이미지를 다운로드했습니다.\n카톡/문자에 사진으로 첨부해 보내세요.");
     } catch (err) {
       try { document.body.removeChild(node); } catch {}
       // 이미지 렌더 실패 시 최후 폴백: 텍스트 공유
       const text = [`📦 마이너스 재고 TOP ${minusTop.length} — NJ SAFETY`, `기준: ${stock.updatedAt || "-"}`, ""]
         .concat(minusTop.map((it, i) => `${i + 1}. ${it.name}${it.spec && it.spec !== it.name ? ` (${it.spec})` : ""}: ${it.qty.toLocaleString()}${it.unit || ""}`)).join("\n");
       if (navigator.share) { try { await navigator.share({ title: "마이너스 재고 TOP 10", text }); return; } catch (e) { if (e.name === "AbortError") return; } }
-      try { await navigator.clipboard.writeText(text); alert("클립보드에 복사했습니다. 카톡/문자에 붙여넣기 하세요."); } catch { alert(text); }
+      try { await navigator.clipboard.writeText(text); showToast("클립보드에 복사했습니다. 카톡/문자에 붙여넣기 하세요."); } catch { showToast(text); }
     }
   };
 
@@ -8885,8 +8958,8 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
 
   const addSubTab = () => {
     const nm = newTabName.trim();
-    if (!nm) { alert("거래처명을 입력하세요"); return; }
-    if (purchaseSubTabs.some(t => t.name === nm)) { alert("이미 있는 거래처입니다"); return; }
+    if (!nm) { showToast("거래처명을 입력하세요"); return; }
+    if (purchaseSubTabs.some(t => t.name === nm)) { showToast("이미 있는 거래처입니다"); return; }
     setPurchaseSubTabs(prev => [...prev, { id: uid(), name: nm }]);
     setActiveSubTab(nm);
     setNewTabName("");
@@ -9598,7 +9671,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const parseImageFile = async (file) => {
     if (!file || !file.type.startsWith("image/")) return;
     if (!apiKey.trim()) {
-      alert("이미지 인식에는 Claude API 키가 필요합니다.\n\n견적 관리 탭에서 API 키(sk-ant-...)를 먼저 입력해 주세요.\n키가 한 번 저장되면 모든 기기에서 사용됩니다.");
+      showToast("이미지 인식에는 Claude API 키가 필요합니다.\n\n견적 관리 탭에서 API 키(sk-ant-...)를 먼저 입력해 주세요.\n키가 한 번 저장되면 모든 기기에서 사용됩니다.");
       return;
     }
     setImgParsing(true);
@@ -9624,10 +9697,10 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
       }
       const data = await res.json();
       const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
-      if (!text || text === "NONE") { alert("이미지에서 거래내역 표를 찾지 못했습니다.\n표가 선명하게 보이도록 다시 캡쳐해 주세요."); return; }
+      if (!text || text === "NONE") { showToast("이미지에서 거래내역 표를 찾지 못했습니다.\n표가 선명하게 보이도록 다시 캡쳐해 주세요."); return; }
       setPasteText(text); // → 기존 파싱·미리보기·단가표 매칭 파이프라인이 이어받음
     } catch (e) {
-      alert("이미지 인식 실패: " + (e.message || e));
+      showToast("이미지 인식 실패: " + (e.message || e));
     } finally {
       setImgParsing(false);
       if (imgInputRef.current) imgInputRef.current.value = "";
@@ -9760,8 +9833,8 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const startEdit = (r) => { setEditId(r.id); setEditDraft({ ...r }); };
   const cancelEdit = () => { setEditId(null); setEditDraft(null); };
   const saveEdit = () => {
-    if (!editDraft || !editDraft.materialName) { alert("원단명은 필수입니다"); return; }
-    if (!editDraft.qty) { alert("수량은 필수입니다"); return; }
+    if (!editDraft || !editDraft.materialName) { showToast("원단명은 필수입니다"); return; }
+    if (!editDraft.qty) { showToast("수량은 필수입니다"); return; }
     setFabricIntakes(prev => prev.map(r => r.id === editId ? { ...editDraft } : r));
     cancelEdit();
   };
@@ -9824,12 +9897,12 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   ])).sort((a,b) => a.localeCompare(b, "ko"));
 
   const commitBatch = () => {
-    if (!newBatch.date) { alert("매입일은 필수입니다"); return; }
-    if (!newBatch.supplier || !newBatch.supplier.trim()) { alert("공급업체명은 필수입니다"); return; }
+    if (!newBatch.date) { showToast("매입일은 필수입니다"); return; }
+    if (!newBatch.supplier || !newBatch.supplier.trim()) { showToast("공급업체명은 필수입니다"); return; }
     const validItems = newBatch.items
       .map(it => ({ ...it, materialName: it.materialName === "__custom__" ? (it.customMaterial || "").trim() : (it.materialName || "").trim() }))
       .filter(it => it.materialName && it.qty);
-    if (validItems.length === 0) { alert("품목을 최소 1개 입력하세요 (품목명+수량 필수)"); return; }
+    if (validItems.length === 0) { showToast("품목을 최소 1개 입력하세요 (품목명+수량 필수)"); return; }
     const rows = validItems.map(it => ({
       id: uid(),
       date: newBatch.date,
@@ -10511,10 +10584,10 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
   const processExcelFile = (file) => {
     if (!file) return;
     if (!/\.(xlsx|xls)$/i.test(file.name)) {
-      alert("엑셀 파일(.xlsx 또는 .xls)만 지원합니다.");
+      showToast("엑셀 파일(.xlsx 또는 .xls)만 지원합니다.");
       return;
     }
-    if (typeof XLSX === "undefined") { alert("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
+    if (typeof XLSX === "undefined") { showToast("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -10539,7 +10612,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
           if (nameCol >= 0) break;
         }
         if (nameCol < 0) {
-          alert("거래처명 열을 찾을 수 없습니다. 첫 행에 '거래처명' 헤더가 있는지 확인해주세요.");
+          showToast("거래처명 열을 찾을 수 없습니다. 첫 행에 '거래처명' 헤더가 있는지 확인해주세요.");
           return;
         }
         const startRow = headerIdx + 1;
@@ -10557,11 +10630,11 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
           newOnes.push({ id: ++baseId, name: nm, grade: "A", note: parts.join(" · "), createdAt: baseId });
           existingNames.add(nm);
         }
-        if (newOnes.length === 0) { alert(`추가된 거래처 없음. ${skipped > 0 ? `중복 ${skipped}곳 제외` : "유효한 행이 없습니다"}`); return; }
+        if (newOnes.length === 0) { showToast(`추가된 거래처 없음. ${skipped > 0 ? `중복 ${skipped}곳 제외` : "유효한 행이 없습니다"}`); return; }
         if (!confirm(`📂 ${file.name}\n${newOnes.length}곳을 신규 등록합니다.${skipped > 0 ? ` (이미 등록된 ${skipped}곳 제외)` : ""}\n진행할까요?`)) return;
         setClients(cs => [...cs, ...newOnes]);
-        alert(`✅ ${newOnes.length}곳 등록 완료!`);
-      } catch (err) { alert("엑셀 파일 처리 실패: " + err.message); }
+        showToast(`✅ ${newOnes.length}곳 등록 완료!`);
+      } catch (err) { showToast("엑셀 파일 처리 실패: " + err.message); }
     };
     reader.readAsArrayBuffer(file);
   };
@@ -10599,7 +10672,7 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
     const name = newClient.name.trim();
     if (!name) return;
     if (registeredNames.has(name)) {
-      alert("이미 등록된 거래처입니다: " + name);
+      showToast("이미 등록된 거래처입니다: " + name);
       return;
     }
     setClients(cs => [...cs, {
@@ -10930,7 +11003,7 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
   const addSupplier = () => {
     const name = newSupplier.name.trim();
     if (!name) return;
-    if (registeredNames.has(name)) { alert("이미 등록된 공급처입니다: " + name); return; }
+    if (registeredNames.has(name)) { showToast("이미 등록된 공급처입니다: " + name); return; }
     setSuppliers(ss => [...ss, { id: uid(), ...newSupplier, name, createdAt: Date.now() }]);
     setNewSupplier({ name: "", contact: "", phone: "", email: "", address: "", items: "", paymentTerms: "", note: "" });
   };
@@ -11268,7 +11341,7 @@ function App() {
   const promptInstall = async () => {
     const evt = installPromptEvt || window.__njDeferredPrompt;
     if (!evt) {
-      alert("설치 안내\n\n[Chrome / Edge]\n주소창 우측의 ⊞ 아이콘 클릭 → '앱 설치'\n또는 메뉴 → '앱 설치'\n\n[Safari (iOS)]\n공유 → '홈 화면에 추가'\n\n[Safari (Mac)]\n파일 → '도크에 추가'");
+      showToast("설치 안내\n\n[Chrome / Edge]\n주소창 우측의 ⊞ 아이콘 클릭 → '앱 설치'\n또는 메뉴 → '앱 설치'\n\n[Safari (iOS)]\n공유 → '홈 화면에 추가'\n\n[Safari (Mac)]\n파일 → '도크에 추가'");
       return;
     }
     evt.prompt();
@@ -11375,7 +11448,7 @@ function App() {
     if (!companyFilesLoaded) return;
     idbSet("frw_company_files", companyFiles).catch(err => {
       console.error("IDB save failed:", err);
-      alert("⚠️ 파일 저장에 실패했습니다.\n중요 파일은 다운로드로 백업해 주세요.\n\n" + (err && err.message ? err.message : ""));
+      showToast("⚠️ 파일 저장에 실패했습니다.\n중요 파일은 다운로드로 백업해 주세요.\n\n" + (err && err.message ? err.message : ""));
     });
   }, [companyFiles, companyFilesLoaded]);
   // 거래처별 미수금: 거래처명을 키로, 청구/입금 내역 배열을 값으로 저장 → 모든 월에서 공유
@@ -12311,7 +12384,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     setPurchaseOrders(next);
     save("frw_purchase_orders", next);
     // 클라우드 저장은 메인 sync effect에 위임 (백오프 재시도 + 미저장 경고 보호)
-    alert(`${existing ? "✏️ 발주서가 수정됐습니다" : "💾 발주서가 저장됐습니다"}!\n${entry.dateStr} ${entry.timeStr}${existing ? `\n(수정: ${dateStr} ${timeStr})` : ""}`);
+    showToast(`${existing ? "✏️ 발주서가 수정됐습니다" : "💾 발주서가 저장됐습니다"}!\n${entry.dateStr} ${entry.timeStr}${existing ? `\n(수정: ${dateStr} ${timeStr})` : ""}`);
     // 저장 완료 → 작성 draft 초기화 (발주서 작성 초기 화면으로 복귀)
     setPoDraft(null);
     save("frw_po_draft", null);
@@ -12347,7 +12420,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   // 발주서 → 매입 현황(fabricIntakes) 전송. 품목을 1:1 매핑, transferredToInventory 플래그로 중복 방지.
   const transferPOToInventory = (po) => {
     const items = (po.items || []).filter(it => (it.name || "").trim() && Number(it.qty) > 0);
-    if (items.length === 0) { alert("전송할 품목이 없습니다 (품목명 + 수량 필요)."); return; }
+    if (items.length === 0) { showToast("전송할 품목이 없습니다 (품목명 + 수량 필요)."); return; }
     if (po.transferredToInventory) {
       if (!window.confirm("이미 매입 현황으로 전송한 발주서입니다.\n또 전송하면 매입에 중복 등록됩니다. 계속할까요?")) return;
     }
@@ -12369,7 +12442,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     }
     // 매입 현황 탭으로 바로 이동 — 어디 갔는지 못 찾던 문제 해결 (거래처 탭에 착지)
     setTab("inventory");
-    alert(`📦 매입 현황으로 ${rows.length}건 전송 완료!\n${supName ? `'${supName}' 거래처 탭` : "매입 현황"}으로 이동합니다.`);
+    showToast(`📦 매입 현황으로 ${rows.length}건 전송 완료!\n${supName ? `'${supName}' 거래처 탭` : "매입 현황"}으로 이동합니다.`);
   };
 
   // 발주서 복제 — 작성 화면에 같은 내용 새 초안(editId 없음). 발주일·본문은 비워 재확인 유도.
@@ -12404,7 +12477,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   // ─────────────────────────────────────────────────────────────
   const importPOFromExcel = (file) => {
     if (!file) return;
-    if (typeof XLSX === "undefined") { alert("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
+    if (typeof XLSX === "undefined") { showToast("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
@@ -12412,7 +12485,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         const wb = XLSX.read(data, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: false });
-        if (!rows || rows.length === 0) { alert("빈 엑셀 파일입니다."); return; }
+        if (!rows || rows.length === 0) { showToast("빈 엑셀 파일입니다."); return; }
 
         // 헤더 행 찾기 (품명/품목/품목명/수량/단가 키워드 포함된 행)
         const headerKeys = ["품명","품목","품목명","품목 명","item","제품명","원단","원단명","수량","qty","quantity","단가","단가(원)","price","unit price","단위","unit","비고","memo","note","공급처","담당자","전화"];
@@ -12423,7 +12496,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           const hits = cells.filter(c => headerKeys.some(k => c.includes(norm(k))));
           if (hits.length >= 2) { headerIdx = i; break; }
         }
-        if (headerIdx === -1) { alert("엑셀 양식을 인식하지 못했습니다.\n\n첫 행 또는 상단 10행 이내에 다음 컬럼명 중 2개 이상 필요:\n품명/품목명, 수량, 단가, 단위, 비고"); return; }
+        if (headerIdx === -1) { showToast("엑셀 양식을 인식하지 못했습니다.\n\n첫 행 또는 상단 10행 이내에 다음 컬럼명 중 2개 이상 필요:\n품명/품목명, 수량, 단가, 단위, 비고"); return; }
 
         const headers = rows[headerIdx].map(c => norm(c));
         const findCol = (...keywords) => {
@@ -12436,7 +12509,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         const colUnit = findCol("단위","unit");
         const colNote = findCol("비고","memo","note","메모");
 
-        if (colName === -1 || colQty === -1) { alert("필수 컬럼(품명, 수량)을 찾지 못했습니다."); return; }
+        if (colName === -1 || colQty === -1) { showToast("필수 컬럼(품명, 수량)을 찾지 못했습니다."); return; }
 
         // 공급처 + 날짜 정보 자동 추출 (헤더 위쪽 행에서)
         let supplierUpdate = null;
@@ -12474,7 +12547,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           });
         }
 
-        if (newItems.length === 0) { alert("유효한 품목 행을 찾지 못했습니다."); return; }
+        if (newItems.length === 0) { showToast("유효한 품목 행을 찾지 못했습니다."); return; }
 
         const replaceConfirm = (poDraft && poDraft.items || []).filter(it => (it.name||"").trim() || it.qty).length > 0
           ? window.confirm(`엑셀에서 ${newItems.length}건의 품목을 가져왔습니다.\n\n확인: 기존 품목 모두 교체\n취소: 기존 품목 끝에 추가`)
@@ -12494,10 +12567,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           dateUpdate.orderDate ? `발주일: ${dateUpdate.orderDate}` : "",
           dateUpdate.deliveryDate ? `납기: ${dateUpdate.deliveryDate}` : ""
         ].filter(Boolean).join(" / ");
-        alert(`✅ ${newItems.length}건 입력 완료${supplierUpdate ? `\n공급처: ${supplierUpdate.name}`:""}${dateMsg?`\n${dateMsg}`:""}`);
+        showToast(`✅ ${newItems.length}건 입력 완료${supplierUpdate ? `\n공급처: ${supplierUpdate.name}`:""}${dateMsg?`\n${dateMsg}`:""}`);
       } catch (err) {
         console.error("[Excel Import]", err);
-        alert("엑셀 파싱 오류: " + err.message);
+        showToast("엑셀 파싱 오류: " + err.message);
       }
     };
     reader.readAsArrayBuffer(file);
@@ -12507,9 +12580,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   // 발주서 — PDF 다운로드
   // ─────────────────────────────────────────────────────────────
   const downloadPOasPDF = async () => {
-    if (typeof html2canvas === "undefined" || !window.jspdf) { alert("PDF 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
+    if (typeof html2canvas === "undefined" || !window.jspdf) { showToast("PDF 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
     const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc");
-    if (!target) { alert("발주서 미리보기를 먼저 생성해주세요."); return; }
+    if (!target) { showToast("발주서 미리보기를 먼저 생성해주세요."); return; }
     try {
       // 인쇄용 설정
       const prevColor = target.style.color;
@@ -12544,7 +12617,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       pdf.save(fname);
     } catch (err) {
       console.error("[PDF Export]", err);
-      alert("PDF 생성 오류: " + err.message);
+      showToast("PDF 생성 오류: " + err.message);
     }
   };
 
@@ -12565,7 +12638,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       }
       setPoDraft((d) => ({ ...d, photos: [...(d.photos || []), ...photos] }));
     } catch (err) {
-      alert("사진 업로드 실패: " + (err.message || String(err)));
+      showToast("사진 업로드 실패: " + (err.message || String(err)));
     }
   };
   const handlePOPhotoUpload = (e) => {
@@ -12643,7 +12716,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     setSavedQuotes(next);
     save("frw_quote_history", stripQuoteImages(next));
     // 클라우드 저장은 메인 sync effect에 위임 (백오프 재시도 + 미저장 경고 보호)
-    alert(`💾 견적서가 저장됐습니다!\n${dateStr} ${timeStr}`);
+    showToast(`💾 견적서가 저장됐습니다!\n${dateStr} ${timeStr}`);
   };
 
   const deleteQuote = (id) => {
@@ -14918,7 +14991,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     e.preventDefault(); e.currentTarget.style.outline = ""; e.currentTarget.style.background = "";
                     const f = e.dataTransfer.files && e.dataTransfer.files[0];
                     if (!f) return;
-                    if (!/\.(xlsx|xls|xlsm|csv)$/i.test(f.name)) { alert("엑셀(.xlsx/.xls/.csv) 파일만 가능합니다."); return; }
+                    if (!/\.(xlsx|xls|xlsm|csv)$/i.test(f.name)) { showToast("엑셀(.xlsx/.xls/.csv) 파일만 가능합니다."); return; }
                     importPOFromExcel(f);
                   }}
                 >
@@ -15471,7 +15544,7 @@ function KeywordManagerPanel({ darkMode, onClose }) {
       }
       setKeywords(prev => prev.map(k => k.key === key ? { ...k, ...patch } : k));
     } catch (e) {
-      alert("수정 실패: " + (e?.message || String(e)));
+      showToast("수정 실패: " + (e?.message || String(e)));
     } finally { setUpdatingKey(null); }
   };
 
@@ -15486,15 +15559,15 @@ function KeywordManagerPanel({ darkMode, onClose }) {
       }
       setKeywords(prev => prev.filter(k => k.key !== key));
     } catch (e) {
-      alert("삭제 실패: " + (e?.message || String(e)));
+      showToast("삭제 실패: " + (e?.message || String(e)));
     } finally { setUpdatingKey(null); }
   };
 
   const addKeyword = async () => {
     const trimmed = newKw.keyword.trim();
-    if (!trimmed) { alert("키워드를 입력하세요"); return; }
+    if (!trimmed) { showToast("키워드를 입력하세요"); return; }
     if (keywords.some(k => k.keyword === trimmed)) {
-      alert(`이미 등록된 키워드입니다: "${trimmed}"`); return;
+      showToast(`이미 등록된 키워드입니다: "${trimmed}"`); return;
     }
     setAdding(true);
     try {
@@ -15508,7 +15581,7 @@ function KeywordManagerPanel({ darkMode, onClose }) {
       setKeywords(prev => [...prev, { key: data.key, isSeed: false, ...data.keyword }]);
       setNewKw({ keyword: "", category: newKw.category, weight: 5 });
     } catch (e) {
-      alert("추가 실패: " + (e?.message || String(e)));
+      showToast("추가 실패: " + (e?.message || String(e)));
     } finally { setAdding(false); }
   };
 
@@ -15711,7 +15784,7 @@ function TenderAutoSection({ darkMode }) {
       // 낙관적 업데이트: 응답 성공 시 로컬 state 갱신
       setNotices(prev => prev.map(n => n.key === key ? { ...n, status: newStatus, reviewedAt: (newStatus === 'applied' || newStatus === 'skipped') ? new Date().toISOString() : n.reviewedAt } : n));
     } catch (e) {
-      alert("상태 변경 실패: " + (e?.message || String(e)));
+      showToast("상태 변경 실패: " + (e?.message || String(e)));
     } finally {
       setUpdatingKey(null);
     }
@@ -15764,7 +15837,7 @@ function TenderAutoSection({ darkMode }) {
       setExpandedKey(null);
       setDraft({});
     } catch (e) {
-      alert("응찰 정보 저장 실패: " + (e?.message || String(e)));
+      showToast("응찰 정보 저장 실패: " + (e?.message || String(e)));
     } finally {
       setSavingDraft(false);
     }
@@ -16058,7 +16131,7 @@ function BidsTab({ bids, setBids, darkMode }) {
 
   const reset = () => { setDraft({ title:"", agency:"", openDate:"", closeDate:"", awardDate:"", amount:"", status:"예정", url:"", note:"" }); setEditingId(null); setShowForm(false); };
   const saveBid = () => {
-    if (!draft.title.trim()) { alert("입찰 공고명은 필수입니다"); return; }
+    if (!draft.title.trim()) { showToast("입찰 공고명은 필수입니다"); return; }
     if (editingId) {
       setBids(prev => prev.map(b => b.id === editingId ? { ...b, ...draft } : b));
     } else {
@@ -16623,7 +16696,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   // 기존 todo (notionPageId 없는 것) 일괄 동기화
   const bulkSyncToNotion = async () => {
     const pending = todos.filter(t => !t.notionPageId);
-    if (pending.length === 0) { alert("동기화 대기 중인 일정이 없습니다 ✓"); return; }
+    if (pending.length === 0) { showToast("동기화 대기 중인 일정이 없습니다 ✓"); return; }
     if (!window.confirm(`${pending.length}개 일정을 노션 To Do List에 등록할까요?`)) return;
     setBulkSyncing(true);
     let okCount = 0, failCount = 0;
@@ -16643,10 +16716,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
     setTodos(prev => prev.map(x => updates[x.id] ? { ...x, notionPageId: updates[x.id] } : x));
     setBulkSyncing(false);
     if (envMissing) {
-      alert(`❌ 노션 연동이 설정되지 않았습니다.\n\nCloudflare Worker에 아래 환경변수를 설정해주세요:\n\n1. Cloudflare 대시보드 → Workers & Pages → fr-workwear-app\n2. Settings → Variables and Secrets\n3. 추가:\n   • NOTION_TOKEN (Secret) — secret_xxx 형태의 노션 통합 토큰\n   • NOTION_TODO_DSID (Plain) — To Do List 데이터베이스 ID\n     (예: 2c70e386-6388-818e-9ad9-000bfd99e1c4)\n\n설정 후 다시 시도해주세요.`);
+      showToast(`❌ 노션 연동이 설정되지 않았습니다.\n\nCloudflare Worker에 아래 환경변수를 설정해주세요:\n\n1. Cloudflare 대시보드 → Workers & Pages → fr-workwear-app\n2. Settings → Variables and Secrets\n3. 추가:\n   • NOTION_TOKEN (Secret) — secret_xxx 형태의 노션 통합 토큰\n   • NOTION_TODO_DSID (Plain) — To Do List 데이터베이스 ID\n     (예: 2c70e386-6388-818e-9ad9-000bfd99e1c4)\n\n설정 후 다시 시도해주세요.`);
     } else {
       const detailMsg = errors.length > 0 ? `\n\n실패 사유:\n${errors.slice(0, 5).join("\n")}${errors.length > 5 ? `\n…외 ${errors.length - 5}건` : ""}` : "";
-      alert(`동기화 완료\n성공: ${okCount}건\n실패: ${failCount}건${detailMsg}`);
+      showToast(`동기화 완료\n성공: ${okCount}건\n실패: ${failCount}건${detailMsg}`);
     }
   };
 
@@ -17217,7 +17290,7 @@ function NotesPanel({ notes, setNotes, clients, darkMode }) {
     if (!editing) return;
     const title = (editing.title || "").trim();
     const body = (editing.body || "").trim();
-    if (!title && !body) { alert("제목 또는 본문을 입력해주세요."); return; }
+    if (!title && !body) { showToast("제목 또는 본문을 입력해주세요."); return; }
     const tags = (editing.tagsText !== undefined ? editing.tagsText : (editing.tags || []).join(","))
       .split(",").map(t => t.trim()).filter(Boolean);
     const now = Date.now();
@@ -17468,7 +17541,7 @@ function RecurringPanel({ recurringSchedules, setRecurringSchedules, darkMode })
   const saveRecurring = () => {
     if (!editing) return;
     const title = (editing.title || "").trim();
-    if (!title) { alert("제목을 입력해주세요."); return; }
+    if (!title) { showToast("제목을 입력해주세요."); return; }
     const next = {
       id: editing.id || uid(),
       title,
@@ -18092,7 +18165,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
         setDriveSubFolderIds(next);
         localStorage.setItem("frw_drive_subfolders", JSON.stringify(next));
         setActiveSub(newId);
-      } catch (e) { alert("카테고리 생성 실패: " + e.message); }
+      } catch (e) { showToast("카테고리 생성 실패: " + e.message); }
       return;
     }
     const id = "sub_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
@@ -18123,7 +18196,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
     setRenamingId(null);
   };
   const deleteSubtab = async (s) => {
-    if (subtabs.length <= 1) { alert("최소 1개의 카테고리는 유지되어야 합니다."); return; }
+    if (subtabs.length <= 1) { showToast("최소 1개의 카테고리는 유지되어야 합니다."); return; }
     const cnt = (items[s.id] || []).length;
     const driveNote = driveConnected ? "\n⚠️ Google Drive 폴더와 그 안의 파일도 함께 삭제됩니다." : "";
     if (!window.confirm(`"${s.name}" 카테고리를 삭제하시겠습니까?${cnt > 0 ? `\n포함된 파일 ${cnt}개도 함께 삭제됩니다.` : ""}${driveNote}`)) return;
@@ -18167,7 +18240,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
           });
         }
         await loadDriveSubtab(activeSub, sub.name);
-      } catch (e) { alert("Drive 업로드 실패: " + e.message); setDriveError(e.message); }
+      } catch (e) { showToast("Drive 업로드 실패: " + e.message); setDriveError(e.message); }
       finally { setDriveBusy(false); }
       return;
     }
@@ -18185,7 +18258,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
           dataUrl, uploadedAt: Date.now(),
         });
       } catch (e) {
-        alert(`"${f.name}" 파일을 읽지 못했습니다.`);
+        showToast(`"${f.name}" 파일을 읽지 못했습니다.`);
       }
     }
     if (newFiles.length === 0) return;
@@ -18202,7 +18275,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
         await driveApi(`drive/v3/files/${id}`, { method: "DELETE" });
         const sub = subtabs.find(s => s.id === activeSub);
         if (sub) await loadDriveSubtab(activeSub, sub.name);
-      } catch (e) { alert("Drive 삭제 실패: " + e.message); }
+      } catch (e) { showToast("Drive 삭제 실패: " + e.message); }
       finally { setDriveBusy(false); }
       return;
     }
@@ -18220,7 +18293,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
         const a = document.createElement("a"); a.href = url; a.download = f.name;
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 2000);
-      } catch (e) { alert("Drive 다운로드 실패: " + e.message); }
+      } catch (e) { showToast("Drive 다운로드 실패: " + e.message); }
       return;
     }
     const a = document.createElement("a");
@@ -18239,7 +18312,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
         });
         const sub = subtabs.find(s => s.id === activeSub);
         if (sub) await loadDriveSubtab(activeSub, sub.name);
-      } catch (e) { alert("이름 변경 실패: " + e.message); }
+      } catch (e) { showToast("이름 변경 실패: " + e.message); }
       finally { setDriveBusy(false); }
       return;
     }
@@ -18270,7 +18343,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
           try { await navigator.share({ title: f.name, text: f.name, url: link }); return; }
           catch (e) { if (e.name === "AbortError") return; }
         }
-        try { await navigator.clipboard.writeText(link); alert("📋 공유 링크가 클립보드에 복사되었습니다.\n\n" + link); }
+        try { await navigator.clipboard.writeText(link); showToast("📋 공유 링크가 클립보드에 복사되었습니다.\n\n" + link); }
         catch { window.prompt("공유 링크를 복사하세요:", link); }
         return;
       }
@@ -18291,7 +18364,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
         window.location.href = `mailto:?subject=${subject}&body=${body}`;
       }
     } catch (e) {
-      if (e && e.name !== "AbortError") alert("공유에 실패했습니다: " + (e.message || e));
+      if (e && e.name !== "AbortError") showToast("공유에 실패했습니다: " + (e.message || e));
     }
   };
 
@@ -18775,7 +18848,7 @@ function MailTab({ darkMode, clients = [] }) {
   };
 
   const sendMail = async ({ to, subject, body, replyToHeaders }) => {
-    if (!to || !subject) { alert("받는 사람과 제목을 입력해주세요."); return; }
+    if (!to || !subject) { showToast("받는 사람과 제목을 입력해주세요."); return; }
     const headers = [
       `To: ${to}`,
       `Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`,
@@ -18797,11 +18870,11 @@ function MailTab({ darkMode, clients = [] }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(sendBody),
       });
-      alert("✅ 메일 전송 완료!");
+      showToast("✅ 메일 전송 완료!");
       setComposing(null);
       fetchInbox(activeQ);
     } catch (e) {
-      alert("전송 실패: " + e.message);
+      showToast("전송 실패: " + e.message);
     }
   };
 
