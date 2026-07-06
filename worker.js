@@ -53,6 +53,11 @@ export default {
       return handleFirebaseSync(request, env, url);
     }
 
+    // 카카오톡 일정 알림 (나에게 보내기)
+    if (url.pathname.startsWith("/api/kakao/")) {
+      return handleKakaoApi(request, env, url);
+    }
+
     // 입찰 모니터링 API (조달청 폴링 + 키워드 시드 등)
     if (url.pathname === "/api/tenders" || url.pathname.startsWith("/api/tenders/")) {
       return handleTendersApi(request, env, url);
@@ -113,6 +118,16 @@ export default {
         runChangeHistoryPoll(env, appUrl)
           .then((result) => console.log(`[scheduled] 변경이력 폴링 완료:`, result))
           .catch((err) => console.error(`[scheduled] 변경이력 폴링 실패:`, err?.message ?? err))
+      );
+      return;
+    }
+
+    // KST 07:30 (UTC 22:30) — 카카오톡 아침 일정 브리핑
+    if (event.cron === "30 22 * * *") {
+      ctx.waitUntil(
+        sendKakaoDailyBriefing(env)
+          .then((r) => console.log(`[scheduled] 카카오 브리핑:`, r))
+          .catch((err) => console.error(`[scheduled] 카카오 브리핑 실패:`, err?.message ?? err))
       );
       return;
     }
@@ -292,4 +307,124 @@ function buildProperties(body) {
     props["상태 구분"] = { status: { name: body.done ? "완료" : "시작 전" } };
   }
   return props;
+}
+
+
+// ─── 카카오톡 일정 알림 ───
+// "나에게 보내기"(talk_message) 방식: 사장님 개인 카카오 계정으로 로그인 1회 →
+// refresh token을 Firebase에 보관 → 매일 아침 cron이 오늘/내일 일정을 내 카톡으로 발송.
+// 필요 시크릿: KAKAO_REST_KEY (카카오 개발자 앱의 REST API 키)
+const KAKAO_TOKEN_PATH = "/frw_kakao.json";
+
+async function fbGet(env, path) {
+  const r = await fetch(`https://${FB_HOST}${path}?auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`);
+  return r.ok ? r.json() : null;
+}
+async function fbPut(env, path, data) {
+  await fetch(`https://${FB_HOST}${path}?auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+}
+
+async function kakaoRefreshAccess(env) {
+  const saved = await fbGet(env, KAKAO_TOKEN_PATH);
+  if (!saved || !saved.refresh_token) throw new Error("카카오 미연결 — 앱 일정 탭에서 연결하세요");
+  const body = new URLSearchParams({
+    grant_type: "refresh_token", client_id: env.KAKAO_REST_KEY, refresh_token: saved.refresh_token,
+  });
+  const r = await fetch("https://kauth.kakao.com/oauth/token", {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+  });
+  const j = await r.json();
+  if (!j.access_token) throw new Error("토큰 갱신 실패: " + JSON.stringify(j).slice(0, 150));
+  if (j.refresh_token) await fbPut(env, KAKAO_TOKEN_PATH, { ...saved, refresh_token: j.refresh_token, updated: Date.now() });
+  return j.access_token;
+}
+
+async function kakaoSendMemo(env, text) {
+  const access = await kakaoRefreshAccess(env);
+  const body = new URLSearchParams({
+    template_object: JSON.stringify({
+      object_type: "text",
+      text: text.slice(0, 950),
+      link: { web_url: "https://fr-workwear-app.njsafety91.workers.dev", mobile_web_url: "https://fr-workwear-app.njsafety91.workers.dev" },
+      button_title: "앱 열기",
+    }),
+  });
+  const r = await fetch("https://kapi.kakao.com/v2/api/talk/memo/default/send", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${access}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const j = await r.json();
+  if (j.result_code !== 0) throw new Error("발송 실패: " + JSON.stringify(j).slice(0, 150));
+  return true;
+}
+
+// 오늘/내일 일정 + 입찰 마감 브리핑 텍스트 (KST 기준)
+async function buildKakaoBriefing(env) {
+  const data = await fbGet(env, "/frw.json") || {};
+  const kstNow = new Date(Date.now() + 9 * 3600000);
+  const day = (off) => new Date(kstNow.getTime() + off * 86400000).toISOString().slice(0, 10);
+  const today = day(0), tomorrow = day(1);
+  const inRange = (t, d) => {
+    const s2 = (t.date || "").slice(0, 10), e2 = (t.endDate || t.date || "").slice(0, 10);
+    return s2 && s2 <= d && d <= (e2 || s2);
+  };
+  const todos = (data.todos || []).filter(t => !t.done);
+  const lines = [];
+  const tToday = todos.filter(t => inRange(t, today));
+  const tTomorrow = todos.filter(t => inRange(t, tomorrow) && !inRange(t, today));
+  if (tToday.length) lines.push("[오늘 일정]", ...tToday.map(t => "· " + t.text));
+  if (tTomorrow.length) lines.push("", "[내일 일정]", ...tTomorrow.map(t => "· " + t.text));
+  const bids = (data.bids || []).filter(b => b.status !== "종료" && (b.closeDate || "").slice(0, 10) >= today && (b.closeDate || "").slice(0, 10) <= tomorrow);
+  if (bids.length) lines.push("", "[입찰 마감 임박]", ...bids.map(b => `· ${b.title} (마감 ${(b.closeDate || "").slice(5, 10)})`));
+  if (lines.length === 0) return null; // 알릴 것 없음 → 발송 생략
+  const [y, m2, d2] = today.split("-");
+  return `📅 NJ SAFETY ${+m2}/${+d2} 아침 브리핑\n\n` + lines.join("\n");
+}
+
+async function sendKakaoDailyBriefing(env) {
+  if (!env.KAKAO_REST_KEY) return { skip: "KAKAO_REST_KEY 미설정" };
+  const text = await buildKakaoBriefing(env);
+  if (!text) return { skip: "오늘·내일 일정 없음" };
+  await kakaoSendMemo(env, text);
+  return { sent: true };
+}
+
+async function handleKakaoApi(request, env, url) {
+  if (!env.KAKAO_REST_KEY) {
+    return new Response(JSON.stringify({ error: "KAKAO_REST_KEY 미설정 — wrangler secret put KAKAO_REST_KEY" }), { status: 500, headers: corsHeaders });
+  }
+  const redirectUri = `${url.origin}/api/kakao/callback`;
+  try {
+    if (url.pathname === "/api/kakao/login") {
+      const auth = `https://kauth.kakao.com/oauth/authorize?client_id=${env.KAKAO_REST_KEY}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=talk_message`;
+      return Response.redirect(auth, 302);
+    }
+    if (url.pathname === "/api/kakao/callback") {
+      const code = url.searchParams.get("code");
+      if (!code) return Response.redirect(url.origin + "/?kakao=fail", 302);
+      const body = new URLSearchParams({ grant_type: "authorization_code", client_id: env.KAKAO_REST_KEY, redirect_uri: redirectUri, code });
+      const r = await fetch("https://kauth.kakao.com/oauth/token", {
+        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body,
+      });
+      const j = await r.json();
+      if (!j.refresh_token) return Response.redirect(url.origin + "/?kakao=fail", 302);
+      await fbPut(env, KAKAO_TOKEN_PATH, { refresh_token: j.refresh_token, connected: Date.now() });
+      return Response.redirect(url.origin + "/?kakao=ok", 302);
+    }
+    if (url.pathname === "/api/kakao/status") {
+      const saved = await fbGet(env, KAKAO_TOKEN_PATH);
+      return new Response(JSON.stringify({ connected: !!(saved && saved.refresh_token) }), { headers: corsHeaders });
+    }
+    if (url.pathname === "/api/kakao/test" && request.method === "POST") {
+      const text = (await buildKakaoBriefing(env)) || "📅 NJ SAFETY 카카오 알림 연결 테스트입니다. 오늘·내일 등록된 일정이 없어 테스트 메시지를 보냈어요.";
+      await kakaoSendMemo(env, text);
+      return new Response(JSON.stringify({ ok: true }), { headers: corsHeaders });
+    }
+    return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: corsHeaders });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message || String(e) }), { status: 500, headers: corsHeaders });
+  }
 }
