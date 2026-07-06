@@ -1704,11 +1704,91 @@ function computeProduct(p, materials, laborItems) {
   };
 }
 
+// ─── 거래처 월말 정산서: 해당 월 청구·입금·미수를 표 이미지로 생성해 공유 ───
+async function shareClientStatement(client, ym, ledgers, clientAR) {
+  const row = ((ledgers[ym] || {}).clients || []).find(c => (c.name || "").trim() === client);
+  if (!row) { showToast("해당 월에 이 거래처 청구 내역이 없습니다"); return; }
+  const supply = parseFloat(row.supply) || 0, tax = parseFloat(row.tax) || 0;
+  const total = parseFloat(row.total) || (supply + tax);
+  const entries = (((clientAR || {})[client] || {}).entries || []).filter(e => (e.date || "").slice(0, 7) === ym);
+  const paid = entries.reduce((a, e) => a + (parseFloat(e.amount) || 0), 0);
+  const isPaid = row.status === "입금완료";
+  const balance = isPaid ? 0 : Math.max(0, total - paid);
+  const esc = (x) => String(x ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const W = (n) => Math.round(n).toLocaleString() + "원";
+  const [yy, mm] = ym.split("-");
+  const line = (label, val, opt) => `<tr><td style="padding:10px 12px;border:1px solid #E5E8EB;color:#4E5968;background:#F9FAFB;width:130px;">${label}</td><td style="padding:10px 12px;border:1px solid #E5E8EB;text-align:right;font-weight:${opt&&opt.bold?800:600};color:${(opt&&opt.color)||"#191F28"};background:#fff;font-variant-numeric:tabular-nums;">${val}</td></tr>`;
+  const node = document.createElement("div");
+  node.style.cssText = "position:fixed;left:-10000px;top:0;width:520px;background:#ffffff;color:#191F28;font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;padding:28px;";
+  node.innerHTML =
+    `<div style="font-size:12px;font-weight:700;letter-spacing:.1em;color:#FF4103;">NJ SAFETY</div>` +
+    `<div style="font-size:20px;font-weight:800;margin:4px 0 2px;color:#191F28;">${esc(client)} — ${+yy}년 ${+mm}월 정산서</div>` +
+    `<div style="font-size:12px;color:#8B95A1;margin-bottom:16px;">발행일 ${new Date().toISOString().slice(0, 10)}</div>` +
+    `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+    line("공급가액", W(supply)) + line("부가세", W(tax)) + line("청구 합계", W(total), { bold: true }) +
+    line("입금액", isPaid ? W(total) : W(paid), { color: "#00B493" }) +
+    line("미수 잔액", W(balance), { bold: true, color: balance > 0 ? "#F04452" : "#00B493" }) +
+    `</table>` +
+    (entries.length ? `<div style="font-size:11px;color:#8B95A1;margin-top:12px;line-height:1.7;">입금 내역: ${entries.map(e => `${esc((e.date||"").slice(5))} ${W(parseFloat(e.amount)||0)}`).join(" · ")}</div>` : "") +
+    `<div style="font-size:11px;color:#8B95A1;margin-top:14px;">상태: <b style="color:${isPaid ? "#00B493" : "#FF9500"};">${isPaid ? "입금완료" : "미입금"}</b> · 문의 02-1577-0000</div>`;
+  try {
+    document.body.appendChild(node);
+    const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+    document.body.removeChild(node);
+    const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+    if (!blob) throw new Error("이미지 생성 실패");
+    const fname = `정산서_${client}_${ym}.png`;
+    const file = new File([blob], fname, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: fname }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = fname; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast("정산서 이미지를 다운로드했습니다. 카톡/메일에 첨부해 보내세요.");
+  } catch (err) {
+    try { document.body.removeChild(node); } catch {}
+    showToast("정산서 생성 실패: " + (err.message || err));
+  }
+}
+
 // ─── 원가 레이더: 단가표 기준가 vs 실제 매입가 괴리 감지 + 제품 마진 침식 계산 ───
 // 매입 현황(fabricIntakes)의 최근 windowDays일 실매입가(수량 가중 평균, 최근 8건)를
 // 단가표(materials/laborItems) 기준가와 비교. thresholdPct 이상 괴리난 항목만 보고.
 // 제품 영향: 실매입가를 패치해 computeProduct 재계산 — 납품가(등급 단가)는 고정으로 두고
 // "지금 단가로 팔면 실질 마진이 몇 %인가"를 계산 (조용한 마진 침식의 조기 경보).
+// ─── 시즌 발주 시그널: 작년 이맘때(이번달·다음달) 매입량 대비 현재 재고 부족 감지 ───
+function computeSeasonSignals(fabricIntakes, stockObj) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth() + 1;
+  const mm2 = (n) => String(n).padStart(2, "0");
+  const months = m === 12 ? [`${y - 1}-12`] : [`${y - 1}-${mm2(m)}`, `${y - 1}-${mm2(m + 1)}`];
+  const agg = {};
+  for (const r of (fabricIntakes || [])) {
+    if (!months.includes((r.date || "").slice(0, 7))) continue;
+    const nm = (r.materialName || "").trim(); const q = parseFloat(r.qty || 0);
+    if (!nm || !(q > 0)) continue;
+    if (!agg[nm]) agg[nm] = { qty: 0, unit: r.unit || "" };
+    agg[nm].qty += q;
+  }
+  const items = (stockObj && stockObj.items) || [];
+  const stockOf = (nm) => {
+    const key = nm.toLowerCase();
+    return items.filter(it => {
+      const inm = (it.name || "").toLowerCase();
+      return inm.includes(key) || key.includes(stockBaseName(it.name).toLowerCase());
+    }).reduce((s2, it) => s2 + (parseFloat(it.qty) || 0), 0);
+  };
+  const signals = Object.entries(agg)
+    .map(([nm, a]) => ({ name: nm, lastQty: a.qty, unit: a.unit, curStock: items.length ? stockOf(nm) : null }))
+    .filter(x => x.lastQty >= 10 && (x.curStock === null || x.curStock < x.lastQty * 0.5))
+    .sort((a, b) => b.lastQty - a.lastQty)
+    .slice(0, 5);
+  return { months, signals };
+}
+
 function computeCostDrift(materials, laborItems, fabricIntakes, products, { thresholdPct = 3, windowDays = 90 } = {}) {
   const cutoff = new Date(Date.now() - windowDays * 86400000).toISOString().slice(0, 10);
   const recentByName = {};
@@ -3546,7 +3626,7 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
   );
 }
 
-function DashboardTab({ products, setProducts, materials, setMaterials, laborItems, setLaborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {}, clientAR = {}, accounts = [], fabricIntakes = [], scheduledExpenses = [] }) {
+function DashboardTab({ products, setProducts, materials, setMaterials, laborItems, setLaborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {}, clientAR = {}, accounts = [], fabricIntakes = [], scheduledExpenses = [], stock = null }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", clientId: "", note: "", paymentDue: "", paidDate: "" });
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
   const [showOrderForm, setShowOrderForm] = useState(false);
@@ -4024,6 +4104,33 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
             {kpi("kpi_this_month", "이번 달 매출", thisMonthSales>0?Math.round(thisMonthSales).toLocaleString()+"원":"—", `${now.getFullYear()}년 ${now.getMonth()+1}월`, thisMonthSales>0?"#007AFF":null)}
             {kpi("kpi_cash", "현금 잔고", Math.round(cashTotal).toLocaleString()+"원", cashCount>0?cashCount+"개 계좌 합계":"등록된 계좌 없음", cashTotal>0?"#10B981":null)}
             {kpi("kpi_profit", "추정 순이익", (totalYearRevenue>0 && avgMarginSell>0)?Math.round(estimatedProfit).toLocaleString()+"원":"—", (totalYearRevenue>0 && avgMarginSell>0)?`${thisYear}년 매출 ${Math.round(totalYearRevenue/10000).toLocaleString()}만원 × 평균 마진 ${avgMarginSell.toFixed(1)}%`:"연매출 또는 제품 마진 입력 필요", (totalYearRevenue>0 && avgMarginSell>0)?(estimatedProfit>0?"#10B981":"#F04452"):null)}
+          </div>
+        );
+      })()}
+      {/* ─── 시즌 발주 시그널: 작년 이맘때 매입량 vs 현재 재고 ─── */}
+      {(() => {
+        const { months, signals } = computeSeasonSignals(fabricIntakes, stock);
+        if (signals.length === 0) return null;
+        return (
+          <div className="card" style={{ borderLeft: "3px solid #18a5a5", padding: "16px 20px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>
+                <Icon name="calendar" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>시즌 발주 시그널
+              </div>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>작년 {months.map(x => +x.slice(5)).join("·")}월 매입량 기준 — 재고가 그 절반 미만인 품목</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {signals.map(sg => (
+                <div key={sg.name} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid rgba(24,165,165,0.3)", background: "rgba(24,165,165,0.06)", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontWeight: 700, color: "var(--text1)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sg.name}</span>
+                  <span style={{ color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>작년 {Math.round(sg.lastQty).toLocaleString()}{sg.unit}</span>
+                  <span style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: sg.curStock !== null && sg.curStock <= 0 ? "#F04452" : "#18a5a5" }}>
+                    현재 {sg.curStock === null ? "재고 미등록" : Math.round(sg.curStock).toLocaleString() + (sg.unit || "")}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>작년 같은 시기에 많이 샀던 자재입니다 — 발주 타이밍을 검토하세요.</div>
           </div>
         );
       })()}
@@ -6478,6 +6585,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                         </td>
                         <td style={{fontSize:12,color:"var(--text2)"}}>{c.memo}</td>
                         <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
+                          <button onClick={()=>shareClientStatement((c.name||"").trim(), selectedYM, ledgers, clientAR)} title="월 정산서 공유 (카톡/문자)" style={{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:15}}><Icon name="share" size={14} style={{verticalAlign:"middle"}}/></button>
                           <button onClick={()=>setExpandedClientId(isExpanded?null:c.id)} title="미수금 상세" style={{background:"none",border:"none",cursor:"pointer",color:"var(--text2)",fontSize:14,marginRight:6}}>{isExpanded?"▼":"▶"}</button>
                           <button onClick={()=>startEdit(c)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:4}}><Icon name="edit" size={14}/></button>
                           <button onClick={()=>deleteOne(c.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
@@ -14792,6 +14900,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             accounts={accounts}
             fabricIntakes={fabricIntakes}
             scheduledExpenses={scheduledExpenses}
+            stock={stock}
           />
         )}
 
