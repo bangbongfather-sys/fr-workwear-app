@@ -11664,6 +11664,14 @@ function App() {
   useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
   const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
   const [viewingPO, setViewingPO] = useState(null);
+  const [expandedPOIds, setExpandedPOIds] = useState(() => new Set()); // 발주 이력에서 펼친 행
+  const togglePOExpand = (id) => setExpandedPOIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // 발주 품목의 입고량 저장 (품목 index로 지정)
+  const setPOReceived = (poId, itemIdx, val) => setPurchaseOrders(prev => prev.map(p => {
+    if (p.id !== poId) return p;
+    const items = (p.items || []).map((it, i) => i === itemIdx ? { ...it, receivedQty: val } : it);
+    return { ...p, items };
+  }));
   const [poHistorySearch, setPoHistorySearch] = useState("");
   const [poHistorySupFilter, setPoHistorySupFilter] = useState("");
   const [poHistorySort, setPoHistorySort] = useState("date_desc"); // date_desc | date_asc | amount_desc | supplier
