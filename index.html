@@ -15655,6 +15655,59 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                                     </div>
                                   </div>
+                                  {isExpanded && (() => {
+                                    const its = po.items || [];
+                                    const totRcv = its.reduce((s, it) => s + (parseFloat(it.receivedQty) || 0), 0);
+                                    const totOrd = its.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0);
+                                    return (
+                                    <div style={{ padding: "12px 16px 16px 52px", background: "var(--surface2)", borderBottom: idx < sorted.length - 1 ? `1px solid ${T.divider}` : "none" }}>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                                        <span style={{ fontSize: 12, fontWeight: 800, color: T.text }}>발주 품목 {its.length}건</span>
+                                        <span style={{ fontSize: 11, color: T.text3 }}>발주 {totOrd.toLocaleString()} / 입고 <b style={{ color: totRcv >= totOrd && totOrd > 0 ? "#00B493" : "#FF9500" }}>{totRcv.toLocaleString()}</b></span>
+                                        <button onClick={(e) => { e.stopPropagation(); setViewingPO(po); }} style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "none", border: "1px solid var(--border)", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}>발주서 전체 보기</button>
+                                      </div>
+                                      <div style={{ overflowX: "auto" }}>
+                                        <table style={{ width: "100%", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                                          <thead><tr style={{ color: T.text3, fontSize: 11 }}>
+                                            <th style={{ textAlign: "left", padding: "6px 8px" }}>품목</th>
+                                            <th style={{ textAlign: "right", padding: "6px 8px", width: 90 }}>발주수량</th>
+                                            <th style={{ textAlign: "right", padding: "6px 8px", width: 110 }}>입고수량</th>
+                                            <th style={{ textAlign: "right", padding: "6px 8px", width: 90 }}>미입고</th>
+                                            <th style={{ textAlign: "center", padding: "6px 8px", width: 74 }}>상태</th>
+                                          </tr></thead>
+                                          <tbody>
+                                            {its.map((it, ii) => {
+                                              const ord = parseFloat(it.qty) || 0;
+                                              const rcv = parseFloat(it.receivedQty);
+                                              const hasRcv = !isNaN(rcv);
+                                              const remain = ord - (hasRcv ? rcv : 0);
+                                              const done = hasRcv && rcv >= ord && ord > 0;
+                                              return (
+                                                <tr key={it.id || ii} style={{ borderTop: `1px solid ${T.divider}` }}>
+                                                  <td style={{ padding: "7px 8px", fontWeight: 600, color: T.text }}>{it.name || "—"}{it.note ? <span style={{ color: T.text3, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{it.note}</span> : ""}</td>
+                                                  <td style={{ padding: "7px 8px", textAlign: "right", color: T.text2 }}>{ord.toLocaleString()}{it.unit ? " " + it.unit : ""}</td>
+                                                  <td style={{ padding: "5px 8px", textAlign: "right" }}>
+                                                    <input type="number" value={it.receivedQty ?? ""} placeholder="0"
+                                                      onClick={(e) => e.stopPropagation()}
+                                                      onChange={(e) => setPOReceived(po.id, ii, e.target.value)}
+                                                      style={{ width: 84, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", border: `1px solid ${done ? "rgba(0,180,147,0.5)" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                                                  </td>
+                                                  <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: !hasRcv ? T.text3 : remain > 0 ? "#FF9500" : "#00B493" }}>{hasRcv ? remain.toLocaleString() : "—"}</td>
+                                                  <td style={{ padding: "7px 8px", textAlign: "center" }}>
+                                                    {!hasRcv ? <span style={{ fontSize: 10, color: T.text3 }}>대기</span>
+                                                      : done ? <span style={{ fontSize: 10, fontWeight: 800, color: "#00B493", background: "rgba(0,180,147,0.12)", padding: "2px 7px", borderRadius: 100 }}>완료</span>
+                                                      : <span style={{ fontSize: 10, fontWeight: 800, color: "#FF9500", background: "rgba(255,149,0,0.12)", padding: "2px 7px", borderRadius: 100 }}>부분</span>}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                    );
+                                  })()}
+                                  </React.Fragment>
                                 );
                               })}
                               {/* 필터 결과 합계 */}
