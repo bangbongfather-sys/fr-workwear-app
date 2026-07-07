@@ -9064,9 +9064,12 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                       <td style={{ padding: "7px 8px", textAlign: "right", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{deltaCell(deltaOf(it))}</td>
                       <td style={{ padding: "7px 8px", textAlign: "right", color: val > 0 ? "var(--text2)" : "var(--text3)", fontSize: 12 }}>{val > 0 ? Math.round(val).toLocaleString() + "원" : "—"}</td>
                       <td style={{ padding: "4px 8px", textAlign: "right" }}>
-                        <input type="number" value={it.safeQty || ""} placeholder="—"
+                        {(() => { const inh = matSafe(it); return (
+                        <input type="number" value={it.safeQty || ""} placeholder={inh > 0 ? String(inh) : "—"}
+                          title={inh > 0 && !(parseFloat(it.safeQty) > 0) ? "단가표 원단 안전재고 " + inh + " 자동 적용 중 (직접 입력하면 덮어씀)" : ""}
                           onChange={e => setSafeQty(it.id, e.target.value)}
-                          style={{ width: 74, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px" }}/>
+                          style={{ width: 74, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", borderColor: inh > 0 && !(parseFloat(it.safeQty) > 0) ? "rgba(255,149,0,0.4)" : undefined }}/>
+                        ); })()}
                       </td>
                     </tr>
                   );
