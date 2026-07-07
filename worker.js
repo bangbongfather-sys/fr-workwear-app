@@ -89,13 +89,19 @@ export default {
       return;
     }
 
-    // KST 08:30 (UTC 23:30) — 이메일 알림 발송
+    // KST 08:30 (UTC 23:30) — 이메일 알림 발송 + 카카오톡 아침 일정 브리핑
+    // (카카오는 별도 cron을 추가하면 5개 한도에 걸릴 수 있어 이 아침 슬롯에 합쳐 발송)
     if (event.cron === "30 23 * * *") {
       const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
       ctx.waitUntil(
         sendTenderNotification(env, appUrl)
           .then((result) => console.log(`[scheduled] 이메일 알림 완료:`, result))
           .catch((err) => console.error(`[scheduled] 이메일 알림 실패:`, err?.message ?? err))
+      );
+      ctx.waitUntil(
+        sendKakaoDailyBriefing(env)
+          .then((r) => console.log(`[scheduled] 카카오 브리핑:`, r))
+          .catch((err) => console.error(`[scheduled] 카카오 브리핑 실패:`, err?.message ?? err))
       );
       return;
     }
