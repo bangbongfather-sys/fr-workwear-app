@@ -1344,16 +1344,49 @@ async function prodImgDel(id) {
     });
   } catch {}
 }
+// ── Firebase 키 이스케이프 ──
+// Firebase RTDB는 키에 . # $ / [ ] 를 금지한다(경로 구분자·예약문자).
+// 재고(stock)처럼 "품번/사이즈"(예: NFWF25/090)를 객체 키로 쓰는 데이터는 저장 시 400 에러가 나
+// 동기화가 통째로 실패했다. → 저장 직전 키의 금지문자를 ~HEX 로 인코딩, 읽을 때 원복.
+// 값(문자열/숫자)과 배열 인덱스는 그대로 두고 "객체 키"만 변환하므로 앱 로직엔 투명하다.
+const FB_ESC_MAP = { "~": "~7E", ".": "~2E", "#": "~23", "$": "~24", "/": "~2F", "[": "~5B", "]": "~5D" };
+const FB_UNESC_MAP = { "7E": "~", "2E": ".", "23": "#", "24": "$", "2F": "/", "5B": "[", "5D": "]" };
+const fbEscKey = (k) => /[~.#$/[\]]/.test(k) ? k.replace(/[~.#$/[\]]/g, (c) => FB_ESC_MAP[c]) : k;
+const fbUnescKey = (k) => k.indexOf("~") >= 0 ? k.replace(/~([0-9A-F]{2})/g, (m, h) => FB_UNESC_MAP[h] || m) : k;
+function fbEscapeKeys(v) {
+  if (Array.isArray(v)) return v.map(fbEscapeKeys);
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const k of Object.keys(v)) o[fbEscKey(k)] = fbEscapeKeys(v[k]);
+    return o;
+  }
+  return v;
+}
+function fbUnescapeKeys(v) {
+  if (Array.isArray(v)) return v.map(fbUnescapeKeys);
+  if (v && typeof v === "object") {
+    const o = {};
+    for (const k of Object.keys(v)) o[fbUnescKey(k)] = fbUnescapeKeys(v[k]);
+    return o;
+  }
+  return v;
+}
+
 async function cloudLoad() {
   const r = await fetch(FB_URL);
   if (!r.ok) throw new Error("load failed");
-  return await r.json();
+  const d = await r.json();
+  // 저장 시 이스케이프된 키를 원복 (_rev/_revs는 섹션명 키라 금지문자 없음 → 무변경)
+  return d ? fbUnescapeKeys(d) : d;
 }
 async function cloudSave(data) {
   // PATCH = shallow merge at root. data에 포함된 key만 갱신하고 나머지 top-level key는 보존.
   // PUT은 전체 노드를 교체하므로, 부분 cloudSave 호출이 다른 key(ledgers 등)를 삭제하는 데이터 손실 버그가 있었음.
   // 2026-05-14 수정: PUT → PATCH. 부분 저장이 안전해짐.
-  const r = await fetch(FB_URL, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  // "_revs/<섹션>" 같은 deep-path 키는 의도된 슬래시라 보존하고, 섹션 데이터 값의 키만 이스케이프.
+  const safe = {};
+  for (const k of Object.keys(data)) safe[k] = k.startsWith("_revs/") ? data[k] : fbEscapeKeys(data[k]);
+  const r = await fetch(FB_URL, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(safe) });
   if (!r.ok) throw new Error("save failed");
 }
 
