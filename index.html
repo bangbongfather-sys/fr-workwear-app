@@ -11890,6 +11890,16 @@ function App() {
     const tick = async () => {
       if (document.visibilityState !== "visible") return;
       if (!initialized.current) return;
+      // 스턱 error 자동 복구: 저장이 실패해 error로 박혔는데 온라인이면 스스로 재시도.
+      // (순간적 서버 hiccup은 online 이벤트가 안 떠서 onlineRetryTick 경로로는 안 풀림 → 여기서 주기적으로 복구)
+      if (syncStatusRef.current === "error" && navigator.onLine && !syncTimer.current) {
+        if (dirtySections.current.size > 0) {
+          setOnlineRetryTick(t => t + 1); // 미저장 변경 재전송 트리거
+        } else {
+          setSyncStatus("saved"); // 재전송할 것 없음 → 배지만 정상화
+        }
+        return;
+      }
       if (syncTimer.current || load("frw_dirty", false) || dirtySections.current.size > 0) return;
       try {
         const rr = await fetch(`${FB_URL}/revs`);
