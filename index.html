@@ -12833,7 +12833,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     if (syncStatus === "syncing") return <div style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span style={styles.text}>저장 중</span></div>;
     if (syncStatus === "saved") return <div style={styles.wrap}><Icon name="check" size={13}/><span style={styles.text}>동기화됨</span></div>;
     if (syncStatus === "conflict") return <div onClick={() => window.location.reload()} style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="같은 항목을 다른 기기에서도 동시에 수정했어요. 다른 항목들은 자동으로 합쳐 저장됐습니다. 클릭하면 이 항목을 최신본으로 새로고침합니다 (지금 화면의 이 항목 수정은 사라질 수 있어요)."><Icon name="alert" size={13}/><span style={styles.text}>충돌 · 새로고침</span></div>;
-    return <div style={styles.wrap}><Icon name="alert" size={13}/><span style={styles.text}>연결 오류</span></div>;
+    return <div onClick={() => { if (dirtySections.current.size > 0) { setOnlineRetryTick(t => t + 1); } else { setSyncStatus("syncing"); cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error")); } }} style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="클라우드 저장에 실패했어요. 클릭하면 즉시 재시도합니다. (자동으로도 8초마다 재시도돼요)"><Icon name="alert" size={13}/><span style={styles.text}>연결 오류 · 재시도</span></div>;
   };
 
   // 인라인 스타일용 테마 토큰
