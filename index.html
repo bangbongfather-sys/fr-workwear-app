@@ -1415,7 +1415,7 @@ async function cloudBackupDaily(data) {
   const lastKey = "frw_last_backup_slot";
   if (load(lastKey, "") === slot) return; // 이 슬롯 이미 백업됨
   try {
-    const r = await fetch(`${FB_URL}/backup/${slot}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+    const r = await fetch(`${FB_URL}/backup/${slot}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fbEscapeKeys(data)) });
     if (r.ok) save(lastKey, slot);
   } catch { /* 백업 실패는 무시 — 본 동기화를 방해하지 않음 */ }
 }
