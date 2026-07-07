@@ -11664,6 +11664,14 @@ function App() {
   useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
   const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
   const [viewingPO, setViewingPO] = useState(null);
+  const [expandedPOIds, setExpandedPOIds] = useState(() => new Set()); // 발주 이력에서 펼친 행
+  const togglePOExpand = (id) => setExpandedPOIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // 발주 품목의 입고량 저장 (품목 index로 지정)
+  const setPOReceived = (poId, itemIdx, val) => setPurchaseOrders(prev => prev.map(p => {
+    if (p.id !== poId) return p;
+    const items = (p.items || []).map((it, i) => i === itemIdx ? { ...it, receivedQty: val } : it);
+    return { ...p, items };
+  }));
   const [poHistorySearch, setPoHistorySearch] = useState("");
   const [poHistorySupFilter, setPoHistorySupFilter] = useState("");
   const [poHistorySort, setPoHistorySort] = useState("date_desc"); // date_desc | date_asc | amount_desc | supplier
@@ -15617,7 +15625,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           ) : (
                             <div className="card" style={{ padding: 0, overflow: "hidden" }}>
                               {/* 목록 헤더 */}
-                              <div style={{ display: "grid", gridTemplateColumns: "108px 1.1fr 1.4fr 62px 158px 132px", gap: 12, padding: "10px 16px", background: "var(--surface2)", borderBottom: `1px solid ${T.divider}`, fontSize: 11, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "26px 108px 1.1fr 1.4fr 62px 158px 132px", gap: 12, padding: "10px 16px", background: "var(--surface2)", borderBottom: `1px solid ${T.divider}`, fontSize: 11, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                                <div/>
                                 <div>발주일자</div>
                                 <div>거래처</div>
                                 <div>품목 / 제목</div>
@@ -15629,18 +15638,21 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               {sorted.map((po, idx) => {
                                 const dateDisplay = po.orderDate || po.dateStr || "—";
                                 const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${po.items.length - 2}` : "");
+                                const isExpanded = expandedPOIds.has(po.id);
                                 return (
-                                  <div key={po.id}
-                                    onClick={() => setViewingPO(po)}
+                                  <React.Fragment key={po.id}>
+                                  <div
+                                    onClick={() => togglePOExpand(po.id)}
                                     style={{
-                                      display: "grid", gridTemplateColumns: "108px 1.1fr 1.4fr 62px 158px 132px", gap: 12,
-                                      padding: "12px 16px", borderBottom: idx < sorted.length - 1 ? `1px solid ${T.divider}` : "none",
+                                      display: "grid", gridTemplateColumns: "26px 108px 1.1fr 1.4fr 62px 158px 132px", gap: 12,
+                                      padding: "12px 16px", borderBottom: (isExpanded || idx < sorted.length - 1) ? `1px solid ${T.divider}` : "none",
                                       cursor: "pointer", alignItems: "center",
-                                      transition: "background 0.12s",
+                                      transition: "background 0.12s", background: isExpanded ? "var(--surface2)" : "transparent",
                                     }}
-                                    onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
-                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                                    onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.background = "var(--surface2)"; }}
+                                    onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.background = "transparent"; }}
                                   >
+                                    <div style={{ textAlign: "center", color: T.text3, fontSize: 11, transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "none" }}>▶</div>
                                     <div style={{ fontSize: 12, fontWeight: 600, color: T.text2, fontVariantNumeric: "tabular-nums" }}>{dateDisplay}{po.updatedAt && <span title="수정됨" style={{ marginLeft: 4, fontSize: 10, color: "#FF4103", fontWeight: 700 }}>✎</span>}</div>
                                     <div style={{ fontSize: 13, fontWeight: 700, color: T.text, display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="factory" size={13}/>{po.supplier?.name || "—"}</div>
                                     <div style={{ fontSize: 12, color: T.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"}</div>
@@ -15653,6 +15665,59 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       <button onClick={(e) => { e.stopPropagation(); deletePO(po.id); }} title="삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit", padding: 4 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                                     </div>
                                   </div>
+                                  {isExpanded && (() => {
+                                    const its = po.items || [];
+                                    const totRcv = its.reduce((s, it) => s + (parseFloat(it.receivedQty) || 0), 0);
+                                    const totOrd = its.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0);
+                                    return (
+                                    <div style={{ padding: "12px 16px 16px 52px", background: "var(--surface2)", borderBottom: idx < sorted.length - 1 ? `1px solid ${T.divider}` : "none" }}>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+                                        <span style={{ fontSize: 12, fontWeight: 800, color: T.text }}>발주 품목 {its.length}건</span>
+                                        <span style={{ fontSize: 11, color: T.text3 }}>발주 {totOrd.toLocaleString()} / 입고 <b style={{ color: totRcv >= totOrd && totOrd > 0 ? "#00B493" : "#FF9500" }}>{totRcv.toLocaleString()}</b></span>
+                                        <button onClick={(e) => { e.stopPropagation(); setViewingPO(po); }} style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "none", border: "1px solid var(--border)", borderRadius: 7, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}>발주서 전체 보기</button>
+                                      </div>
+                                      <div style={{ overflowX: "auto" }}>
+                                        <table style={{ width: "100%", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                                          <thead><tr style={{ color: T.text3, fontSize: 11 }}>
+                                            <th style={{ textAlign: "left", padding: "6px 8px" }}>품목</th>
+                                            <th style={{ textAlign: "right", padding: "6px 8px", width: 90 }}>발주수량</th>
+                                            <th style={{ textAlign: "right", padding: "6px 8px", width: 110 }}>입고수량</th>
+                                            <th style={{ textAlign: "right", padding: "6px 8px", width: 90 }}>미입고</th>
+                                            <th style={{ textAlign: "center", padding: "6px 8px", width: 74 }}>상태</th>
+                                          </tr></thead>
+                                          <tbody>
+                                            {its.map((it, ii) => {
+                                              const ord = parseFloat(it.qty) || 0;
+                                              const rcv = parseFloat(it.receivedQty);
+                                              const hasRcv = !isNaN(rcv);
+                                              const remain = ord - (hasRcv ? rcv : 0);
+                                              const done = hasRcv && rcv >= ord && ord > 0;
+                                              return (
+                                                <tr key={it.id || ii} style={{ borderTop: `1px solid ${T.divider}` }}>
+                                                  <td style={{ padding: "7px 8px", fontWeight: 600, color: T.text }}>{it.name || "—"}{it.note ? <span style={{ color: T.text3, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{it.note}</span> : ""}</td>
+                                                  <td style={{ padding: "7px 8px", textAlign: "right", color: T.text2 }}>{ord.toLocaleString()}{it.unit ? " " + it.unit : ""}</td>
+                                                  <td style={{ padding: "5px 8px", textAlign: "right" }}>
+                                                    <input type="number" value={it.receivedQty ?? ""} placeholder="0"
+                                                      onClick={(e) => e.stopPropagation()}
+                                                      onChange={(e) => setPOReceived(po.id, ii, e.target.value)}
+                                                      style={{ width: 84, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", border: `1px solid ${done ? "rgba(0,180,147,0.5)" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                                                  </td>
+                                                  <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: !hasRcv ? T.text3 : remain > 0 ? "#FF9500" : "#00B493" }}>{hasRcv ? remain.toLocaleString() : "—"}</td>
+                                                  <td style={{ padding: "7px 8px", textAlign: "center" }}>
+                                                    {!hasRcv ? <span style={{ fontSize: 10, color: T.text3 }}>대기</span>
+                                                      : done ? <span style={{ fontSize: 10, fontWeight: 800, color: "#00B493", background: "rgba(0,180,147,0.12)", padding: "2px 7px", borderRadius: 100 }}>완료</span>
+                                                      : <span style={{ fontSize: 10, fontWeight: 800, color: "#FF9500", background: "rgba(255,149,0,0.12)", padding: "2px 7px", borderRadius: 100 }}>부분</span>}
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                    );
+                                  })()}
+                                  </React.Fragment>
                                 );
                               })}
                               {/* 필터 결과 합계 */}
