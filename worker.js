@@ -128,16 +128,6 @@ export default {
       return;
     }
 
-    // KST 07:30 (UTC 22:30) — 카카오톡 아침 일정 브리핑
-    if (event.cron === "30 22 * * *") {
-      ctx.waitUntil(
-        sendKakaoDailyBriefing(env)
-          .then((r) => console.log(`[scheduled] 카카오 브리핑:`, r))
-          .catch((err) => console.error(`[scheduled] 카카오 브리핑 실패:`, err?.message ?? err))
-      );
-      return;
-    }
-
     console.warn(`[scheduled] 등록되지 않은 cron 스케줄: ${event.cron}`);
   },
 };
