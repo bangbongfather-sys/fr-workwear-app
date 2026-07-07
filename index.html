@@ -2115,7 +2115,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
                 const isDropBot = matDropInfo?.id === m.id && matDropInfo?.side === "bottom";
                 return (
                   <React.Fragment key={m.id}>
-                    {isDropTop && <InsertRow cols={5} />}
+                    {isDropTop && <InsertRow cols={6} />}
                     <tr draggable
                       onDragStart={e => { dragMat.current = m.id; e.currentTarget.style.opacity = "0.4"; }}
                       onDragEnd={e => { e.currentTarget.style.opacity = "1"; setMatDropInfo(null); dragMat.current = null; }}
@@ -2175,7 +2175,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
                         </>
                       )}
                     </tr>
-                    {isDropBot && <InsertRow cols={5} />}
+                    {isDropBot && <InsertRow cols={6} />}
                   </React.Fragment>
                 );
               })}
@@ -8653,11 +8653,23 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
     return m ? parseFloat(m.price) || 0 : 0;
   };
 
+  // 유효 안전재고: 재고 표에서 직접 입력한 값(safeQty) 우선, 없으면 단가표 원단의 안전재고(safeStock) 참조
+  const matSafe = (it) => {
+    const m = materials.find(x => (x.name || "").trim() === (it.name || "").trim());
+    const v = m ? parseFloat(m.safeStock) : NaN;
+    return (!isNaN(v) && v > 0) ? v : 0;
+  };
+  const effSafe = (it) => {
+    const own = parseFloat(it.safeQty);
+    if (!isNaN(own) && own > 0) return own;
+    return matSafe(it);
+  };
+
   // ── 집계 ──
   const minus = items.filter(it => it.qty < 0).sort((a, b) => a.qty - b.qty);
   const minusTop = minus.slice(0, 10);
-  const lowSafe = items.filter(it => it.qty >= 0 && parseFloat(it.safeQty) > 0 && it.qty < parseFloat(it.safeQty))
-    .sort((a, b) => (a.qty / parseFloat(a.safeQty)) - (b.qty / parseFloat(b.safeQty)));
+  const lowSafe = items.filter(it => { const s = effSafe(it); return it.qty >= 0 && s > 0 && it.qty < s; })
+    .sort((a, b) => (a.qty / effSafe(a)) - (b.qty / effSafe(b)));
   const totalValue = items.reduce((s, it) => s + (it.qty > 0 ? it.qty * priceOf(it) : 0), 0);
   const valuedCount = items.filter(it => it.qty > 0 && priceOf(it) > 0).length;
 
