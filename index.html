@@ -11914,7 +11914,8 @@ function App() {
   useEffect(() => { save("frw_po_subtab", poSubTab); }, [poSubTab]);
   const PO_SUBTABS = { current: { label: "발주서 작성", icon: "purchase" }, history: { label: "발주 이력", icon: "history" } };
   const poSubOrder = useSubtabOrder("frw_po_subtab_order", ["current", "history"], "data-po-sub");
-  const [calcSubTab, setCalcSubTab] = useState("calculator"); // "calculator" | "profitability"
+  const [calcSubTab, setCalcSubTab] = useState(() => load("frw_calc_subtab", "calculator")); // "calculator" | "profitability"
+  useEffect(() => { save("frw_calc_subtab", calcSubTab); }, [calcSubTab]);
   const CALC_SUBTABS = { calculator: { label: "단가 계산", icon: "calc" }, profitability: { label: "제품별 수익성 분석", icon: "trendingUp" }, simulator: { label: "인상 시뮬레이터", icon: "flame" } };
   const calcSubOrder = useSubtabOrder("frw_calc_subtab_order", ["calculator", "profitability", "simulator"], "data-calc-sub");
   const [poStyle, setPoStyle] = useState(() => load("frw_po_style", "apple")); // apple | bold | card | korean
