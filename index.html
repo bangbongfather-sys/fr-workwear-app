@@ -2347,15 +2347,19 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
         {showNotionImport && <NotionSafeStockModal materials={materials} setMaterials={setMaterials} onClose={() => setShowNotionImport(false)} />}
         <div className="card" style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 원단 추가</div>
-          <div className="add-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 130px 110px 90px auto", gap: 8 }}>
+          <div className="add-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 120px 100px 100px 84px auto", gap: 8 }}>
             <input placeholder="원단명 (예: 아라미드 동복용)" value={newMat.name}
               onChange={e => setNewMat({...newMat, name: e.target.value})}
               onKeyDown={e => e.key === "Enter" && addMaterial()} />
             <input type="number" placeholder="단가" value={newMat.price} style={{ textAlign: "right" }}
               onChange={e => setNewMat({...newMat, price: e.target.value})} />
             <input type="number" placeholder="안전재고" value={newMat.safeStock} style={{ textAlign: "right" }}
-              title="이 수량 아래로 떨어지면 재고 현황에서 '안전재고 미달' 경보가 뜹니다"
+              title="이 수량 아래로 떨어지면 '안전재고 미달' 경보가 뜹니다"
               onChange={e => setNewMat({...newMat, safeStock: e.target.value})}
+              onKeyDown={e => e.key === "Enter" && addMaterial()} />
+            <input type="number" placeholder="현재재고" value={newMat.currentStock} style={{ textAlign: "right" }}
+              title="현재 보유 중인 원단 수량 — 발주서 작성 시 함께 표시됩니다"
+              onChange={e => setNewMat({...newMat, currentStock: e.target.value})}
               onKeyDown={e => e.key === "Enter" && addMaterial()} />
             <select value={newMat.unit} onChange={e => setNewMat({...newMat, unit: e.target.value})}>
               <option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option>
