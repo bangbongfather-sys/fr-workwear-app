@@ -15470,7 +15470,11 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               setPoDraft({ ...poDraft, items });
                             }}>
                               <option value="">원단 선택...</option>
-                              {materials.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+                              {materials.map(m => {
+                                const info = poStockInfo(m.name, materials, stock);
+                                const hint = info ? ` — ${info.qty !== null ? "재고 " + info.qty.toLocaleString() : ""}${info.qty !== null && info.safe > 0 ? " / " : ""}${info.safe > 0 ? "안전 " + info.safe.toLocaleString() : ""}${info.short > 0 ? " ⚠" : ""}` : "";
+                                return <option key={m.id} value={m.name}>{m.name}{hint}</option>;
+                              })}
                             </select>
                           ) : it.kind === "labor" ? (
                             <select style={{ flex: "2 1 200px", minWidth: 160 }} value={it.name} onChange={e => {
