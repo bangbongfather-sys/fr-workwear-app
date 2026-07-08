@@ -11910,7 +11910,8 @@ function App() {
   }, [ledgers]);
   const [suppliers, setSuppliers] = useState(() => load("frw_suppliers", []));
   const [purchaseOrders, setPurchaseOrders] = useState(() => load("frw_purchase_orders", []));
-  const [poSubTab, setPoSubTab] = useState("current"); // "current" | "history"
+  const [poSubTab, setPoSubTab] = useState(() => load("frw_po_subtab", "current")); // "current" | "history"
+  useEffect(() => { save("frw_po_subtab", poSubTab); }, [poSubTab]);
   const PO_SUBTABS = { current: { label: "발주서 작성", icon: "purchase" }, history: { label: "발주 이력", icon: "history" } };
   const poSubOrder = useSubtabOrder("frw_po_subtab_order", ["current", "history"], "data-po-sub");
   const [calcSubTab, setCalcSubTab] = useState("calculator"); // "calculator" | "profitability"
