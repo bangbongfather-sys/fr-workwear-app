@@ -16992,7 +16992,8 @@ const noteCategoryColor = (id) => (NOTE_CATEGORIES.find(c => c.id === id) || NOT
 
 function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode }) {
   const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","notes","recurring"], "data-schedule-sub");
-  const [scheduleSub, setScheduleSub] = React.useState("calendar");
+  const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
+  React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
   const today = new Date();
   const ymd = (d) => {
     const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0");
