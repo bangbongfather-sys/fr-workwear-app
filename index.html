@@ -11687,6 +11687,15 @@ function App() {
   const [tab, setTab] = useState(() => load("frw_tab", "calc"));
   const [ledgerFocusClient, setLedgerFocusClient] = useState(null);
   useEffect(() => { save("frw_tab", tab); }, [tab]);
+  // 탭 전환 시 마지막 스크롤 위치 유지 — 다른 탭 갔다 와도 보던 위치로 복원.
+  // main-content 컨테이너의 scrollTop을 탭별로 기억(세션 메모리)했다가 탭이 바뀌면 복원.
+  const mainRef = useRef(null);
+  const scrollPosRef = useRef({});
+  const onMainScroll = () => { const el = mainRef.current; if (el) scrollPosRef.current[tab] = el.scrollTop; };
+  React.useLayoutEffect(() => {
+    const el = mainRef.current;
+    if (el) el.scrollTop = scrollPosRef.current[tab] || 0;
+  }, [tab]);
   const DEFAULT_QUICK_TABS = ["dashboard", "calc", "quote", "ledger"];
   const [quickTabs, setQuickTabs] = useState(() => load("frw_quickmenu_tabs", DEFAULT_QUICK_TABS));
   const [editingQuickMenu, setEditingQuickMenu] = useState(false);
