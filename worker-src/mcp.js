@@ -18,6 +18,7 @@ const ALLOWED_SECTIONS = [
   "clients", "suppliers", "clientAR", "ledgers", "monthlySales", "accounts",
   "products", "materials", "laborItems", "orders", "purchaseOrders", "fabricIntakes",
   "bids", "investments", "cashFlows", "scheduledExpenses", "todos", "notes", "recurringSchedules",
+  "stock",
 ];
 
 // 단가 계산기 로직 (index.html computeProduct와 동일 공식) ──
