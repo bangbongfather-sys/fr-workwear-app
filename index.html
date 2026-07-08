@@ -6012,7 +6012,8 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
 function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, monthlySales = {}, orders = [], darkMode, focusClient, clearFocus }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
-  const [subTab, setSubTab] = useState("monthly"); // "monthly" | "ar"
+  const [subTab, setSubTab] = useState(() => load("frw_ledger_subtab", "monthly")); // "monthly" | "ar" — 탭 이탈 후 복귀 시 유지
+  useEffect(() => { save("frw_ledger_subtab", subTab); }, [subTab]);
   // 외부에서 거래처를 지정해 들어온 경우: AR 서브탭으로 전환
   useEffect(() => {
     if (focusClient) setSubTab("ar");
