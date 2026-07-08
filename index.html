@@ -2035,8 +2035,161 @@ function SectionTitle({ children, action }) {
   );
 }
 
+// ─── 노션 "2026 원단 단가 정리" 스냅샷 (신기방적 관련 → 원단 입고 → 26년도 방염원단 입고) ───
+// 안전재고량이 범위(예: 12000~13000)면 하한값을 재발주 기준선으로 사용. 원문(safeText)은 미리보기에 표시.
+// 출처 데이터베이스: 2026 원단 단가 정리 (25년 1월 5일 기준) — 값 변경 시 이 배열만 갱신하면 됨.
+const NOTION_FABRIC_SNAPSHOT = [
+  { name: "방염 동복 점퍼 겉감(AFR205947) Ribstop D/Navy", price: 26300, safeText: "12000~13000", safe: 12000 },
+  { name: "방염 춘추 상의 (AFG235846) Navy", price: null, safeText: "6000", safe: 6000, note: "소진 후 점퍼겉감으로 대체" },
+  { name: "방염 동복 상의 배색(AFR225948) M/Blue", price: 26800, safeText: "7000~8000", safe: 7000 },
+  { name: "방염 동복 퀼팅안감 체크(AFP135683) 오렌지Pad 110g", price: 22500, safeText: "7000", safe: 7000 },
+  { name: "방염 동복 퀼팅안감 체크(AFP135683) 오렌지Pad 210g", price: 24000, safeText: "6000~7000", safe: 6000 },
+  { name: "방염 동복 하의 기모 (AFL300847) D/Navy", price: 36000, safeText: "9000~10000", safe: 9000 },
+  { name: "방염하복 하의겉감(Span) Navy (AFL165831)", price: 21700, safeText: "16000", safe: 16000 },
+  { name: "방염 PK 니트 (AFK185900) Grey 185gsm", price: 23700, safeText: "4~5000", safe: 4000 },
+  { name: "방염하복 상의 메란지데님(AFP160653)", price: 22000, safeText: "15000~16000", safe: 15000 },
+  { name: "방염하복 상의안감(매쉬망사) AFN115966", price: null, safeText: "3000", safe: 3000 },
+  { name: "Aramid/FR 65/35 발목시보리 D/Navy 565g 9인치", price: null, safeText: "1500~2000", safe: 1500 },
+  { name: "손목시보리(Aramid/FR 65/35) Grey 565g 7인치", price: null, safeText: "1500~2000", safe: 1500 },
+  { name: "방염 주머니안감 Navy (AFP115865)", price: 15000, safeText: "6000~7000", safe: 6000 },
+  { name: "방염주머니감(스몰체크브라운) AFP135683", price: null, safeText: "5000", safe: 5000 },
+  { name: "디지털 아라미드 원단(안감용으로 사용)", price: null, safeText: "", safe: null },
+  { name: "버프원단 140g D/G AFK1401018 (50/48.5/1.5)", price: 14000, safeText: "3000", safe: 3000 },
+  { name: "구형 춘추 체크원단", price: null, safeText: "", safe: null, note: "추후 동복 안감으로 사용" },
+  { name: "방염안감(Navy) AFP115855 + 3단쮸리퀼팅", price: null, safeText: "소진 후 끝", safe: null },
+  { name: "방염 동복 퀼팅 안감 NAVY 오렌지 PAD 110g", price: null, safeText: "4000", safe: 4000, note: "솜 조끼용" },
+];
+const _nfNorm = s => String(s || "").toLowerCase().replace(/[\s()[\]/·・,._-]/g, "");
+const _nfCode = s => { const m = String(s || "").match(/A[A-Z]{2}\d{5,8}/i); return m ? m[0].toUpperCase() : null; };
+const _NF_KEYS = ["점퍼", "춘추", "배색", "퀼팅", "110g", "210g", "기모", "하의겉감", "span", "pk", "메란지", "데님", "매쉬", "망사", "발목시보리", "손목시보리", "주머니안감", "주머니감", "스몰체크", "디지털", "버프", "오렌지", "navy", "grey", "blue", "185", "565", "9인치", "7인치"];
+// 원단명 → 스냅샷 항목 매칭 (코드 우선, 이름 토큰 보조). 임계값 미만이면 null.
+function nfMatch(matName) {
+  const mC = _nfCode(matName), mN = _nfNorm(matName);
+  if (!mN) return null;
+  let best = null, bs = 0;
+  for (const s of NOTION_FABRIC_SNAPSHOT) {
+    const sC = _nfCode(s.name), sN = _nfNorm(s.name);
+    let sc = 0;
+    if (mC && sC && mC === sC) sc += 60;
+    const sh = mN.length < sN.length ? mN : sN, lo = mN.length < sN.length ? sN : mN;
+    if (sh.length >= 4 && lo.includes(sh)) sc += 35;
+    for (const k of _NF_KEYS) { const kn = _nfNorm(k); if (kn && mN.includes(kn) && sN.includes(kn)) sc += 7; }
+    if (sc > bs) { bs = sc; best = s; }
+  }
+  return bs >= 30 ? { s: best, score: bs } : null;
+}
+
+function NotionSafeStockModal({ materials, setMaterials, onClose }) {
+  // 안전재고 값이 있는 스냅샷 항목만 반영 대상
+  const matched = materials
+    .map(m => ({ mat: m, hit: nfMatch(m.name) }))
+    .filter(x => x.hit && x.hit.s.safe != null);
+  const usedNames = new Set(matched.map(x => x.hit.s.name));
+  const unmatched = NOTION_FABRIC_SNAPSHOT.filter(s => s.safe != null && !usedNames.has(s.name));
+  const [selMatched, setSelMatched] = useState(() => matched.map(() => true));
+  const [selNew, setSelNew] = useState(() => unmatched.map(() => false));
+
+  const apply = () => {
+    setMaterials(ms => {
+      let arr = ms.map(m => {
+        const idx = matched.findIndex(x => x.mat.id === m.id);
+        if (idx >= 0 && selMatched[idx]) return { ...m, safeStock: matched[idx].hit.s.safe };
+        return m;
+      });
+      unmatched.forEach((s, i) => {
+        if (selNew[i]) arr = [...arr, { id: uid(), name: s.name, price: s.price || 0, unit: "yard", safeStock: s.safe }];
+      });
+      return arr;
+    });
+    const nUpd = selMatched.filter(Boolean).length, nAdd = selNew.filter(Boolean).length;
+    showToast(`안전재고 ${nUpd}건 반영` + (nAdd ? `, 신규 ${nAdd}건 추가` : "") + " 완료", "success");
+    onClose();
+  };
+
+  const overlay = { position: "fixed", inset: 0, background: "rgba(0,10,25,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 };
+  const sheet = { background: "var(--card-bg, #fff)", borderRadius: 16, width: "min(680px, 100%)", maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.35)" };
+  const cell = { padding: "8px 10px", fontSize: 13, verticalAlign: "middle" };
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={sheet} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "16px 18px", borderBottom: "1px solid var(--divider)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: NAVY }}>노션 안전재고 불러오기</div>
+            <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 2 }}>2026 원단 단가 정리 · 범위는 하한값을 기준선으로 반영</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 20, color: "var(--text2)", cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+
+        <div style={{ overflowY: "auto", padding: "14px 18px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", marginBottom: 8 }}>
+            내 원단과 매칭됨 <span style={{ color: "#FF9500" }}>{matched.length}건</span>
+          </div>
+          {matched.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0 4px" }}>매칭되는 원단이 없습니다. 아래에서 신규로 추가할 수 있습니다.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr style={{ color: "var(--text2)", fontSize: 11 }}>
+                <th style={{ ...cell, width: 30 }}></th>
+                <th style={{ ...cell, textAlign: "left" }}>내 원단명</th>
+                <th style={{ ...cell, textAlign: "right", width: 70 }}>현재</th>
+                <th style={{ ...cell, textAlign: "center", width: 24 }}></th>
+                <th style={{ ...cell, textAlign: "right", width: 120 }}>노션 안전재고</th>
+              </tr></thead>
+              <tbody>
+                {matched.map((x, i) => {
+                  const cur = (x.mat.safeStock !== "" && x.mat.safeStock != null && !isNaN(x.mat.safeStock)) ? Number(x.mat.safeStock).toLocaleString() : "—";
+                  return (
+                    <tr key={x.mat.id} style={{ borderTop: "1px solid var(--divider)" }}>
+                      <td style={cell}><input type="checkbox" checked={selMatched[i]} onChange={e => setSelMatched(a => a.map((v, j) => j === i ? e.target.checked : v))} /></td>
+                      <td style={{ ...cell, fontWeight: 500 }}>{x.mat.name}</td>
+                      <td style={{ ...cell, textAlign: "right", color: "var(--text3)" }}>{cur}</td>
+                      <td style={{ ...cell, textAlign: "center", color: "var(--text3)" }}>→</td>
+                      <td style={{ ...cell, textAlign: "right" }}>
+                        <span style={{ fontWeight: 700, color: "#FF9500" }}>{x.hit.s.safe.toLocaleString()}</span>
+                        {x.hit.s.safeText !== String(x.hit.s.safe) && <span style={{ color: "var(--text3)", fontSize: 11, marginLeft: 4 }}>({x.hit.s.safeText})</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          {unmatched.length > 0 && (
+            <>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", margin: "18px 0 8px" }}>
+                단가표에 없는 노션 원단 <span style={{ color: "var(--text2)" }}>{unmatched.length}건</span>
+                <span style={{ fontWeight: 400, color: "var(--text3)", fontSize: 11, marginLeft: 6 }}>체크 시 새 원단으로 추가</span>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <tbody>
+                  {unmatched.map((s, i) => (
+                    <tr key={s.name} style={{ borderTop: "1px solid var(--divider)" }}>
+                      <td style={{ ...cell, width: 30 }}><input type="checkbox" checked={selNew[i]} onChange={e => setSelNew(a => a.map((v, j) => j === i ? e.target.checked : v))} /></td>
+                      <td style={{ ...cell, fontWeight: 500 }}>{s.name}</td>
+                      <td style={{ ...cell, textAlign: "right", color: "var(--text3)", width: 90 }}>{s.price ? s.price.toLocaleString() + "원" : "단가없음"}</td>
+                      <td style={{ ...cell, textAlign: "right", width: 110 }}><span style={{ fontWeight: 700, color: "#FF9500" }}>{s.safe.toLocaleString()}</span>{s.safeText !== String(s.safe) && <span style={{ color: "var(--text3)", fontSize: 11, marginLeft: 3 }}>({s.safeText})</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+
+        <div style={{ padding: "12px 18px", borderTop: "1px solid var(--divider)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onClose} style={{ height: 40, padding: "0 16px", background: "var(--input-bg, #f2f2f7)", color: "var(--text1)", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+          <button className="btn-orange" onClick={apply} style={{ height: 40, padding: "0 18px" }}>적용</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
   const [newMat, setNewMat] = useState({ name: "", price: "", unit: "yard", safeStock: "" });
+  const [showNotionImport, setShowNotionImport] = useState(false);
   const [editMat, setEditMat] = useState(null);
   const [newLab, setNewLab] = useState({ name: "", price: "", unit: "벌" });
   const [editLab, setEditLab] = useState(null);
