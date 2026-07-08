@@ -1846,6 +1846,51 @@ async function shareClientStatement(client, ym, ledgers, clientAR) {
   }
 }
 
+// ─── 견적서 공유 — 화면의 견적서 문서를 흰 배경 PNG로 렌더해 카톡/문자/메일 공유 시트로 전송 ───
+// 다크모드여도 공유 이미지는 항상 라이트(흰 배경) — 문서 스타일이 참조하는 CSS 변수를
+// 클론 래퍼에 라이트 값으로 강제 지정 (다크모드 캡처 시 흰 글자 사라짐 방지, 정산서 공유와 동일 원칙).
+async function shareQuoteImage(nodeId, title, client) {
+  const src = document.getElementById(nodeId);
+  if (!src) { showToast("견적서 영역을 찾을 수 없습니다"); return; }
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "position:fixed;left:-10000px;top:0;width:840px;background:#ffffff;";
+  [
+    ["--doc-bg", "#fff"], ["--doc-text", "#001621"], ["--doc-text2", "#404652"], ["--doc-text3", "#5A6270"],
+    ["--doc-border", "#D7DBE2"], ["--doc-row-border", "#E5E8ED"], ["--doc-hover", "#F7F8FA"],
+    ["--doc-last", "#001621"], ["--doc-footer", "#828A98"],
+    ["--text1", "#191F28"], ["--text2", "#4E5968"], ["--text3", "#8B95A1"],
+    ["--surface", "#ffffff"], ["--surface2", "#F2F4F6"], ["--row-border", "#E5E8EB"],
+    ["--border", "#E5E8EB"], ["--divider", "#F2F4F6"], ["--row-bg", "#F9FAFB"], ["--accent", "#FF4103"],
+  ].forEach(([k, v]) => wrap.style.setProperty(k, v));
+  const clone = src.cloneNode(true);
+  clone.style.margin = "0";
+  clone.style.width = "auto";
+  clone.style.boxShadow = "none";
+  wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+  try {
+    const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: "#ffffff" });
+    document.body.removeChild(wrap);
+    const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+    if (!blob) throw new Error("이미지 생성 실패");
+    const base = (title || "").trim() || (client || "").trim() || "견적서";
+    const fname = `견적서_${base.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.png`;
+    const file = new File([blob], fname, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: fname, text: client ? `${client} 견적서입니다.` : "견적서입니다." }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = fname; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast("견적서 이미지를 다운로드했습니다. 카톡/메일에 첨부해 보내세요.");
+  } catch (err) {
+    try { document.body.removeChild(wrap); } catch {}
+    showToast("견적서 이미지 생성 실패: " + (err.message || err));
+  }
+}
+
 // ─── 원가 레이더: 단가표 기준가 vs 실제 매입가 괴리 감지 + 제품 마진 침식 계산 ───
 // 매입 현황(fabricIntakes)의 최근 windowDays일 실매입가(수량 가중 평균, 최근 8건)를
 // 단가표(materials/laborItems) 기준가와 비교. thresholdPct 이상 괴리난 항목만 보고.
