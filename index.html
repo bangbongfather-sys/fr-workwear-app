@@ -7546,7 +7546,8 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
 }
 
 function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashFlows, setCashFlows, scheduledExpenses, setScheduledExpenses, ledgers, clientAR, orders, clients = [], suppliers = [], darkMode, setTab, setLedgerFocusClient }) {
-  const [subTab, setSubTab] = useState("dashboard"); // dashboard | accounts | investments | ar | schedule
+  const [subTab, setSubTab] = useState(() => load("frw_treasury_subtab", "dashboard")); // dashboard | accounts | investments | ar | schedule — 탭 이탈 후 복귀 시 유지
+  useEffect(() => { save("frw_treasury_subtab", subTab); }, [subTab]);
   const [showAcctForm, setShowAcctForm] = useState(false);
   const [acctDraft, setAcctDraft] = useState({ name:"", bank:"", balance:"", color:"#FF4103", memo:"" });
   const [editAcctId, setEditAcctId] = useState(null);
