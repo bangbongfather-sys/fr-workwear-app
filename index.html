@@ -2235,7 +2235,14 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems }) {
 
       {/* 원단 단가표 */}
       <div>
-        <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14 }}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="pricedb" size={14}/>원단 단가표</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: NAVY }}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="pricedb" size={14}/>원단 단가표</span></div>
+          <button onClick={() => setShowNotionImport(true)} title="노션 '2026 원단 단가 정리'의 안전재고량을 불러와 반영"
+            style={{ height: 34, padding: "0 12px", background: "var(--input-bg, #f2f2f7)", color: NAVY, border: "1px solid var(--divider)", borderRadius: 9, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+            ↓ 노션 안전재고 불러오기
+          </button>
+        </div>
+        {showNotionImport && <NotionSafeStockModal materials={materials} setMaterials={setMaterials} onClose={() => setShowNotionImport(false)} />}
         <div className="card" style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 원단 추가</div>
           <div className="add-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 130px 110px 90px auto", gap: 8 }}>
