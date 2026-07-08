@@ -20315,5 +20315,86 @@ ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
   });
 })();
 </script>
+
+<script>
+// ─── 앱 부트스트랩 — JSX 컴파일 결과를 기기(IndexedDB)에 캐싱해 부팅 가속 ───
+// 1회차(또는 배포 직후): Babel을 지연 로드해 컴파일 → 실행 + 캐시 저장
+// 2회차부터: 캐시된 컴파일 결과를 즉시 실행 (Babel 3MB 다운로드/파싱/컴파일 전부 생략)
+// 캐시 키 = 소스 해시(FNV-1a) → 배포로 소스가 바뀌면 자동으로 재컴파일.
+(function () {
+  var BABEL_URL = 'https://unpkg.com/@babel/standalone@7/babel.min.js';
+  function showErr(msg) {
+    var el = document.getElementById('frw-err-banner');
+    if (el) { el.style.display = 'block'; el.textContent = (el.textContent ? el.textContent + '\n\n' : '') + msg; }
+  }
+  function hashSrc(s) {
+    var h = 0x811c9dc5;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(36) + ':' + s.length;
+  }
+  function openDb() {
+    return new Promise(function (res, rej) {
+      var r = indexedDB.open('frw-jsx-cache', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('kv'); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+  }
+  function cacheGet(key) {
+    return openDb().then(function (db) {
+      return new Promise(function (res, rej) {
+        var t = db.transaction('kv', 'readonly').objectStore('kv').get(key);
+        t.onsuccess = function () { res(t.result); };
+        t.onerror = function () { rej(t.error); };
+      });
+    });
+  }
+  function cacheSet(key, val) {
+    return openDb().then(function (db) {
+      return new Promise(function (res, rej) {
+        var st = db.transaction('kv', 'readwrite').objectStore('kv');
+        st.clear(); // 이전 배포분 제거 — 항상 최신 1개만 유지
+        var t = st.put(val, key);
+        t.onsuccess = function () { res(); };
+        t.onerror = function () { rej(t.error); };
+      });
+    });
+  }
+  function loadBabel() {
+    return new Promise(function (res, rej) {
+      if (window.Babel) return res();
+      var s = document.createElement('script');
+      s.src = BABEL_URL; s.crossOrigin = 'anonymous';
+      s.onload = function () { res(); };
+      s.onerror = function () { rej(new Error('Babel 로드 실패 — 네트워크를 확인해주세요')); };
+      document.head.appendChild(s);
+    });
+  }
+  function runCode(code) {
+    var s = document.createElement('script');
+    s.text = code + '\n//# sourceURL=frw-app.js';
+    document.body.appendChild(s);
+  }
+  function boot() {
+    var el = document.getElementById('frw-app-src');
+    if (!el) { showErr('⚠️ 앱 소스를 찾을 수 없습니다'); return; }
+    var src = el.textContent;
+    var key = 'v1:' + hashSrc(src);
+    cacheGet(key).catch(function () { return null; }).then(function (cached) {
+      if (cached) { runCode(cached); return; }
+      return loadBabel().then(function () {
+        var out = window.Babel.transform(src, { presets: ['react'] }).code;
+        runCode(out);
+        cacheSet(key, out).catch(function () {}); // 저장 실패(사파리 시크릿 등)는 무시 — 다음에 재컴파일
+      });
+    }).catch(function (e) {
+      showErr('⚠️ 앱 시작 실패: ' + (e && e.message ? e.message : e));
+    });
+  }
+  // defer 스크립트(React 등)가 모두 실행된 뒤(DOMContentLoaded) 부팅
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
+</script>
 </body>
 </html>
