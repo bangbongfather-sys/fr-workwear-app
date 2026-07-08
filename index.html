@@ -2035,6 +2035,23 @@ function SectionTitle({ children, action }) {
   );
 }
 
+// ─── 발주서 작성 시 재고·안전재고 참조 ───
+// 이름 정확 매칭(trim)으로 단가표 원단 + 재고 현황 품목을 찾아 요약.
+// 안전재고 우선순위는 재고 현황과 동일: 재고 표에 직접 입력한 safeQty > 단가표 safeStock.
+function poStockInfo(name, materials, stock) {
+  const n = (name || "").trim();
+  if (!n) return null;
+  const m = (materials || []).find(x => (x.name || "").trim() === n);
+  const st = ((stock && stock.items) || []).find(x => (x.name || "").trim() === n);
+  const own = st ? parseFloat(st.safeQty) : NaN;
+  const matS = m ? parseFloat(m.safeStock) : NaN;
+  const safe = (!isNaN(own) && own > 0) ? own : ((!isNaN(matS) && matS > 0) ? matS : 0);
+  const qty = st ? (Number(st.qty) || 0) : null; // null = 재고 현황에 없는 품목
+  if (!safe && qty === null) return null;
+  const short = (safe > 0 && qty !== null) ? Math.max(0, Math.ceil(safe - qty)) : null;
+  return { safe, qty, short, unit: (m && m.unit) || (st && st.unit) || "" };
+}
+
 // ─── 노션 "2026 원단 단가 정리" 스냅샷 (신기방적 관련 → 원단 입고 → 26년도 방염원단 입고) ───
 // 안전재고량이 범위(예: 12000~13000)면 하한값을 재발주 기준선으로 사용. 원문(safeText)은 미리보기에 표시.
 // 출처 데이터베이스: 2026 원단 단가 정리 (25년 1월 5일 기준) — 값 변경 시 이 배열만 갱신하면 됨.
