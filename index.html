@@ -2110,20 +2110,31 @@ function currentStockOf(materialName, stock) {
   return matched ? { qty: sum, unit, safeOverride } : null;
 }
 
+// ─── 원단의 유효 현재재고 ───
+// 우선순위: 단가표에 직접 입력한 currentStock > 재고 현황(frw_stock) 자동 참조.
+// (이 회사의 재고 현황은 '완제품' 기준이라 원단과 이름이 안 맞음 → 원단 현재고는 단가표에서 직접 관리)
+function effCurrentStock(m, stock) {
+  const manual = m ? parseFloat(m.currentStock) : NaN;
+  if (!isNaN(manual)) return { qty: manual, unit: (m && m.unit) || "", manual: true };
+  const cur = currentStockOf(m ? m.name : "", stock);
+  return cur ? { qty: cur.qty, unit: cur.unit, manual: false } : null;
+}
+
 // ─── 발주서 작성 시 재고·안전재고 참조 ───
-// 현재재고는 currentStockOf(코드/이름 매칭·합산)로, 안전재고는 재고표 직접입력(safeQty) > 단가표 safeStock 순.
+// 현재고: 단가표 직접입력(currentStock) 우선, 없으면 재고 현황 자동 참조. 안전재고: 단가표 safeStock 우선.
 function poStockInfo(name, materials, stock) {
   const n = (name || "").trim();
   if (!n) return null;
   const m = (materials || []).find(x => (x.name || "").trim() === n);
-  const cur = currentStockOf(n, stock); // { qty, unit, safeOverride } | null
+  const cs = m ? effCurrentStock(m, stock) : null;
+  const cur = currentStockOf(n, stock); // safeOverride 확보용
   const own = cur ? cur.safeOverride : NaN;
   const matS = m ? parseFloat(m.safeStock) : NaN;
-  const safe = (!isNaN(own) && own > 0) ? own : ((!isNaN(matS) && matS > 0) ? matS : 0);
-  const qty = cur ? cur.qty : null; // null = 재고 현황에 없는 품목
+  const safe = (!isNaN(matS) && matS > 0) ? matS : ((!isNaN(own) && own > 0) ? own : 0);
+  const qty = cs ? cs.qty : null; // null = 현재고 미기입/미참조
   if (!safe && qty === null) return null;
   const short = (safe > 0 && qty !== null) ? Math.max(0, Math.ceil(safe - qty)) : null;
-  return { safe, qty, short, unit: (m && m.unit) || (cur && cur.unit) || "" };
+  return { safe, qty, short, unit: (m && m.unit) || (cs && cs.unit) || "" };
 }
 
 // ─── 노션 "2026 원단 단가 정리" 스냅샷 (신기방적 관련 → 원단 입고 → 26년도 방염원단 입고) ───
