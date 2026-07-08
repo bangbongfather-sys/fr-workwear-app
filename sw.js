@@ -21,8 +21,9 @@ const SHELL = [
 
 // index.html <head>의 CDN <script>/<link>와 반드시 일치시킬 것 (URL 바뀌면 여기도 갱신)
 const CDN_ASSETS = [
-  'https://unpkg.com/react@18/umd/react.development.js',
-  'https://unpkg.com/react-dom@18/umd/react-dom.development.js',
+  'https://unpkg.com/react@18/umd/react.production.min.js',
+  'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
+  // Babel은 컴파일 캐시 미스(첫 방문·배포 직후)에만 지연 로드되지만, 오프라인 대비 SW에는 캐싱
   'https://unpkg.com/@babel/standalone@7/babel.min.js',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js',
