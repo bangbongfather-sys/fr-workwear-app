@@ -2435,12 +2435,12 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           <td style={{ textAlign: "right", fontWeight: 600 }}>{m.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
                           <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{(m.safeStock !== "" && m.safeStock != null && !isNaN(m.safeStock)) ? <span style={{ fontWeight: 600, color: "#FF9500" }}>{Number(m.safeStock).toLocaleString()}<span style={{ color: "var(--text3)", fontWeight: 400, fontSize: 11, marginLeft: 1 }}>{m.unit}</span></span> : <span style={{ color: "var(--text3)" }}>—</span>}</td>
                           <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{(() => {
-                            const cs = currentStockOf(m.name, stock);
-                            if (!cs) return <span style={{ color: "var(--text3)" }} title="재고 현황 탭에 이 원단이 없습니다">—</span>;
+                            const cs = effCurrentStock(m, stock);
+                            if (!cs) return <span style={{ color: "var(--text3)" }} title="현재재고 미입력 — 수정에서 입력하세요">—</span>;
                             const hasSafe = (m.safeStock !== "" && m.safeStock != null && !isNaN(m.safeStock));
                             const low = hasSafe && cs.qty < Number(m.safeStock);
                             const color = cs.qty < 0 ? "#F04452" : (low ? "#FF9500" : "var(--text1)");
-                            return <span style={{ fontWeight: 600, color }} title={low ? "안전재고 미달" : ""}>{cs.qty.toLocaleString()}<span style={{ color: "var(--text3)", fontWeight: 400, fontSize: 11, marginLeft: 1 }}>{cs.unit || m.unit}</span>{low ? <span style={{ color: "#FF9500", marginLeft: 3 }}>⚠</span> : null}</span>;
+                            return <span style={{ fontWeight: 600, color }} title={low ? "안전재고 미달" : (cs.manual ? "" : "재고 현황 자동 참조")}>{cs.qty.toLocaleString()}<span style={{ color: "var(--text3)", fontWeight: 400, fontSize: 11, marginLeft: 1 }}>{cs.unit || m.unit}</span>{low ? <span style={{ color: "#FF9500", marginLeft: 3 }}>⚠</span> : null}</span>;
                           })()}</td>
                           <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{m.unit}</td>
                           <td style={{ textAlign: "center" }}>
