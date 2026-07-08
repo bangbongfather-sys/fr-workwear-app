@@ -2082,21 +2082,48 @@ function SectionTitle({ children, action }) {
   );
 }
 
+// ─── 원단명 → 재고 현황(frw_stock)의 현재재고 합계 조회 ───
+// 매칭 우선순위: (1) 이름 정확 일치  (2) 품목코드(AFP115865 등) 일치  (3) 정규화 후 전체 포함관계.
+// 같은 원단의 색/사이즈 변형이 여러 행이면 수량을 합산. 재고 현황에 없으면 null(→ "—").
+const _STK_CODE_RE = /[A-Za-z]{2,3}\d{5,8}/;
+const _stkCode = s => { const m = String(s || "").match(_STK_CODE_RE); return m ? m[0].toUpperCase() : null; };
+const _stkNorm = s => String(s || "").toLowerCase().replace(/[\s()[\]/·・,._-]/g, "");
+function currentStockOf(materialName, stock) {
+  const items = (stock && stock.items) || [];
+  const n = (materialName || "").trim();
+  if (!n || !items.length) return null;
+  const mCode = _stkCode(n), mN = _stkNorm(n);
+  let sum = 0, matched = false, unit = "", safeOverride = NaN;
+  for (const it of items) {
+    const inm = (it.name || "").trim();
+    const iN = _stkNorm(inm), iCode = _stkCode(inm);
+    let hit = false;
+    if (inm === n) hit = true;
+    else if (mCode && iCode && mCode === iCode) hit = true;
+    else if (mN.length >= 6 && iN.length >= 6 && (iN.includes(mN) || mN.includes(iN))) hit = true;
+    if (hit) {
+      sum += Number(it.qty) || 0; matched = true;
+      if (!unit) unit = it.unit || "";
+      const sq = parseFloat(it.safeQty); if (!isNaN(sq) && sq > 0 && isNaN(safeOverride)) safeOverride = sq;
+    }
+  }
+  return matched ? { qty: sum, unit, safeOverride } : null;
+}
+
 // ─── 발주서 작성 시 재고·안전재고 참조 ───
-// 이름 정확 매칭(trim)으로 단가표 원단 + 재고 현황 품목을 찾아 요약.
-// 안전재고 우선순위는 재고 현황과 동일: 재고 표에 직접 입력한 safeQty > 단가표 safeStock.
+// 현재재고는 currentStockOf(코드/이름 매칭·합산)로, 안전재고는 재고표 직접입력(safeQty) > 단가표 safeStock 순.
 function poStockInfo(name, materials, stock) {
   const n = (name || "").trim();
   if (!n) return null;
   const m = (materials || []).find(x => (x.name || "").trim() === n);
-  const st = ((stock && stock.items) || []).find(x => (x.name || "").trim() === n);
-  const own = st ? parseFloat(st.safeQty) : NaN;
+  const cur = currentStockOf(n, stock); // { qty, unit, safeOverride } | null
+  const own = cur ? cur.safeOverride : NaN;
   const matS = m ? parseFloat(m.safeStock) : NaN;
   const safe = (!isNaN(own) && own > 0) ? own : ((!isNaN(matS) && matS > 0) ? matS : 0);
-  const qty = st ? (Number(st.qty) || 0) : null; // null = 재고 현황에 없는 품목
+  const qty = cur ? cur.qty : null; // null = 재고 현황에 없는 품목
   if (!safe && qty === null) return null;
   const short = (safe > 0 && qty !== null) ? Math.max(0, Math.ceil(safe - qty)) : null;
-  return { safe, qty, short, unit: (m && m.unit) || (st && st.unit) || "" };
+  return { safe, qty, short, unit: (m && m.unit) || (cur && cur.unit) || "" };
 }
 
 // ─── 노션 "2026 원단 단가 정리" 스냅샷 (신기방적 관련 → 원단 입고 → 26년도 방염원단 입고) ───
