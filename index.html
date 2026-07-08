@@ -16664,7 +16664,8 @@ function BidsTab({ bids, setBids, darkMode }) {
   ];
   const [draft, setDraft] = useState({ title:"", agency:"", openDate:"", closeDate:"", awardDate:"", amount:"", status:"예정", url:"", note:"" });
   const [filterStatus, setFilterStatus] = useState("");
-  const [viewMode, setViewMode] = useState("list"); // list | calendar
+  const [viewMode, setViewMode] = useState(() => load("frw_bids_viewmode", "list")); // list | calendar — 탭 이탈 후 복귀 시 유지
+  useEffect(() => { save("frw_bids_viewmode", viewMode); }, [viewMode]);
   const [calMonth, setCalMonth] = useState(new Date().toISOString().slice(0,7));
 
   const reset = () => { setDraft({ title:"", agency:"", openDate:"", closeDate:"", awardDate:"", amount:"", status:"예정", url:"", note:"" }); setEditingId(null); setShowForm(false); };
