@@ -12024,11 +12024,69 @@ function App() {
   const [expandedPOIds, setExpandedPOIds] = useState(() => new Set()); // 발주 이력에서 펼친 행
   const togglePOExpand = (id) => setExpandedPOIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // 발주 품목의 입고량 저장 (품목 index로 지정)
-  const setPOReceived = (poId, itemIdx, val) => setPurchaseOrders(prev => prev.map(p => {
-    if (p.id !== poId) return p;
-    const items = (p.items || []).map((it, i) => i === itemIdx ? { ...it, receivedQty: val } : it);
-    return { ...p, items };
-  }));
+  const setPOReceived = (poId, itemIdx, val) => {
+    setPurchaseOrders(prev => prev.map(p => {
+      if (p.id !== poId) return p;
+      const items = (p.items || []).map((it, i) => i === itemIdx ? { ...it, receivedQty: val } : it);
+      return { ...p, items };
+    }));
+    // 입력이 멈추면(0.9초) 매입 현황에 자동 반영 — 타이핑 중 중간값으로 등록되는 것 방지
+    const tkey = poId + ":" + itemIdx;
+    clearTimeout(poRcvTimers.current[tkey]);
+    poRcvTimers.current[tkey] = setTimeout(() => syncReceivedToIntake(poId, itemIdx), 900);
+  };
+  // ── 입고수량 → 매입 현황(fabricIntakes) 자동 반영 ──
+  // 발주 품목당 매입 행 1개를 유지(sourcePoItemId 링크): 수량을 고치면 같은 행이 업데이트되고,
+  // 지우면 자동 생성분만 삭제. '매입 전송'으로 이미 만든 행이 있으면 그 행을 이어받아 중복 등록 방지.
+  const poRcvTimers = useRef({});
+  const purchaseOrdersRef = useRef(purchaseOrders);
+  useEffect(() => { purchaseOrdersRef.current = purchaseOrders; }, [purchaseOrders]);
+  const fabricIntakesRef = useRef(fabricIntakes);
+  useEffect(() => { fabricIntakesRef.current = fabricIntakes; }, [fabricIntakes]);
+  const syncReceivedToIntake = (poId, itemIdx) => {
+    const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
+    if (!po) return;
+    const it = (po.items || [])[itemIdx];
+    if (!it || !(it.name || "").trim()) return;
+    const itemKey = it.id != null ? String(it.id) : poId + "#" + itemIdx;
+    const qty = parseFloat(it.receivedQty);
+    const has = !isNaN(qty) && qty > 0;
+    const arr = [...(fabricIntakesRef.current || [])];
+    let idx = arr.findIndex(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey);
+    if (idx < 0 && has) {
+      // '매입 전송'으로 만든 행(품목 링크 없음)이 있으면 이어받기 — 같은 발주서 + 같은 품목명
+      idx = arr.findIndex(r => r.sourcePoId === po.id && !r.sourcePoItemId && (r.materialName || "").trim() === (it.name || "").trim());
+    }
+    if (!has) {
+      // 입고수량을 지움 → 자동 생성한 행만 삭제 (매입 전송·수기 입력 행은 보존)
+      if (idx >= 0 && arr[idx].autoFromPO) {
+        arr.splice(idx, 1);
+        setFabricIntakes(arr);
+        showToast("매입 현황의 자동 입고 기록을 삭제했습니다", "info");
+      }
+      return;
+    }
+    if (idx >= 0) {
+      const cur = arr[idx];
+      if (parseFloat(cur.qty) === qty && cur.status === "입고완료") return; // 변화 없음
+      arr[idx] = { ...cur, qty: String(qty), status: "입고완료", sourcePoItemId: itemKey,
+        unit: it.unit || cur.unit, unitPrice: (it.unitPrice !== "" && it.unitPrice != null) ? it.unitPrice : cur.unitPrice };
+      setFabricIntakes(arr);
+      showToast(`매입 현황 업데이트: ${it.name} ${qty.toLocaleString()}${it.unit ? " " + it.unit : ""} 입고`, "success");
+      return;
+    }
+    const supName = (po.supplier?.name || "").trim();
+    arr.push({
+      id: uid(), date: new Date().toISOString().slice(0, 10), supplier: supName, inspector: "",
+      materialName: (it.name || "").trim(), qty: String(qty), unit: it.unit || "",
+      unitPrice: it.unitPrice || "", status: "입고완료",
+      note: po.title ? `발주 입고: ${po.title}` : "발주 입고",
+      sourcePoId: po.id, sourcePoItemId: itemKey, autoFromPO: true,
+    });
+    setFabricIntakes(arr);
+    if (supName) setPurchaseSubTabs(p2 => (p2 || []).some(t => t.name === supName) ? p2 : [...(p2 || []), { id: uid(), name: supName }]);
+    showToast(`매입 현황에 자동 등록: ${it.name} ${qty.toLocaleString()}${it.unit ? " " + it.unit : ""} 입고 (${supName || "공급처 미지정"})`, "success");
+  };
   const [poHistorySearch, setPoHistorySearch] = useState("");
   const [poHistorySupFilter, setPoHistorySupFilter] = useState("");
   const [poHistorySort, setPoHistorySort] = useState("date_desc"); // date_desc | date_asc | amount_desc | supplier
