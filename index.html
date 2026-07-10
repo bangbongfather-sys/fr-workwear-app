@@ -12039,10 +12039,9 @@ function App() {
   // 발주 품목당 매입 행 1개를 유지(sourcePoItemId 링크): 수량을 고치면 같은 행이 업데이트되고,
   // 지우면 자동 생성분만 삭제. '매입 전송'으로 이미 만든 행이 있으면 그 행을 이어받아 중복 등록 방지.
   const poRcvTimers = useRef({});
-  const purchaseOrdersRef = useRef(purchaseOrders);
-  useEffect(() => { purchaseOrdersRef.current = purchaseOrders; }, [purchaseOrders]);
-  const fabricIntakesRef = useRef(fabricIntakes);
-  useEffect(() => { fabricIntakesRef.current = fabricIntakes; }, [fabricIntakes]);
+  // 최신 상태 미러 — fabricIntakes는 아래에서 선언되므로(TDZ) null로 시작, 선언 직후 useEffect로 채움
+  const purchaseOrdersRef = useRef(null);
+  const fabricIntakesRef = useRef(null);
   const syncReceivedToIntake = (poId, itemIdx) => {
     const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
     if (!po) return;
