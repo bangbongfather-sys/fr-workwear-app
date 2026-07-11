@@ -9498,42 +9498,6 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* 명세서 원클릭 반영 */}
-      {stmt && (
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={() => setShowStmtImport(true)}
-            title={`${stmt.title} (${stmt.period}) PDF 수치를 그대로 반영`}
-            style={{ height: 34, padding: "0 12px", background: "var(--input-bg, #f2f2f7)", color: NAVY, border: "1px solid var(--divider)", borderRadius: 9, fontWeight: 700, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
-            ↓ 명세서 불러오기 (26.01~07)
-          </button>
-        </div>
-      )}
-      {stmt && showStmtImport && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,10,25,0.55)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setShowStmtImport(false)}>
-          <div style={{ background: "var(--surface)", borderRadius: 16, width: "min(560px, 100%)", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: "20px 22px" }} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: NAVY, marginBottom: 4 }}>{stmt.title} 반영</div>
-            <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 14 }}>{stmt.period} · 2026-07-10 작성 PDF 기준</div>
-            <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-              <tbody>
-                {[["기초 미지급잔액 (1/1)", stmt.openingBalance], ["기간 매입액 (VAT포함, 15건)", 983806560], ["기간 지급액 (11건)", 1000000000], ["기말 미지급잔액 (7/31)", stmt.expectedClosing]].map(([l, v]) => (
-                  <tr key={l} style={{ borderTop: "1px solid var(--divider)" }}>
-                    <td style={{ padding: "8px 4px", color: "var(--text2)" }}>{l}</td>
-                    <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{v.toLocaleString()}원</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ fontSize: 12, color: "var(--text2)", margin: "14px 0", lineHeight: 1.7 }}>
-              <b>입금(지급) 11건</b>을 이 원장에 넣고, <b>매입 15건</b>은 매입 현황에 기록해 자동 집계로 반영합니다. 기초잔액·전기이월 일자도 설정됩니다.<br/>
-              <span style={{ color: "#FF9500", fontWeight: 600 }}>⚠ 현재 {supplier}의 미지급 정산 입금 내역과 기간 내(26.01~07) 매입 현황 기록은 명세서 기준으로 <b>교체</b>됩니다.</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={() => setShowStmtImport(false)} style={{ height: 40, padding: "0 14px", background: "var(--input-bg, #f2f2f7)", color: "var(--text1)", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
-              <button className="btn-orange" onClick={applyStatement} style={{ height: 40, padding: "0 16px" }}>명세서로 채우기</button>
-            </div>
-          </div>
-        </div>
-      )}
       {/* 요약 */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         {kpi("기초 미지급잔액", opening)}
