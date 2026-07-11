@@ -9620,20 +9620,28 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
         {kpi("현재 미지급잔액", closing, closing > 0 ? "#FF4103" : "#00B493")}
       </div>
 
-      {/* 기초잔액 설정 + 매입/입금 직접 등록 */}
+      {/* 기초 설정(접이식) + 매입/입금 직접 등록 */}
       <div className="card">
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div>
-            <label className="po-label">기초 미지급잔액 (전기이월)</label>
-            <input type="number" placeholder="예: 875094051" value={cfg.openingBalance ?? ""} style={{ width: 170, textAlign: "right" }}
-              onChange={e => persist({ openingBalance: e.target.value })} />
-          </div>
-          <div>
-            <label className="po-label">전기이월 일자</label>
-            <input type="date" value={cfg.openingDate ?? ""} onChange={e => persist({ openingDate: e.target.value })} />
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setShowOpening(v => !v)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", color: "var(--text2)", fontSize: 12, fontWeight: 600, padding: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="settings" size={13} /> 기초 설정 <span style={{ fontSize: 10 }}>{showOpening ? "▲" : "▼"}</span>
+            <span style={{ fontWeight: 400, color: "var(--text3)" }}>· 기초 미지급잔액 {W(opening)}원{openDate ? ` (${openDate} 이후 매입 집계)` : ""}</span>
+          </button>
+          {showOpening && (
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--divider)" }}>
+              <div>
+                <label className="po-label">기초 미지급잔액 (전기이월)</label>
+                <input type="number" placeholder="예: 875094051" value={cfg.openingBalance ?? ""} style={{ width: 170, textAlign: "right" }}
+                  onChange={e => persist({ openingBalance: e.target.value })} />
+              </div>
+              <div>
+                <label className="po-label">전기이월 일자 <span style={{ fontWeight: 400, color: "var(--text3)" }}>— 이 날짜 이후 매입 현황만 집계</span></label>
+                <input type="date" value={cfg.openingDate ?? ""} onChange={e => persist({ openingDate: e.target.value })} />
+              </div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div>
               <label className="po-label">구분</label>
               <div style={{ display: "inline-flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 10, height: 42, alignItems: "center" }}>
