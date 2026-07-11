@@ -9393,7 +9393,180 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
   );
 }
 
-function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems = [], purchaseSubTabs = [], setPurchaseSubTabs, purchaseDateMemos = {}, setPurchaseDateMemos, focusSupplier = null, clearFocusSupplier, darkMode, apiKey = "" }) {
+// ─── 공급처 미지급금(결제원장) 뷰 — 신기방적 매입처 미지급금 명세서와 동일 구조 ───
+// 기초잔액(전기이월) + 기간 매입액(매입 현황 자동 집계, VAT 포함) − 지급액(직접 입력) = 미지급잔액.
+// 매입 행은 fabricIntakes에서 공급처·기준일로 자동 필터 (반품은 음수). 월계·누적잔액 자동 계산.
+function PayablesView({ supplier, fabricIntakes, payables, setPayables, darkMode }) {
+  const cfg = (payables || {})[supplier] || { openingBalance: "", openingDate: "", payments: [] };
+  const upd = (patch) => setPayables(prev => ({ ...(prev || {}), [supplier]: { openingBalance: cfg.openingBalance, openingDate: cfg.openingDate, payments: cfg.payments || [], ...patch } }));
+  const [payDraft, setPayDraft] = useState({ date: new Date().toISOString().slice(0, 10), amount: "", memo: "" });
+  const W = (n) => Math.round(n).toLocaleString();
+  const opening = parseFloat(cfg.openingBalance) || 0;
+  const openDate = cfg.openingDate || "";
+
+  // 매입 행 — 이 공급처 + 기준일 이후(당일 포함)만. 반품은 음수로 상쇄.
+  const buys = (fabricIntakes || [])
+    .filter(r => (r.supplier || "").trim() === supplier)
+    .filter(r => !openDate || (r.date || "") >= openDate)
+    .map(r => {
+      const sign = r.status === "반품" ? -1 : 1;
+      const qty = sign * (parseFloat(r.qty) || 0);
+      const supply = qty * (parseFloat(r.unitPrice) || 0);
+      return { kind: "buy", date: r.date || "", label: r.materialName || "(품목명 없음)", qty, total: Math.round(supply * 1.1), status: r.status || "" };
+    })
+    .filter(r => r.total !== 0);
+  const pays = (cfg.payments || []).map(p => ({ kind: "pay", date: p.date || "", label: p.memo || "지급", amount: parseFloat(p.amount) || 0, id: p.id }));
+  const rows = [...buys, ...pays].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.kind === "pay" ? -1 : 1));
+
+  const buyTotal = buys.reduce((s, r) => s + r.total, 0);
+  const payTotal = pays.reduce((s, r) => s + r.amount, 0);
+  const closing = opening + buyTotal - payTotal;
+
+  const addPayment = () => {
+    const amt = parseFloat(payDraft.amount);
+    if (!payDraft.date || isNaN(amt) || amt <= 0) { showToast("지급일과 금액을 입력하세요"); return; }
+    upd({ payments: [...(cfg.payments || []), { id: uid(), date: payDraft.date, amount: amt, memo: payDraft.memo.trim() }] });
+    setPayDraft({ date: payDraft.date, amount: "", memo: "" });
+    showToast(`지급 ${W(amt)}원 등록 완료`, "success");
+  };
+  const removePayment = (pid) => upd({ payments: (cfg.payments || []).filter(p => p.id !== pid) });
+
+  // 렌더용: 누적잔액 + 월계 행 삽입
+  const ledger = [];
+  let bal = opening;
+  let curYm = null, moBuy = 0, moPay = 0;
+  const pushMonth = () => { if (curYm !== null) ledger.push({ kind: "month", ym: curYm, buy: moBuy, pay: moPay }); };
+  for (const r of rows) {
+    const ym = (r.date || "").slice(0, 7);
+    if (ym !== curYm) { pushMonth(); curYm = ym; moBuy = 0; moPay = 0; }
+    if (r.kind === "buy") { bal += r.total; moBuy += r.total; } else { bal -= r.amount; moPay += r.amount; }
+    ledger.push({ ...r, bal });
+  }
+  pushMonth();
+
+  const kpi = (label, val, color) => (
+    <div className="card" style={{ flex: "1 1 160px", minWidth: 150 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 800, color: color || "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{W(val)}<span style={{ fontSize: 12, marginLeft: 2, color: "var(--text2)", fontWeight: 400 }}>원</span></div>
+    </div>
+  );
+  const td = { padding: "8px 10px", fontSize: 12.5, verticalAlign: "middle", borderTop: "1px solid var(--divider)", fontVariantNumeric: "tabular-nums" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* 요약 */}
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {kpi("기초 미지급잔액", opening)}
+        {kpi("기간 매입액 (VAT포함)", buyTotal)}
+        {kpi("기간 지급액", payTotal, "#00B493")}
+        {kpi("현재 미지급잔액", closing, closing > 0 ? "#FF4103" : "#00B493")}
+      </div>
+
+      {/* 기초잔액 설정 + 지급 등록 */}
+      <div className="card">
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div>
+            <label className="po-label">기초 미지급잔액 (전기이월)</label>
+            <input type="number" placeholder="예: 875094051" value={cfg.openingBalance ?? ""} style={{ width: 170, textAlign: "right" }}
+              onChange={e => upd({ openingBalance: e.target.value })} />
+          </div>
+          <div>
+            <label className="po-label">집계 기준일 <span style={{ fontWeight: 400, color: "var(--text3)" }}>— 이 날짜 이후 매입만 합산</span></label>
+            <input type="date" value={cfg.openingDate ?? ""} onChange={e => upd({ openingDate: e.target.value })} />
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div>
+              <label className="po-label">지급일</label>
+              <input type="date" value={payDraft.date} onChange={e => setPayDraft({ ...payDraft, date: e.target.value })} />
+            </div>
+            <div>
+              <label className="po-label">지급액</label>
+              <input type="number" placeholder="100000000" value={payDraft.amount} style={{ width: 140, textAlign: "right" }}
+                onChange={e => setPayDraft({ ...payDraft, amount: e.target.value })}
+                onKeyDown={e => e.key === "Enter" && addPayment()} />
+            </div>
+            <div>
+              <label className="po-label">메모</label>
+              <input placeholder="기업은행 이체 등" value={payDraft.memo} style={{ width: 150 }}
+                onChange={e => setPayDraft({ ...payDraft, memo: e.target.value })}
+                onKeyDown={e => e.key === "Enter" && addPayment()} />
+            </div>
+            <button className="btn-orange" onClick={addPayment} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 지급 등록</button>
+          </div>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text3)" }}>
+          매입액은 이 거래처의 매입 현황 기록(수량×단가 +VAT 10%)에서 자동 집계됩니다 · 반품은 음수로 상쇄 · 산식: 기초잔액 + 매입액 − 지급액 = 미지급잔액
+        </div>
+      </div>
+
+      {/* 결제원장 */}
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr style={{ fontSize: 11, color: "var(--text3)" }}>
+              <th style={{ padding: "9px 10px", textAlign: "left", width: 96 }}>거래일자</th>
+              <th style={{ padding: "9px 10px", textAlign: "left" }}>품목 / 내용</th>
+              <th style={{ padding: "9px 10px", textAlign: "right", width: 80 }}>수량</th>
+              <th style={{ padding: "9px 10px", textAlign: "right", width: 120 }}>매입액(VAT포함)</th>
+              <th style={{ padding: "9px 10px", textAlign: "right", width: 120 }}>지급액</th>
+              <th style={{ padding: "9px 10px", textAlign: "right", width: 130 }}>미지급잔액</th>
+              <th style={{ padding: "9px 10px", width: 40 }}></th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td style={td}>{openDate || "—"}</td>
+                <td style={{ ...td, fontWeight: 700 }}>전기이월 (기초잔액)</td>
+                <td style={td}></td><td style={td}></td><td style={td}></td>
+                <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{W(opening)}</td>
+                <td style={td}></td>
+              </tr>
+              {ledger.map((r, i) => r.kind === "month" ? (
+                <tr key={"m" + i} style={{ background: "var(--surface2)" }}>
+                  <td style={{ ...td, fontWeight: 800, fontSize: 11.5 }} colSpan={3}>월 계 ({+r.ym.slice(0, 4)}년 {+r.ym.slice(5, 7)}월)</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 800 }}>{r.buy ? W(r.buy) : ""}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 800, color: "#00B493" }}>{r.pay ? W(r.pay) : ""}</td>
+                  <td style={td}></td><td style={td}></td>
+                </tr>
+              ) : r.kind === "pay" ? (
+                <tr key={r.id || "p" + i} style={{ background: darkMode ? "rgba(0,122,255,0.10)" : "rgba(0,122,255,0.05)" }}>
+                  <td style={td}>{r.date}</td>
+                  <td style={{ ...td, color: "#007AFF", fontWeight: 600 }}>[지급] {r.label}</td>
+                  <td style={td}></td><td style={td}></td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#007AFF" }}>{W(r.amount)}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{W(r.bal)}</td>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <button onClick={() => removePayment(r.id)} title="지급 기록 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={"b" + i}>
+                  <td style={td}>{r.date}</td>
+                  <td style={td}>{r.label}{r.status === "반품" ? <span style={{ color: "#F04452", fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>반품</span> : null}</td>
+                  <td style={{ ...td, textAlign: "right", color: "var(--text2)" }}>{r.qty ? r.qty.toLocaleString() : ""}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 600, color: r.total < 0 ? "#F04452" : "var(--text1)" }}>{W(r.total)}</td>
+                  <td style={td}></td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{W(r.bal)}</td>
+                  <td style={td}></td>
+                </tr>
+              ))}
+              <tr style={{ background: "var(--accent-tonal)" }}>
+                <td style={{ ...td, fontWeight: 800 }} colSpan={3}>소 계</td>
+                <td style={{ ...td, textAlign: "right", fontWeight: 800 }}>{W(buyTotal)}</td>
+                <td style={{ ...td, textAlign: "right", fontWeight: 800, color: "#00B493" }}>{W(payTotal)}</td>
+                <td style={{ ...td, textAlign: "right", fontWeight: 800, color: closing > 0 ? "#FF4103" : "#00B493" }}>{W(closing)}</td>
+                <td style={td}></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {ledger.length === 0 && <div style={{ textAlign: "center", padding: 32, color: "var(--empty-color)", fontSize: 13 }}>아직 기록이 없습니다 — 기초잔액·기준일을 설정하고, 매입 현황에 입고를 기록하거나 지급을 등록하세요</div>}
+      </div>
+    </div>
+  );
+}
+
+function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems = [], purchaseSubTabs = [], setPurchaseSubTabs, purchaseDateMemos = {}, setPurchaseDateMemos, focusSupplier = null, clearFocusSupplier, darkMode, apiKey = "", payables = {}, setPayables }) {
   // 매입 서브탭: "dashboard" (종합 대시보드) | "all" (전체) | supplier name | "summary" (총합계)
   // 다른 메인 탭 갔다 와도(컴포넌트 unmount) 보던 거래처 탭 유지 — localStorage에 저장.
   // 저장된 거래처 탭이 삭제된 경우엔 dashboard로 폴백.
