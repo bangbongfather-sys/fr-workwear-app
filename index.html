@@ -9713,19 +9713,21 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#007AFF" }}>{W(r.amount)}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{W(r.bal)}</td>
                   <td style={{ ...td, textAlign: "center" }}>
-                    <button onClick={() => removeEntry(r.id)} title="이 기록 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button>
+                    <button onClick={() => removePayment(r.id)} title="이 입금 기록 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button>
                   </td>
                 </tr>
               ) : (
                 <tr key={r.id || "b" + i}>
                   <td style={td}>{r.date}</td>
-                  <td style={td}>{r.label}{r.isReturn ? <span style={{ color: "#F04452", fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>반품</span> : null}</td>
+                  <td style={td}>{r.label}
+                    {r.isReturn ? <span style={{ color: "#F04452", fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>반품</span> : null}
+                    {r.isManual ? <span title="여기서 직접 추가한 매입" style={{ fontSize: 9.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", padding: "2px 6px", borderRadius: 100, marginLeft: 6, verticalAlign: "middle" }}>수동</span> : null}</td>
                   <td style={{ ...td, textAlign: "right", color: "var(--text2)" }}>{r.qty ? r.qty.toLocaleString() : ""}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 600, color: r.amount < 0 ? "#F04452" : "var(--text1)" }}>{W(r.amount)}</td>
                   <td style={td}></td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{W(r.bal)}</td>
                   <td style={{ ...td, textAlign: "center" }}>
-                    <button onClick={() => removeEntry(r.id)} title="이 기록 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button>
+                    {r.isManual ? <button onClick={() => removeManualBuy(r.id)} title="이 수동 매입 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button> : null}
                   </td>
                 </tr>
               ))}
