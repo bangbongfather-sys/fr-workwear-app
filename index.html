@@ -9677,23 +9677,25 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
               ) : r.kind === "pay" ? (
                 <tr key={r.id || "p" + i} style={{ background: darkMode ? "rgba(0,122,255,0.10)" : "rgba(0,122,255,0.05)" }}>
                   <td style={td}>{r.date}</td>
-                  <td style={{ ...td, color: "#007AFF", fontWeight: 600 }}>[지급] {r.label}{r.fromCashFlow ? <span title="자금 운용 탭의 출금 기록에서 자동 반영 — 수정/삭제는 자금 운용에서" style={{ fontSize: 9.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", padding: "2px 6px", borderRadius: 100, marginLeft: 6, verticalAlign: "middle" }}>자금 운용</span> : null}</td>
+                  <td style={{ ...td, color: "#007AFF", fontWeight: 600 }}>[입금] {r.label}</td>
                   <td style={td}></td><td style={td}></td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#007AFF" }}>{W(r.amount)}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{W(r.bal)}</td>
                   <td style={{ ...td, textAlign: "center" }}>
-                    {r.fromCashFlow ? null : <button onClick={() => removePayment(r.id)} title="지급 기록 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button>}
+                    <button onClick={() => removeEntry(r.id)} title="이 기록 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button>
                   </td>
                 </tr>
               ) : (
-                <tr key={"b" + i}>
+                <tr key={r.id || "b" + i}>
                   <td style={td}>{r.date}</td>
-                  <td style={td}>{r.label}{r.status === "반품" ? <span style={{ color: "#F04452", fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>반품</span> : null}</td>
+                  <td style={td}>{r.label}{r.isReturn ? <span style={{ color: "#F04452", fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>반품</span> : null}</td>
                   <td style={{ ...td, textAlign: "right", color: "var(--text2)" }}>{r.qty ? r.qty.toLocaleString() : ""}</td>
-                  <td style={{ ...td, textAlign: "right", fontWeight: 600, color: r.total < 0 ? "#F04452" : "var(--text1)" }}>{W(r.total)}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 600, color: r.amount < 0 ? "#F04452" : "var(--text1)" }}>{W(r.amount)}</td>
                   <td style={td}></td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{W(r.bal)}</td>
-                  <td style={td}></td>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <button onClick={() => removeEntry(r.id)} title="이 기록 삭제" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text3)", fontSize: 13, fontFamily: "inherit" }}>×</button>
+                  </td>
                 </tr>
               ))}
               <tr style={{ background: "var(--accent-tonal)" }}>
