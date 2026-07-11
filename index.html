@@ -9429,7 +9429,13 @@ function PayablesView({ supplier, fabricIntakes, payables, setPayables, darkMode
       return { kind: "buy", date: r.date || "", label: r.materialName || "(품목명 없음)", qty, total: Math.round(supply * 1.1), status: r.status || "" };
     })
     .filter(r => r.total !== 0);
-  const pays = (cfg.payments || []).map(p => ({ kind: "pay", date: p.date || "", label: p.memo || "지급", amount: parseFloat(p.amount) || 0, id: p.id }));
+  // 지급 = ① 이 화면에서 직접 등록한 지급 + ② 자금 운용(자금흐름)의 이 거래처 출금 기록 (자동 반영)
+  const ownPays = (cfg.payments || []).map(p => ({ kind: "pay", date: p.date || "", label: p.memo || "지급", amount: parseFloat(p.amount) || 0, id: p.id }));
+  const cfPays = (cashFlows || [])
+    .filter(c => c.type === "출금" && payablesNameMatch(c.client, supplier))
+    .filter(c => !openDate || (c.date || "") >= openDate)
+    .map(c => ({ kind: "pay", date: c.date || "", label: (c.category || "").trim() || "출금", amount: parseFloat(c.amount) || 0, fromCashFlow: true }));
+  const pays = [...ownPays, ...cfPays];
   const rows = [...buys, ...pays].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.kind === "pay" ? -1 : 1));
 
   const buyTotal = buys.reduce((s, r) => s + r.total, 0);
