@@ -9878,7 +9878,26 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
         ? <PurchaseDashboardView fabricIntakes={fabricIntakes} dashStatusRef={dashStatusRef} dashMonthlyRef={dashMonthlyRef} dashSupTopRef={dashSupTopRef} dashItemTopRef={dashItemTopRef} darkMode={darkMode} setActiveSubTab={setActiveSubTab} />
         : activeSubTab === "summary"
           ? <PurchaseSummaryView fabricIntakes={fabricIntakes} totalSumRef={totalSumRef} monthlyTrendRef={monthlyTrendRef} matPieRef={matPieRef} darkMode={darkMode} setActiveSubTab={setActiveSubTab} />
-          : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} laborItems={laborItems} purchaseDateMemos={purchaseDateMemos} setPurchaseDateMemos={setPurchaseDateMemos} darkMode={darkMode} filterSupplier={activeSubTab === "all" ? "" : activeSubTab} apiKey={apiKey} />
+          : activeSubTab === "all"
+            ? <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} laborItems={laborItems} purchaseDateMemos={purchaseDateMemos} setPurchaseDateMemos={setPurchaseDateMemos} darkMode={darkMode} filterSupplier="" apiKey={apiKey} />
+            : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {/* 거래처 탭 내부 뷰 전환: 입고 내역 ↔ 미지급 정산(결제원장) */}
+                <div style={{ display: "inline-flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 100, width: "fit-content" }}>
+                  {[["list", "입고 내역"], ["payables", "미지급 정산"]].map(([k, label]) => (
+                    <button key={k} onClick={() => { setSupplierView(k); save("frw_purchase_supplier_view", k); }} style={{
+                      padding: "7px 16px", border: "none", borderRadius: 100, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                      background: supplierView === k ? "var(--accent)" : "transparent",
+                      color: supplierView === k ? "#fff" : "var(--text2)",
+                      transition: "all 0.15s",
+                    }}>{label}</button>
+                  ))}
+                </div>
+                {supplierView === "payables"
+                  ? <PayablesView supplier={activeSubTab} fabricIntakes={fabricIntakes} payables={payables} setPayables={setPayables} darkMode={darkMode} />
+                  : <PurchaseListView fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} materials={materials} laborItems={laborItems} purchaseDateMemos={purchaseDateMemos} setPurchaseDateMemos={setPurchaseDateMemos} darkMode={darkMode} filterSupplier={activeSubTab} apiKey={apiKey} />}
+              </div>
+            )
       }
     </div>
   );
