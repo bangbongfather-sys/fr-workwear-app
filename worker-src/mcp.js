@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-11-payables-independent", note: "미지급 정산 독립 원장화 — 매입/입금 직접 입력, 자금운용·매입현황 자동연동 해제 (기존값 이관)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-11-payables-auto-buy", note: "미지급 정산: 매입=매입현황 자동집계 복원, 입금=직접입력, 자금운용 비연동, 기초설정 접이식 (중복없이 이관)" }) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
