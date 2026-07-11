@@ -9576,6 +9576,8 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
     return (purchaseSubTabs || []).some(t => t.name === saved) ? saved : "dashboard";
   });
   useEffect(() => { save("frw_purchase_active_subtab", activeSubTab); }, [activeSubTab]);
+  // 거래처 탭 내부 뷰(입고 내역 | 미지급 정산) — 탭 이탈 후 복귀 시에도 유지
+  const [supplierView, setSupplierView] = useState(() => load("frw_purchase_supplier_view", "list"));
   // 발주서 → 매입 전송 직후: 해당 거래처 서브탭으로 자동 전환 (포커스 1회 소비)
   useEffect(() => {
     if (focusSupplier) {
