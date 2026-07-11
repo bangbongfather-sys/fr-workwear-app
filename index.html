@@ -9410,65 +9410,6 @@ function payablesNameMatch(a, b) {
   return x === y || (x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x)));
 }
 
-// ─── 신기방적(주) 미지급금 명세서 스냅샷 (2026-01-01 ~ 2026-07-31, 2026-07-10 작성 PDF) ───
-// 단가는 명세서 공급가액÷수량으로 역산 — 수량×단가×1.1 합계가 명세서와 1원 단위까지 일치함을 검증 완료.
-// (매입 VAT포함 983,806,560 / 지급 1,000,000,000 / 기말 858,900,611)
-const SHINGI_STATEMENT = {
-  supplier: "신기방적",
-  title: "신기방적(주) 미지급금 명세서",
-  period: "2026-01-01 ~ 2026-07-31",
-  openingBalance: 875094051,
-  openingDate: "2026-01-01",
-  periodEnd: "2026-07-31",
-  cfExcludeBefore: "2026-08-01", // 이 날짜 이전 자금 운용 출금은 명세서 지급과 중복이므로 제외
-  expectedClosing: 858900611,
-  payMemo: "기업(24100057204036)",
-  payments: [
-    ["2026-01-13", 100000000], ["2026-02-10", 100000000],
-    ["2026-03-10", 10000000], ["2026-03-10", 90000000],
-    ["2026-04-11", 100000000], ["2026-05-11", 100000000], ["2026-05-12", 100000000],
-    ["2026-06-10", 100000000], ["2026-06-12", 100000000],
-    ["2026-07-10", 100000000], ["2026-07-10", 100000000],
-  ],
-  buys: [
-    ["2026-03-31", "방염 매쉬 대체용 트리코트 Navy", 370, 13500],
-    ["2026-03-31", "방염 PK 니트 (AFK185900) D/Grey(64/34.5/1.5)", 1986.8, 20300],
-    ["2026-03-31", "M-A/FR 65/35 발목시보리 565gsm 9인치 Navy", 2029, 8000],
-    ["2026-03-31", "M-A/FR 65/35 손목시보리 565gsm 7인치 Grey", 2185, 7500],
-    ["2026-03-31", "방염 하복 상의회색(핀체크) AFP155537", 4042.5, 20300],
-    ["2026-03-31", "방염 하복 하의 겉감 Navy AFL165995", 1306.5, 21700],
-    ["2026-03-31", "방염 하복 매쉬망사 Navy AFN115966", 2799.5, 13500],
-    ["2026-03-31", "방염 하복 상의 메란지데님 AFP160996", 10086, 22000],
-    ["2026-03-31", "방염 PK니트(AFK185900) D/Grey (64/34.5/1.5)", 1890.7, 20300],
-    ["2026-05-29", "버프원단 140g D/G AFK1401018 (50/48.5/1.5)", 3497, 14000],
-    ["2026-05-29", "방염하복 하의 겉감 Navy 165g (AFL165907)", 509, 21700],
-    ["2026-06-30", "방열 등록 주머니감 115g Navy(AFP115855)", 3344, 15800],
-    ["2026-06-30", "방염 하복 하의 165g Navy(AFR225948)", 856.5, 21700],
-    ["2026-06-30", "방염 춘추 상의배색 M/Blue(AFR225948)", 6456.5, 27500],
-    ["2026-06-30", "방열 등록 활동안감(AFP1201035)+오렌지Pad 110g", 4603, 21500],
-  ],
-};
-
-// 레거시(payments + 매입현황 자동집계) → 독립 원장 entries 로 1회 이관용 계산 (결정적 id).
-function computeLegacyPayableEntries(cfg, fabricIntakes, supplier) {
-  const openDate = (cfg && cfg.openingDate) || "";
-  const pays = ((cfg && cfg.payments) || []).map((p, i) => ({
-    id: "lp" + (p.id != null ? p.id : (i + "_" + (p.amount || 0))), type: "pay",
-    date: p.date || "", amount: parseFloat(p.amount) || 0, memo: p.memo || "",
-  }));
-  const buys = (fabricIntakes || [])
-    .filter(r => payablesNameMatch(r.supplier, supplier))
-    .filter(r => !openDate || (r.date || "") >= openDate)
-    .map((r, i) => {
-      const sign = r.status === "반품" ? -1 : 1;
-      const qty = sign * (parseFloat(r.qty) || 0);
-      const amt = Math.round(qty * (parseFloat(r.unitPrice) || 0) * 1.1);
-      return { id: "lb" + (r.id != null ? r.id : i), type: "buy", date: r.date || "", amount: amt, memo: r.materialName || "", qty, isReturn: r.status === "반품" };
-    })
-    .filter(r => r.amount !== 0);
-  return [...pays, ...buys];
-}
-
 function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, setPayables, darkMode }) {
   const cfg = (payables || {})[supplier] || { openingBalance: "", openingDate: "", payments: [], manualBuys: [] };
   const W = (n) => Math.round(n).toLocaleString();
@@ -9527,25 +9468,6 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
   };
   const removePayment = (pid) => persist({ payments: (cfg.payments || []).filter(p => p.id !== pid) });
   const removeManualBuy = (bid) => persist({ manualBuys: (cfg.manualBuys || []).filter(b => b.id !== bid) });
-
-  // 명세서 → 지급 11건(payments) + 매입 15건은 매입 현황(fabricIntakes)에 기록(자동집계로 반영)
-  const stmt = payablesNameMatch(supplier, SHINGI_STATEMENT.supplier) ? SHINGI_STATEMENT : null;
-  const [showStmtImport, setShowStmtImport] = useState(false);
-  const applyStatement = () => {
-    if (!stmt) return;
-    setPayables(prev => ({ ...(prev || {}), [supplier]: {
-      openingBalance: String(stmt.openingBalance), openingDate: stmt.openingDate,
-      payments: stmt.payments.map(([d, a]) => ({ id: uid(), date: d, amount: a, memo: stmt.payMemo })),
-      manualBuys: [],
-    } }));
-    if (setFabricIntakes) setFabricIntakes(prev => {
-      const kept = (prev || []).filter(r => !(payablesNameMatch(r.supplier, supplier) && (r.date || "") >= stmt.openingDate && (r.date || "") <= stmt.periodEnd));
-      const added = stmt.buys.map(([d, nm, q, up]) => ({ id: uid(), date: d, supplier, inspector: "", materialName: nm, qty: String(q), unit: "yard", unitPrice: String(up), status: "입고완료", note: "명세서 반영(2026-07-10 PDF)", fromStatement: true }));
-      return [...kept, ...added];
-    });
-    setShowStmtImport(false);
-    showToast(`명세서 반영 완료 — 기말 미지급잔액 ${stmt.expectedClosing.toLocaleString()}원`, "success");
-  };
 
   // 정렬: 날짜순, 같은 날짜면 입금 먼저
   const rows = [...autoBuys, ...manualBuyRows, ...payRows].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.kind === "pay" ? -1 : 1));
