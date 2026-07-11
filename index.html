@@ -9449,77 +9449,85 @@ const SHINGI_STATEMENT = {
   ],
 };
 
-function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, setPayables, darkMode, cashFlows = [] }) {
-  const cfg = (payables || {})[supplier] || { openingBalance: "", openingDate: "", payments: [] };
-  const upd = (patch) => setPayables(prev => ({ ...(prev || {}), [supplier]: { openingBalance: cfg.openingBalance, openingDate: cfg.openingDate, payments: cfg.payments || [], ...patch } }));
-  const [payDraft, setPayDraft] = useState({ date: new Date().toISOString().slice(0, 10), amount: "", memo: "" });
+// 레거시(payments + 매입현황 자동집계) → 독립 원장 entries 로 1회 이관용 계산 (결정적 id).
+function computeLegacyPayableEntries(cfg, fabricIntakes, supplier) {
+  const openDate = (cfg && cfg.openingDate) || "";
+  const pays = ((cfg && cfg.payments) || []).map((p, i) => ({
+    id: "lp" + (p.id != null ? p.id : (i + "_" + (p.amount || 0))), type: "pay",
+    date: p.date || "", amount: parseFloat(p.amount) || 0, memo: p.memo || "",
+  }));
+  const buys = (fabricIntakes || [])
+    .filter(r => payablesNameMatch(r.supplier, supplier))
+    .filter(r => !openDate || (r.date || "") >= openDate)
+    .map((r, i) => {
+      const sign = r.status === "반품" ? -1 : 1;
+      const qty = sign * (parseFloat(r.qty) || 0);
+      const amt = Math.round(qty * (parseFloat(r.unitPrice) || 0) * 1.1);
+      return { id: "lb" + (r.id != null ? r.id : i), type: "buy", date: r.date || "", amount: amt, memo: r.materialName || "", qty, isReturn: r.status === "반품" };
+    })
+    .filter(r => r.amount !== 0);
+  return [...pays, ...buys];
+}
+
+function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, setPayables, darkMode }) {
+  const cfg = (payables || {})[supplier] || { openingBalance: "", openingDate: "", entries: undefined };
   const W = (n) => Math.round(n).toLocaleString();
   const opening = parseFloat(cfg.openingBalance) || 0;
   const openDate = cfg.openingDate || "";
+  const today = new Date().toISOString().slice(0, 10);
+  const [draft, setDraft] = useState({ type: "pay", date: today, amount: "", memo: "" });
 
-  // 매입 행 — 이 공급처 + 기준일 이후(당일 포함)만. 반품은 음수로 상쇄.
-  const buys = (fabricIntakes || [])
-    .filter(r => (r.supplier || "").trim() === supplier)
-    .filter(r => !openDate || (r.date || "") >= openDate)
-    .map(r => {
-      const sign = r.status === "반품" ? -1 : 1;
-      const qty = sign * (parseFloat(r.qty) || 0);
-      const supply = qty * (parseFloat(r.unitPrice) || 0);
-      return { kind: "buy", date: r.date || "", label: r.materialName || "(품목명 없음)", qty, total: Math.round(supply * 1.1), status: r.status || "" };
-    })
-    .filter(r => r.total !== 0);
-  // 지급 = ① 이 화면에서 직접 등록한 지급 + ② 자금 운용(자금흐름)의 이 거래처 출금 기록 (자동 반영)
-  const ownPays = (cfg.payments || []).map(p => ({ kind: "pay", date: p.date || "", label: p.memo || "지급", amount: parseFloat(p.amount) || 0, id: p.id }));
-  const cfPays = (cashFlows || [])
-    .filter(c => c.type === "출금" && payablesNameMatch(c.client, supplier))
-    .filter(c => !openDate || (c.date || "") >= openDate)
-    // 명세서 반영 기간의 자금 운용 출금은 명세서 지급과 중복 → 제외 (cfExcludeBefore 이후 것만 자동 반영)
-    .filter(c => !cfg.cfExcludeBefore || (c.date || "") >= cfg.cfExcludeBefore)
-    .map(c => ({ kind: "pay", date: c.date || "", label: (c.category || "").trim() || "출금", amount: parseFloat(c.amount) || 0, fromCashFlow: true }));
-  const pays = [...ownPays, ...cfPays];
+  // 독립 원장 entries. 없으면 레거시(지급+매입현황)를 이관해 채운다(첫 표시는 fallback로 끊김 없이).
+  const entries = Array.isArray(cfg.entries) ? cfg.entries : computeLegacyPayableEntries(cfg, fabricIntakes, supplier);
+  useEffect(() => {
+    const c = (payables || {})[supplier];
+    if (c && Array.isArray(c.entries)) return; // 이미 독립 원장 → 스킵
+    const migrated = computeLegacyPayableEntries(c, fabricIntakes, supplier);
+    setPayables(prev => {
+      const cc = (prev || {})[supplier] || {};
+      if (Array.isArray(cc.entries)) return prev;
+      return { ...(prev || {}), [supplier]: { openingBalance: cc.openingBalance ?? "", openingDate: cc.openingDate ?? "", entries: migrated } };
+    });
+  }, [supplier, payables, fabricIntakes]);
 
-  // 명세서 원클릭 반영 (해당 공급처 스냅샷이 있을 때만 버튼 노출)
+  // 저장 헬퍼 — entries 를 항상 보존하며 부분 업데이트
+  const entriesRef = useRef(entries); entriesRef.current = entries;
+  const persist = (patch) => setPayables(prev => {
+    const c = (prev || {})[supplier] || {};
+    const base = Array.isArray(c.entries) ? c.entries : entriesRef.current;
+    return { ...(prev || {}), [supplier]: { openingBalance: c.openingBalance ?? "", openingDate: c.openingDate ?? "", entries: base, ...patch } };
+  });
+  const addEntry = () => {
+    const amt = parseFloat(draft.amount);
+    if (!draft.date || isNaN(amt) || amt <= 0) { showToast("거래일과 금액을 입력하세요"); return; }
+    const ent = { id: uid(), type: draft.type, date: draft.date, amount: amt, memo: draft.memo.trim() };
+    persist({ entries: [...entriesRef.current, ent] });
+    setDraft({ type: draft.type, date: draft.date, amount: "", memo: "" });
+    showToast(`${draft.type === "buy" ? "매입" : "입금"} ${W(amt)}원 등록 완료`, "success");
+  };
+  const removeEntry = (eid) => persist({ entries: entriesRef.current.filter(e => e.id !== eid) });
+
+  // 명세서 원클릭 반영 (해당 공급처 스냅샷이 있을 때만 버튼 노출) — 독립 원장 entries 로 직접 기록
   const stmt = payablesNameMatch(supplier, SHINGI_STATEMENT.supplier) ? SHINGI_STATEMENT : null;
   const [showStmtImport, setShowStmtImport] = useState(false);
-  const stmtExistingBuys = stmt ? (fabricIntakes || []).filter(r =>
-    payablesNameMatch(r.supplier, supplier) && (r.date || "") >= stmt.openingDate && (r.date || "") <= stmt.periodEnd
-  ).length : 0;
-  const applyStatement = (replaceBuys) => {
+  const applyStatement = () => {
     if (!stmt) return;
-    setPayables(prev => ({ ...(prev || {}), [supplier]: {
-      openingBalance: String(stmt.openingBalance),
-      openingDate: stmt.openingDate,
-      cfExcludeBefore: stmt.cfExcludeBefore,
-      payments: stmt.payments.map(([d, a]) => ({ id: uid(), date: d, amount: a, memo: stmt.payMemo })),
-    } }));
-    if (replaceBuys && setFabricIntakes) {
-      setFabricIntakes(prev => {
-        const kept = (prev || []).filter(r => !(payablesNameMatch(r.supplier, supplier) && (r.date || "") >= stmt.openingDate && (r.date || "") <= stmt.periodEnd));
-        const added = stmt.buys.map(([d, nm, q, up]) => ({
-          id: uid(), date: d, supplier, inspector: "",
-          materialName: nm, qty: String(q), unit: "yard", unitPrice: String(up),
-          status: "입고완료", note: "명세서 반영(2026-07-10 PDF)", fromStatement: true,
-        }));
-        return [...kept, ...added];
-      });
-    }
+    const payEntries = stmt.payments.map(([d, a]) => ({ id: uid(), type: "pay", date: d, amount: a, memo: stmt.payMemo }));
+    const buyEntries = stmt.buys.map(([d, nm, q, up]) => ({ id: uid(), type: "buy", date: d, amount: Math.round(q * up * 1.1), memo: nm, qty: q }));
+    setPayables(prev => ({ ...(prev || {}), [supplier]: { openingBalance: String(stmt.openingBalance), openingDate: stmt.openingDate, entries: [...payEntries, ...buyEntries] } }));
     setShowStmtImport(false);
     showToast(`명세서 반영 완료 — 기말 미지급잔액 ${stmt.expectedClosing.toLocaleString()}원`, "success");
   };
-  const rows = [...buys, ...pays].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.kind === "pay" ? -1 : 1));
 
-  const buyTotal = buys.reduce((s, r) => s + r.total, 0);
-  const payTotal = pays.reduce((s, r) => s + r.amount, 0);
+  // 정렬: 날짜순, 같은 날짜면 입금 먼저
+  const rows = entries.map(e => ({
+    kind: e.type, date: e.date || "", label: e.memo || (e.type === "buy" ? "(내용 없음)" : "입금"),
+    amount: e.amount, qty: e.qty, isReturn: e.isReturn, id: e.id,
+  })).sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.kind === "pay" ? -1 : 1));
+
+  const buyTotal = entries.filter(e => e.type === "buy").reduce((s, e) => s + (e.amount || 0), 0);
+  const payTotal = entries.filter(e => e.type === "pay").reduce((s, e) => s + (e.amount || 0), 0);
   const closing = opening + buyTotal - payTotal;
-
-  const addPayment = () => {
-    const amt = parseFloat(payDraft.amount);
-    if (!payDraft.date || isNaN(amt) || amt <= 0) { showToast("지급일과 금액을 입력하세요"); return; }
-    upd({ payments: [...(cfg.payments || []), { id: uid(), date: payDraft.date, amount: amt, memo: payDraft.memo.trim() }] });
-    setPayDraft({ date: payDraft.date, amount: "", memo: "" });
-    showToast(`지급 ${W(amt)}원 등록 완료`, "success");
-  };
-  const removePayment = (pid) => upd({ payments: (cfg.payments || []).filter(p => p.id !== pid) });
 
   // 렌더용: 누적잔액 + 월계 행 삽입
   const ledger = [];
