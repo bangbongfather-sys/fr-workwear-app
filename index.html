@@ -9596,41 +9596,53 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
         {kpi("현재 미지급잔액", closing, closing > 0 ? "#FF4103" : "#00B493")}
       </div>
 
-      {/* 기초잔액 설정 + 지급 등록 */}
+      {/* 기초잔액 설정 + 매입/입금 직접 등록 */}
       <div className="card">
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div>
             <label className="po-label">기초 미지급잔액 (전기이월)</label>
             <input type="number" placeholder="예: 875094051" value={cfg.openingBalance ?? ""} style={{ width: 170, textAlign: "right" }}
-              onChange={e => upd({ openingBalance: e.target.value })} />
+              onChange={e => persist({ openingBalance: e.target.value })} />
           </div>
           <div>
-            <label className="po-label">집계 기준일 <span style={{ fontWeight: 400, color: "var(--text3)" }}>— 이 날짜 이후 매입만 합산</span></label>
-            <input type="date" value={cfg.openingDate ?? ""} onChange={e => upd({ openingDate: e.target.value })} />
+            <label className="po-label">전기이월 일자</label>
+            <input type="date" value={cfg.openingDate ?? ""} onChange={e => persist({ openingDate: e.target.value })} />
           </div>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div>
-              <label className="po-label">지급일</label>
-              <input type="date" value={payDraft.date} onChange={e => setPayDraft({ ...payDraft, date: e.target.value })} />
+              <label className="po-label">구분</label>
+              <div style={{ display: "inline-flex", gap: 4, background: "var(--surface2)", padding: 3, borderRadius: 10, height: 42, alignItems: "center" }}>
+                {[["buy", "매입"], ["pay", "입금"]].map(([k, label]) => (
+                  <button key={k} onClick={() => setDraft({ ...draft, type: k })} style={{
+                    padding: "6px 14px", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                    background: draft.type === k ? (k === "buy" ? "#FF4103" : "#007AFF") : "transparent",
+                    color: draft.type === k ? "#fff" : "var(--text2)", transition: "all 0.15s",
+                  }}>{label}</button>
+                ))}
+              </div>
             </div>
             <div>
-              <label className="po-label">지급액</label>
-              <input type="number" placeholder="100000000" value={payDraft.amount} style={{ width: 140, textAlign: "right" }}
-                onChange={e => setPayDraft({ ...payDraft, amount: e.target.value })}
-                onKeyDown={e => e.key === "Enter" && addPayment()} />
+              <label className="po-label">거래일</label>
+              <input type="date" value={draft.date} onChange={e => setDraft({ ...draft, date: e.target.value })} />
             </div>
             <div>
-              <label className="po-label">메모</label>
-              <input placeholder="기업은행 이체 등" value={payDraft.memo} style={{ width: 150 }}
-                onChange={e => setPayDraft({ ...payDraft, memo: e.target.value })}
-                onKeyDown={e => e.key === "Enter" && addPayment()} />
+              <label className="po-label">{draft.type === "buy" ? "매입액(VAT포함)" : "입금액"}</label>
+              <input type="number" placeholder="100000000" value={draft.amount} style={{ width: 140, textAlign: "right" }}
+                onChange={e => setDraft({ ...draft, amount: e.target.value })}
+                onKeyDown={e => e.key === "Enter" && addEntry()} />
             </div>
-            <button className="btn-orange" onClick={addPayment} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 지급 등록</button>
+            <div>
+              <label className="po-label">내용 / 메모</label>
+              <input placeholder={draft.type === "buy" ? "품목명 등" : "기업은행 이체 등"} value={draft.memo} style={{ width: 150 }}
+                onChange={e => setDraft({ ...draft, memo: e.target.value })}
+                onKeyDown={e => e.key === "Enter" && addEntry()} />
+            </div>
+            <button className="btn-orange" onClick={addEntry} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap", background: draft.type === "pay" ? "#007AFF" : undefined }}>+ {draft.type === "buy" ? "매입" : "입금"} 등록</button>
           </div>
         </div>
         <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text3)" }}>
-          매입액은 이 거래처의 매입 현황 기록(수량×단가 +VAT 10%)에서, <b>지급액은 자금 운용 탭의 이 거래처 출금 기록에서도 자동 반영</b>됩니다 (이미 자금 운용에 적은 결제는 여기 또 입력하지 마세요 — 중복 계산) · 반품은 음수로 상쇄 · 산식: 기초잔액 + 매입액 − 지급액 = 미지급잔액
+          이 원장은 <b>여기서 직접 입력한 매입·입금만</b> 반영되는 독립 원장입니다 — 자금 운용·매입 현황과 자동 연동되지 않습니다 · 매입은 미지급을 늘리고 입금(지급)은 줄입니다 · 산식: 기초잔액 + 매입 − 입금 = 미지급잔액
         </div>
       </div>
 
