@@ -9578,14 +9578,12 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
               </tbody>
             </table>
             <div style={{ fontSize: 12, color: "var(--text2)", margin: "14px 0", lineHeight: 1.7 }}>
-              반영 내용: 기초잔액·기준일 설정 + <b>지급 11건</b> 등록 + <b>매입 15건</b>을 매입 현황에 추가.<br/>
-              {stmtExistingBuys > 0 && <span style={{ color: "#FF9500", fontWeight: 600 }}>⚠ 기간 내(26.01~07) 기존 {supplier} 매입 기록 {stmtExistingBuys}건은 명세서와 중복되므로 <b>교체(삭제 후 명세서 기준 재등록)</b>됩니다.<br/></span>}
-              26.08.01 이전 자금 운용 출금은 명세서 지급과 중복이라 이 원장에서 자동 제외되고, 이후 출금부터 다시 자동 반영됩니다.
+              이 미지급 정산 원장에 <b>매입 15건 + 입금(지급) 11건</b>을 그대로 넣고 기초잔액·전기이월 일자를 설정합니다.<br/>
+              <span style={{ color: "#FF9500", fontWeight: 600 }}>⚠ 현재 {supplier} 미지급 정산에 있는 내역은 명세서 기준으로 <b>교체</b>됩니다.</span> (매입 현황·자금 운용 데이터는 건드리지 않습니다)
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
               <button onClick={() => setShowStmtImport(false)} style={{ height: 40, padding: "0 14px", background: "var(--input-bg, #f2f2f7)", color: "var(--text1)", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
-              <button onClick={() => applyStatement(false)} title="매입 현황은 건드리지 않고 기초잔액·지급만 반영" style={{ height: 40, padding: "0 14px", background: "var(--input-bg, #f2f2f7)", color: NAVY, border: "1px solid var(--divider)", borderRadius: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>지급·잔액만 반영</button>
-              <button className="btn-orange" onClick={() => applyStatement(true)} style={{ height: 40, padding: "0 16px" }}>전체 반영 (권장)</button>
+              <button className="btn-orange" onClick={applyStatement} style={{ height: 40, padding: "0 16px" }}>명세서로 채우기</button>
             </div>
           </div>
         </div>
