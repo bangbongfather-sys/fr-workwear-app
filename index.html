@@ -9396,7 +9396,21 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
 // ─── 공급처 미지급금(결제원장) 뷰 — 신기방적 매입처 미지급금 명세서와 동일 구조 ───
 // 기초잔액(전기이월) + 기간 매입액(매입 현황 자동 집계, VAT 포함) − 지급액(직접 입력) = 미지급잔액.
 // 매입 행은 fabricIntakes에서 공급처·기준일로 자동 필터 (반품은 음수). 월계·누적잔액 자동 계산.
-function PayablesView({ supplier, fabricIntakes, payables, setPayables, darkMode }) {
+// 공급처명 매칭용 정규화 — "(주)", "（주）", "㈜", "주식회사", 공백·괄호 차이를 흡수
+// (자금 운용에 "신기방적（주）"로, 매입 탭에 "신기방적"으로 적어도 같은 회사로 인식)
+function payablesNameNorm(s) {
+  return String(s || "")
+    .replace(/\(주\)|（주）|㈜|주식회사/g, "")
+    .replace(/[\s()（）\[\],.·]/g, "")
+    .toLowerCase();
+}
+function payablesNameMatch(a, b) {
+  const x = payablesNameNorm(a), y = payablesNameNorm(b);
+  if (!x || !y) return false;
+  return x === y || (x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x)));
+}
+
+function PayablesView({ supplier, fabricIntakes, payables, setPayables, darkMode, cashFlows = [] }) {
   const cfg = (payables || {})[supplier] || { openingBalance: "", openingDate: "", payments: [] };
   const upd = (patch) => setPayables(prev => ({ ...(prev || {}), [supplier]: { openingBalance: cfg.openingBalance, openingDate: cfg.openingDate, payments: cfg.payments || [], ...patch } }));
   const [payDraft, setPayDraft] = useState({ date: new Date().toISOString().slice(0, 10), amount: "", memo: "" });
