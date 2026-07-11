@@ -9473,8 +9473,39 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
   const cfPays = (cashFlows || [])
     .filter(c => c.type === "출금" && payablesNameMatch(c.client, supplier))
     .filter(c => !openDate || (c.date || "") >= openDate)
+    // 명세서 반영 기간의 자금 운용 출금은 명세서 지급과 중복 → 제외 (cfExcludeBefore 이후 것만 자동 반영)
+    .filter(c => !cfg.cfExcludeBefore || (c.date || "") >= cfg.cfExcludeBefore)
     .map(c => ({ kind: "pay", date: c.date || "", label: (c.category || "").trim() || "출금", amount: parseFloat(c.amount) || 0, fromCashFlow: true }));
   const pays = [...ownPays, ...cfPays];
+
+  // 명세서 원클릭 반영 (해당 공급처 스냅샷이 있을 때만 버튼 노출)
+  const stmt = payablesNameMatch(supplier, SHINGI_STATEMENT.supplier) ? SHINGI_STATEMENT : null;
+  const [showStmtImport, setShowStmtImport] = useState(false);
+  const stmtExistingBuys = stmt ? (fabricIntakes || []).filter(r =>
+    payablesNameMatch(r.supplier, supplier) && (r.date || "") >= stmt.openingDate && (r.date || "") <= stmt.periodEnd
+  ).length : 0;
+  const applyStatement = (replaceBuys) => {
+    if (!stmt) return;
+    setPayables(prev => ({ ...(prev || {}), [supplier]: {
+      openingBalance: String(stmt.openingBalance),
+      openingDate: stmt.openingDate,
+      cfExcludeBefore: stmt.cfExcludeBefore,
+      payments: stmt.payments.map(([d, a]) => ({ id: uid(), date: d, amount: a, memo: stmt.payMemo })),
+    } }));
+    if (replaceBuys && setFabricIntakes) {
+      setFabricIntakes(prev => {
+        const kept = (prev || []).filter(r => !(payablesNameMatch(r.supplier, supplier) && (r.date || "") >= stmt.openingDate && (r.date || "") <= stmt.periodEnd));
+        const added = stmt.buys.map(([d, nm, q, up]) => ({
+          id: uid(), date: d, supplier, inspector: "",
+          materialName: nm, qty: String(q), unit: "yard", unitPrice: String(up),
+          status: "입고완료", note: "명세서 반영(2026-07-10 PDF)", fromStatement: true,
+        }));
+        return [...kept, ...added];
+      });
+    }
+    setShowStmtImport(false);
+    showToast(`명세서 반영 완료 — 기말 미지급잔액 ${stmt.expectedClosing.toLocaleString()}원`, "success");
+  };
   const rows = [...buys, ...pays].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.kind === "pay" ? -1 : 1));
 
   const buyTotal = buys.reduce((s, r) => s + r.total, 0);
