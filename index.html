@@ -17444,6 +17444,9 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   };
   const [cursor, setCursor] = React.useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = React.useState(() => ymd(today));
+  const [search, setSearch] = React.useState(""); // 일정 검색어(내용)
+  // 검색 결과 클릭 → 해당 월로 이동 + 그 날짜 선택
+  const jumpToDate = (ds) => { if (!ds) return; const [y, m] = ds.split("-").map(Number); setCursor(new Date(y, m - 1, 1)); setSelectedDate(ds); };
   const [draft, setDraft] = React.useState("");
   const [draftEnd, setDraftEnd] = React.useState(""); // 종료일 (업무 기간) — 비워두면 단일일자
   const [editingId, setEditingId] = React.useState(null);
