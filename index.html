@@ -17835,6 +17835,38 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         </div>
       </div>
 
+      {search.trim() && (() => {
+        const q = search.trim().toLowerCase();
+        const results = (todos || [])
+          .filter(t => ((t.text || "").toLowerCase().includes(q)) || (t.date || "").includes(q) || (t.endDate || "").includes(q))
+          .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+        const WD = ["일", "월", "화", "수", "목", "금", "토"];
+        const fmt = (ds) => { if (!ds) return ""; const [y, m, d] = ds.split("-").map(Number); const dt = new Date(y, m - 1, d); return `${m}/${d}(${WD[dt.getDay()]})`; };
+        return (
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
+              검색 결과 <span style={{ color: "var(--accent)" }}>{results.length}건</span>
+              <span style={{ fontWeight: 400, color: "var(--text3)", fontSize: 12, marginLeft: 6 }}>· "{search.trim()}"</span>
+            </div>
+            {results.length === 0
+              ? <div style={{ padding: "18px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13, borderTop: "1px solid var(--divider)" }}>일치하는 일정이 없습니다</div>
+              : <div style={{ maxHeight: 320, overflowY: "auto" }}>
+                  {results.map(t => (
+                    <button key={t.id} onClick={() => jumpToDate(t.date)}
+                      onMouseEnter={e => { e.currentTarget.style.background = "var(--row-bg)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 16px", background: "transparent", border: "none", borderTop: "1px solid var(--divider)", cursor: "pointer", fontFamily: "inherit", transition: "background 0.12s" }}>
+                      <span style={{ flexShrink: 0, minWidth: 96, fontSize: 12, fontWeight: 700, color: "var(--accent)" }}>{fmt(t.date)}{t.endDate && t.endDate !== t.date ? `~${fmt(t.endDate)}` : ""}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: "var(--text1)", textDecoration: t.done ? "line-through" : "none", opacity: t.done ? 0.55 : 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</span>
+                      {t.done && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 800, color: "#10B981", background: "rgba(16,185,129,0.12)", padding: "2px 7px", borderRadius: 100 }}>완료</span>}
+                      <span style={{ flexShrink: 0, color: "var(--text3)", fontSize: 12 }}>이동 ›</span>
+                    </button>
+                  ))}
+                </div>}
+          </div>
+        );
+      })()}
+
       <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }} className="schedule-grid">
         <div className="card" style={{ padding: 18 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 }}>
