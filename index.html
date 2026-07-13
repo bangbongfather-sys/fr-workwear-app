@@ -18339,8 +18339,15 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         }
         @media (hover: none) {
           .sched-addbtn { opacity: 1; transform: scale(1); }
+        }
+        /* 진짜 터치 전용 기기(폰·태블릿)에서만 호버 프리뷰 제거 — 탭 → 상세 모달로 대체.
+           마우스 있는 좁은 창·터치 겸용 노트북에서는 프리뷰 유지 */
+        @media (hover: none) and (pointer: coarse) {
           .sched-peek { display: none; }
         }
+        /* 오른쪽 끝(금·토) 열 일정은 프리뷰를 왼쪽으로 펼쳐 화면 밖 잘림 방지 */
+        .sched-eventbar-right .sched-peek { left: auto; right: 0; transform-origin: bottom right; }
+        .sched-weekrow:first-child .sched-eventbar-right .sched-peek { transform-origin: top right; }
         @media (prefers-reduced-motion: reduce) {
           .sched-month-anim, .sched-item, .sched-up-row { animation: none !important; }
           .sched-cell, .sched-item, .sched-up-row, .sched-progress > div, .sched-peek, .sched-addbtn { transition: none !important; }
