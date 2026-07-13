@@ -17891,8 +17891,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         );
       })()}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }} className="schedule-grid">
-        <div className="card" style={{ padding: 18 }}>
+      <div className="schedule-grid">
+        <div className="card" style={{ padding: "18px 18px 22px" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 }}>
             {weekdays.map((w, i) => (
               <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, padding: "6px 0", color: i === 0 ? "#EF4444" : i === 6 ? "#3B82F6" : "var(--text3)", letterSpacing: 0.4 }}>{w}</div>
@@ -18033,141 +18033,6 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
           })()}
         </div>
 
-        <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div key={selectedDate} className="sched-month-anim">
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{
-                width: 52, height: 52, borderRadius: 14, flexShrink: 0,
-                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                background: selectedDate === todayKey ? "linear-gradient(135deg, #DB6B2E, #C55E27)" : "var(--surface2)",
-                color: selectedDate === todayKey ? "#fff" : "var(--text1)",
-                boxShadow: selectedDate === todayKey ? "0 4px 12px rgba(219,107,46,0.35)" : "none",
-              }}>
-                <span style={{ fontSize: 20, fontWeight: 800, lineHeight: 1 }}>{+selectedDate.slice(8, 10)}</span>
-                <span style={{ fontSize: 9.5, fontWeight: 700, opacity: 0.8, marginTop: 2 }}>{+selectedDate.slice(5, 7)}월</span>
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>
-                  {weekdays[new Date(selectedDate).getDay()]}요일
-                  {selectedDate === todayKey && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#fff", background: "#DB6B2E", padding: "2px 8px", borderRadius: 100, verticalAlign: "middle" }}>TODAY</span>}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{dayTodos.length}건 · 완료 {dayTodos.filter(t=>t.done).length}건</div>
-              </div>
-            </div>
-            {dayTodos.length > 0 && (
-              <div className="sched-progress" style={{ marginTop: 10 }} title={`완료율 ${Math.round(dayTodos.filter(t=>t.done).length / dayTodos.length * 100)}%`}>
-                <div style={{ width: `${Math.round(dayTodos.filter(t=>t.done).length / dayTodos.length * 100)}%` }} />
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addTodo(); }}
-                placeholder="할 일을 입력하세요" style={{ flex: 1 }} />
-              <button onClick={addTodo} disabled={!draft.trim()}
-                style={{ padding: "0 16px", height: 44, borderRadius: 10, border: "none", background: draft.trim() ? "#DB6B2E" : "var(--surface2)", color: draft.trim() ? "#fff" : "var(--text3)", fontWeight: 700, fontSize: 13, cursor: draft.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                + 추가
-              </button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, fontSize: 11, color: "var(--text3)" }}>
-              <span style={{ fontWeight: 700, letterSpacing: 0.3, flexShrink: 0 }}>업무 기간</span>
-              <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
-                style={{ height: 32, minHeight: 32, padding: "0 8px", fontSize: 12, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
-              <span style={{ color: "var(--text3)" }}>→</span>
-              <input type="date" value={draftEnd} onChange={e => setDraftEnd(e.target.value)} placeholder="종료일 (선택)" min={selectedDate}
-                style={{ height: 32, minHeight: 32, padding: "0 8px", fontSize: 12, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
-              {draftEnd && (
-                <button onClick={() => setDraftEnd("")} title="종료일 지우기" style={{ width: 22, height: 22, border: "none", borderRadius: 4, background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 11, fontFamily: "inherit", padding: 0 }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
-              )}
-              <span style={{ marginLeft: "auto", fontStyle: "italic", flexShrink: 0 }}>{draftEnd ? `${Math.round((new Date(draftEnd) - new Date(selectedDate))/86400000) + 1}일간` : "단일 일자"}</span>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflowY: "auto" }}>
-            {dayTodos.length === 0 ? (
-              <div style={{ padding: "32px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7 }}>
-                할 일이 없습니다.<br/>위에서 추가해보세요.
-              </div>
-            ) : (
-              dayTodos.map((t, ti) => {
-                const isEditing = editingId === t.id;
-                const hasRange = t.endDate && t.endDate !== t.date;
-                const rangeDays = hasRange ? Math.round((new Date(t.endDate) - new Date(t.date)) / 86400000) + 1 : 0;
-                return (
-                <div key={t.id} className="sched-item" style={{
-                  display: "flex", flexDirection: "column", gap: 6,
-                  padding: "10px 12px", borderRadius: 10,
-                  background: t.done ? "var(--surface2)" : "var(--surface)",
-                  border: "1px solid var(--border)",
-                  opacity: t.done ? 0.65 : 1,
-                  animationDelay: `${Math.min(ti, 10) * 0.035}s`,
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <button onClick={() => toggleTodo(t.id)} title={t.done ? "미완료로" : "완료"} className="sched-check"
-                      style={{ width: 22, height: 22, borderRadius: 6, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#10B981" : "transparent", color: "#fff", cursor: "pointer", fontSize: 13, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, fontFamily: "inherit" }}>
-                      {t.done ? "✓" : ""}
-                    </button>
-                    {(t.isAuto || t.recurringId) && (
-                      <span title="정기 일정에서 자동 생성됨"
-                        style={{ opacity: 0.8, flexShrink: 0, display: "inline-flex" }}><Icon name="refresh" size={12}/></span>
-                    )}
-                    <div onClick={() => openDetail(t)} title="눌러서 상세 보기/편집" style={{ flex: 1, minWidth: 0, cursor: "pointer", padding: "4px 8px", borderRadius: 6 }}>
-                      <div style={{
-                        fontSize: 13, lineHeight: 1.45,
-                        textDecoration: t.done ? "line-through" : "none",
-                        color: t.done ? "var(--text3)" : "var(--text1)",
-                        display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-                        overflow: "hidden", whiteSpace: "normal", wordBreak: "break-all",
-                      }}>{t.text}</div>
-                      {t.memo && (
-                        <div style={{
-                          fontSize: 11, color: "var(--text3)", marginTop: 2,
-                          display: "flex", alignItems: "center", gap: 4,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>
-                          <Icon name="document" size={11} style={{ flexShrink: 0 }}/>
-                          <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{t.memo.split("\n")[0]}</span>
-                        </div>
-                      )}
-                    </div>
-                    <button onClick={() => removeTodo(t.id)} title="삭제"
-                      style={{ width: 26, height: 26, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", cursor: "pointer", fontSize: 14, padding: 0, fontFamily: "inherit", flexShrink: 0 }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "#EF4444"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text3)"; }}>
-                      ✕
-                    </button>
-                  </div>
-                  {/* 업무 기간 표시/편집 */}
-                  {isEditing ? (
-                    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, fontSize: 11, color: "var(--text3)", paddingLeft: 32 }}>
-                      <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)}
-                        style={{ height: 28, padding: "0 6px", fontSize: 11, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
-                      <span>→</span>
-                      <input type="date" value={editEnd} onChange={e => setEditEnd(e.target.value)} min={editDate}
-                        style={{ height: 28, padding: "0 6px", fontSize: 11, borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
-                      <button onClick={saveEditDates} style={{ padding: "0 10px", height: 26, border: "none", borderRadius: 6, background: "#10B981", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>저장</button>
-                      <button onClick={cancelEditDates} style={{ padding: "0 8px", height: 26, border: "1px solid var(--border)", borderRadius: 6, background: "transparent", color: "var(--text2)", cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>취소</button>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text3)", paddingLeft: 32, cursor: "pointer" }} onClick={() => startEditDates(t)} title="업무 기간 편집">
-                      <Icon name="calendar" size={12}/>
-                      <span>{t.date.slice(5).replace("-",".")}</span>
-                      {hasRange && (
-                        <>
-                          <span>→</span>
-                          <span>{t.endDate.slice(5).replace("-",".")}</span>
-                          <span style={{ padding: "1px 6px", borderRadius: 999, background: "rgba(219,107,46,0.10)", color: "#DB6B2E", fontWeight: 700, fontSize: 10 }}>{rangeDays}일간</span>
-                        </>
-                      )}
-                      <span style={{ marginLeft: 4, opacity: 0.7 }}>✎</span>
-                    </div>
-                  )}
-                </div>
-              );})
-            )}
-          </div>
-        </div>
       </div>
 
       {allUpcoming.length > 0 && (
