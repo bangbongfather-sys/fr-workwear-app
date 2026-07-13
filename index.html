@@ -17683,6 +17683,25 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   };
   const cancelEditDates = () => { setEditingId(null); setEditDate(""); setEditEnd(""); };
 
+  // ── 일정 추가 모달 (노션 '새 페이지' 스타일) — 캘린더 셀 + 버튼/더블클릭으로 열림 ──
+  const [addModal, setAddModal] = React.useState(null); // { date, endDate, text, memo }
+  const openAdd = (dateStr) => setAddModal({ date: dateStr || ymd(new Date()), endDate: "", text: "", memo: "" });
+  const saveAdd = () => {
+    if (!addModal) return;
+    const text = addModal.text.trim();
+    if (!text) { showToast("일정 내용을 입력하세요"); return; }
+    let start = addModal.date, end = addModal.endDate || "";
+    if (end && end < start) { const tmp = start; start = end; end = tmp; }
+    const t = { id: Date.now(), date: start, endDate: end || "", text, memo: addModal.memo.trim(), done: false, createdAt: Date.now() };
+    setTodos(prev => [...prev, t]);
+    setSelectedDate(start);
+    setAddModal(null);
+    showToast("일정이 추가됐습니다", "success");
+    notionCreate(t).then(pageId => {
+      if (pageId) setTodos(prev => prev.map(x => x.id === t.id ? { ...x, notionPageId: pageId } : x));
+    });
+  };
+
   // ── 일정 상세 모달 (노션 스타일: 제목 + 내용 메모) ──
   const [detail, setDetail] = React.useState(null); // { id, text, memo, date, endDate } — 편집 중 드래프트
   const openDetail = (t) => setDetail({ id: t.id, text: t.text, memo: t.memo || "", date: t.date, endDate: t.endDate || "" });
