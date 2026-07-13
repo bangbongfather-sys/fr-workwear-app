@@ -18003,25 +18003,44 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                           const top = ev.track * (trackH + 2);
                           const isMulti = ev.endCol > ev.startCol || ev.continuesLeft || ev.continuesRight;
                           return (
-                            <div key={ev.t.id} title={ev.t.text} className="sched-eventbar"
-                              onClick={(e) => { e.stopPropagation(); setSelectedDate(ymd(week[ev.startCol] || firstDate)); }}
+                            <div key={ev.t.id} className="sched-eventbar"
+                              onClick={(e) => { e.stopPropagation(); setSelectedDate(ymd(week[ev.startCol] || firstDate)); openDetail(ev.t); }}
                               style={{
                                 position: "absolute", left, width, top, height: trackH,
                                 pointerEvents: "auto", cursor: "pointer",
                                 background: ev.t.done ? (darkMode ? "rgba(255,255,255,0.04)" : "#F7F6F4") : c.bg,
                                 color: ev.t.done ? "var(--text3)" : c.text,
                                 border: `1px solid ${ev.t.done ? "transparent" : c.border}`,
-                                borderRadius: ev.continuesLeft ? "0 4px 4px 0" : ev.continuesRight ? "4px 0 0 4px" : 4,
-                                paddingLeft: 8, paddingRight: 8,
-                                fontSize: 11, fontWeight: 500, lineHeight: `${trackH - 2}px`,
-                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                                textDecoration: ev.t.done ? "line-through" : "none",
-                                transition: "background 0.1s",
+                                borderRadius: ev.continuesLeft ? "0 6px 6px 0" : ev.continuesRight ? "6px 0 0 6px" : 6,
+                                paddingLeft: 6, paddingRight: 8,
+                                fontSize: 11.5, fontWeight: 500,
+                                display: "flex", alignItems: "center", gap: 6,
                               }}
-                              onMouseEnter={e => { if (!ev.t.done) e.currentTarget.style.background = darkMode ? "rgba(255,255,255,0.16)" : "#E5E4E1"; }}
-                              onMouseLeave={e => { if (!ev.t.done) e.currentTarget.style.background = c.bg; }}
                             >
-                              {ev.t.done && "✓ "}{ev.t.text}
+                              {/* 완료 체크박스 — 노션처럼 이벤트 카드 안에서 바로 토글 */}
+                              <span onClick={(e) => { e.stopPropagation(); toggleTodo(ev.t.id); }} title={ev.t.done ? "미완료로" : "완료"}
+                                className="sched-evcheck"
+                                style={{
+                                  width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+                                  border: ev.t.done ? "none" : `1.5px solid ${darkMode ? "rgba(255,255,255,0.35)" : "#B9B7B2"}`,
+                                  background: ev.t.done ? "#10B981" : "transparent",
+                                  color: "#fff", fontSize: 10, fontWeight: 800,
+                                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                }}>{ev.t.done ? "✓" : ""}</span>
+                              <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: ev.t.done ? "line-through" : "none" }}>{ev.t.text}</span>
+                              {/* 호버 확대 프리뷰 (데스크톱) */}
+                              <div className="sched-peek">
+                                <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text1)", lineHeight: 1.45, textDecoration: ev.t.done ? "line-through" : "none", opacity: ev.t.done ? 0.6 : 1 }}>{ev.t.text}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7, fontSize: 11.5, color: "var(--text3)" }}>
+                                  <Icon name="calendar" size={12}/>
+                                  <span>{ev.t.date.replace(/-/g, ".")}{ev.t.endDate && ev.t.endDate !== ev.t.date ? ` → ${ev.t.endDate.replace(/-/g, ".")}` : ""}</span>
+                                  {ev.t.done
+                                    ? <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: "#10B981", background: "rgba(16,185,129,0.12)", padding: "1px 7px", borderRadius: 100 }}>완료</span>
+                                    : <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: "#DB6B2E", background: "rgba(219,107,46,0.12)", padding: "1px 7px", borderRadius: 100 }}>진행</span>}
+                                </div>
+                                {ev.t.memo && <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--text2)", lineHeight: 1.5, whiteSpace: "pre-wrap", maxHeight: 60, overflow: "hidden" }}>{ev.t.memo}</div>}
+                                <div style={{ marginTop: 7, fontSize: 10, color: "var(--text3)" }}>클릭하여 상세 보기 · 체크박스로 완료</div>
+                              </div>
                             </div>
                           );
                         })}
