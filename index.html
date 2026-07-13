@@ -6960,11 +6960,29 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                           </button>
                         </td>
                         <td style={{fontSize:12,color:"var(--text2)"}}>{c.memo}</td>
-                        <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
-                          <button onClick={()=>shareClientStatement((c.name||"").trim(), selectedYM, ledgers, clientAR)} title="월 정산서 공유 (카톡/문자)" style={{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontSize:15}}><Icon name="share" size={14} style={{verticalAlign:"middle"}}/></button>
-                          <button onClick={()=>setExpandedClientId(isExpanded?null:c.id)} title="미수금 상세" style={{background:"none",border:"none",cursor:"pointer",color:"var(--text2)",fontSize:14,marginRight:6}}>{isExpanded?"▼":"▶"}</button>
-                          <button onClick={()=>startEdit(c)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#007AFF",fontSize:15,marginRight:4}}><Icon name="edit" size={14}/></button>
-                          <button onClick={()=>deleteOne(c.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
+                        <td style={{textAlign:"center"}}>
+                          <div style={{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:2}}>
+                            <button onClick={()=>shareClientStatement((c.name||"").trim(), selectedYM, ledgers, clientAR)} title="월 정산서 공유 (카톡/문자)" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                              onMouseEnter={e=>{e.currentTarget.style.background="rgba(219,107,46,0.12)";e.currentTarget.style.color="var(--accent)";}}
+                              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}>
+                              <Icon name="share" size={14}/>
+                            </button>
+                            <button onClick={()=>setExpandedClientId(isExpanded?null:c.id)} title={isExpanded?"미수금 내역 접기":"미수금 상세 보기"} style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:isExpanded?"rgba(219,107,46,0.14)":"transparent",color:isExpanded?"var(--accent)":"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                              onMouseEnter={e=>{if(!isExpanded){e.currentTarget.style.background="rgba(219,107,46,0.12)";e.currentTarget.style.color="var(--accent)";}}}
+                              onMouseLeave={e=>{if(!isExpanded){e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}}>
+                              <Icon name="chevronRight" size={16} style={{transform:isExpanded?"rotate(90deg)":"none",transition:"transform 0.2s"}}/>
+                            </button>
+                            <button onClick={()=>startEdit(c)} title="수정" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                              onMouseEnter={e=>{e.currentTarget.style.background="rgba(0,122,255,0.12)";e.currentTarget.style.color="#007AFF";}}
+                              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}>
+                              <Icon name="edit" size={14}/>
+                            </button>
+                            <button onClick={()=>deleteOne(c.id)} title="삭제" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
+                              onMouseEnter={e=>{e.currentTarget.style.background="rgba(240,68,82,0.12)";e.currentTarget.style.color="#F04452";}}
+                              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}>
+                              <Icon name="close" size={14}/>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                       {isExpanded && (
