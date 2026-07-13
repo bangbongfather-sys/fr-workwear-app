@@ -18323,14 +18323,20 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         /* 첫 주는 위 공간이 없으니 프리뷰를 아래로 */
         .sched-weekrow:first-child .sched-peek { bottom: auto; top: calc(100% + 8px); transform-origin: top left; transform: translateY(-6px) scale(.92); }
         .sched-weekrow:first-child .sched-eventbar:hover .sched-peek { transform: translateY(0) scale(1); }
-        /* ── 모바일 반응형 ── */
+        /* ── 모바일 반응형: 캘린더 축소 대신 원본 크기 유지 + 좌우 스와이프 스크롤 ── */
+        .sched-scroll-hint { display: none; }
         @media (max-width: 768px) {
-          .sched-addbtn { opacity: 1; transform: scale(1); width: 20px; height: 20px; }
+          .sched-addbtn { opacity: 1; transform: scale(1); }
           .sched-peek { display: none; } /* 터치에선 호버 프리뷰 대신 탭 → 상세 모달 */
-          .sched-weekrow { gap: 2px !important; }
-          .sched-cell { padding: 4px 4px !important; border-radius: 8px !important; }
-          .sched-eventbar { font-size: 10px !important; padding-left: 4px !important; padding-right: 4px !important; gap: 4px !important; }
-          .sched-evcheck { width: 13px !important; height: 13px !important; }
+          .sched-scroll-hint { display: block; text-align: center; font-size: 11px; color: var(--text3); margin-bottom: 8px; }
+          .sched-cal-scroll {
+            overflow-x: auto; -webkit-overflow-scrolling: touch;
+            margin: 0 -14px; padding: 0 14px 8px;
+            scrollbar-width: thin;
+          }
+          .sched-cal-scroll::-webkit-scrollbar { height: 6px; }
+          .sched-cal-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+          .sched-cal-inner { min-width: 740px; } /* 셀당 ~100px — 데스크톱과 동일한 크기로 표시 */
         }
         @media (hover: none) {
           .sched-addbtn { opacity: 1; transform: scale(1); }
