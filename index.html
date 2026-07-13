@@ -18090,20 +18090,21 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                 할 일이 없습니다.<br/>위에서 추가해보세요.
               </div>
             ) : (
-              dayTodos.map(t => {
+              dayTodos.map((t, ti) => {
                 const isEditing = editingId === t.id;
                 const hasRange = t.endDate && t.endDate !== t.date;
                 const rangeDays = hasRange ? Math.round((new Date(t.endDate) - new Date(t.date)) / 86400000) + 1 : 0;
                 return (
-                <div key={t.id} style={{
+                <div key={t.id} className="sched-item" style={{
                   display: "flex", flexDirection: "column", gap: 6,
                   padding: "10px 12px", borderRadius: 10,
                   background: t.done ? "var(--surface2)" : "var(--surface)",
                   border: "1px solid var(--border)",
-                  opacity: t.done ? 0.65 : 1, transition: "all 0.15s",
+                  opacity: t.done ? 0.65 : 1,
+                  animationDelay: `${Math.min(ti, 10) * 0.035}s`,
                 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <button onClick={() => toggleTodo(t.id)} title={t.done ? "미완료로" : "완료"}
+                    <button onClick={() => toggleTodo(t.id)} title={t.done ? "미완료로" : "완료"} className="sched-check"
                       style={{ width: 22, height: 22, borderRadius: 6, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#10B981" : "transparent", color: "#fff", cursor: "pointer", fontSize: 13, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 0, fontFamily: "inherit" }}>
                       {t.done ? "✓" : ""}
                     </button>
