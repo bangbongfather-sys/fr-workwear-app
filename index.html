@@ -18034,12 +18034,31 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         </div>
 
         <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
-              {selectedDate.replace(/-/g,".")} ({weekdays[new Date(selectedDate).getDay()]})
-              {selectedDate === todayKey && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#fff", background: "#DB6B2E", padding: "2px 8px", borderRadius: 100 }}>TODAY</span>}
+          <div key={selectedDate} className="sched-month-anim">
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: 14, flexShrink: 0,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                background: selectedDate === todayKey ? "linear-gradient(135deg, #DB6B2E, #C55E27)" : "var(--surface2)",
+                color: selectedDate === todayKey ? "#fff" : "var(--text1)",
+                boxShadow: selectedDate === todayKey ? "0 4px 12px rgba(219,107,46,0.35)" : "none",
+              }}>
+                <span style={{ fontSize: 20, fontWeight: 800, lineHeight: 1 }}>{+selectedDate.slice(8, 10)}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 700, opacity: 0.8, marginTop: 2 }}>{+selectedDate.slice(5, 7)}월</span>
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>
+                  {weekdays[new Date(selectedDate).getDay()]}요일
+                  {selectedDate === todayKey && <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "#fff", background: "#DB6B2E", padding: "2px 8px", borderRadius: 100, verticalAlign: "middle" }}>TODAY</span>}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{dayTodos.length}건 · 완료 {dayTodos.filter(t=>t.done).length}건</div>
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{dayTodos.length}건 · 완료 {dayTodos.filter(t=>t.done).length}건</div>
+            {dayTodos.length > 0 && (
+              <div className="sched-progress" style={{ marginTop: 10 }} title={`완료율 ${Math.round(dayTodos.filter(t=>t.done).length / dayTodos.length * 100)}%`}>
+                <div style={{ width: `${Math.round(dayTodos.filter(t=>t.done).length / dayTodos.length * 100)}%` }} />
+              </div>
+            )}
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
