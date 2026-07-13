@@ -17954,22 +17954,22 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                     ev.track = placed;
                   });
                   const maxTrack = tracks.length;
-                  const trackH = 20; // px
-                  const headerH = 24; // 날짜 숫자 영역
-                  const rowH = headerH + Math.max(2, maxTrack) * (trackH + 2) + 8;
+                  const trackH = 26; // px — 노션식 큰 이벤트 카드 (체크박스 포함)
+                  const headerH = 30; // 날짜 숫자 영역
+                  const rowH = Math.max(104, headerH + Math.max(2, maxTrack) * (trackH + 4) + 10);
 
                   return (
-                    <div key={wi} style={{ position: "relative", minHeight: rowH, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+                    <div key={wi} className="sched-weekrow" style={{ position: "relative", minHeight: rowH, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
                       {/* 날짜 셀 (배경) */}
                       {week.map((d, ci) => {
-                        if (!d) return <div key={ci} style={{ minHeight: rowH, borderRadius: 8, background: "transparent" }}/>;
+                        if (!d) return <div key={ci} style={{ minHeight: rowH, borderRadius: 10, background: "transparent" }}/>;
                         const k = ymd(d);
                         const isToday = k === todayKey;
                         const isSelected = k === selectedDate;
                         const dow = d.getDay();
                         const dayColor = dow === 0 ? "#EF4444" : dow === 6 ? "#3B82F6" : "var(--text1)";
                         return (
-                          <button key={ci} onClick={() => setSelectedDate(k)} className="sched-cell"
+                          <div key={ci} onClick={() => setSelectedDate(k)} onDoubleClick={() => openAdd(k)} className="sched-cell" role="button" tabIndex={0}
                             style={{
                               minHeight: rowH, padding: "6px 8px",
                               border: isSelected ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
@@ -17990,7 +17990,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                               boxShadow: isToday ? "0 2px 6px rgba(219,107,46,0.4)" : "none",
                               alignSelf: "flex-start",
                             }}>{d.getDate()}</span>
-                          </button>
+                            <span className="sched-addbtn" title="일정 추가" onClick={(e) => { e.stopPropagation(); openAdd(k); }}>+</span>
+                          </div>
                         );
                       })}
                       {/* 이벤트 바 (absolute) */}
