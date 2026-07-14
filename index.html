@@ -18378,11 +18378,14 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         @media (hover: none) {
           .sched-addbtn { opacity: 1; transform: scale(1); }
         }
-        /* 진짜 터치 전용 기기(폰·태블릿)에서만 호버 프리뷰 제거 — 탭 → 상세 모달로 대체.
-           마우스 있는 좁은 창·터치 겸용 노트북에서는 프리뷰 유지 */
+        /* 진짜 터치 전용 기기(폰·태블릿): 호버 프리뷰 대신 롱프레스(400ms)로 표시.
+           마우스 있는 좁은 창·터치 겸용 노트북에서는 호버 프리뷰 유지 */
         @media (hover: none) and (pointer: coarse) {
           .sched-peek { display: none; }
+          .sched-eventbar { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
         }
+        /* 롱프레스로 열린 프리뷰 — 터치의 display:none보다 높은 특이도로 강제 표시 */
+        .sched-eventbar.sched-peek-open .sched-peek { display: block; opacity: 1; transform: translateY(0) scale(1); }
         /* 오른쪽 끝(금·토) 열 일정은 프리뷰를 왼쪽으로 펼쳐 화면 밖 잘림 방지 */
         .sched-eventbar-right .sched-peek { left: auto; right: 0; transform-origin: bottom right; }
         .sched-weekrow:first-child .sched-eventbar-right .sched-peek { transform-origin: top right; }
