@@ -18065,14 +18065,17 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                         const isSelected = k === selectedDate;
                         const dow = d.getDay();
                         const dayColor = dow === 0 ? "#EF4444" : dow === 6 ? "#3B82F6" : "var(--text1)";
+                        const isDragOver = dragOverDate === k && dragTodoId != null;
                         return (
                           <div key={ci} onClick={() => setSelectedDate(k)} onDoubleClick={() => openAdd(k)} className="sched-cell" role="button" tabIndex={0}
+                            onDragOver={(e) => { if (dragTodoId == null) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOverDate !== k) setDragOverDate(k); }}
+                            onDrop={(e) => { e.preventDefault(); moveTodoToDate(dragTodoId, k); clearDrag(); }}
                             style={{
                               minHeight: rowH, padding: "6px 8px",
-                              border: isSelected ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
+                              border: isDragOver ? "1.5px dashed #DB6B2E" : isSelected ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
                               borderRadius: 10,
-                              background: isSelected ? "rgba(219,107,46,0.07)" : "var(--surface)",
-                              boxShadow: isSelected ? "0 0 0 3px rgba(219,107,46,0.12)" : "none",
+                              background: isDragOver ? "rgba(219,107,46,0.12)" : isSelected ? "rgba(219,107,46,0.07)" : "var(--surface)",
+                              boxShadow: isSelected && !isDragOver ? "0 0 0 3px rgba(219,107,46,0.12)" : "none",
                               cursor: "pointer", fontFamily: "inherit", textAlign: "left",
                               position: "relative",
                               display: "flex", flexDirection: "column",
