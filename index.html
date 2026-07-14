@@ -17701,6 +17701,23 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   };
   const cancelEditDates = () => { setEditingId(null); setEditDate(""); setEditEnd(""); };
 
+  // ── 터치 기기(폰·패드) 롱프레스 미리보기 — 호버가 없으니 길게 눌러 프리뷰 표시 ──
+  const [peekId, setPeekId] = React.useState(null); // 롱프레스로 열린 이벤트 id
+  const peekTimerRef = React.useRef(null);
+  const suppressClickRef = React.useRef(false); // 롱프레스 직후 따라오는 클릭이 상세 모달을 열지 않도록
+  React.useEffect(() => {
+    if (peekId == null) return;
+    const close = () => setPeekId(null);
+    document.addEventListener("touchstart", close, { passive: true });
+    const t = setTimeout(close, 4000); // 4초 뒤 자동 닫힘
+    return () => { document.removeEventListener("touchstart", close); clearTimeout(t); };
+  }, [peekId]);
+  const peekTouchStart = (id) => {
+    clearTimeout(peekTimerRef.current);
+    peekTimerRef.current = setTimeout(() => { suppressClickRef.current = true; setPeekId(id); }, 400);
+  };
+  const peekTouchCancel = () => clearTimeout(peekTimerRef.current);
+
   // ── 일정 추가 모달 (노션 '새 페이지' 스타일) — 캘린더 셀 + 버튼/더블클릭으로 열림 ──
   const [addModal, setAddModal] = React.useState(null); // { date, endDate, text, memo }
   const openAdd = (dateStr) => setAddModal({ date: dateStr || ymd(new Date()), endDate: "", text: "", memo: "" });
