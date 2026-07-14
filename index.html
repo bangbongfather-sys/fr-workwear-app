@@ -6108,7 +6108,332 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
     </div>
   );
 }
-function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, monthlySales = {}, orders = [], darkMode, focusClient, clearFocus }) {
+// ─── 은행 입금내역 (장부 서브탭) ───
+// 은행 거래내역 엑셀을 업로드해 입금 행만 앱으로 가져오고, 항목별로 거래처를 지정해
+// 장부의 미입금 청구를 입금완료 처리하거나 미수금 원장에 입금으로 기록한다.
+// 한 번 지정한 입금자명→거래처 매핑은 기억해 다음 업로드부터 자동 추천.
+// (은행 인증정보는 어디에도 저장하지 않음 — 엑셀 파일만 사용)
+function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedgers, clientAR = {}, setClientAR, clients = [], darkMode }) {
+  const items = (bankDeposits && bankDeposits.items) || [];
+  const nameMap = (bankDeposits && bankDeposits.nameMap) || {};
+  const [dragActive, setDragActive] = useState(false);
+  const [filter, setFilter] = useState("pending"); // pending | done | all
+  const [search, setSearch] = useState("");
+  const [openId, setOpenId] = useState(null);     // 처리 패널이 열린 행 id
+  const [pickClient, setPickClient] = useState("");
+  const [pickLink, setPickLink] = useState("none");
+  const fileRef = useRef(null);
+  const fmt = (n) => Math.round(parseFloat(n) || 0).toLocaleString();
+
+  // 거래처 후보: 거래처별 단가 + 모든 월 장부 + 미수금 원장의 이름 합집합
+  const clientNames = React.useMemo(() => {
+    const s = new Set();
+    (clients || []).forEach(c => { const n = (c.name || "").trim(); if (n) s.add(n); });
+    Object.values(ledgers || {}).forEach(m => (((m || {}).clients) || []).forEach(c => { const n = (c.name || "").trim(); if (n) s.add(n); }));
+    Object.keys(clientAR || {}).forEach(n => { const t = n.trim(); if (t) s.add(t); });
+    return Array.from(s).sort((a, b) => a.localeCompare(b, "ko"));
+  }, [clients, ledgers, clientAR]);
+
+  // 입금자명 → 추천 거래처 (저장된 매핑 우선, 없으면 이름 유사 매칭)
+  const suggestClient = (depName) => {
+    const saved = nameMap[payablesNameNorm(depName)];
+    if (saved) return saved;
+    return clientNames.find(n => payablesNameMatch(n, depName)) || "";
+  };
+
+  // 해당 거래처의 미입금 청구 목록 (모든 월, 최신순)
+  const unpaidOf = (clientName) => {
+    const name = (clientName || "").trim();
+    if (!name) return [];
+    const out = [];
+    Object.keys(ledgers || {}).sort().reverse().forEach(ym => {
+      ((((ledgers || {})[ym]) || {}).clients || []).forEach(c => {
+        if ((c.name || "").trim() === name && c.status === "미입금") out.push({ ym, id: c.id, total: parseFloat(c.total) || 0 });
+      });
+    });
+    return out;
+  };
+  // 거래처/금액이 정해졌을 때 기본 연결 대상: 금액이 정확히 일치하는 미입금 청구 우선
+  const defaultLinkFor = (clientName, amount) => {
+    const ups = unpaidOf(clientName);
+    const exact = ups.find(u => Math.round(u.total) === Math.round(amount));
+    const pick = exact || ups[0];
+    return pick ? `led|${pick.ym}|${pick.id}` : "ar";
+  };
+
+  // ── 엑셀 업로드 파싱 ──
+  const parseDateCell = (v) => {
+    if (v == null || v === "") return "";
+    if (typeof v === "number" && v > 20000) { // 엑셀 날짜 시리얼
+      const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+    }
+    const m = String(v).match(/(\d{4})[.\-\/년\s]+(\d{1,2})[.\-\/월\s]+(\d{1,2})/);
+    if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
+    return "";
+  };
+  const handleFile = (file) => {
+    if (!file) return;
+    if (typeof XLSX === "undefined") { showToast("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도하세요."); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        // 헤더 자동 감지 — 은행별 명칭 다양성 흡수 (기업/국민/신한/우리/하나 등)
+        const TARGETS = [
+          { key: "date",  re: /거래일|이체일|입금일|날짜|일시|일자/ },
+          { key: "inAmt", re: /입금|맡기신|받은\s*금액|credit/i },
+          { key: "name",  re: /입금자|보낸\s*분|의뢰인|거래자명|적요|내용|기재사항/ },
+          { key: "memo",  re: /적요|내용|비고|메모|거래점|취급점|송금메모/ },
+        ];
+        let bestRow = -1, bestScore = 0, bestCols = {};
+        for (let i = 0; i < Math.min(rows.length, 30); i++) {
+          const row = rows[i] || []; const found = {}; let score = 0;
+          for (let j = 0; j < row.length; j++) {
+            const v = String(row[j] || "").trim(); if (!v) continue;
+            if (Object.values(found).includes(j)) continue; // 한 컬럼은 한 역할만
+            for (const t of TARGETS) {
+              if (t.re.test(v) && !(t.key in found)) { found[t.key] = j; score++; break; }
+            }
+          }
+          if (score >= 2 && score > bestScore) { bestRow = i; bestScore = score; bestCols = found; }
+        }
+        if (bestRow < 0 || bestCols.date == null || bestCols.inAmt == null) {
+          showToast("거래일/입금액 헤더를 찾을 수 없습니다.\n은행 인터넷뱅킹에서 내려받은 거래내역 엑셀인지 확인하세요."); return;
+        }
+        const dateCol = bestCols.date, inCol = bestCols.inAmt, nameCol = bestCols.name ?? -1, memoCol = bestCols.memo ?? -1;
+        const parsed = [];
+        for (let i = bestRow + 1; i < rows.length; i++) {
+          const row = rows[i] || [];
+          const date = parseDateCell(row[dateCol]);
+          const amt = parseFloat(String(row[inCol] ?? "").replace(/[^\d.-]/g, "")) || 0;
+          if (!date || amt <= 0) continue; // 출금·빈 행 스킵 (입금액이 있는 행만)
+          const nm = String(nameCol >= 0 ? row[nameCol] : "").trim();
+          const memo = String(memoCol >= 0 && memoCol !== nameCol ? row[memoCol] : "").trim();
+          parsed.push({ date, amount: amt, name: nm || "(입금자명 없음)", memo });
+        }
+        if (!parsed.length) { showToast("가져올 입금 내역이 없습니다. (입금액이 있는 행 기준)"); return; }
+        // 중복 방지: 같은 (날짜·금액·입금자) 조합은 기존 개수를 초과하는 만큼만 추가
+        const keyOf = (x) => `${x.date}|${Math.round(x.amount)}|${payablesNameNorm(x.name)}`;
+        const existCnt = new Map();
+        items.forEach(x => { const k = keyOf(x); existCnt.set(k, (existCnt.get(k) || 0) + 1); });
+        const seenCnt = new Map(); const fresh = []; let dup = 0; let base = Date.now();
+        parsed.forEach(x => {
+          const k = keyOf(x); const seen = (seenCnt.get(k) || 0) + 1; seenCnt.set(k, seen);
+          if (seen <= (existCnt.get(k) || 0)) { dup++; return; }
+          fresh.push({ id: ++base, ...x, status: "pending", client: "", link: null });
+        });
+        if (!fresh.length) { showToast(`새 입금 내역이 없습니다. (이미 가져온 ${dup}건 제외)`); return; }
+        setBankDeposits(prev => ({
+          items: [...(((prev || {}).items) || []), ...fresh].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id),
+          nameMap: ((prev || {}).nameMap) || {},
+        }));
+        showToast(`✅ 입금 ${fresh.length}건 가져왔습니다${dup ? ` (중복 ${dup}건 제외)` : ""}`, "success");
+      } catch (err) { showToast("엑셀 처리 실패: " + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // ── 처리/되돌리기 ──
+  const openProcess = (dep) => {
+    const sug = suggestClient(dep.name);
+    setOpenId(dep.id);
+    setPickClient(sug);
+    setPickLink(sug ? defaultLinkFor(sug, dep.amount) : "none");
+  };
+  const completeDeposit = (dep) => {
+    const name = (pickClient || "").trim();
+    if (!name) { showToast("거래처를 선택하세요"); return; }
+    let link = { kind: "none" };
+    if (pickLink.startsWith("led|")) {
+      const [, ym, idStr] = pickLink.split("|");
+      setLedgers(prev => {
+        const m = prev[ym]; if (!m) return prev;
+        return { ...prev, [ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === idStr ? { ...c, status: "입금완료" } : c) } };
+      });
+      link = { kind: "ledger", ym, clientId: idStr };
+    } else if (pickLink === "ar") {
+      const entryId = Date.now();
+      setClientAR(prev => {
+        const cur = prev[name] || { entries: [] };
+        return { ...prev, [name]: { ...cur, entries: [...(cur.entries || []), { id: entryId, type: "입금", desc: `은행입금 (${dep.name})`, amount: dep.amount, date: dep.date }] } };
+      });
+      link = { kind: "ar", entryId };
+    }
+    setBankDeposits(prev => ({
+      items: (((prev || {}).items) || []).map(x => x.id === dep.id ? { ...x, status: "done", client: name, link, doneAt: Date.now() } : x),
+      nameMap: { ...(((prev || {}).nameMap) || {}), [payablesNameNorm(dep.name)]: name },
+    }));
+    setOpenId(null);
+    showToast(`${fmt(dep.amount)}원 → "${name}" 입금완료 처리했습니다`, "success");
+  };
+  const undoDeposit = (dep) => {
+    if (!window.confirm(`"${dep.client}" ${fmt(dep.amount)}원 처리를 되돌릴까요?\n연결된 장부/미수금 기록도 함께 복구됩니다.`)) return;
+    const link = dep.link || {};
+    if (link.kind === "ledger") {
+      setLedgers(prev => {
+        const m = prev[link.ym]; if (!m) return prev;
+        return { ...prev, [link.ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === String(link.clientId) && c.status === "입금완료" ? { ...c, status: "미입금" } : c) } };
+      });
+    } else if (link.kind === "ar") {
+      setClientAR(prev => {
+        const cur = prev[dep.client]; if (!cur) return prev;
+        return { ...prev, [dep.client]: { ...cur, entries: (cur.entries || []).filter(e => e.id !== link.entryId) } };
+      });
+    }
+    setBankDeposits(prev => ({
+      items: (((prev || {}).items) || []).map(x => x.id === dep.id ? { ...x, status: "pending", client: "", link: null } : x),
+      nameMap: ((prev || {}).nameMap) || {},
+    }));
+  };
+  const removeDeposit = (dep) => {
+    if (!window.confirm("이 입금 행을 삭제할까요?")) return;
+    setBankDeposits(prev => ({ items: (((prev || {}).items) || []).filter(x => x.id !== dep.id), nameMap: ((prev || {}).nameMap) || {} }));
+  };
+
+  const pending = items.filter(x => x.status === "pending");
+  const done = items.filter(x => x.status === "done");
+  const shown = items
+    .filter(x => filter === "all" ? true : x.status === filter)
+    .filter(x => !search.trim() || (x.name || "").includes(search.trim()) || (x.client || "").includes(search.trim()));
+  const chipStyle = (on) => ({
+    padding: "7px 14px", borderRadius: 100, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
+    background: on ? "rgba(219,107,46,0.10)" : "var(--surface)", color: on ? "#DB6B2E" : "var(--text2)",
+    fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+  });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, verticalAlign: "middle" }}><Icon name="coins" size={15}/>은행 입금내역</span>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text3)" }}>은행 거래내역 엑셀 업로드 → 항목별 거래처 지정 → 입금완료 처리 · 지정한 입금자명은 기억해 자동 추천</div>
+      </div>
+
+      {/* 업로드 존 */}
+      <div
+        onClick={() => fileRef.current && fileRef.current.click()}
+        onDragOver={e => { e.preventDefault(); setDragActive(true); }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={e => { e.preventDefault(); setDragActive(false); handleFile(e.dataTransfer.files && e.dataTransfer.files[0]); }}
+        style={{
+          border: `2px dashed ${dragActive ? "#DB6B2E" : "var(--border)"}`, borderRadius: 14,
+          background: dragActive ? "rgba(219,107,46,0.06)" : "var(--surface2)",
+          padding: "22px 16px", textAlign: "center", cursor: "pointer", transition: "all 0.15s",
+        }}>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }}
+          onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="folderOpen" size={16}/>은행 거래내역 엑셀 가져오기</div>
+        <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>
+          인터넷뱅킹 거래내역 .xlsx/.xls 를 드래그하거나 클릭해서 선택 · 거래일/입금액/입금자 헤더 자동 인식 · 입금 행만 가져오고 중복은 자동 제외
+        </div>
+      </div>
+
+      {/* 요약 + 필터 + 검색 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={() => setFilter("pending")} style={chipStyle(filter === "pending")}>미처리 {pending.length}건 · {fmt(pending.reduce((s, x) => s + x.amount, 0))}원</button>
+        <button onClick={() => setFilter("done")} style={chipStyle(filter === "done")}>처리완료 {done.length}건</button>
+        <button onClick={() => setFilter("all")} style={chipStyle(filter === "all")}>전체 {items.length}건</button>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="입금자·거래처 검색"
+          style={{ marginLeft: "auto", height: 36, padding: "0 12px", fontSize: 12.5, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 180 }} />
+      </div>
+
+      {/* 목록 */}
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {shown.length === 0 ? (
+          <div style={{ padding: "36px 16px", textAlign: "center", fontSize: 13, color: "var(--text3)" }}>
+            {items.length === 0 ? <>아직 가져온 입금내역이 없습니다.<br/>위 상자에 은행 거래내역 엑셀을 업로드하세요.</> : "조건에 맞는 내역이 없습니다."}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: "var(--surface2)", color: "var(--text2)", fontSize: 12 }}>
+                <th style={{ padding: "10px 12px", textAlign: "left", whiteSpace: "nowrap" }}>거래일</th>
+                <th style={{ padding: "10px 12px", textAlign: "left" }}>입금자 / 적요</th>
+                <th style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>입금액</th>
+                <th style={{ padding: "10px 12px", textAlign: "center", minWidth: 190 }}>처리</th>
+              </tr></thead>
+              <tbody>
+                {shown.map(dep => {
+                  const isOpen = openId === dep.id;
+                  const isDone = dep.status === "done";
+                  const sug = !isDone ? suggestClient(dep.name) : "";
+                  return (
+                    <React.Fragment key={dep.id}>
+                      <tr style={{ borderTop: "1px solid var(--divider)", background: isDone ? (darkMode ? "rgba(0,180,147,0.10)" : "rgba(0,180,147,0.07)") : isOpen ? "rgba(219,107,46,0.06)" : "transparent" }}>
+                        <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: "var(--text2)", fontSize: 12.5 }}>{dep.date.replace(/-/g, ".")}</td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <div style={{ fontWeight: 600, color: "var(--text1)" }}>{dep.name}</div>
+                          {dep.memo && dep.memo !== dep.name && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{dep.memo}</div>}
+                          {isDone && <div style={{ fontSize: 11, color: "#00B493", marginTop: 3, fontWeight: 600 }}>→ {dep.client} · {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 입금 기록" : "확인 처리"}</div>}
+                        </td>
+                        <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", color: isDone ? "#00B493" : "var(--text1)" }}>{fmt(dep.amount)}원</td>
+                        <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
+                          {isDone ? (
+                            <button onClick={() => undoDeposit(dep)} title="처리 되돌리기" style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>↩ 되돌리기</button>
+                          ) : (
+                            <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                              <button onClick={() => isOpen ? setOpenId(null) : openProcess(dep)} className="btn-orange"
+                                style={{ padding: "6px 13px", borderRadius: 8, border: "none", background: "#DB6B2E", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                {isOpen ? "닫기" : sug ? `거래처 지정 (추천: ${sug.length > 8 ? sug.slice(0, 8) + "…" : sug})` : "거래처 지정"}
+                              </button>
+                              <button onClick={() => removeDeposit(dep)} title="행 삭제" style={{ width: 26, height: 26, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>×</button>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                      {isOpen && !isDone && (
+                        <tr style={{ background: "rgba(219,107,46,0.05)" }}>
+                          <td colSpan={4} style={{ padding: "12px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
+                            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>거래처</label>
+                                <input list="frw-dep-clients" value={pickClient}
+                                  onChange={e => { const v = e.target.value; setPickClient(v); setPickLink(v.trim() ? defaultLinkFor(v, dep.amount) : "none"); }}
+                                  placeholder="거래처명 입력/선택"
+                                  style={{ height: 38, padding: "0 10px", fontSize: 13, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }} />
+                              </div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>연결할 항목</label>
+                                <select value={pickLink} onChange={e => setPickLink(e.target.value)}
+                                  style={{ height: 38, padding: "0 10px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", maxWidth: 300 }}>
+                                  {unpaidOf(pickClient).map(u => (
+                                    <option key={`${u.ym}-${u.id}`} value={`led|${u.ym}|${u.id}`}>
+                                      {u.ym} 장부 청구 {fmt(u.total)}원 → 입금완료{Math.round(u.total) === Math.round(dep.amount) ? " (금액 일치)" : ""}
+                                    </option>
+                                  ))}
+                                  <option value="ar">미수금 원장에 입금으로 기록</option>
+                                  <option value="none">연결 없이 확인 처리만</option>
+                                </select>
+                              </div>
+                              <button onClick={() => completeDeposit(dep)}
+                                style={{ height: 38, padding: "0 18px", borderRadius: 9, border: "none", background: "#00B493", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                ✓ 입금완료 처리
+                              </button>
+                            </div>
+                            {pickClient.trim() && unpaidOf(pickClient).length === 0 && (
+                              <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>이 거래처의 미입금 청구가 없어 미수금 원장 기록 또는 확인 처리만 가능합니다.</div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <datalist id="frw-dep-clients">{clientNames.map(n => <option key={n} value={n} />)}</datalist>
+    </div>
+  );
+}
+
+function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, monthlySales = {}, orders = [], darkMode, focusClient, clearFocus, bankDeposits, setBankDeposits, clients = [] }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
   const [subTab, setSubTab] = useState(() => load("frw_ledger_subtab", "monthly")); // "monthly" | "ar" — 탭 이탈 후 복귀 시 유지
