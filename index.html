@@ -18107,6 +18107,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                               onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } setSelectedDate(ymd(week[ev.startCol] || firstDate)); openDetail(ev.t); }}
                               onTouchStart={() => peekTouchStart(ev.t.id)}
                               onTouchMove={peekTouchCancel} onTouchEnd={peekTouchCancel} onTouchCancel={peekTouchCancel}
+                              draggable
+                              onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(ev.t.id)); e.dataTransfer.effectAllowed = "move"; setDragTodoId(ev.t.id); }}
+                              onDragEnd={clearDrag}
+                              title="드래그하여 다른 날짜로 이동"
                               style={{
                                 position: "absolute", left, width, top, height: trackH,
                                 pointerEvents: "auto", cursor: "pointer",
