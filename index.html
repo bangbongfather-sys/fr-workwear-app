@@ -17719,6 +17719,32 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   };
   const peekTouchCancel = () => clearTimeout(peekTimerRef.current);
 
+  // ── 드래그 앤 드롭으로 일정 날짜 이동 (데스크톱 마우스) ──
+  const [dragTodoId, setDragTodoId] = React.useState(null);   // 드래그 중인 일정 id
+  const [dragOverDate, setDragOverDate] = React.useState(null); // 드롭 대상 날짜 (하이라이트)
+  const clearDrag = () => { setDragTodoId(null); setDragOverDate(null); };
+  const moveTodoToDate = (id, newDate) => {
+    if (id == null || !newDate) return;
+    let target = null;
+    setTodos(prev => prev.map(t => {
+      if (t.id !== id || t.date === newDate) return t;
+      // 기간 일정은 기간 길이를 유지한 채 시작일만 이동
+      let newEnd = "";
+      if (t.endDate && t.endDate > t.date) {
+        const days = Math.round((new Date(t.endDate) - new Date(t.date)) / 86400000);
+        const [ny, nm, nd] = newDate.split("-").map(Number);
+        newEnd = ymd(new Date(ny, nm - 1, nd + days));
+      }
+      target = { ...t, date: newDate, endDate: newEnd };
+      return target;
+    }));
+    if (target) {
+      setSelectedDate(newDate);
+      showToast(`"${(target.text || "").slice(0, 20)}" → ${newDate.replace(/-/g, ".")} 로 이동했습니다`, "success");
+      if (target.notionPageId) notionPatch(target.notionPageId, { date: target.date, endDate: target.endDate || null });
+    }
+  };
+
   // ── 일정 추가 모달 (노션 '새 페이지' 스타일) — 캘린더 셀 + 버튼/더블클릭으로 열림 ──
   const [addModal, setAddModal] = React.useState(null); // { date, endDate, text, memo }
   const openAdd = (dateStr) => setAddModal({ date: dateStr || ymd(new Date()), endDate: "", text: "", memo: "" });
