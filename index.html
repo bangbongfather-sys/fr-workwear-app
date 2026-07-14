@@ -17713,6 +17713,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
     return () => { document.removeEventListener("touchstart", close); clearTimeout(t); };
   }, [peekId]);
   const peekTouchStart = (id) => {
+    suppressClickRef.current = false; // 이전 롱프레스의 잔여 플래그 초기화 (iOS는 롱프레스 후 click 미발생)
     clearTimeout(peekTimerRef.current);
     peekTimerRef.current = setTimeout(() => { suppressClickRef.current = true; setPeekId(id); }, 400);
   };
