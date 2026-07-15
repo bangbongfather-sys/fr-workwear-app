@@ -6347,8 +6347,15 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         <button onClick={() => setFilter("pending")} style={chipStyle(filter === "pending")}>미처리 {pending.length}건 · {fmt(pending.reduce((s, x) => s + x.amount, 0))}원</button>
         <button onClick={() => setFilter("done")} style={chipStyle(filter === "done")}>처리완료 {done.length}건</button>
         <button onClick={() => setFilter("all")} style={chipStyle(filter === "all")}>전체 {items.length}건</button>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="입금자·거래처 검색"
-          style={{ marginLeft: "auto", height: 36, padding: "0 12px", fontSize: 12.5, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 180 }} />
+        <span style={{ marginLeft: "auto", position: "relative", display: "inline-flex", alignItems: "center" }}>
+          <span style={{ position: "absolute", left: 10, display: "inline-flex", color: "var(--text3)", pointerEvents: "none" }}><Icon name="search" size={13}/></span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="거래처명·입금자 검색"
+            style={{ height: 38, padding: "0 30px 0 30px", fontSize: 12.5, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }} />
+          {search && (
+            <button onClick={() => setSearch("")} aria-label="검색 지우기" title="지우기"
+              style={{ position: "absolute", right: 6, width: 20, height: 20, border: "none", borderRadius: 10, background: "var(--surface2)", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          )}
+        </span>
       </div>
 
       {/* 목록 */}
