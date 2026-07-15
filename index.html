@@ -6443,9 +6443,11 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                   const sug = !isDone ? suggestClient(dep.name) : "";
                   return (
                     <React.Fragment key={dep.id}>
-                      <tr style={{ borderTop: "1px solid var(--divider)", background: selectedIds.has(dep.id) ? "rgba(219,107,46,0.08)" : isDone ? (darkMode ? "rgba(0,180,147,0.10)" : "rgba(0,180,147,0.07)") : isOpen ? "rgba(219,107,46,0.06)" : "transparent" }}>
-                        <td style={{ padding: "10px 8px 10px 12px", textAlign: "center" }}>
-                          <input type="checkbox" checked={selectedIds.has(dep.id)} onChange={() => toggleSelect(dep.id)} style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer" }} />
+                      <tr onMouseEnter={() => enterRowDrag(dep.id)}
+                        style={{ borderTop: "1px solid var(--divider)", userSelect: dragSelecting ? "none" : "auto", background: selectedIds.has(dep.id) ? "rgba(219,107,46,0.08)" : isDone ? (darkMode ? "rgba(0,180,147,0.10)" : "rgba(0,180,147,0.07)") : isOpen ? "rgba(219,107,46,0.06)" : "transparent" }}>
+                        <td onMouseDown={(e) => beginRowDrag(dep.id, e)} title="드래그하여 여러 건 선택"
+                          style={{ padding: "10px 8px 10px 12px", textAlign: "center", cursor: "pointer", userSelect: "none" }}>
+                          <input type="checkbox" checked={selectedIds.has(dep.id)} readOnly tabIndex={-1} style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer", pointerEvents: "none" }} />
                         </td>
                         <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: "var(--text2)", fontSize: 12.5 }}>{dep.date.replace(/-/g, ".")}</td>
                         <td style={{ padding: "10px 12px" }}>
