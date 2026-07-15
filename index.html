@@ -6324,6 +6324,30 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     if (allShownSelected) shown.forEach(x => n.delete(x.id)); else shown.forEach(x => n.add(x.id));
     return n;
   });
+  // ── 드래그해서 여러 건 선택 (체크박스 칸을 누른 채 위/아래 행을 훑기) ──
+  // 시작 행의 현재 상태로 방향 결정: 선택돼 있으면 훑는 동안 해제, 아니면 선택
+  const dragModeRef = useRef(null); // null | "add" | "remove"
+  const [dragSelecting, setDragSelecting] = useState(false);
+  const applyRowSelect = (id, mode) => setSelectedIds(prev => {
+    const want = mode === "add";
+    if (want === prev.has(id)) return prev; // 변화 없음
+    const n = new Set(prev); if (want) n.add(id); else n.delete(id); return n;
+  });
+  const beginRowDrag = (id, e) => {
+    if (e && e.button !== 0) return; // 좌클릭만
+    if (e) e.preventDefault();       // 드래그 중 텍스트 선택 방지
+    const mode = selectedIds.has(id) ? "remove" : "add";
+    dragModeRef.current = mode;
+    setDragSelecting(true);
+    applyRowSelect(id, mode);
+  };
+  const enterRowDrag = (id) => { if (dragModeRef.current) applyRowSelect(id, dragModeRef.current); };
+  useEffect(() => {
+    if (!dragSelecting) return;
+    const end = () => { dragModeRef.current = null; setDragSelecting(false); };
+    window.addEventListener("mouseup", end);
+    return () => window.removeEventListener("mouseup", end);
+  }, [dragSelecting]);
   const chipStyle = (on) => ({
     padding: "7px 14px", borderRadius: 100, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
     background: on ? "rgba(219,107,46,0.10)" : "var(--surface)", color: on ? "#DB6B2E" : "var(--text2)",
