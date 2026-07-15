@@ -6117,14 +6117,18 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const items = (bankDeposits && bankDeposits.items) || [];
   const nameMap = (bankDeposits && bankDeposits.nameMap) || {};
   const [dragActive, setDragActive] = useState(false);
-  const [filter, setFilter] = useState("pending"); // pending | done | all
-  const [search, setSearch] = useState("");
+  // 필터·검색·선택은 서브탭을 오갈 때 컴포넌트가 언마운트되어도 유지되도록 localStorage에 저장
+  const [filter, setFilter] = useState(() => load("frw_bank_dep_filter", "pending")); // pending | done | all
+  const [search, setSearch] = useState(() => load("frw_bank_dep_search", ""));
   const [openId, setOpenId] = useState(null);     // 처리 패널이 열린 행 id
   const [pickClient, setPickClient] = useState("");
   const [pickLink, setPickLink] = useState("none");
-  const [selectedIds, setSelectedIds] = useState(() => new Set()); // 합계 계산용 선택
+  const [selectedIds, setSelectedIds] = useState(() => new Set(load("frw_bank_dep_selected", []))); // 합계 계산용 선택 (유지됨)
   const fileRef = useRef(null);
   const fmt = (n) => Math.round(parseFloat(n) || 0).toLocaleString();
+  useEffect(() => { save("frw_bank_dep_filter", filter); }, [filter]);
+  useEffect(() => { save("frw_bank_dep_search", search); }, [search]);
+  useEffect(() => { save("frw_bank_dep_selected", Array.from(selectedIds)); }, [selectedIds]);
 
   // 거래처 후보: 거래처별 단가 + 모든 월 장부 + 미수금 원장의 이름 합집합
   const clientNames = React.useMemo(() => {
