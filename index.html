@@ -6295,9 +6295,19 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
 
   const pending = items.filter(x => x.status === "pending");
   const done = items.filter(x => x.status === "done");
+  // 검색: 입금자명 + 지정된 거래처 + (미처리 행은) 추천 거래처까지 거래처명으로 찾기
+  const q = search.trim();
   const shown = items
     .filter(x => filter === "all" ? true : x.status === filter)
-    .filter(x => !search.trim() || (x.name || "").includes(search.trim()) || (x.client || "").includes(search.trim()));
+    .filter(x => {
+      if (!q) return true;
+      if ((x.name || "").includes(q) || (x.client || "").includes(q)) return true;
+      if (x.status === "pending") {
+        const sug = suggestClient(x.name);
+        if (sug && sug.includes(q)) return true;
+      }
+      return false;
+    });
   const chipStyle = (on) => ({
     padding: "7px 14px", borderRadius: 100, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
     background: on ? "rgba(219,107,46,0.10)" : "var(--surface)", color: on ? "#DB6B2E" : "var(--text2)",
