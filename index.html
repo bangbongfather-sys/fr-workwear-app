@@ -6309,6 +6309,17 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       }
       return false;
     });
+  // 합계: 표시 중인 항목 / 체크 선택한 항목
+  const shownTotal = shown.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
+  const selectedItems = items.filter(x => selectedIds.has(x.id));
+  const selectedTotal = selectedItems.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
+  const allShownSelected = shown.length > 0 && shown.every(x => selectedIds.has(x.id));
+  const toggleSelect = (id) => setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleSelectAllShown = () => setSelectedIds(prev => {
+    const n = new Set(prev);
+    if (allShownSelected) shown.forEach(x => n.delete(x.id)); else shown.forEach(x => n.add(x.id));
+    return n;
+  });
   const chipStyle = (on) => ({
     padding: "7px 14px", borderRadius: 100, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
     background: on ? "rgba(219,107,46,0.10)" : "var(--surface)", color: on ? "#DB6B2E" : "var(--text2)",
