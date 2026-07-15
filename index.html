@@ -6370,6 +6370,26 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         </span>
       </div>
 
+      {/* 합계 바: 표시된 항목 합계 + 체크 선택 합계 */}
+      {items.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", borderRadius: 12, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
+          <span style={{ fontSize: 12.5, color: "var(--text2)" }}>
+            표시 <b style={{ color: "var(--text1)" }}>{shown.length}건</b> 합계
+            <b style={{ color: "var(--text1)", marginLeft: 6, fontSize: 14 }}>{fmt(shownTotal)}원</b>
+          </span>
+          {selectedIds.size > 0 && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "5px 12px", borderRadius: 100, background: "rgba(219,107,46,0.12)", border: "1px solid rgba(219,107,46,0.35)" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#DB6B2E" }}>
+                ✓ 선택 {selectedItems.length}건 합계 <span style={{ fontSize: 14 }}>{fmt(selectedTotal)}원</span>
+              </span>
+              <button onClick={() => setSelectedIds(new Set())} title="선택 해제"
+                style={{ border: "none", background: "transparent", color: "#DB6B2E", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>해제 ×</button>
+            </span>
+          )}
+          {selectedIds.size === 0 && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>행 앞의 체크박스를 선택하면 선택 합계가 표시됩니다</span>}
+        </div>
+      )}
+
       {/* 목록 */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {shown.length === 0 ? (
