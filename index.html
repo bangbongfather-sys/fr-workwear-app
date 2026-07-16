@@ -7061,8 +7061,9 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   const allMonths = Object.keys(ledgers).sort().reverse();
   const totalAcrossMonths = Object.values(ledgers).reduce((s, m) => s + (m.clients||[]).reduce((ss, c) => ss + (parseFloat(c.total)||0), 0), 0);
 
-  const LEDGER_SUBTABS = { monthly: { label: "월별 장부", icon: "ledger" }, ar: { label: "거래처별 미수금", icon: "treasury" }, deposits: { label: "입금내역", icon: "coins" }, yearly: { label: "연매출 추이", icon: "dashboard" } };
-  const ledgerSubOrder = useSubtabOrder("frw_ledger_subtab_order", ["monthly", "ar", "deposits", "yearly"], "data-ledger-sub");
+  const LEDGER_SUBTABS = { monthly: { label: "월별 장부", icon: "ledger" }, ar: { label: "거래처별 미수금", icon: "treasury" }, pattern: { label: "수금 패턴", icon: "trendingUp" }, deposits: { label: "입금내역", icon: "coins" }, yearly: { label: "연매출 추이", icon: "dashboard" } };
+  const ledgerSubOrder = useSubtabOrder("frw_ledger_subtab_order", ["monthly", "ar", "pattern", "deposits", "yearly"], "data-ledger-sub");
+  const [arJumpName, setArJumpName] = useState(null); // 수금 패턴 행 클릭 → 거래처별 미수금으로 점프
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 토글 */}
@@ -7095,12 +7096,15 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         <YearlyRevenueView yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} ledgers={ledgers} orders={orders} darkMode={darkMode} />
       )}
       {subTab === "ar" && (
-        <ARDetailView ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} focusClient={focusClient} clearFocus={clearFocus} />
+        <ARDetailView ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} focusClient={arJumpName || focusClient} clearFocus={() => { if (arJumpName) setArJumpName(null); if (clearFocus) clearFocus(); }} />
+      )}
+      {subTab === "pattern" && (
+        <CollectionPatternView ledgers={ledgers} clientAR={clientAR} bankDeposits={bankDeposits} darkMode={darkMode} onJump={(name) => { setArJumpName(name); setSubTab("ar"); }} />
       )}
       {subTab === "deposits" && (
         <BankDepositsView bankDeposits={bankDeposits} setBankDeposits={setBankDeposits} ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} clients={clients} darkMode={darkMode} />
       )}
-      {subTab !== "yearly" && subTab !== "ar" && subTab !== "deposits" && (<>
+      {subTab !== "yearly" && subTab !== "ar" && subTab !== "pattern" && subTab !== "deposits" && (<>
       {/* 헤더 + 월 선택 */}
       <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
         <div style={{fontSize:18,fontWeight:800,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="ledger" size={14}/>월별 매출 장부</span></div>
@@ -7625,6 +7629,161 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         )}
       </div>
       </>)}
+    </div>
+  );
+}
+
+// 거래처 미수 aging — 청구(장부 미입금 ym-15 기준 + 수동 청구)를 오래된 것부터 수동 입금 총액으로 차감(FIFO)하고,
+// 남은 금액만 경과일 구간(30/60/90/90+)에 배분. 잔액 = 대시보드 총미수금 공식(자동 + 수동청구 - 수동입금, 양수만)과 일치.
+function computeClientAging(name, ledgers, clientAR, now) {
+  const out = { d30: 0, d60: 0, d90: 0, d90p: 0, balance: 0, oldestDays: 0 };
+  const charges = [];
+  Object.entries(ledgers || {}).forEach(([ym, m]) => {
+    ((m && m.clients) || []).forEach(c => {
+      if ((c.name || "").trim() !== name || c.status !== "미입금") return;
+      const amt = parseFloat(c.total) || ((parseFloat(c.supply) || 0) + (parseFloat(c.tax) || 0));
+      if (amt > 0) charges.push({ dateStr: ym + "-15", amt });
+    });
+  });
+  const entries = (((clientAR || {})[name]) || {}).entries || [];
+  entries.forEach(a => {
+    if (a.type !== "청구") return;
+    const amt = parseFloat(a.amount) || 0;
+    if (amt > 0) charges.push({ dateStr: a.date || "", amt });
+  });
+  let paid = entries.filter(a => a.type === "입금").reduce((s, a) => s + (parseFloat(a.amount) || 0), 0);
+  charges.sort((a, b) => a.dateStr.localeCompare(b.dateStr));
+  charges.forEach(ch => {
+    const use = Math.min(paid, ch.amt); paid -= use;
+    const remain = ch.amt - use;
+    if (remain <= 0) return;
+    const d = ch.dateStr ? new Date(ch.dateStr) : now;
+    const days = Math.max(0, Math.floor((now - d) / 86400000));
+    if (days <= 30) out.d30 += remain; else if (days <= 60) out.d60 += remain; else if (days <= 90) out.d90 += remain; else out.d90p += remain;
+    if (days > out.oldestDays) out.oldestDays = days;
+    out.balance += remain;
+  });
+  return out;
+}
+
+// 수금 패턴 분석 (장부 서브탭) — 거래처별 미수 aging + 수금 소요일. 집계 전용(데이터 변경 없음).
+function CollectionPatternView({ ledgers, clientAR, bankDeposits, darkMode, onJump }) {
+  const { useState, useMemo } = React;
+  const [showAll, setShowAll] = useState(false);
+  const [sortBy, setSortBy] = useState("balance"); // balance | overdue | days
+  const { rows, kpi } = useMemo(() => {
+    const now = new Date();
+    const names = new Set(Object.keys(clientAR || {}));
+    Object.values(ledgers || {}).forEach(m => ((m && m.clients) || []).forEach(c => { if (c.name) names.add(c.name.trim()); }));
+    const rows = [];
+    let allSamples = [];
+    names.forEach(name => {
+      if (!name) return;
+      const ag = computeClientAging(name, ledgers, clientAR, now);
+      // 수금 소요일 표본 — 입금내역에서 장부 청구에 연결 완료된 건 (입금일 - 청구월 15일)
+      const samples = [];
+      (((bankDeposits || {}).items) || []).forEach(dep => {
+        if (dep.status !== "done" || (dep.client || "").trim() !== name) return;
+        if (!dep.link || dep.link.kind !== "ledger" || !dep.date || !dep.link.ym) return;
+        const days = Math.max(0, Math.floor((new Date(dep.date) - new Date(dep.link.ym + "-15")) / 86400000));
+        samples.push({ days, date: dep.date });
+      });
+      const avgDays = samples.length ? Math.round(samples.reduce((s, x) => s + x.days, 0) / samples.length) : null;
+      const lastPaid = samples.length ? samples.map(x => x.date).sort().pop() : null;
+      allSamples = allSamples.concat(samples.map(x => x.days));
+      if (ag.balance > 0 || samples.length > 0) rows.push({ name, ...ag, avgDays, sampleN: samples.length, lastPaid });
+    });
+    const totalBalance = rows.reduce((s, r) => s + r.balance, 0);
+    const total90p = rows.reduce((s, r) => s + r.d90p, 0);
+    const avgAll = allSamples.length ? Math.round(allSamples.reduce((s, x) => s + x, 0) / allSamples.length) : null;
+    const risky = rows.filter(r => r.d90p > 0).length;
+    return { rows, kpi: { totalBalance, total90p, avgAll, sampleN: allSamples.length, risky } };
+  }, [ledgers, clientAR, bankDeposits]);
+
+  const visible = rows
+    .filter(r => showAll || r.balance > 0)
+    .sort((a, b) => sortBy === "overdue" ? (b.d90p - a.d90p || b.balance - a.balance)
+      : sortBy === "days" ? ((b.avgDays ?? -1) - (a.avgDays ?? -1) || b.balance - a.balance)
+      : (b.balance - a.balance || b.d90p - a.d90p));
+
+  const daysColor = (d) => d == null ? "var(--text3)" : d <= 30 ? "#00B493" : d <= 60 ? "#FF9500" : "#F04452";
+  const money = (n) => n > 0 ? Math.round(n).toLocaleString() : "—";
+  const th = { padding: "9px 10px", fontSize: 11, fontWeight: 700, color: "var(--text3)", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid var(--divider)" };
+  const td = { padding: "10px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", borderBottom: "1px solid var(--divider)" };
+  const kpiCard = (label, value, sub, color) => (
+    <div style={{ flex: "1 1 140px", minWidth: 130, background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 12, padding: "12px 14px" }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 19, fontWeight: 800, color: color || "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+  const chip = (id, label) => (
+    <button onClick={() => setSortBy(id)} style={{
+      padding: "6px 12px", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+      fontSize: 12, fontWeight: 700,
+      background: sortBy === id ? (darkMode ? "rgba(219,107,46,0.22)" : "rgba(219,107,46,0.12)") : "var(--surface2)",
+      color: sortBy === id ? (darkMode ? "#FBF0E8" : "#AB4F1F") : "var(--text2)",
+    }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)" }}><span style={{ display: "inline-flex", alignItems: "center", gap: 6, verticalAlign: "middle" }}><Icon name="trendingUp" size={14}/>수금 패턴</span> <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text3)" }}>거래처별 미수 경과·수금 속도</span></div>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }} className="no-print">
+          {chip("balance", "미수 많은순")}
+          {chip("overdue", "90일+ 많은순")}
+          {chip("days", "수금 느린순")}
+          <button onClick={() => setShowAll(v => !v)} style={{ padding: "6px 12px", border: "1px solid var(--divider)", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: "var(--surface)", color: "var(--text2)" }}>{showAll ? "미수만 보기" : "전체 보기"}</button>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {kpiCard("총 미수금", money(kpi.totalBalance) + (kpi.totalBalance > 0 ? "원" : ""), `${visible.filter(r => r.balance > 0).length}곳`, undefined)}
+        {kpiCard("90일 초과 미수", money(kpi.total90p) + (kpi.total90p > 0 ? "원" : ""), kpi.risky > 0 ? `${kpi.risky}곳 — 우선 수금 대상` : "없음", kpi.total90p > 0 ? "#F04452" : "#00B493")}
+        {kpiCard("평균 수금 소요일", kpi.avgAll != null ? `${kpi.avgAll}일` : "—", `은행입금 연동 ${kpi.sampleN}건 기준`, daysColor(kpi.avgAll))}
+      </div>
+
+      {visible.length === 0 ? (
+        <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 12 }}>표시할 거래처가 없습니다{showAll ? "" : " — 우측 상단 [전체 보기]로 완납 거래처까지 볼 수 있어요"}</div>
+      ) : (
+        <div style={{ background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 12, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+            <thead>
+              <tr>
+                <th style={{ ...th, textAlign: "left" }}>거래처</th>
+                <th style={th}>미수 잔액</th>
+                <th style={th}>~30일</th>
+                <th style={th}>31~60일</th>
+                <th style={th}>61~90일</th>
+                <th style={th}>90일 초과</th>
+                <th style={th}>평균 수금일</th>
+                <th style={th}>최장 경과</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map(r => (
+                <tr key={r.name} onClick={() => onJump && onJump(r.name)} title="클릭하면 거래처별 미수금 상세로 이동" style={{ cursor: "pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <td style={{ ...td, textAlign: "left", fontWeight: 700, color: "var(--text1)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</td>
+                  <td style={{ ...td, fontWeight: 800, color: r.balance > 0 ? "var(--text1)" : "var(--text3)" }}>{money(r.balance)}</td>
+                  <td style={{ ...td, color: r.d30 > 0 ? "var(--text2)" : "var(--text3)" }}>{money(r.d30)}</td>
+                  <td style={{ ...td, color: r.d60 > 0 ? "#FF9500" : "var(--text3)", fontWeight: r.d60 > 0 ? 700 : 400 }}>{money(r.d60)}</td>
+                  <td style={{ ...td, color: r.d90 > 0 ? "#FF9500" : "var(--text3)", fontWeight: r.d90 > 0 ? 700 : 400 }}>{money(r.d90)}</td>
+                  <td style={{ ...td, color: r.d90p > 0 ? "#F04452" : "var(--text3)", fontWeight: r.d90p > 0 ? 800 : 400 }}>{money(r.d90p)}</td>
+                  <td style={{ ...td, color: daysColor(r.avgDays), fontWeight: 700 }}>{r.avgDays != null ? `${r.avgDays}일` : "—"}{r.sampleN > 0 && <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 500 }}> ({r.sampleN}건)</span>}</td>
+                  <td style={{ ...td, color: r.oldestDays > 90 ? "#F04452" : r.oldestDays > 60 ? "#FF9500" : "var(--text3)" }}>{r.balance > 0 ? `${r.oldestDays}일` : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.6 }}>
+        경과일은 장부 청구월 15일 기준. 수동 입금은 오래된 청구부터 차감(FIFO)한 잔여만 집계 — 총 미수금 합계는 대시보드와 동일한 공식.
+        평균 수금일은 입금내역에서 장부 청구에 연결 완료한 건 기준이라, 연결을 쓸수록 정확해져요.
+      </div>
     </div>
   );
 }
@@ -8467,35 +8626,18 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           const quickRatio = currentLiabilities > 0 ? (totalBank + totalAR) / currentLiabilities : null;
           const cashRatio = currentLiabilities > 0 ? totalBank / currentLiabilities : null;
 
-          // AR Aging
+          // AR Aging — 거래처별 FIFO 정산(computeClientAging) 합산. 수동 입금을 차감해 총미수금 공식·수금 패턴 탭과 숫자 일치.
+          // (기존: clientAR 청구만 합산하고 입금을 안 빼서 완납 거래처도 연체로 잡히던 버그)
           const aging = { d30: 0, d60: 0, d90: 0, d90p: 0 };
-          Object.entries(ledgers || {}).forEach(([month, m]) => {
-            const invDate = new Date(month + "-15");
-            (m.clients || []).forEach(c => {
-              if (!c.name || c.status !== "미입금") return;
-              const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
-              if (amt <= 0) return;
-              const days = Math.floor((now - invDate) / 86400000);
-              if (days <= 30) aging.d30 += amt;
-              else if (days <= 60) aging.d60 += amt;
-              else if (days <= 90) aging.d90 += amt;
-              else aging.d90p += amt;
+          {
+            const agingNames = new Set(Object.keys(clientAR || {}));
+            Object.values(ledgers || {}).forEach(m => ((m && m.clients) || []).forEach(c => { if (c.name) agingNames.add(c.name.trim()); }));
+            agingNames.forEach(nm => {
+              if (!nm) return;
+              const ag = computeClientAging(nm, ledgers, clientAR, now);
+              aging.d30 += ag.d30; aging.d60 += ag.d60; aging.d90 += ag.d90; aging.d90p += ag.d90p;
             });
-          });
-          Object.entries(clientAR || {}).forEach(([name, data]) => {
-            const entries = (data && data.entries) || [];
-            entries.forEach(a => {
-              if (a.type !== "청구") return;
-              const amt = parseFloat(a.amount) || 0;
-              if (amt <= 0) return;
-              const d = a.date ? new Date(a.date) : now;
-              const days = Math.floor((now - d) / 86400000);
-              if (days <= 30) aging.d30 += amt;
-              else if (days <= 60) aging.d60 += amt;
-              else if (days <= 90) aging.d90 += amt;
-              else aging.d90p += amt;
-            });
-          });
+          }
           const agingTotal = aging.d30 + aging.d60 + aging.d90 + aging.d90p;
 
           // 13주 현금 예측
