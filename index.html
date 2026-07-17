@@ -17216,6 +17216,34 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                         <button onClick={savePoQuickEdit} style={{ height: 32, padding: "0 14px", borderRadius: 8, border: "none", background: "#00B493", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>저장</button>
                                                         <button onClick={() => setPoQuickEdit(null)} style={{ height: 32, padding: "0 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>취소</button>
                                                         <span style={{ flexBasis: "100%", fontSize: 10.5, color: T.text3 }}>저장하면 발주 합계와 발주서 문서가 함께 갱신됩니다 (발주번호 유지)</span>
+                                                        {/* 재고·안전재고 참조 스트립 — 발주서 작성 화면과 동일 (품목명이 단가표·재고와 매칭되면 표시) */}
+                                                        {qe.name && (() => {
+                                                          const info = poStockInfo(qe.name, materials, stock);
+                                                          if (!info) return null;
+                                                          const low = info.short !== null && info.short > 0;
+                                                          const met = info.short !== null && info.short === 0;
+                                                          return (
+                                                            <div style={{
+                                                              flexBasis: "100%", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
+                                                              padding: "7px 12px", borderRadius: 9, fontSize: 11.5, color: "var(--text2)",
+                                                              background: low ? "rgba(255,149,0,0.09)" : "var(--row-bg)",
+                                                              border: low ? "1px solid rgba(255,149,0,0.30)" : "1px solid transparent",
+                                                            }}>
+                                                              <span>현재고 <b style={{ color: info.qty !== null && info.qty < 0 ? "#F04452" : "var(--text1)" }}>{info.qty === null ? "—" : info.qty.toLocaleString()}</b>{info.qty !== null && info.unit ? <span style={{ color: "var(--text3)" }}> {info.unit}</span> : null}</span>
+                                                              <span>안전재고 <b style={{ color: "#FF9500" }}>{info.safe > 0 ? info.safe.toLocaleString() : "—"}</b>{info.safe > 0 && info.unit ? <span style={{ color: "var(--text3)" }}> {info.unit}</span> : null}</span>
+                                                              {low && (
+                                                                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                                                  <b style={{ color: "#F04452" }}>부족 {info.short.toLocaleString()}{info.unit ? " " + info.unit : ""}</b>
+                                                                  {(Number(qe.qty) || 0) < info.short
+                                                                    ? <button onClick={() => setPoQuickEdit({ ...qe, qty: String(info.short) })} title="발주 수량을 부족량으로 채웁니다"
+                                                                        style={{ padding: "3px 10px", borderRadius: 100, border: "1px solid rgba(240,68,82,0.4)", background: "transparent", color: "#F04452", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>부족량 채우기</button>
+                                                                    : <span style={{ color: "#00B493", fontWeight: 700 }}>발주분 포함 시 충족</span>}
+                                                                </span>
+                                                              )}
+                                                              {met && <span style={{ color: "#00B493", fontWeight: 700 }}>안전재고 충족</span>}
+                                                            </div>
+                                                          );
+                                                        })()}
                                                       </div>
                                                     </td>
                                                   </tr>
