@@ -13742,7 +13742,11 @@ ${productList}
     const tax = Math.round(subtotal * 0.1);
     const total = subtotal + tax;
     const sup = draft.supplier || {};
-    const itemsTable = items.length === 0 ? "_품목이 없습니다_" : `| 품목 | 규격/단위 | 수량 | 단가 | 금액 |\n|------|----------|-----:|-----:|-----:|\n${items.map(it => `| ${it.name} | ${it.unit || "-"} | ${Number(it.qty).toLocaleString()} | ${Number(it.unitPrice||0).toLocaleString()}원 | ${Math.round((Number(it.qty)||0)*(Number(it.unitPrice)||0)).toLocaleString()}원 |`).join("\n")}`;
+    const hasItemMemo = items.some(it => (it.memo || "").trim());
+    const itemsTable = items.length === 0 ? "_품목이 없습니다_"
+      : hasItemMemo
+        ? `| 품목 | 규격/단위 | 수량 | 단가 | 금액 | 요청사항 |\n|------|----------|-----:|-----:|-----:|----------|\n${items.map(it => `| ${it.name} | ${it.unit || "-"} | ${Number(it.qty).toLocaleString()} | ${Number(it.unitPrice||0).toLocaleString()}원 | ${Math.round((Number(it.qty)||0)*(Number(it.unitPrice)||0)).toLocaleString()}원 | ${(it.memo || "").trim() || "—"} |`).join("\n")}`
+        : `| 품목 | 규격/단위 | 수량 | 단가 | 금액 |\n|------|----------|-----:|-----:|-----:|\n${items.map(it => `| ${it.name} | ${it.unit || "-"} | ${Number(it.qty).toLocaleString()} | ${Number(it.unitPrice||0).toLocaleString()}원 | ${Math.round((Number(it.qty)||0)*(Number(it.unitPrice)||0)).toLocaleString()}원 |`).join("\n")}`;
     return `# 발주서 (Purchase Order)
 
 **발주 번호** ${poNum}  ·  **발주일자** ${orderDateDisplay}  ·  **납기일** ${draft.deliveryDate || "협의"}
