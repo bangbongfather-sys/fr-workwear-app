@@ -17083,6 +17083,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                             <th style={{ textAlign: "right", padding: "6px 8px", width: 110 }}>입고수량</th>
                                             <th style={{ textAlign: "right", padding: "6px 8px", width: 90 }}>미입고</th>
                                             <th style={{ textAlign: "center", padding: "6px 8px", width: 74 }}>상태</th>
+                                            <th style={{ width: 38 }}/>
                                           </tr></thead>
                                           <tbody>
                                             {its.map((it, ii) => {
@@ -17091,9 +17092,32 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                               const hasRcv = !isNaN(rcv);
                                               const remain = ord - (hasRcv ? rcv : 0);
                                               const done = hasRcv && rcv >= ord && ord > 0;
+                                              // 바로 편집 모드 — 이 행만 입력칸으로 전환
+                                              if (poQuickEdit && poQuickEdit.poId === po.id && poQuickEdit.idx === ii) {
+                                                const qe = poQuickEdit;
+                                                const upd = (k) => (e) => setPoQuickEdit({ ...qe, [k]: e.target.value });
+                                                const amt = Math.round((Number(qe.qty) || 0) * (Number(qe.unitPrice) || 0));
+                                                return (
+                                                  <tr key={it.id || ii} style={{ borderTop: `1px solid ${T.divider}`, background: "rgba(219,107,46,0.07)" }}>
+                                                    <td colSpan={6} style={{ padding: "9px 8px" }}>
+                                                      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+                                                        <input value={qe.name} onChange={upd("name")} placeholder="품목명" style={{ flex: "2 1 200px", minWidth: 170, height: 32, fontSize: 12, padding: "0 8px" }} />
+                                                        <input value={qe.unit} onChange={upd("unit")} placeholder="단위" style={{ flex: "0 0 60px", height: 32, fontSize: 12, padding: "0 8px" }} />
+                                                        <input type="number" value={qe.qty} onChange={upd("qty")} placeholder="수량" style={{ flex: "0 0 84px", height: 32, fontSize: 12, padding: "0 8px", textAlign: "right" }} />
+                                                        <input type="number" value={qe.unitPrice} onChange={upd("unitPrice")} placeholder="단가(원)" style={{ flex: "0 0 100px", height: 32, fontSize: 12, padding: "0 8px", textAlign: "right" }} />
+                                                        <span style={{ fontSize: 12, fontWeight: 700, color: NAVY, whiteSpace: "nowrap" }}>{amt.toLocaleString()}원</span>
+                                                        <input value={qe.memo} onChange={upd("memo")} placeholder="요청사항 메모 (선택)" style={{ flex: "1 1 150px", minWidth: 130, height: 32, fontSize: 12, padding: "0 8px" }} />
+                                                        <button onClick={savePoQuickEdit} style={{ height: 32, padding: "0 14px", borderRadius: 8, border: "none", background: "#00B493", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>저장</button>
+                                                        <button onClick={() => setPoQuickEdit(null)} style={{ height: 32, padding: "0 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>취소</button>
+                                                        <span style={{ flexBasis: "100%", fontSize: 10.5, color: T.text3 }}>저장하면 발주 합계와 발주서 문서가 함께 갱신됩니다 (발주번호 유지)</span>
+                                                      </div>
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              }
                                               return (
                                                 <tr key={it.id || ii} style={{ borderTop: `1px solid ${T.divider}` }}>
-                                                  <td style={{ padding: "7px 8px", fontWeight: 600, color: T.text }}>{it.name || "—"}{it.note ? <span style={{ color: T.text3, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{it.note}</span> : ""}</td>
+                                                  <td style={{ padding: "7px 8px", fontWeight: 600, color: T.text }}>{it.name || "—"}{(it.memo || "").trim() ? <span title="요청사항" style={{ color: "#DB6B2E", fontWeight: 500, marginLeft: 6, fontSize: 11 }}>✎ {it.memo}</span> : it.note ? <span style={{ color: T.text3, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{it.note}</span> : ""}</td>
                                                   <td style={{ padding: "7px 8px", textAlign: "right", color: T.text2 }}>{ord.toLocaleString()}{it.unit ? " " + it.unit : ""}</td>
                                                   <td style={{ padding: "5px 8px", textAlign: "right" }}>
                                                     <input type="number" value={it.receivedQty ?? ""} placeholder="0"
