@@ -6105,9 +6105,115 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
           </div>
         </div>
       )}
+
+      {/* ── 거래처 매출 순위 — 기간(월) 선택 누적 취합 (매출 순위 파악) ── */}
+      <ClientRankSection ledgers={ledgers} darkMode={darkMode} />
     </div>
   );
 }
+
+// ─── 거래처 매출 순위 — 월별 장부 청구합계 기준, 시작월~종료월 누적 (연매출 추이 내 섹션) ───
+function ClientRankSection({ ledgers = {}, darkMode }) {
+  const now = new Date();
+  const curYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const ymAdd = (ym, delta) => { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 1 + delta, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const allMonths = Object.keys(ledgers || {}).sort();
+  const [fromYM, setFromYM] = useState(() => load("frw_client_rank_from", `${now.getFullYear()}-01`));
+  const [toYM, setToYM] = useState(() => load("frw_client_rank_to", curYM));
+  const [search, setSearch] = useState("");
+  useEffect(() => { save("frw_client_rank_from", fromYM); }, [fromYM]);
+  useEffect(() => { save("frw_client_rank_to", toYM); }, [toYM]);
+  const fmt = (n) => Math.round(n).toLocaleString();
+
+  const rows = React.useMemo(() => {
+    const map = {};
+    Object.keys(ledgers || {}).forEach(ym => {
+      if ((fromYM && ym < fromYM) || (toYM && ym > toYM)) return;
+      (((ledgers || {})[ym] || {}).clients || []).forEach(c => {
+        const name = (c.name || "").trim(); if (!name) return;
+        const amt = parseFloat(c.total) || 0;
+        if (!map[name]) map[name] = { name, total: 0, count: 0, months: new Set() };
+        map[name].total += amt; map[name].count += 1; map[name].months.add(ym);
+      });
+    });
+    return Object.values(map).map(r => ({ name: r.name, total: r.total, count: r.count, monthCnt: r.months.size })).sort((a, b) => b.total - a.total);
+  }, [ledgers, fromYM, toYM]);
+  const grand = rows.reduce((s, r) => s + r.total, 0);
+  const maxTotal = rows.length ? rows[0].total : 0;
+  const shown = rows.filter(r => !search.trim() || r.name.includes(search.trim()));
+  const chips = [
+    { label: "올해", from: `${now.getFullYear()}-01`, to: curYM },
+    { label: "최근 3개월", from: ymAdd(curYM, -2), to: curYM },
+    { label: "최근 6개월", from: ymAdd(curYM, -5), to: curYM },
+    { label: "전체 기간", from: allMonths[0] || `${now.getFullYear()}-01`, to: allMonths[allMonths.length - 1] || curYM },
+  ];
+  const medal = (i) => i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`;
+  const monthInputStyle = { height: 36, padding: "0 10px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" };
+
+  return (
+    <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 7 }}><Icon name="trendingUp" size={15}/>거래처 매출 순위</div>
+        <span style={{ fontSize: 11.5, color: "var(--text3)" }}>월별 장부 청구합계 기준 · 기간을 정해 거래처별 누적 취합</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <input type="month" value={fromYM} onChange={e => setFromYM(e.target.value)} style={monthInputStyle} />
+        <span style={{ color: "var(--text3)", fontSize: 12 }}>~</span>
+        <input type="month" value={toYM} onChange={e => setToYM(e.target.value)} style={monthInputStyle} />
+        {chips.map(c => { const on = fromYM === c.from && toYM === c.to; return (
+          <button key={c.label} onClick={() => { setFromYM(c.from); setToYM(c.to); }}
+            style={{ padding: "6px 12px", borderRadius: 100, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)", background: on ? "rgba(219,107,46,0.10)" : "var(--surface)", color: on ? "#DB6B2E" : "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{c.label}</button>
+        ); })}
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="거래처 검색"
+          style={{ marginLeft: "auto", height: 36, padding: "0 12px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 150 }} />
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--text2)" }}>
+        {fromYM.replace("-", ".")} ~ {toYM.replace("-", ".")} · 거래처 <b style={{ color: "var(--text1)" }}>{rows.length}곳</b> · 합계 <b style={{ color: "#DB6B2E", fontSize: 14 }}>{fmt(grand)}원</b>
+      </div>
+      {shown.length === 0 ? (
+        <div style={{ padding: "26px 0", textAlign: "center", fontSize: 13, color: "var(--text3)" }}>해당 기간에 장부 데이터가 없습니다</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+            <thead><tr style={{ color: "var(--text3)", fontSize: 11 }}>
+              <th style={{ textAlign: "center", padding: "6px 8px", width: 46 }}>순위</th>
+              <th style={{ textAlign: "left", padding: "6px 8px" }}>거래처</th>
+              <th style={{ textAlign: "right", padding: "6px 8px", width: 74 }}>청구 건수</th>
+              <th style={{ textAlign: "right", padding: "6px 8px", width: 68 }}>거래 월수</th>
+              <th style={{ textAlign: "right", padding: "6px 8px", width: 140 }}>합계</th>
+              <th style={{ textAlign: "left", padding: "6px 8px", minWidth: 150 }}>비중</th>
+            </tr></thead>
+            <tbody>
+              {shown.map((r) => {
+                const rank = rows.indexOf(r);
+                const pct = grand > 0 ? (r.total / grand) * 100 : 0;
+                const barPct = maxTotal > 0 ? (r.total / maxTotal) * 100 : 0;
+                return (
+                  <tr key={r.name} style={{ borderTop: "1px solid var(--divider)", background: rank < 3 ? "rgba(219,107,46,0.04)" : "transparent" }}>
+                    <td style={{ padding: "8px", textAlign: "center", fontWeight: 800, fontSize: rank < 3 ? 15 : 12, color: "var(--text2)" }}>{medal(rank)}</td>
+                    <td style={{ padding: "8px", fontWeight: rank < 3 ? 800 : 600, color: "var(--text1)" }}>{r.name}</td>
+                    <td style={{ padding: "8px", textAlign: "right", color: "var(--text2)" }}>{r.count}건</td>
+                    <td style={{ padding: "8px", textAlign: "right", color: "var(--text2)" }}>{r.monthCnt}개월</td>
+                    <td style={{ padding: "8px", textAlign: "right", fontWeight: 800, color: rank === 0 ? "#DB6B2E" : "var(--text1)" }}>{fmt(r.total)}원</td>
+                    <td style={{ padding: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ flex: 1, height: 8, borderRadius: 4, background: "var(--surface2)", overflow: "hidden" }}>
+                          <div style={{ width: `${barPct}%`, height: "100%", borderRadius: 4, background: rank === 0 ? "#DB6B2E" : "rgba(219,107,46,0.45)", transition: "width .3s" }}/>
+                        </div>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text2)", width: 46, textAlign: "right" }}>{pct.toFixed(1)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── 은행 입금내역 (장부 서브탭) ───
 // 은행 거래내역 엑셀을 업로드해 입금 행만 앱으로 가져오고, 항목별로 거래처를 지정해
 // 장부의 미입금 청구를 입금완료 처리하거나 미수금 원장에 입금으로 기록한다.
