@@ -13862,6 +13862,31 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     save("frw_po_draft", null);
   };
 
+  // 발주 이력 펼침 화면에서 품목 바로 편집 저장 — 합계 재계산 + 발주서 문서 갱신(발주번호는 유지)
+  const savePoQuickEdit = () => {
+    const qe = poQuickEdit;
+    if (!qe) return;
+    if (!(qe.name || "").trim()) { showToast("품목명을 입력하세요"); return; }
+    setPurchaseOrders(prev => {
+      const next = prev.map(po => {
+        if (po.id !== qe.poId) return po;
+        const items = (po.items || []).map((it, i) => i === qe.idx ? { ...it, name: qe.name.trim(), unit: qe.unit, qty: qe.qty, unitPrice: qe.unitPrice, memo: qe.memo } : it);
+        const subtotal = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.unitPrice) || 0), 0);
+        let body = po.body;
+        try {
+          const oldNum = (po.body || "").match(/PO-[A-Z0-9]{4,8}/);
+          body = buildPOMarkdown({ ...po, items });
+          if (oldNum) body = body.replace(/PO-[A-Z0-9]{4,8}/, oldNum[0]);
+        } catch (e) { /* 문서 갱신 실패 시 기존 body 유지 */ }
+        return { ...po, items, body, totalAmount: subtotal + Math.round(subtotal * 0.1), updatedAt: Date.now() };
+      });
+      save("frw_purchase_orders", next);
+      return next;
+    });
+    setPoQuickEdit(null);
+    showToast("품목이 수정됐습니다 — 합계·발주서 문서 갱신", "success");
+  };
+
   const editPOFromHistory = (po) => {
     setPoDraft({
       editId: po.id,
