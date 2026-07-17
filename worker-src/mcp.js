@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-17-qe-stock-strip", note: "발주 이력 바로 편집에 재고 스트립 — 편집 중 현재고·안전재고·부족량 표시 + 부족량 채우기 (발주서 작성 화면과 동일)"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-17-lgprint-po-seed", note: "2026.07.03 LG프린트 반사 전사 발주(작업지시서 NJ-WO-2026-0703-01, 500 PCS) 발주 이력 자동 등록 — 단가 확인 필요, 중복 방지"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
