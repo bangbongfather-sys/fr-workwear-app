@@ -18318,6 +18318,115 @@ const NOTE_CATEGORIES = [
 const RECURRING_CATEGORIES = ["인증", "신고", "회의", "기타"];
 const noteCategoryColor = (id) => (NOTE_CATEGORIES.find(c => c.id === id) || NOTE_CATEGORIES[4]).color;
 
+// ─── 첨부파일 유틸 + 공용 첨부 UI (일정·중요메모) ───
+// 용량 전략: 사진은 자동 압축(긴 변 1280px, JPEG 0.72 → 보통 100~250KB)해 내장 저장,
+// 일반 파일은 1MB까지만 내장 저장(초과 시 '회사 필요 파일'(구글 드라이브) 탭 안내).
+// 첨부는 todos/notes 데이터에 함께 실려 기존 클라우드 동기화로 모든 기기에 공유된다.
+const ATT_MAX_FILE = 1024 * 1024; // 일반 파일 1MB
+const ATT_MAX_COUNT = 6;          // 항목당 첨부 수
+function attFmtSize(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + "MB" : Math.max(1, Math.round(n / 1024)) + "KB"; }
+function attDataUrlBytes(durl) { const i = (durl || "").indexOf(","); return i < 0 ? 0 : Math.floor((durl.length - i - 1) * 3 / 4); }
+function compressImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("파일을 읽을 수 없습니다"));
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("이미지를 해석할 수 없습니다"));
+      img.onload = () => {
+        try {
+          const MAX = 1280;
+          let w = img.width, h = img.height;
+          if (Math.max(w, h) > MAX) { const r = MAX / Math.max(w, h); w = Math.round(w * r); h = Math.round(h * r); }
+          const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+          cv.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(cv.toDataURL("image/jpeg", 0.72));
+        } catch (e) { reject(e); }
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+async function fileToAttachment(file) {
+  const mkId = () => Date.now() + "-" + Math.random().toString(36).slice(2, 7);
+  if (/^image\//.test(file.type)) {
+    const dataUrl = await compressImageFile(file);
+    return { id: mkId(), kind: "image", name: file.name, mime: "image/jpeg", size: attDataUrlBytes(dataUrl), dataUrl };
+  }
+  if (file.size > ATT_MAX_FILE) throw new Error(`"${file.name}" (${attFmtSize(file.size)})는 1MB를 초과합니다.\n큰 파일은 사이드바의 '회사 필요 파일'(구글 드라이브)에 올려주세요.`);
+  const dataUrl = await new Promise((res, rej) => { const fr = new FileReader(); fr.onerror = () => rej(new Error("파일을 읽을 수 없습니다")); fr.onload = () => res(fr.result); fr.readAsDataURL(file); });
+  return { id: mkId(), kind: "file", name: file.name, mime: file.type || "application/octet-stream", size: file.size, dataUrl };
+}
+function attDownload(att) {
+  const a = document.createElement("a");
+  a.href = att.dataUrl; a.download = att.name || "첨부파일";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+// 공용 첨부 필드 — value: 첨부 배열, onChange(next배열)
+function AttachmentField({ value = [], onChange }) {
+  const inputRef = React.useRef(null);
+  const [busy, setBusy] = React.useState(false);
+  const [viewer, setViewer] = React.useState(null); // 확대 보기 중인 이미지 첨부
+  const totalBytes = value.reduce((s, a) => s + (a.size || attDataUrlBytes(a.dataUrl)), 0);
+  const addFiles = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    if (value.length + files.length > ATT_MAX_COUNT) { showToast(`첨부는 항목당 최대 ${ATT_MAX_COUNT}개까지 가능합니다`); return; }
+    setBusy(true);
+    const added = [];
+    for (const f of files) {
+      try { added.push(await fileToAttachment(f)); }
+      catch (e) { showToast(e.message || "첨부 실패"); }
+    }
+    setBusy(false);
+    if (added.length) onChange([...(value || []), ...added]);
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={() => inputRef.current && inputRef.current.click()} disabled={busy}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", borderRadius: 8, border: "1.5px dashed var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+          <Icon name="camera" size={13}/>{busy ? "처리 중…" : "사진·파일 첨부"}
+        </button>
+        <span style={{ fontSize: 10.5, color: "var(--text3)" }}>사진 자동 압축 · 파일 1MB까지{value.length ? ` · ${value.length}개 · ${attFmtSize(totalBytes)}` : ""}</span>
+        <input ref={inputRef} type="file" multiple accept="image/*,.pdf,.xlsx,.xls,.docx,.doc,.hwp,.txt,.zip" style={{ display: "none" }}
+          onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
+      </div>
+      {value.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {value.map(att => (
+            <div key={att.id} style={{ position: "relative", width: att.kind === "image" ? 76 : 160 }}>
+              {att.kind === "image" ? (
+                <img src={att.dataUrl} alt={att.name} onClick={() => setViewer(att)}
+                  style={{ width: 76, height: 76, objectFit: "cover", borderRadius: 10, border: "1px solid var(--border)", cursor: "zoom-in", display: "block" }} />
+              ) : (
+                <button onClick={() => attDownload(att)} title={`${att.name} 다운로드`}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, padding: "8px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface2)", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                  <Icon name="document" size={16} style={{ flexShrink: 0, color: "var(--text2)" }}/>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 11, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{att.name}</span>
+                    <span style={{ fontSize: 10, color: "var(--text3)" }}>{attFmtSize(att.size || 0)} · 클릭해 저장</span>
+                  </span>
+                </button>
+              )}
+              <button onClick={() => onChange(value.filter(x => x.id !== att.id))} title="첨부 삭제"
+                style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: 10, border: "none", background: "#F04452", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {viewer && (
+        <div onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", zIndex: 10050, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, cursor: "zoom-out" }}>
+          <img src={viewer.dataUrl} alt={viewer.name} style={{ maxWidth: "94vw", maxHeight: "86vh", borderRadius: 12, boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} />
+          <button onClick={(e) => { e.stopPropagation(); attDownload(viewer); }}
+            style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", height: 38, padding: "0 18px", borderRadius: 100, border: "none", background: "#DB6B2E", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>⬇ 저장</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode }) {
   const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","notes","recurring"], "data-schedule-sub");
   const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
