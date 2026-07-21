@@ -17377,10 +17377,35 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                   <td style={{ padding: "7px 8px", fontWeight: 600, color: T.text }}>{it.name || "—"}{(it.memo || "").trim() ? <span title="요청사항" style={{ color: "#DB6B2E", fontWeight: 500, marginLeft: 6, fontSize: 11 }}>✎ {it.memo}</span> : it.note ? <span style={{ color: T.text3, fontWeight: 400, marginLeft: 6, fontSize: 11 }}>{it.note}</span> : ""}</td>
                                                   <td style={{ padding: "7px 8px", textAlign: "right", color: T.text2 }}>{ord.toLocaleString()}{it.unit ? " " + it.unit : ""}</td>
                                                   <td style={{ padding: "5px 8px", textAlign: "right" }}>
-                                                    <input type="number" value={it.receivedQty ?? ""} placeholder="0"
-                                                      onClick={(e) => e.stopPropagation()}
-                                                      onChange={(e) => setPOReceived(po.id, ii, e.target.value)}
-                                                      style={{ width: 84, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", border: `1px solid ${done ? "rgba(0,180,147,0.5)" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                                                    {(() => {
+                                                      const nRcv = (it.rcv || []).length;
+                                                      const isRcptOpen = poRcptOpen && poRcptOpen.poId === po.id && poRcptOpen.idx === ii;
+                                                      const openRcpt = (e) => {
+                                                        e.stopPropagation();
+                                                        if (isRcptOpen) { setPoRcptOpen(null); return; }
+                                                        // 기존 누계 입력분이 있으면 첫 입고 건으로 이관 (매입 현황의 기존 날짜 유지)
+                                                        if (!nRcv && parseFloat(it.receivedQty) > 0) {
+                                                          const itemKey = it.id != null ? String(it.id) : po.id + "#" + ii;
+                                                          const exist = fabricIntakes.find(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && !r.sourceRcptId);
+                                                          setPOReceipts(po.id, ii, [{ id: uid(), date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: String(parseFloat(it.receivedQty)) }]);
+                                                        }
+                                                        setRcptDraft({ date: new Date().toISOString().slice(0, 10), qty: "" });
+                                                        setPoRcptOpen({ poId: po.id, idx: ii });
+                                                      };
+                                                      return (<>
+                                                        <input type="number" value={it.receivedQty ?? ""} placeholder="0"
+                                                          readOnly={nRcv > 0}
+                                                          title={nRcv > 0 ? "부분입고 내역으로 관리 중 — 아래 버튼으로 수정" : ""}
+                                                          onClick={(e) => { e.stopPropagation(); if (nRcv > 0) openRcpt(e); }}
+                                                          onChange={(e) => { if (nRcv === 0) setPOReceived(po.id, ii, e.target.value); }}
+                                                          style={{ width: 84, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", border: `1px solid ${done ? "rgba(0,180,147,0.5)" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit", cursor: nRcv > 0 ? "pointer" : "text" }} />
+                                                        <button onClick={openRcpt}
+                                                          style={{ display: "block", marginLeft: "auto", marginTop: 3, padding: "2px 8px", borderRadius: 100, border: "none", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                                                            background: nRcv > 0 || isRcptOpen ? "rgba(219,107,46,0.14)" : "var(--surface2)", color: nRcv > 0 || isRcptOpen ? "#DB6B2E" : "var(--text3)" }}>
+                                                          📅 부분입고{nRcv > 0 ? ` ${nRcv}건` : ""}
+                                                        </button>
+                                                      </>);
+                                                    })()}
                                                   </td>
                                                   <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: !hasRcv ? T.text3 : remain > 0 ? "#FF9500" : "#00B493" }}>{hasRcv ? remain.toLocaleString() : "—"}</td>
                                                   <td style={{ padding: "7px 8px", textAlign: "center" }}>
