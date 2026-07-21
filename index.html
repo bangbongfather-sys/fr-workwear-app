@@ -17422,6 +17422,57 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                     </button>
                                                   </td>
                                                 </tr>
+                                                {poRcptOpen && poRcptOpen.poId === po.id && poRcptOpen.idx === ii && (() => {
+                                                  const rcv = it.rcv || [];
+                                                  const totalRc = rcv.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+                                                  const updRc = (rid, k, v) => setPOReceipts(po.id, ii, rcv.map(r => r.id === rid ? { ...r, [k]: v } : r));
+                                                  const delRc = (rid) => setPOReceipts(po.id, ii, rcv.filter(r => r.id !== rid));
+                                                  const addRc = () => {
+                                                    const q = parseFloat(rcptDraft.qty);
+                                                    if (isNaN(q) || q <= 0) { showToast("입고 수량을 입력하세요"); return; }
+                                                    setPOReceipts(po.id, ii, [...rcv, { id: uid(), date: rcptDraft.date || new Date().toISOString().slice(0, 10), qty: String(q) }]);
+                                                    setRcptDraft({ date: rcptDraft.date, qty: "" });
+                                                  };
+                                                  return (
+                                                    <tr key={(it.id || ii) + "-rcpt"} style={{ background: "rgba(219,107,46,0.05)" }}>
+                                                      <td colSpan={6} style={{ padding: "10px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
+                                                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+                                                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                                            <span style={{ fontSize: 12, fontWeight: 800, color: T.text }}>📅 부분입고 내역 — {it.name}</span>
+                                                            <span style={{ fontSize: 11, color: T.text3 }}>누계 <b style={{ color: totalRc >= ord && ord > 0 ? "#00B493" : "#FF9500" }}>{totalRc.toLocaleString()}</b> / 발주 {ord.toLocaleString()}{it.unit ? " " + it.unit : ""} · 미입고 {Math.max(0, ord - totalRc).toLocaleString()}</span>
+                                                            <span style={{ fontSize: 10.5, color: T.text3, background: "var(--surface2)", padding: "2px 8px", borderRadius: 100 }}>입고 건마다 해당 날짜로 매입 현황에 자동 기록</span>
+                                                            <button onClick={() => setPoRcptOpen(null)} style={{ marginLeft: "auto", padding: "3px 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>닫기</button>
+                                                          </div>
+                                                          {rcv.length > 0 && (
+                                                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                                              {rcv.map((rc, ri) => (
+                                                                <div key={rc.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                                                  <span style={{ fontSize: 11, color: T.text3, width: 34 }}>{ri + 1}차</span>
+                                                                  <input type="date" value={rc.date || ""} onChange={(e) => updRc(rc.id, "date", e.target.value)}
+                                                                    style={{ width: 140, height: 30, padding: "0 8px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                                                                  <input type="number" value={rc.qty} onChange={(e) => updRc(rc.id, "qty", e.target.value)} placeholder="수량"
+                                                                    style={{ width: 100, height: 30, padding: "0 8px", fontSize: 12, textAlign: "right", borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                                                                  <span style={{ fontSize: 11, color: T.text3 }}>{it.unit || ""}</span>
+                                                                  <button onClick={() => delRc(rc.id)} title="이 입고 건 삭제 (매입 현황 자동 행도 함께 삭제)"
+                                                                    style={{ width: 24, height: 24, border: "none", borderRadius: 6, background: "transparent", color: "#F04452", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>×</button>
+                                                                </div>
+                                                              ))}
+                                                            </div>
+                                                          )}
+                                                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                                            <span style={{ fontSize: 11, fontWeight: 700, color: T.text3, width: 34 }}>추가</span>
+                                                            <input type="date" value={rcptDraft.date} onChange={(e) => setRcptDraft({ ...rcptDraft, date: e.target.value })}
+                                                              style={{ width: 140, height: 30, padding: "0 8px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                                                            <input type="number" value={rcptDraft.qty} onChange={(e) => setRcptDraft({ ...rcptDraft, qty: e.target.value })} placeholder="입고 수량"
+                                                              onKeyDown={(e) => { if (e.key === "Enter") addRc(); }}
+                                                              style={{ width: 100, height: 30, padding: "0 8px", fontSize: 12, textAlign: "right", borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+                                                            <button onClick={addRc} className="btn-orange" style={{ height: 30, padding: "0 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>+ 입고 추가</button>
+                                                          </div>
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  );
+                                                })()}
                                               );
                                             })}
                                           </tbody>
