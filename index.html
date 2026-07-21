@@ -11532,6 +11532,30 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
           }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: "#475569" }}>✓ {selectedIds.size}건 선택됨</span>
             <div style={{ flex: 1 }} />
+            {/* 선택 항목을 다른 거래처(공급처)로 이동 — 잘못 등록된 거래처 정리용 */}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <select value={moveTarget} onChange={e => setMoveTarget(e.target.value)}
+                style={{ height: 36, padding: "0 10px", fontSize: 12, borderRadius: 8, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", maxWidth: 180 }}>
+                <option value="">이동할 거래처…</option>
+                {(purchaseSubTabs || []).filter(t => (t.name || "") && t.name !== filterSupplier).map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                <option value="__new__">+ 새 거래처 직접 입력</option>
+              </select>
+              <button onClick={() => {
+                let target = moveTarget;
+                if (!target) { showToast("이동할 거래처를 먼저 선택하세요"); return; }
+                if (target === "__new__") {
+                  target = (window.prompt("이동할 거래처명을 입력하세요") || "").trim();
+                  if (!target) return;
+                }
+                if (!window.confirm(`선택한 ${selectedIds.size}건을 "${target}" 거래처로 이동할까요?\n(해당 거래처 탭·미지급 정산 자동집계에 반영됩니다)`)) return;
+                setFabricIntakes(prev => prev.map(r => selectedIds.has(r.id) ? { ...r, supplier: target } : r));
+                if (setPurchaseSubTabs) setPurchaseSubTabs(p => (p || []).some(t => t.name === target) ? p : [...(p || []), { id: uid(), name: target }]);
+                const n = selectedIds.size;
+                clearSelection(); setMoveTarget("");
+                showToast(`${n}건을 "${target}" 거래처로 이동했습니다`, "success");
+              }}
+                style={{ padding:"8px 14px", fontSize:12, fontWeight:700, color:"#fff", background:"#DB6B2E", border:"none", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap", boxShadow:"var(--elev-2)" }}>→ 거래처 이동</button>
+            </span>
             <button onClick={clearSelection}
               style={{ padding:"8px 14px", fontSize:12, fontWeight:600, color:"var(--text2)", background:"transparent", border:"1.5px solid var(--divider)", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>선택 해제</button>
             <button onClick={deleteSelected}
