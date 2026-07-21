@@ -13064,11 +13064,77 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   // 최신 상태 미러 — fabricIntakes는 아래에서 선언되므로(TDZ) null로 시작, 선언 직후 useEffect로 채움
   const purchaseOrdersRef = useRef(null);
   const fabricIntakesRef = useRef(null);
+  // ── 부분입고: 품목당 rcv:[{id,date,qty}] 배열로 날짜별 분할 입고 관리 ──
+  // receivedQty는 rcv 합계로 자동 유지되어 기존 표시(누계·미입고·상태)와 호환된다.
+  const setPOReceipts = (poId, itemIdx, receipts) => {
+    const total = (receipts || []).reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+    setPurchaseOrders(prev => prev.map(p => {
+      if (p.id !== poId) return p;
+      const items = (p.items || []).map((it, i) => i === itemIdx ? { ...it, rcv: receipts || [], receivedQty: (receipts || []).length ? String(total) : "" } : it);
+      return { ...p, items };
+    }));
+    const tkey = poId + ":" + itemIdx;
+    clearTimeout(poRcvTimers.current[tkey]);
+    poRcvTimers.current[tkey] = setTimeout(() => syncReceiptsToIntake(poId, itemIdx), 600);
+  };
+  // 부분입고 → 매입 현황: 입고 건마다 해당 날짜의 매입 행 1개를 유지(sourceRcptId 링크)
+  const syncReceiptsToIntake = (poId, itemIdx) => {
+    const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
+    if (!po) return;
+    const it = (po.items || [])[itemIdx];
+    if (!it || !(it.name || "").trim()) return;
+    const itemKey = it.id != null ? String(it.id) : poId + "#" + itemIdx;
+    const rcv = it.rcv || [];
+    const supName = (po.supplier?.name || "").trim();
+    const arr = [...(fabricIntakesRef.current || [])];
+    let changed = false;
+    // 기존 단일 누계 행 처리 (부분입고 전환 시 중복 방지): 자동행은 제거, 수기/전송행은 첫 입고 건에 연결
+    const cumIdx = arr.findIndex(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && !r.sourceRcptId);
+    if (cumIdx >= 0 && rcv.length) {
+      if (arr[cumIdx].autoFromPO) { arr.splice(cumIdx, 1); changed = true; }
+      else { arr[cumIdx] = { ...arr[cumIdx], sourceRcptId: rcv[0].id }; changed = true; }
+    }
+    // 삭제된 입고 건의 자동 행 제거
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const r = arr[i];
+      if (r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && r.sourceRcptId && r.autoFromPO
+        && !rcv.some(x => String(x.id) === String(r.sourceRcptId))) { arr.splice(i, 1); changed = true; }
+    }
+    // 입고 건별 업서트
+    rcv.forEach(rc => {
+      const q = parseFloat(rc.qty);
+      if (isNaN(q) || q <= 0) return;
+      const ix = arr.findIndex(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && String(r.sourceRcptId || "") === String(rc.id));
+      if (ix >= 0) {
+        const cur = arr[ix];
+        if (parseFloat(cur.qty) === q && (!rc.date || cur.date === rc.date)) return;
+        arr[ix] = { ...cur, qty: String(q), date: rc.date || cur.date, status: "입고완료",
+          unit: it.unit || cur.unit, unitPrice: (it.unitPrice !== "" && it.unitPrice != null) ? it.unitPrice : cur.unitPrice };
+        changed = true;
+      } else {
+        arr.push({
+          id: uid(), date: rc.date || new Date().toISOString().slice(0, 10), supplier: supName, inspector: "",
+          materialName: (it.name || "").trim(), qty: String(q), unit: it.unit || "",
+          unitPrice: it.unitPrice || "", status: "입고완료",
+          note: po.title ? `발주 부분입고: ${po.title}` : "발주 부분입고",
+          sourcePoId: po.id, sourcePoItemId: itemKey, sourceRcptId: rc.id, autoFromPO: true,
+        });
+        changed = true;
+      }
+    });
+    if (changed) {
+      setFabricIntakes(arr);
+      if (supName) setPurchaseSubTabs(p2 => (p2 || []).some(t => t.name === supName) ? p2 : [...(p2 || []), { id: uid(), name: supName }]);
+      const total = rcv.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+      showToast(`매입 현황 반영: ${it.name} 부분입고 ${rcv.length}건 · 누계 ${total.toLocaleString()}${it.unit ? " " + it.unit : ""}`, "success");
+    }
+  };
   const syncReceivedToIntake = (poId, itemIdx) => {
     const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
     if (!po) return;
     const it = (po.items || [])[itemIdx];
     if (!it || !(it.name || "").trim()) return;
+    if ((it.rcv || []).length) { syncReceiptsToIntake(poId, itemIdx); return; } // 부분입고 관리 품목은 건별 동기화
     const itemKey = it.id != null ? String(it.id) : poId + "#" + itemIdx;
     const qty = parseFloat(it.receivedQty);
     const has = !isNaN(qty) && qty > 0;
