@@ -18898,7 +18898,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
 
   // ── 일정 상세 모달 (노션 스타일: 제목 + 내용 메모) ──
   const [detail, setDetail] = React.useState(null); // { id, text, memo, date, endDate } — 편집 중 드래프트
-  const openDetail = (t) => setDetail({ id: t.id, text: t.text, memo: t.memo || "", date: t.date, endDate: t.endDate || "", atts: t.atts || [] });
+  const openDetail = (t) => { setMoveToNotePin(false); setDetail({ id: t.id, text: t.text, memo: t.memo || "", date: t.date, endDate: t.endDate || "", atts: t.atts || [] }); };
   const closeDetail = (saveIt = true) => {
     if (saveIt && detail) {
       let start = detail.date, end = detail.endDate;
@@ -18914,6 +18914,42 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
       if (target?.notionPageId) notionPatch(target.notionPageId, { text, date: start, endDate: end || null });
     }
     setDetail(null);
+  };
+
+  // ── 일정 → 중요 메모 이관 ──
+  // 캘린더로 관리하던 항목을 장기 보관용 메모로 옮긴다. 제목·내용·첨부를 그대로 넘기고
+  // 기간 정보는 본문 말미에 출처로 남긴다. '상단 고정'을 켜면 중요 메모 탭의
+  // '고정 메모' 영역 최상단에 올라간다(기존 note.pinned 재사용).
+  // 원본 일정 삭제는 확인 후 선택 — 취소하면 캘린더에 그대로 두고 복사만 된다.
+  const [moveToNotePin, setMoveToNotePin] = React.useState(false);
+  const moveDetailToNote = () => {
+    if (!detail) return;
+    if (!setNotes) { showToast("중요 메모를 사용할 수 없습니다"); return; }
+    const title = (detail.text || "").trim() || "(제목 없음)";
+    const period = detail.endDate && detail.endDate !== detail.date
+      ? `${detail.date} → ${detail.endDate}` : detail.date;
+    const body = [(detail.memo || "").trim(), `— 일정에서 이관 (${period})`].filter(Boolean).join("\n\n");
+    const now = Date.now();
+    setNotes(prev => [{
+      id: uid(),
+      title, body,
+      category: "기타",
+      color: noteCategoryColor("기타"),
+      pinned: moveToNotePin,
+      clientId: null,
+      tags: [],
+      atts: detail.atts || [],
+      createdAt: now, updatedAt: now,
+    }, ...(prev || [])]);
+    const alsoRemove = window.confirm(
+      `"${title}"을(를) 중요 메모로 옮겼습니다.\n\n원본 일정도 삭제할까요?\n(취소하면 캘린더에 그대로 남습니다)`
+    );
+    if (alsoRemove) { removeTodo(detail.id); setDetail(null); }
+    else closeDetail(true); // 모달에서 수정한 내용을 원본 일정에도 반영하고 닫기
+    setMoveToNotePin(false);
+    showToast(alsoRemove
+      ? `중요 메모로 이동했습니다${moveToNotePin ? " (상단 고정)" : ""}`
+      : `중요 메모에 복사했습니다${moveToNotePin ? " (상단 고정)" : ""}`, "success");
   };
 
   // 기존 todo (notionPageId 없는 것) 일괄 동기화
@@ -19477,6 +19513,32 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
 
               {/* 첨부 (사진·파일) */}
               <AttachmentField value={detail.atts || []} onChange={arr => setDetail(d => ({ ...d, atts: arr }))} />
+
+              {/* 중요 메모로 이관 — 날짜 관리가 끝난 항목을 장기 보관용 메모로 넘김 */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                padding: "12px 14px", borderRadius: 12,
+                background: "var(--surface2)", border: "1px solid var(--border)",
+              }}>
+                <div style={{ flex: 1, minWidth: 148 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", marginBottom: 2 }}>중요 메모로 넘기기</div>
+                  <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.5 }}>제목·내용·첨부를 그대로 옮깁니다</div>
+                </div>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}>
+                  <input type="checkbox" checked={moveToNotePin} onChange={e => setMoveToNotePin(e.target.checked)} />
+                  <span style={{ color: moveToNotePin ? "#DB6B2E" : "var(--text2)", fontWeight: moveToNotePin ? 800 : 500 }}>
+                    {moveToNotePin ? "★" : "☆"} 상단 고정
+                  </span>
+                </label>
+                <button onClick={moveDetailToNote} title="이 일정을 중요 메모로 옮깁니다" style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  padding: "9px 14px", border: "none", borderRadius: 10,
+                  background: "rgba(219,107,46,0.12)", color: "#DB6B2E",
+                  fontFamily: "inherit", fontSize: 12, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap",
+                }}>
+                  <Icon name="clipboard" size={13}/>넘기기
+                </button>
+              </div>
             </div>
 
             {/* 푸터 */}
