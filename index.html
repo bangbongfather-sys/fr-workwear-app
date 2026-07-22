@@ -760,8 +760,19 @@
     }
 
     /* ─── 태블릿/작은 노트북 (1024px 이하) ─── */
+    /* 좁은 화면에선 검색바 대신 헤더의 검색 아이콘(.gs-mobile-btn)을 노출하고,
+       누르면 화면 상단 전체폭 오버레이(.gs-open)로 검색을 연다. */
+    .gs-mobile-btn { display: none !important; }
     @media (max-width: 1024px) {
       .global-search-wrap { display: none !important; }
+      .global-search-wrap.gs-open {
+        display: block !important;
+        /* inline style의 position:relative를 이겨야 해서 !important */
+        position: fixed !important; top: max(10px, env(safe-area-inset-top)); left: 10px; right: 10px;
+        max-width: none !important; z-index: 1200;
+        background: var(--surface); border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.25);
+      }
+      .gs-mobile-btn { display: flex !important; }
     }
 
     /* ─── 모바일 (768px 이하) ─── */
@@ -1208,6 +1219,48 @@ const ORANGE = "#F59E0B";
 // 여기 순서/이름이 Firebase /frw 의 top-level key 및 _revs 키와 1:1 대응한다.
 const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits"];
 
+
+// ─── 통합 검색 매칭 유틸 ───
+// 약점 보완: ① 공백·대소문자 무시("lg프린트" ↔ "LG 프린트") ② 다단어 AND, 순서 무관
+// ("팬츠 아라미드" → "하계 아라미드 팬츠") ③ 초성 검색("ㅇㄹㅁㄷ" → "아라미드").
+// 점수제 랭킹: 완전일치 100 > 접두 80 > 포함 50 > 초성 30, 첫 필드(제목) 매칭 시 +10.
+const _CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+const searchNorm = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
+const toChosung = (s) => {
+  let out = "";
+  for (const ch of String(s || "")) {
+    const c = ch.charCodeAt(0);
+    out += (c >= 0xAC00 && c <= 0xD7A3) ? _CHO[Math.floor((c - 0xAC00) / 588)] : ch.toLowerCase();
+  }
+  return out.replace(/\s+/g, "");
+};
+const _isChosungQuery = (t) => /^[ㄱ-ㅎ]{2,}$/.test(t);
+// 모든 토큰이 fields 중 어딘가에 걸려야 매칭(토큰별 최고점 합산). 0이면 미매칭.
+function searchScore(query, fields) {
+  const tokens = String(query || "").trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return 0;
+  const norm = fields.map(searchNorm);
+  const cho = fields.map(toChosung);
+  let total = 0;
+  for (const t of tokens) {
+    const tn = searchNorm(t);
+    let best = 0;
+    for (let i = 0; i < norm.length; i++) {
+      const f = norm[i];
+      if (!f) continue;
+      let s = 0;
+      if (f === tn) s = 100;
+      else if (f.startsWith(tn)) s = 80;
+      else if (f.includes(tn)) s = 50;
+      else if (_isChosungQuery(tn) && cho[i].includes(tn)) s = 30;
+      if (s > 0 && i === 0) s += 10; // 제목 필드 가중치
+      if (s > best) best = s;
+    }
+    if (best === 0) return 0;
+    total += best;
+  }
+  return total;
+}
 
 // ─── 토스트 알림 (alert 대체) ───
 // React 밖 vanilla 구현 — 모듈 레벨 어디서든 호출 가능. 클릭하면 닫힘, 최대 4개 유지.
@@ -12928,6 +12981,11 @@ function App() {
   const [orders, setOrders] = useState(() => load("frw_orders", []));
   const [clients, setClients] = useState(() => load("frw_clients", []));
   const [globalSearch, setGlobalSearch] = useState("");
+  const [gsSel, setGsSel] = useState(0);   // 통합 검색 — 키보드 선택 인덱스
+  const gsResultsRef = useRef([]);          // 통합 검색 — Enter 핸들러가 참조할 현재 결과
+  const gsKeyNavRef = useRef(false);        // 방향키 탐색 중일 때만 scrollIntoView (호버와 구분)
+  const [gsMobileOpen, setGsMobileOpen] = useState(false); // 1024px 이하 — 검색 오버레이 열림
+  useEffect(() => { setGsMobileOpen(false); }, [tab]);      // 검색 결과로 탭 이동하면 오버레이 닫기
   const [bids, setBids] = useState(() => load("frw_bids", []));
   const [todos, setTodos] = useState(() => load("frw_todos", []));
   const [notes, setNotes] = useState(() => load("frw_notes", []));
@@ -14786,20 +14844,28 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             }}><Icon name="menu" size={20}/></button>
             <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
               {/* 통합 검색 바 */}
-              <div style={{ flex: 1, maxWidth: 900, position: "relative" }} className="no-print global-search-wrap">
+              <div style={{ flex: 1, maxWidth: 900, position: "relative" }} className={"no-print global-search-wrap" + (gsMobileOpen ? " gs-open" : "")}>
                 <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", display: "inline-flex", pointerEvents: "none" }}><Icon name="search" size={15}/></span>
                 <input
-                  placeholder="통합 검색 — 거래처·제품·주문·견적·원단..."
+                  placeholder="통합 검색 — 거래처·제품·일정·메모·발주·입찰... (초성 검색 지원)"
                   value={globalSearch}
-                  onChange={e => setGlobalSearch(e.target.value)}
+                  onChange={e => { setGlobalSearch(e.target.value); setGsSel(0); }}
+                  onKeyDown={e => {
+                    if (!globalSearch.trim()) return;
+                    const list = gsResultsRef.current || [];
+                    if (e.key === "ArrowDown") { e.preventDefault(); gsKeyNavRef.current = true; setGsSel(s => Math.min(s + 1, Math.max(list.length - 1, 0))); }
+                    else if (e.key === "ArrowUp") { e.preventDefault(); gsKeyNavRef.current = true; setGsSel(s => Math.max(s - 1, 0)); }
+                    else if (e.key === "Enter") { const r = list[Math.min(gsSel, list.length - 1)]; if (r) r.action(); }
+                    else if (e.key === "Escape") { setGlobalSearch(""); setGsMobileOpen(false); }
+                  }}
                   style={{
                     width: "100%", height: 38, padding: "0 36px 0 36px", fontSize: 13,
                     borderRadius: 10, background: "var(--input-bg)", border: "1px solid var(--border)",
                     color: "var(--input-color)", fontFamily: "inherit",
                   }}
                 />
-                {globalSearch && (
-                  <button onClick={() => setGlobalSearch("")} style={{
+                {(globalSearch || gsMobileOpen) && (
+                  <button onClick={() => { setGlobalSearch(""); setGsMobileOpen(false); }} style={{
                     position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
                     width: 24, height: 24, borderRadius: "50%", border: "none",
                     background: "var(--divider)", color: "var(--text2)", cursor: "pointer",
@@ -14807,58 +14873,59 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   }}><Icon name="close" size={12}/></button>
                 )}
                 {globalSearch.trim() && (() => {
-                  const q = globalSearch.toLowerCase().trim();
+                  const q = globalSearch.trim();
                   const res = [];
-                  clients.forEach(c => {
-                    if ((c.name||"").toLowerCase().includes(q) || (c.contact||"").toLowerCase().includes(q) || (c.phone||"").includes(q) || (c.bizNo||"").includes(q)) {
-                      res.push({ type:"거래처", icon:"building", title:c.name, sub:`${c.contact||""} ${c.phone||""}`.trim()||c.bizNo||"-", action:()=>{setTab("clients"); setGlobalSearch("");} });
-                    }
-                  });
+                  // score 0이면 미매칭 → 스킵. 매칭 항목은 점수와 함께 수집 후 관련도순 정렬.
+                  const push = (score, item) => { if (score > 0) res.push({ ...item, score }); };
+                  clients.forEach(c => push(searchScore(q, [c.name, c.contact, c.phone, c.bizNo]),
+                    { type:"거래처", icon:"building", title:c.name, sub:`${c.contact||""} ${c.phone||""}`.trim()||c.bizNo||"-", action:()=>{setTab("clients"); setGlobalSearch("");} }));
+                  suppliers.forEach(s => push(searchScore(q, [s.name, s.contact, s.phone, s.items]),
+                    { type:"공급처", icon:"suppliers", title:s.name, sub:`${s.contact||""} ${s.phone||""}`.trim()||s.items||"-", action:()=>{setTab("suppliers"); setGlobalSearch("");} }));
                   products.forEach(p => {
-                    if ((p.name||"").toLowerCase().includes(q)) {
-                      const sp = getActiveSpec(p) || {};
-                      res.push({ type:"제품", icon:"shirt", title:p.name, sub:`${sp.fabrics?.length||0}개 원단 / ${sp.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
-                    }
+                    const sp = getActiveSpec(p) || {};
+                    push(searchScore(q, [p.name]),
+                      { type:"제품", icon:"shirt", title:p.name, sub:`${sp.fabrics?.length||0}개 원단 / ${sp.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
                   });
-                  orders.forEach(o => {
-                    if ((o.productName||"").toLowerCase().includes(q) || (o.client||"").toLowerCase().includes(q) || (o.note||"").toLowerCase().includes(q)) {
-                      res.push({ type:"판매", icon:"package", title:o.productName, sub:`${o.date||""} · ${o.client||""} · ${(parseFloat(o.unitPrice||0)*parseInt(o.qty||1)).toLocaleString()}원`, action:()=>{setTab("dashboard"); setGlobalSearch("");} });
-                    }
-                  });
-                  materials.forEach(m => {
-                    if ((m.name||"").toLowerCase().includes(q)) {
-                      res.push({ type:"원단", icon:"layers", title:m.name, sub:`${m.price?.toLocaleString()||0}원/${m.unit||"yard"}`, action:()=>{setTab("pricedb"); setGlobalSearch("");} });
-                    }
-                  });
-                  (savedQuotes||[]).forEach(q2 => {
-                    if ((q2.title||"").toLowerCase().includes(q) || (q2.quoteClient||"").toLowerCase().includes(q)) {
-                      res.push({ type:"견적", icon:"document", title:q2.title||"무제", sub:`${q2.dateStr||""} · ${q2.quoteClient||""}`, action:()=>{setTab("history"); setGlobalSearch("");} });
-                    }
-                  });
-                  (fabricIntakes||[]).forEach(f => {
-                    if ((f.materialName||"").toLowerCase().includes(q) || (f.supplier||"").toLowerCase().includes(q)) {
-                      res.push({ type:"입고", icon:"inbox", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} });
-                    }
-                  });
+                  orders.forEach(o => push(searchScore(q, [o.productName, o.client, o.note]),
+                    { type:"판매", icon:"package", title:o.productName, sub:`${o.date||""} · ${o.client||""} · ${(parseFloat(o.unitPrice||0)*parseInt(o.qty||1)).toLocaleString()}원`, action:()=>{setTab("dashboard"); setGlobalSearch("");} }));
+                  materials.forEach(m => push(searchScore(q, [m.name]),
+                    { type:"원단", icon:"layers", title:m.name, sub:`${m.price?.toLocaleString()||0}원/${m.unit||"yard"}`, action:()=>{setTab("pricedb"); setGlobalSearch("");} }));
+                  laborItems.forEach(l => push(searchScore(q, [l.name]),
+                    { type:"공임", icon:"wrench", title:l.name, sub:`${l.price?.toLocaleString()||0}원`, action:()=>{setTab("pricedb"); setGlobalSearch("");} }));
+                  (savedQuotes||[]).forEach(q2 => push(searchScore(q, [q2.title, q2.quoteClient]),
+                    { type:"견적", icon:"document", title:q2.title||"무제", sub:`${q2.dateStr||""} · ${q2.quoteClient||""}`, action:()=>{setTab("quote"); setQuoteSubTab("history"); setGlobalSearch("");} }));
+                  (purchaseOrders||[]).forEach(po => push(searchScore(q, [po.title, po.supplier?.name, po.memo]),
+                    { type:"발주", icon:"purchase", title:po.title||po.supplier?.name||"(제목 없음)", sub:`${po.orderDate||""} · ${po.supplier?.name||""}`, action:()=>{setTab("purchase"); setGlobalSearch("");} }));
+                  (fabricIntakes||[]).forEach(f => push(searchScore(q, [f.materialName, f.supplier]),
+                    { type:"입고", icon:"inbox", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} }));
+                  (bids||[]).forEach(b => push(searchScore(q, [b.title, b.agency, b.note]),
+                    { type:"입찰", icon:"bids", title:b.title, sub:`${b.closeDate?`마감 ${b.closeDate}`:""}${b.agency?` · ${b.agency}`:""}${b.status?` · ${b.status}`:""}`, action:()=>{setTab("bids"); setGlobalSearch("");} }));
+                  // 일정·중요메모 — 클릭 시 일정 탭의 해당 서브탭으로 진입 (서브탭은 localStorage에서 복원됨)
+                  // localStorage는 새로 마운트될 때, 커스텀 이벤트는 일정 탭이 이미 열려 있을 때 서브탭 전환을 담당
+                  (todos||[]).forEach(t => push(searchScore(q, [t.text, t.memo]),
+                    { type:"일정", icon:"calendar", title:t.text, sub:`${t.date||""}${t.endDate?` → ${t.endDate}`:""}${t.done?" · ✓ 완료":""}`, action:()=>{save("frw_schedule_subtab","calendar"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"calendar",date:t.date}})),80);} }));
+                  (notes||[]).forEach(n => push(searchScore(q, [n.title, n.body, (n.tags||[]).join(" ")]),
+                    { type:"메모", icon:"clipboard", title:n.title||"(제목 없음)", sub:`${n.pinned?"★ ":""}${n.category||""}${n.body?` · ${n.body.slice(0,40)}`:""}`, action:()=>{save("frw_schedule_subtab","notes"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"notes"}})),80);} }));
                   // 재고 — 클릭하면 재고 탭으로 이동 + 해당 품목이 검색된 상태로 열림
-                  ((stock && stock.items) || []).forEach(it => {
-                    if ((it.name||"").toLowerCase().includes(q) || (it.code||"").toLowerCase().includes(q) || (it.spec||"").toLowerCase().includes(q)) {
-                      res.push({ type:"재고", icon:"layers", title:it.name,
-                        sub:`재고 ${(it.qty??0).toLocaleString()}${it.unit||""}${it.qty<0?" ⚠️ 마이너스":""}${it.code?` · ${it.code}`:""}`,
-                        action:()=>{ setStockFocusSearch(globalSearch.trim()); setTab("stock"); setGlobalSearch(""); } });
-                    }
-                  });
-                  const limited = res.slice(0, 12);
+                  ((stock && stock.items) || []).forEach(it => push(searchScore(q, [it.name, it.code, it.spec]),
+                    { type:"재고", icon:"layers", title:it.name,
+                      sub:`재고 ${(it.qty??0).toLocaleString()}${it.unit||""}${it.qty<0?" ⚠️ 마이너스":""}${it.code?` · ${it.code}`:""}`,
+                      action:()=>{ setStockFocusSearch(globalSearch.trim()); setTab("stock"); setGlobalSearch(""); } }));
+                  res.sort((a, b) => b.score - a.score);
+                  const limited = res.slice(0, 20);
+                  gsResultsRef.current = limited; // Enter/방향키 핸들러와 공유
+                  const sel = Math.min(gsSel, Math.max(limited.length - 1, 0));
                   return (
                     <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 10, marginTop: 6, maxHeight: 380, overflowY: "auto", zIndex: 1000, boxShadow: "0 8px 28px rgba(0,0,0,0.18)" }}>
                       {limited.length === 0 ? (
-                        <div style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>검색 결과가 없습니다</div>
+                        <div style={{ padding: 20, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>검색 결과가 없습니다<div style={{ fontSize: 11, marginTop: 4 }}>초성(ㅇㄹㅁㄷ)·띄어쓰기 무시·단어 순서 무관 검색을 지원합니다</div></div>
                       ) : (
                         <>
                           {limited.map((r, i) => (
-                            <div key={i} onClick={r.action} style={{ padding: "10px 14px", cursor: "pointer", borderBottom: i < limited.length - 1 ? "1px solid var(--divider)" : "none", display: "flex", alignItems: "center", gap: 10 }}
-                              onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"}
-                              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                            <div key={i} onClick={r.action}
+                              ref={el => { if (el && i === sel && gsKeyNavRef.current) { el.scrollIntoView({ block: "nearest" }); gsKeyNavRef.current = false; } }}
+                              style={{ padding: "10px 14px", cursor: "pointer", borderBottom: i < limited.length - 1 ? "1px solid var(--divider)" : "none", display: "flex", alignItems: "center", gap: 10, background: i === sel ? "var(--surface2)" : "transparent" }}
+                              onMouseEnter={() => { gsKeyNavRef.current = false; setGsSel(i); }}
                             >
                               <span style={{ flexShrink: 0, color: "var(--text2)", display: "inline-flex" }}><Icon name={r.icon} size={18}/></span>
                               <div style={{ flex: 1, minWidth: 0 }}>
@@ -14868,9 +14935,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: "var(--divider)", color: "var(--text2)", fontWeight: 700, flexShrink: 0 }}>{r.type}</span>
                             </div>
                           ))}
-                          {res.length > 12 && (
-                            <div style={{ padding: "8px 14px", textAlign: "center", fontSize: 11, color: "var(--text3)", borderTop: "1px solid var(--divider)" }}>총 {res.length}건 중 상위 12건 표시</div>
-                          )}
+                          <div style={{ padding: "7px 14px", display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text3)", borderTop: "1px solid var(--divider)" }}>
+                            <span>↑↓ 이동 · Enter 열기 · Esc 닫기</span>
+                            {res.length > 20 && <span>총 {res.length}건 중 상위 20건</span>}
+                          </div>
                         </>
                       )}
                     </div>
@@ -14879,6 +14947,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {/* 좁은 화면 전용 검색 버튼 — 통합 검색 오버레이 열기 (1024px 이하에서만 CSS로 표시) */}
+              <button className="gs-mobile-btn no-print" title="통합 검색"
+                onClick={() => {
+                  setGsMobileOpen(true);
+                  setTimeout(() => { const el = document.querySelector(".global-search-wrap input"); if (el) el.focus(); }, 60);
+                }}
+                style={{
+                  width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
+                  background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
+                  color: "var(--text1)", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                }}><Icon name="search" size={16}/></button>
               {!installed && (
                 <button onClick={promptInstall} title="앱처럼 바탕화면에 설치" className="no-print"
                   style={{
@@ -18612,6 +18691,17 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   const [search, setSearch] = React.useState(""); // 일정 검색어(내용)
   // 검색 결과 클릭 → 해당 월로 이동 + 그 날짜 선택
   const jumpToDate = (ds) => { if (!ds) return; const [y, m] = ds.split("-").map(Number); setCursor(new Date(y, m - 1, 1)); setSelectedDate(ds); };
+  // 통합 검색 → 일정/메모 결과 진입. 탭이 이미 열려 있으면 마운트가 안 일어나 localStorage
+  // 복원이 무효라, 커스텀 이벤트로 서브탭 전환 + (일정이면) 해당 날짜로 점프한다.
+  React.useEffect(() => {
+    const h = (e) => {
+      const d = (e && e.detail) || {};
+      if (d.sub) setScheduleSub(d.sub);
+      if (d.date) { try { const [y, m] = d.date.split("-").map(Number); setCursor(new Date(y, m - 1, 1)); setSelectedDate(d.date); } catch {} }
+    };
+    window.addEventListener("frw:schedule-nav", h);
+    return () => window.removeEventListener("frw:schedule-nav", h);
+  }, []);
   const [draft, setDraft] = React.useState("");
   const [draftEnd, setDraftEnd] = React.useState(""); // 종료일 (업무 기간) — 비워두면 단일일자
   const [editingId, setEditingId] = React.useState(null);
