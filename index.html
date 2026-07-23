@@ -12918,6 +12918,50 @@ function App() {
     const t2 = setTimeout(() => check(true), 30000);   // 늦은 pull 대비 2차 확인 후 종료
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
+  // '하계 아라미드 셔츠' 견적 이력 기반 재등록 (1회) — 원본 구조가 실패한 경우의 대비책.
+  // 가격 근거: 2026.07.08 견적 D등급 98,000 · 2026.04.26 견적 A등급 87,000 = 자켓과 동일 가격표.
+  // 구조 로직(12초)이 원본을 살리면 이 시드는 건너뛰고, 재구성본이 있는 상태에서 원본이 발견되면 원본으로 교체된다.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        if (load("frw_seed_shirt_rebuild_done", false)) return;
+        save("frw_seed_shirt_rebuild_done", true);
+        let added = false;
+        setProducts(prev => {
+          if (prev.some(p => (p.name || "").includes("하계 아라미드 셔츠"))) return prev;
+          added = true;
+          return [...prev, {
+            id: 3006,
+            name: "하계 아라미드 셔츠 (NSSY26)/update",
+            include: true,
+            marketPrice: "",
+            memo: "[견적 복구] 2026.07/04 견적 이력 단가 기준 재구성 (A 87,000 ~ D 98,000, 자켓과 동일 가격표 확인) — 원단 요척 수량은 확인 후 조정해주세요",
+            specs: [{
+              id: 1777275417255,
+              name: "요척서 1",
+              createdAt: 1777275417463,
+              adminRate: 5,
+              fabrics: [
+                { id: 4011, matId: "220", qty: "1.6" },
+                { id: 4012, matId: "215", qty: "0.2" },
+              ],
+              extras: [
+                { customName: "부자재 (지퍼+반사테이프)", id: 5011, laborId: "2001", price: "2000", qty: "1" },
+                { customName: "공임비 - 플리스 자켓/하계 셔츠", id: 5012, laborId: "2010", price: "14500", qty: "1" },
+              ],
+              grades: ["A", "B", "C", "D"],
+              margins: { A: 55, B: 57, C: 66, D: 75 },
+              priceOverrides: { A: "87000", B: "88000", C: "93000", D: "98000" },
+              selectedGrade: "A",
+            }],
+            activeSpecId: 1777275417255,
+          }];
+        });
+        setTimeout(() => { if (added) showToast("📋 '하계 아라미드 셔츠'를 견적 이력 단가 기준으로 재등록했습니다 — 요척서 수치를 확인해주세요", "info"); }, 400);
+      } catch (e) {}
+    }, 15000); // 구조 로직 1차(12초) 이후 실행 — 원본이 살아났으면 건너뜀
+    return () => clearTimeout(t);
+  }, []);
   const [newProdName, setNewProdName] = useState("");
   const [apiKey, setApiKey] = useState(() => load("frw_apikey", ""));
   const [includeImages, setIncludeImages] = useState(() => load("frw_quote_include_images", true));
