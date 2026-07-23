@@ -2035,6 +2035,242 @@ function computeCostDrift(materials, laborItems, fabricIntakes, products, { thre
   return { drifts, impacts };
 }
 
+// ─── 자사(발주자) 정보 — 정식 발주서 양식에 표시. 변경 시 이 상수만 수정 ───
+const BUYER_INFO = {
+  name: "NJ SAFETY (엔제이세이프티)",
+  bizNo: "101-09-93896",
+  ceo: "나승민",
+  address: "서울시 중랑구 신내역로 111, SK V1 B동 426호",
+  tel: "02-777-3079",
+  contact: "나승민",
+};
+
+// 금액 → 한글 (예: 776765000 → "칠억칠천육백칠십육만오천")
+function numToKoreanAmount(num) {
+  let n = Math.round(Number(num) || 0);
+  if (n === 0) return "영";
+  const digits = ["", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구"];
+  const small = ["", "십", "백", "천"];
+  const big = ["", "만", "억", "조", "경"];
+  let result = "", gi = 0;
+  while (n > 0) {
+    let group = n % 10000, gstr = "", u = 0;
+    while (group > 0) {
+      const d = group % 10;
+      if (d > 0) gstr = digits[d] + small[u] + gstr;
+      group = Math.floor(group / 10); u++;
+    }
+    if (gstr) result = gstr + big[gi] + result;
+    n = Math.floor(n / 10000); gi++;
+  }
+  return result;
+}
+
+// ─── 정식 발주서 문서 (첨부 양식 기반 전문 레이아웃) ───
+// poDraft / 저장된 발주서(viewingPO) 양쪽에 동일 사용. 마크다운(body)이 아니라 구조화 데이터로 직접 렌더.
+function POOfficialDoc({ draft, buyer = BUYER_INFO }) {
+  const sup = draft.supplier || {};
+  const items = (draft.items || []).filter(it => (it.name || "").trim());
+  const num = v => Math.round(Number(v) || 0);
+  const fmt = v => num(v).toLocaleString();
+  const subtotal = items.reduce((s, it) => s + num(it.qty) * num(it.unitPrice), 0);
+  const tax = Math.round(subtotal * 0.1);
+  const total = subtotal + tax;
+  const totalQty = items.reduce((s, it) => s + num(it.qty), 0);
+  const poNo = draft.poNo || (draft.body && (draft.body.match(/PO-[A-Z0-9]{4,8}/) || [])[0]) || `PO-${(draft.id ? String(draft.id) : Date.now().toString(36)).toUpperCase().slice(-6)}`;
+  const dateK = (d) => {
+    if (!d) return "";
+    const m = String(d).match(/(\d{4})[-.\/]\s*(\d{1,2})[-.\/]\s*(\d{1,2})/);
+    return m ? `${m[1]} 년 ${Number(m[2])} 월 ${Number(m[3])} 일` : String(d);
+  };
+  const orderDate = dateK(draft.orderDate) || dateK(new Date().toISOString().slice(0, 10));
+  const partyRow = (label, buyerVal, supVal) => (
+    <tr>
+      <th className="po-off-pl">{label}</th>
+      <td className="po-off-pv">{buyerVal || "—"}</td>
+      <th className="po-off-pl">{label}</th>
+      <td className="po-off-pv">{supVal || ""}</td>
+    </tr>
+  );
+  return (
+    <div className="official-doc">
+      <style>{`
+        .official-doc { width: 100%; max-width: 780px; margin: 0 auto; background: #fff; color: #222; padding: 30px 34px 40px; font-family: 'Pretendard Variable', Pretendard, -apple-system, sans-serif; box-sizing: border-box; }
+        .official-doc * { box-sizing: border-box; }
+        .po-off-title { text-align: center; padding: 14px 0 12px; border-top: 3px solid #22304A; border-bottom: 3px solid #22304A; margin-bottom: 18px; }
+        .po-off-title h1 { margin: 0; font-size: 30px; font-weight: 800; letter-spacing: 14px; color: #1a2438; }
+        .po-off-title .en { display: block; margin-top: 4px; font-size: 12px; letter-spacing: 8px; color: #6B7280; font-weight: 700; }
+        .official-doc table { width: 100%; border-collapse: collapse; }
+        .po-off-meta td, .po-off-meta th { border: 1px solid #C9CDD6; padding: 8px 12px; font-size: 13px; }
+        .po-off-meta th { background: #F4F5F8; font-weight: 700; color: #303848; width: 92px; text-align: center; white-space: nowrap; }
+        .po-off-meta td { color: #222; font-weight: 600; }
+        .po-off-sec { margin-top: 18px; }
+        .po-off-party th.grp { background: #22304A; color: #fff; font-size: 13px; font-weight: 700; text-align: center; padding: 8px; letter-spacing: 1px; }
+        .po-off-party td, .po-off-party th { border: 1px solid #C9CDD6; font-size: 12.5px; padding: 7px 11px; }
+        .po-off-party th.po-off-pl { background: #F4F5F8; font-weight: 700; color: #303848; width: 74px; text-align: center; white-space: nowrap; }
+        .po-off-party td.po-off-pv { color: #222; }
+        .po-off-label { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 800; color: #22304A; margin: 20px 0 8px; }
+        .po-off-label::before { content: ""; width: 4px; height: 16px; background: #22304A; border-radius: 2px; display: inline-block; }
+        .po-off-items th, .po-off-items td { border: 1px solid #C9CDD6; font-size: 12px; padding: 8px 8px; text-align: center; }
+        .po-off-items thead th { background: #22304A; color: #fff; font-weight: 700; }
+        .po-off-items td.nm { text-align: left; font-weight: 600; color: #1a2438; }
+        .po-off-items td.rt { text-align: right; }
+        .po-off-items td.amt { text-align: right; font-weight: 800; color: #1a2438; }
+        .po-off-items td.memo { color: #C0392B; font-size: 11px; }
+        .po-off-items tr.sum td { background: #F4F5F8; font-weight: 800; color: #22304A; }
+        .po-off-total { margin-top: 12px; border: 1px solid #C9CDD6; }
+        .po-off-total td, .po-off-total th { border: 1px solid #C9CDD6; padding: 9px 12px; font-size: 13px; }
+        .po-off-total th { background: #F4F5F8; font-weight: 800; color: #303848; text-align: center; white-space: nowrap; }
+        .po-off-total td.v { text-align: right; font-weight: 700; }
+        .po-off-total .grand th { background: #22304A; color: #fff; }
+        .po-off-total .grand td { text-align: right; }
+        .po-off-total .grand .kor { font-size: 11.5px; color: #6B7280; font-weight: 600; }
+        .po-off-total .grand .big { font-size: 19px; font-weight: 800; color: #1a2438; }
+        .po-off-terms th { background: #22304A; color: #fff; text-align: center; font-size: 13px; font-weight: 700; padding: 8px; }
+        .po-off-terms td, .po-off-terms th.k { border: 1px solid #C9CDD6; font-size: 12.5px; padding: 8px 12px; }
+        .po-off-terms th.k { background: #F4F5F8; width: 92px; text-align: center; font-weight: 700; color: #303848; white-space: nowrap; }
+        .po-off-terms td { color: #303848; }
+        .po-off-disc { text-align: center; font-size: 12px; color: #6B7280; font-style: italic; border-top: 1px dashed #B8BDC7; margin: 22px 0 14px; padding-top: 14px; }
+        .po-off-sign td { border: 1px solid #C9CDD6; padding: 12px 14px; font-size: 12.5px; vertical-align: top; width: 50%; }
+        .po-off-sign .sh { font-size: 13px; font-weight: 800; color: #1a2438; margin-bottom: 6px; }
+        .po-off-sign .ln { color: #6B7280; margin: 3px 0; }
+        .po-off-sign .seal { text-align: right; margin-top: 10px; font-weight: 700; color: #222; }
+        .po-off-foot { text-align: center; font-size: 10.5px; color: #9098A6; margin-top: 20px; }
+      `}</style>
+
+      <div className="po-off-title">
+        <h1>발 주 서</h1>
+        <span className="en">PURCHASE ORDER</span>
+      </div>
+
+      <table className="po-off-meta">
+        <tbody>
+          <tr>
+            <th>발주번호</th><td style={{ fontWeight: 800 }}>{poNo}</td>
+            <th>발주일자</th><td>{orderDate}</td>
+          </tr>
+          <tr>
+            <th>건 명</th><td colSpan={3} style={{ fontWeight: 700 }}>{draft.title || `${sup.name || "공급처"} 발주 건`}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="po-off-sec">
+        <table className="po-off-party">
+          <tbody>
+            <tr><th className="grp" colSpan={2}>발 주 자 (Buyer)</th><th className="grp" colSpan={2}>공 급 자 (Supplier)</th></tr>
+            {partyRow("상 호", buyer.name, sup.name)}
+            {partyRow("사업자번호", buyer.bizNo, sup.bizNo)}
+            {partyRow("대표자", buyer.ceo, sup.ceo)}
+            {partyRow("주 소", buyer.address, sup.address)}
+            {partyRow("연락처", buyer.tel ? `TEL ${buyer.tel}` : "", sup.phone)}
+            {partyRow("담당자", buyer.contact, sup.contact)}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="po-off-label">발주 품목 (Items)</div>
+      <table className="po-off-items">
+        <thead>
+          <tr>
+            <th style={{ width: 34 }}>No</th><th>품 목</th><th style={{ width: 48 }}>단위</th>
+            <th style={{ width: 66 }}>수량</th><th style={{ width: 74 }}>단가</th><th style={{ width: 110 }}>금액</th><th style={{ width: 92 }}>비고</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.length === 0 ? (
+            <tr><td colSpan={7} style={{ padding: 18, color: "#9098A6" }}>발주 품목이 없습니다</td></tr>
+          ) : items.map((it, i) => (
+            <tr key={it.id || i}>
+              <td>{i + 1}</td>
+              <td className="nm">{it.name}</td>
+              <td>{it.unit || "-"}</td>
+              <td className="rt">{fmt(it.qty)}</td>
+              <td className="rt">{fmt(it.unitPrice)}</td>
+              <td className="amt">{fmt(num(it.qty) * num(it.unitPrice))}</td>
+              <td className="memo">{(it.memo || it.note || "").trim() || "—"}</td>
+            </tr>
+          ))}
+          {items.length > 0 && (
+            <tr className="sum">
+              <td colSpan={3}>합 계</td>
+              <td className="rt">{fmt(totalQty)}</td>
+              <td/>
+              <td className="rt">{fmt(subtotal)}</td>
+              <td/>
+            </tr>
+          )}
+        </tbody>
+      </table>
+
+      <table className="po-off-total">
+        <tbody>
+          <tr>
+            <th style={{ width: 92 }}>공급가액</th><td className="v">{fmt(subtotal)} 원</td>
+            <th style={{ width: 110 }}>부가세 (10%)</th><td className="v">{fmt(tax)} 원</td>
+          </tr>
+          <tr className="grand">
+            <th>합계금액</th>
+            <td colSpan={3}>
+              <div className="kor">金 {numToKoreanAmount(total)}원整</div>
+              <div className="big">{fmt(total)} 원</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="po-off-label" style={{ marginTop: 22 }}>거래조건 (Terms &amp; Conditions)</div>
+      <table className="po-off-terms">
+        <tbody>
+          <tr><th colSpan={2}>거래조건 (Terms &amp; Conditions)</th></tr>
+          <tr><th className="k">결제조건</th><td>{draft.paymentTerms || sup.paymentTerms || "협의"}</td></tr>
+          <tr><th className="k">납품장소</th><td>{draft.deliveryPlace || "당사 지정 장소"}</td></tr>
+          <tr><th className="k">품질기준</th><td>견본 동일 / KS 인증 원단에 한함</td></tr>
+          <tr><th className="k">검 수</th><td>납품 시 당사 검수 후 인수하며, 견본과 상이하거나 하자 발생 시 반품·교환 요청 가능</td></tr>
+          <tr><th className="k">기 타</th><td>{(draft.memo || "").trim() || "미명시 사항은 양사 협의에 따르며 상관례를 준용함"}</td></tr>
+        </tbody>
+      </table>
+
+      {(draft.photos || []).length > 0 && (
+        <>
+          <div className="po-off-label" style={{ marginTop: 22 }}>참고 사진 (Reference)</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10 }}>
+            {draft.photos.map((ph, idx) => (
+              <div key={idx} style={{ border: "1px solid #C9CDD6", borderRadius: 6, overflow: "hidden" }}>
+                <img src={ph.dataUrl} alt={ph.name} style={{ width: "100%", height: 150, objectFit: "cover", display: "block" }} />
+                <div style={{ padding: "5px 8px", fontSize: 10.5, color: "#6B7280", background: "#F4F5F8" }}>{ph.name}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="po-off-disc">본 발주서는 정식 계약의 효력을 가지며, 내용 변경 시 양사 협의 후 서면으로 확인한다.</div>
+
+      <table className="po-off-sign">
+        <tbody>
+          <tr>
+            <td>
+              <div className="sh">발 주 자</div>
+              <div style={{ fontWeight: 700, color: "#1a2438" }}>{buyer.name}</div>
+              <div className="ln">사업자번호 {buyer.bizNo}</div>
+              <div className="seal">대표자 {buyer.ceo} <span style={{ marginLeft: 6 }}>(인)</span></div>
+            </td>
+            <td>
+              <div className="sh">공 급 자</div>
+              <div style={{ fontWeight: 700, color: "#1a2438" }}>{sup.name || " "}</div>
+              <div className="ln">사업자번호 {sup.bizNo || "________________"}</div>
+              <div className="seal">대표자 {sup.ceo || "__________"} <span style={{ marginLeft: 6 }}>(인)</span></div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="po-off-foot">{buyer.name}　|　{buyer.address}　|　TEL {buyer.tel}</div>
+    </div>
+  );
+}
+
 // 간이 마크다운 → JSX (애플 도큐먼트 스타일)
 function AppleMarkdown({ text }) {
   if (!text) return null;
