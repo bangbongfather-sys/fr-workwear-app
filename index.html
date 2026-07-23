@@ -2277,6 +2277,34 @@ function POOfficialDoc({ draft, buyer = BUYER_INFO, seal = "" }) {
   );
 }
 
+// 정식 발주서 문구 편집 패널 — 거래조건·하단 문구를 직접 수정 (비우면 기본 문구)
+function POOfficialEditPanel({ terms = {}, onChange, darkMode }) {
+  const fields = [
+    ["payment", "결제조건", "협의"],
+    ["place", "납품장소", "당사 지정 장소"],
+    ["quality", "품질기준", "견본 동일 / KS 인증 원단에 한함"],
+    ["inspect", "검 수", "납품 시 당사 검수 후 인수하며, 견본과 상이하거나 하자 발생 시 반품·교환 요청 가능"],
+    ["etc", "기 타", "미명시 사항은 양사 협의에 따르며 상관례를 준용함"],
+    ["disclaimer", "하단 문구", "본 발주서는 정식 계약의 효력을 가지며, 내용 변경 시 양사 협의 후 서면으로 확인한다."],
+  ];
+  return (
+    <div className="no-print" style={{ marginBottom: 16, padding: 14, borderRadius: 14, border: "1.5px dashed rgba(219,107,46,0.5)", background: darkMode ? "rgba(219,107,46,0.06)" : "rgba(219,107,46,0.04)" }}>
+      <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 10, lineHeight: 1.6 }}>
+        정식 발주서의 <b>거래조건·하단 문구</b>를 수정하세요 — 입력하면 아래 미리보기에 바로 반영됩니다. 비워두면 기본 문구로 표시됩니다.
+        (품목·금액·발주자/공급자 정보는 발주서 작성 화면에서 수정)
+      </div>
+      {fields.map(([k, label, ph]) => (
+        <div key={k} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginTop: 8 }}>
+          <span style={{ width: 66, flexShrink: 0, paddingTop: 8, fontSize: 12, fontWeight: 700, color: "var(--text2)", textAlign: "right" }}>{label}</span>
+          <textarea value={terms[k] ?? ""} onChange={e => onChange({ ...terms, [k]: e.target.value })} placeholder={ph}
+            rows={k === "inspect" || k === "disclaimer" ? 2 : 1}
+            style={{ flex: 1, fontSize: 12.5, lineHeight: 1.6, padding: "7px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", resize: "vertical", fontFamily: "inherit" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // 간이 마크다운 → JSX (애플 도큐먼트 스타일)
 function AppleMarkdown({ text }) {
   if (!text) return null;
