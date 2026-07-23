@@ -14395,33 +14395,55 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc");
     if (!target) { showToast("발주서 미리보기를 먼저 생성해주세요."); return; }
     try {
-      // 인쇄용 설정
-      const prevColor = target.style.color;
-      target.style.color = "#1d1d1f";  // 다크모드에서도 PDF는 검정 텍스트
-      const canvas = await html2canvas(target, {
-        scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false,
-        windowWidth: target.scrollWidth, windowHeight: target.scrollHeight,
-      });
-      target.style.color = prevColor;
+      // 화면 폭과 무관하게 A4 인쇄 레이아웃으로 고정: 794px(A4@96dpi) 클론을 만들어 캡처
+      // (모바일·좁은 창에서 저장해도 글자 크기·표 배치가 데스크톱과 동일하게 나옴)
+      const wrap = document.createElement("div");
+      wrap.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;background:#ffffff;";
+      [
+        ["--text1", "#191F28"], ["--text2", "#4E5968"], ["--text3", "#8B95A1"],
+        ["--surface", "#ffffff"], ["--surface2", "#F2F4F6"], ["--row-border", "#E5E8EB"],
+        ["--border", "#E5E8EB"], ["--divider", "#F2F4F6"], ["--row-bg", "#F9FAFB"], ["--accent", "#DB6B2E"],
+      ].forEach(([k, v]) => wrap.style.setProperty(k, v));
+      const clone = target.cloneNode(true);
+      clone.style.margin = "0";
+      clone.style.width = "794px";
+      clone.style.maxWidth = "794px";
+      clone.style.boxShadow = "none";
+      clone.style.color = "#1d1d1f"; // 다크모드에서도 PDF는 검정 텍스트
+      clone.style.background = "#ffffff";
+      clone.querySelectorAll(".no-print").forEach(el => el.remove());
+      wrap.appendChild(clone);
+      document.body.appendChild(wrap);
+      let canvas;
+      try {
+        canvas = await html2canvas(clone, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false, windowWidth: 794 });
+      } finally { document.body.removeChild(wrap); }
 
       const imgData = canvas.toDataURL("image/jpeg", 0.92);
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageW = 210, pageH = 297;  // A4 mm
       const margin = 10;
-      const imgW = pageW - margin * 2;
-      const imgH = (canvas.height * imgW) / canvas.width;
-      let heightLeft = imgH;
-      let position = margin;
-
-      pdf.addImage(imgData, "JPEG", margin, position, imgW, imgH);
-      heightLeft -= (pageH - margin * 2);
-
-      while (heightLeft > 0) {
-        position = margin - (imgH - heightLeft);
-        pdf.addPage();
-        pdf.addImage(imgData, "JPEG", margin, position, imgW, imgH);
-        heightLeft -= (pageH - margin * 2);
+      const usableW = pageW - margin * 2;
+      const usableH = pageH - margin * 2;
+      const fullH = (canvas.height * usableW) / canvas.width; // 전체 폭 기준 이미지 높이(mm)
+      if (fullH <= usableH * 1.35) {
+        // 기본: 한 장에 맞춤 — 살짝 넘치면 비율을 줄여 한 페이지에 담는다
+        const fit = Math.min(1, usableH / fullH);
+        const w = usableW * fit, h = fullH * fit;
+        pdf.addImage(imgData, "JPEG", (pageW - w) / 2, margin, w, h);
+      } else {
+        // 사진 다수 등 아주 긴 문서만 여러 페이지 분할
+        let heightLeft = fullH;
+        let position = margin;
+        pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
+        heightLeft -= usableH;
+        while (heightLeft > 0) {
+          position = margin - (fullH - heightLeft);
+          pdf.addPage();
+          pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
+          heightLeft -= usableH;
+        }
       }
 
       const fname = `발주서_${(poDraft.title || poDraft.supplier?.name || "draft").replace(/[\\/:*?"<>|]/g, "_")}_${new Date().toISOString().slice(0,10)}.pdf`;
