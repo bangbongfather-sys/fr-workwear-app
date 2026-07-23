@@ -14395,30 +14395,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc");
     if (!target) { showToast("발주서 미리보기를 먼저 생성해주세요."); return; }
     try {
-      // 화면 폭과 무관하게 A4 인쇄 레이아웃으로 고정: 794px(A4@96dpi) 클론을 만들어 캡처
-      // (모바일·좁은 창에서 저장해도 글자 크기·표 배치가 데스크톱과 동일하게 나옴)
-      const wrap = document.createElement("div");
-      wrap.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;background:#ffffff;";
-      [
-        ["--text1", "#191F28"], ["--text2", "#4E5968"], ["--text3", "#8B95A1"],
-        ["--surface", "#ffffff"], ["--surface2", "#F2F4F6"], ["--row-border", "#E5E8EB"],
-        ["--border", "#E5E8EB"], ["--divider", "#F2F4F6"], ["--row-bg", "#F9FAFB"], ["--accent", "#DB6B2E"],
-      ].forEach(([k, v]) => wrap.style.setProperty(k, v));
-      const clone = target.cloneNode(true);
-      clone.style.margin = "0";
-      clone.style.width = "794px";
-      clone.style.maxWidth = "794px";
-      clone.style.boxShadow = "none";
-      clone.style.color = "#1d1d1f"; // 다크모드에서도 PDF는 검정 텍스트
-      clone.style.background = "#ffffff";
-      clone.querySelectorAll(".no-print").forEach(el => el.remove());
-      wrap.appendChild(clone);
-      document.body.appendChild(wrap);
-      let canvas;
-      try {
-        canvas = await html2canvas(clone, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false, windowWidth: 794 });
-      } finally { document.body.removeChild(wrap); }
-
+      const canvas = await capturePOCanvas(target);
       const imgData = canvas.toDataURL("image/jpeg", 0.92);
       const { jsPDF } = window.jspdf;
       const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
