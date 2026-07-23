@@ -17741,8 +17741,19 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     <button className="btn-primary" onClick={() => window.print()}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="printer" size={14}/>PDF 출력</span></button>
                   </div>
                 </div>
-                {/* 문구 수정 모드 — 저장된 발주서 본문 직접 편집, 즉시 이력에 저장·미리보기 반영 */}
-                {poBodyEditing && (
+                {/* 문구 수정 모드 — 정식 발주서는 거래조건·문구 편집, 그 외는 마크다운 본문 편집 (즉시 이력 저장) */}
+                {poBodyEditing && viewingPO.poStyle === "official" && (
+                  <POOfficialEditPanel terms={viewingPO.officialTerms || {}} darkMode={darkMode}
+                    onChange={ot => {
+                      setViewingPO(v => ({ ...v, officialTerms: ot }));
+                      setPurchaseOrders(prev => {
+                        const next = prev.map(p => p.id === viewingPO.id ? { ...p, officialTerms: ot, updatedAt: Date.now() } : p);
+                        save("frw_purchase_orders", next);
+                        return next;
+                      });
+                    }} />
+                )}
+                {poBodyEditing && viewingPO.poStyle !== "official" && (
                   <div className="no-print" style={{ marginBottom: 16, padding: 14, borderRadius: 14, border: "1.5px dashed rgba(219,107,46,0.5)", background: darkMode ? "rgba(219,107,46,0.06)" : "rgba(219,107,46,0.04)" }}>
                     <div style={{ fontSize: 11.5, color: T.text3, marginBottom: 8, lineHeight: 1.6 }}>
                       발주서 본문을 자유롭게 수정하세요 — 수정하는 대로 아래 미리보기와 발주 이력에 바로 저장됩니다.
