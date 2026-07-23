@@ -12876,6 +12876,41 @@ function App() {
     const saved = load("frw_products", null);
     return saved ? saved[0].id : INIT_PRODUCTS[0].id;
   });
+  // 부팅 시점 로컬 제품 스냅샷 — 클라우드 pull이 덮어쓰기 전 데이터 (실수 삭제 구조용)
+  const bootProductsRef = useRef(null);
+  if (bootProductsRef.current === null) { try { bootProductsRef.current = load("frw_products", []) || []; } catch (e) { bootProductsRef.current = []; } }
+  // 삭제된 제품 휴지통 — 90일 보관, 기기 간 클라우드 동기화. 실수 삭제를 언제든 복구.
+  const [prodTrash, setProdTrash] = useState(() => load("frw_prod_trash", []));
+  const [showProdTrash, setShowProdTrash] = useState(false);
+  useEffect(() => { // 90일 지난 휴지통 항목 자동 정리
+    setProdTrash(prev => {
+      const cut = Date.now() - 90 * 86400000;
+      const next = (prev || []).filter(t => (t._deletedAt || 0) > cut);
+      return next.length === (prev || []).length ? prev : next;
+    });
+  }, []);
+  // '하계 아라미드 셔츠' 1회 구조 — 클라우드 삭제가 반영되기 전 로컬 데이터가 남아있는 기기에서
+  // 앱을 열면 자동 복원해 다시 동기화한다. (기기별 1회, 복구 후 플래그로 종료)
+  useEffect(() => {
+    const check = (markDone) => {
+      try {
+        if (load("frw_rescue_shirt_done", false)) return;
+        if (markDone) save("frw_rescue_shirt_done", true);
+        const shirt = (bootProductsRef.current || []).find(p => p && typeof p.name === "string" && p.name.includes("하계 아라미드 셔츠"));
+        if (!shirt) return;
+        let added = false;
+        setProducts(prev => {
+          if (prev.some(p => (p.name || "").includes("하계 아라미드 셔츠"))) return prev;
+          added = true;
+          try { return [...prev, migrateProduct(JSON.parse(JSON.stringify(shirt)))]; } catch (e) { return [...prev, shirt]; }
+        });
+        setTimeout(() => { if (added) showToast("🛟 이 기기에 남아있던 '하계 아라미드 셔츠'를 복구했습니다 — 자동으로 저장·동기화됩니다", "success"); }, 300);
+      } catch (e) {}
+    };
+    const t1 = setTimeout(() => check(false), 12000);  // 클라우드 pull 직후 1차 확인
+    const t2 = setTimeout(() => check(true), 30000);   // 늦은 pull 대비 2차 확인 후 종료
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
   const [newProdName, setNewProdName] = useState("");
   const [apiKey, setApiKey] = useState(() => load("frw_apikey", ""));
   const [includeImages, setIncludeImages] = useState(() => load("frw_quote_include_images", true));
