@@ -12900,11 +12900,18 @@ function App() {
         if (!shirt) return;
         let added = false;
         setProducts(prev => {
-          if (prev.some(p => (p.name || "").includes("하계 아라미드 셔츠"))) return prev;
+          let original;
+          try { original = migrateProduct(JSON.parse(JSON.stringify(shirt))); } catch (e) { original = shirt; }
+          const exIdx = prev.findIndex(p => (p.name || "").includes("하계 아라미드 셔츠"));
+          if (exIdx >= 0) {
+            // 견적 기반 재구성본이 이미 있으면 원본(정확한 요척)으로 교체
+            if (((prev[exIdx].memo || "")).includes("[견적 복구]")) { added = true; const cp = [...prev]; cp[exIdx] = original; return cp; }
+            return prev;
+          }
           added = true;
-          try { return [...prev, migrateProduct(JSON.parse(JSON.stringify(shirt)))]; } catch (e) { return [...prev, shirt]; }
+          return [...prev, original];
         });
-        setTimeout(() => { if (added) showToast("🛟 이 기기에 남아있던 '하계 아라미드 셔츠'를 복구했습니다 — 자동으로 저장·동기화됩니다", "success"); }, 300);
+        setTimeout(() => { if (added) showToast("🛟 이 기기에 남아있던 '하계 아라미드 셔츠' 원본을 복구했습니다 — 자동으로 저장·동기화됩니다", "success"); }, 300);
       } catch (e) {}
     };
     const t1 = setTimeout(() => check(false), 12000);  // 클라우드 pull 직후 1차 확인
