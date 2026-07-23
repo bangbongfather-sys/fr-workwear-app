@@ -14390,6 +14390,67 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   // ─────────────────────────────────────────────────────────────
   // 발주서 — PDF 다운로드
   // ─────────────────────────────────────────────────────────────
+  // 발주서 문서를 화면 폭과 무관하게 A4(794px) 레이아웃으로 캡처 — PDF 저장·공유 공용
+  const capturePOCanvas = async (target) => {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;background:#ffffff;";
+    [
+      ["--text1", "#191F28"], ["--text2", "#4E5968"], ["--text3", "#8B95A1"],
+      ["--surface", "#ffffff"], ["--surface2", "#F2F4F6"], ["--row-border", "#E5E8EB"],
+      ["--border", "#E5E8EB"], ["--divider", "#F2F4F6"], ["--row-bg", "#F9FAFB"], ["--accent", "#DB6B2E"],
+    ].forEach(([k, v]) => wrap.style.setProperty(k, v));
+    const clone = target.cloneNode(true);
+    clone.style.margin = "0";
+    clone.style.width = "794px";
+    clone.style.maxWidth = "794px";
+    clone.style.boxShadow = "none";
+    clone.style.color = "#1d1d1f"; // 다크모드에서도 문서는 검정 텍스트
+    clone.style.background = "#ffffff";
+    clone.querySelectorAll(".no-print").forEach(el => el.remove());
+    wrap.appendChild(clone);
+    document.body.appendChild(wrap);
+    try {
+      return await html2canvas(clone, { scale: 2, useCORS: true, backgroundColor: "#ffffff", logging: false, windowWidth: 794 });
+    } finally { document.body.removeChild(wrap); }
+  };
+
+  // 발주서 공유 — 이미지(PNG)로 만들어 기기 공유창(카톡·메일·문자)으로 전달, 미지원 환경은 다운로드 폴백
+  const sharePODoc = async (title, supplierName) => {
+    if (typeof html2canvas === "undefined") { showToast("이미지 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
+    const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc");
+    if (!target) { showToast("발주서 화면을 먼저 열어주세요."); return; }
+    try {
+      const canvas = await capturePOCanvas(target);
+      const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+      if (!blob) throw new Error("이미지 생성 실패");
+      const base = ((title || "").trim() || (supplierName || "").trim() || "발주서").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+      const fname = `발주서_${base}_${new Date().toISOString().slice(0, 10)}.png`;
+      const file = new File([blob], fname, { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: fname, text: `${supplierName ? supplierName + " " : ""}발주서입니다.` });
+          return;
+        } catch (e) { if (e && e.name === "AbortError") return; /* 그 외 실패는 다운로드 폴백 */ }
+      }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = fname;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      showToast("이 기기는 바로 공유가 안 돼서 발주서 이미지를 저장했습니다.\n카톡·메일·문자에 첨부해 보내세요.", "info");
+    } catch (err) {
+      console.error("[PO Share]", err);
+      showToast("발주서 공유 오류: " + err.message);
+    }
+  };
+  // 발주 이력 목록의 공유 버튼: 전체 보기를 열고 문서가 그려진 뒤 공유 실행
+  const poShareAfterOpenRef = useRef(false);
+  useEffect(() => {
+    if (viewingPO && poShareAfterOpenRef.current) {
+      poShareAfterOpenRef.current = false;
+      const t = setTimeout(() => sharePODoc(viewingPO.title, viewingPO.supplier?.name), 700);
+      return () => clearTimeout(t);
+    }
+  }, [viewingPO && viewingPO.id]);
+
   const downloadPOasPDF = async () => {
     if (typeof html2canvas === "undefined" || !window.jspdf) { showToast("PDF 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
     const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc");
