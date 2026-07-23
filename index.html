@@ -15307,13 +15307,18 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 <div style={{ fontSize: 11, color: "#C5CBD3", marginTop: 8 }}>활성 칩의 <Icon name="edit" size={11} style={{verticalAlign:"-1px"}}/> 또는 더블클릭으로 이름 수정</div>
 
                 {/* 삭제된 제품 휴지통 — 실수 삭제 복구 (90일 보관, 기기 간 동기화) */}
-                {(prodTrash || []).length > 0 && (
+                {(
                   <div style={{ marginTop: 10 }}>
                     <button onClick={() => setShowProdTrash(v => !v)}
                       style={{ padding: "7px 14px", borderRadius: 100, border: "1px solid var(--border)", background: showProdTrash ? "rgba(219,107,46,0.10)" : "transparent", color: showProdTrash ? "#DB6B2E" : "var(--text3)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                      🗑 삭제된 제품 복구 ({prodTrash.length}) {showProdTrash ? "▲" : "▼"}
+                      🗑 삭제된 제품 복구 ({(prodTrash || []).length}) {showProdTrash ? "▲" : "▼"}
                     </button>
-                    {showProdTrash && (
+                    {showProdTrash && (prodTrash || []).length === 0 && (
+                      <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "var(--surface2)", fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>
+                        아직 휴지통이 비어 있습니다. 이제부터 제품을 삭제하면 여기에 90일간 보관되어 언제든 복구할 수 있어요.
+                      </div>
+                    )}
+                    {showProdTrash && (prodTrash || []).length > 0 && (
                       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                         {prodTrash.map((t, ti) => (
                           <div key={(t.id || "") + "-" + (t._deletedAt || ti)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--border)" }}>
