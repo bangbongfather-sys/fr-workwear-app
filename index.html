@@ -1217,7 +1217,7 @@ const ORANGE = "#F59E0B";
 
 // 클라우드 동기화 섹션 목록 (top-level key 단위). 섹션별 자동 병합·충돌 판정의 기준.
 // 여기 순서/이름이 Firebase /frw 의 top-level key 및 _revs 키와 1:1 대응한다.
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -2068,7 +2068,7 @@ function numToKoreanAmount(num) {
 
 // ─── 정식 발주서 문서 (첨부 양식 기반 전문 레이아웃) ───
 // poDraft / 저장된 발주서(viewingPO) 양쪽에 동일 사용. 마크다운(body)이 아니라 구조화 데이터로 직접 렌더.
-function POOfficialDoc({ draft, buyer = BUYER_INFO }) {
+function POOfficialDoc({ draft, buyer = BUYER_INFO, seal = "" }) {
   const sup = draft.supplier || {};
   const items = (draft.items || []).filter(it => (it.name || "").trim());
   const num = v => Math.round(Number(v) || 0);
@@ -13751,6 +13751,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.payables !== undefined && d.payables && typeof d.payables === "object") setPayables(d.payables);
     if (d.bankDeposits !== undefined && d.bankDeposits && typeof d.bankDeposits === "object") setBankDeposits({ items: d.bankDeposits.items || [], nameMap: d.bankDeposits.nameMap || {} });
     if (d.prodTrash !== undefined && Array.isArray(d.prodTrash)) setProdTrash(d.prodTrash);
+    if (d.companySeal !== undefined && typeof d.companySeal === "string") setCompanySeal(d.companySeal);
     if (d.monthlySales !== undefined) setMonthlySales(d.monthlySales);
     if (d.yearlyRevenue !== undefined && Array.isArray(d.yearlyRevenue)) setYearlyRevenue(d.yearlyRevenue);
     if (d.purchaseDateMemos !== undefined && d.purchaseDateMemos && typeof d.purchaseDateMemos === "object") setPurchaseDateMemos(d.purchaseDateMemos);
@@ -13890,8 +13891,9 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_payables", payables);
     save("frw_bank_deposits", bankDeposits);
     save("frw_prod_trash", prodTrash);
+    save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal };
     if (!initialized.current) { prevSnapshot.current = cur; return; }
     // 폴링/포그라운드 복귀로 받아온 클라우드 데이터를 state에 반영하면 이 effect가 실행되는데,
     // 그건 사용자 입력이 아니므로 다시 푸시하면 안 됨(무한 왕복·불필요 쓰기 방지). baseline만 갱신하고 1회 억제.
@@ -13972,7 +13974,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       };
       doSave(0);
     }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
