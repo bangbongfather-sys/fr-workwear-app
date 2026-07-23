@@ -17230,6 +17230,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setPoBodyEditing(v => !v)}
+                      style={{ padding: "10px 16px", borderRadius: 10, border: `1.5px solid ${poBodyEditing ? "#DB6B2E" : "var(--border)"}`, background: poBodyEditing ? "rgba(219,107,46,0.12)" : "var(--surface)", color: poBodyEditing ? "#DB6B2E" : "var(--text1)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Icon name="edit" size={14}/> {poBodyEditing ? "✓ 수정 완료" : "문구 수정"}
+                    </button>
                     <button onClick={() => editPOFromHistory(viewingPO)}
                       style={{ padding: "10px 16px", borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
                       <Icon name="edit" size={14}/> 수정
@@ -17237,6 +17241,26 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     <button className="btn-primary" onClick={() => window.print()}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="printer" size={14}/>PDF 출력</span></button>
                   </div>
                 </div>
+                {/* 문구 수정 모드 — 저장된 발주서 본문 직접 편집, 즉시 이력에 저장·미리보기 반영 */}
+                {poBodyEditing && (
+                  <div className="no-print" style={{ marginBottom: 16, padding: 14, borderRadius: 14, border: "1.5px dashed rgba(219,107,46,0.5)", background: darkMode ? "rgba(219,107,46,0.06)" : "rgba(219,107,46,0.04)" }}>
+                    <div style={{ fontSize: 11.5, color: T.text3, marginBottom: 8, lineHeight: 1.6 }}>
+                      발주서 본문을 자유롭게 수정하세요 — 수정하는 대로 아래 미리보기와 발주 이력에 바로 저장됩니다.
+                      제목은 <b># / ##</b>, 굵게는 <b>**글자**</b>, 표는 <b>|</b> 로 구분하는 형식(마크다운)이에요.
+                    </div>
+                    <textarea value={viewingPO.body || ""} onChange={e => {
+                        const body = e.target.value;
+                        setViewingPO(v => ({ ...v, body }));
+                        setPurchaseOrders(prev => {
+                          const next = prev.map(p => p.id === viewingPO.id ? { ...p, body, updatedAt: Date.now() } : p);
+                          save("frw_purchase_orders", next);
+                          return next;
+                        });
+                      }}
+                      spellCheck={false}
+                      style={{ width: "100%", minHeight: 420, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12.5, lineHeight: 1.7, padding: 14, borderRadius: 12, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", resize: "vertical" }} />
+                  </div>
+                )}
                 <div className={
                   viewingPO.poStyle === "bold" ? "bold-doc" :
                   viewingPO.poStyle === "card" ? "card-doc" :
