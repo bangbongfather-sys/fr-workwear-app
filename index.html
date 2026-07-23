@@ -2084,6 +2084,9 @@ function POOfficialDoc({ draft, buyer = BUYER_INFO, seal = "" }) {
     return m ? `${m[1]} 년 ${Number(m[2])} 월 ${Number(m[3])} 일` : String(d);
   };
   const orderDate = dateK(draft.orderDate) || dateK(new Date().toISOString().slice(0, 10));
+  // 거래조건·하단 문구는 draft.officialTerms 로 덮어쓸 수 있음(문구 수정). 값이 비면 기본값 사용.
+  const ot = draft.officialTerms || {};
+  const term = (key, fallback) => { const v = ot[key]; return (v != null && String(v).trim() !== "") ? v : fallback; };
   const partyRow = (label, buyerVal, supVal) => (
     <tr>
       <th className="po-off-pl">{label}</th>
