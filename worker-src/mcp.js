@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-23-po-pdf-fix", note: "발주서 PDF 저장 수정 — 화면 폭과 무관하게 A4(794px) 레이아웃으로 캡처해 한 장에 담기게(모바일·좁은 창에서 글자 커지고 표 잘리던 문제 해결), 아주 긴 문서만 페이지 분할"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-23-po-share", note: "발주서 공유 — 미리보기·전체 보기·발주 이력 행에서 공유 버튼 → A4 이미지로 만들어 기기 공유창(카톡·메일·문자), 미지원 환경은 이미지 저장 폴백"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
