@@ -13851,11 +13851,30 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   };
   const deleteProduct = (id) => {
     if (products.length <= 1) return;
+    const victim = products.find(p => p.id === id);
     pushHistory();
     const remaining = products.filter(p => p.id !== id);
     setProducts(remaining);
     prodImgDel(id);
     if (activeProdId === id) setActiveProdId(remaining[0].id);
+    // 휴지통 보관 (이미지 제외, 최대 30개·90일) — 실수 삭제 복구용
+    if (victim) {
+      const { image, ...rest } = victim;
+      setProdTrash(prev => [{ ...rest, _deletedAt: Date.now() }, ...(prev || [])].slice(0, 30));
+      showToast(`"${victim.name}" 삭제됨 — 제품 목록 아래 '삭제된 제품 복구'에서 90일간 되살릴 수 있습니다`, "info");
+    }
+  };
+  // 휴지통에서 제품 복구
+  const restoreProduct = (t) => {
+    pushHistory();
+    const { _deletedAt, ...prod } = t;
+    const newId = products.some(p => p.id === prod.id) ? uid() : prod.id;
+    let restored;
+    try { restored = migrateProduct({ ...JSON.parse(JSON.stringify(prod)), id: newId }); } catch (e) { restored = { ...prod, id: newId }; }
+    setProducts(ps => [...ps, restored]);
+    setProdTrash(prev => (prev || []).filter(x => x !== t));
+    setActiveProdId(newId);
+    showToast(`"${prod.name}" 을(를) 복구했습니다`, "success");
   };
   const duplicateProduct = (id) => {
     const src = products.find(p => p.id === id);
