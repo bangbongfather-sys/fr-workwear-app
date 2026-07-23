@@ -174,7 +174,7 @@ async function toolSearchQuotes(args, env) {
     제목: e.title,
     거래처: e.quoteClient || null,
     일자: e.dateStr || null,
-    품목: Array.isArray(e.products) ? e.products.map((p) => p.name) : [],
+    품목: Array.isArray(e.products) ? e.products.map((p) => ({ 이름: p.name, 단가: Number(p.price) || 0 })) : [],
     총액: Array.isArray(e.products) ? e.products.reduce((s, p) => s + (Number(p.price) || 0), 0) : null,
   }));
   return textContent({ 총: filtered.length, 반환: out.length, 견적: out });
