@@ -17659,7 +17659,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(240,68,82,0.4)", background: "transparent", color: "#F04452", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>도장 삭제</button>}
                 </div>
                 {/* 문구 수정 모드 — 본문(마크다운)을 직접 편집, 타이핑 즉시 아래 미리보기에 반영 */}
-                {poBodyEditing && (
+                {poBodyEditing && poStyle === "official" && (
+                  <POOfficialEditPanel terms={poDraft.officialTerms || {}} onChange={ot => setPoDraft({ ...poDraft, officialTerms: ot })} darkMode={darkMode} />
+                )}
+                {poBodyEditing && poStyle !== "official" && (
                   <div className="no-print" style={{ marginBottom: 16, padding: 14, borderRadius: 14, border: "1.5px dashed rgba(219,107,46,0.5)", background: darkMode ? "rgba(219,107,46,0.06)" : "rgba(219,107,46,0.04)" }}>
                     <div style={{ fontSize: 11.5, color: T.text3, marginBottom: 8, lineHeight: 1.6 }}>
                       발주서 본문을 자유롭게 수정하세요 — 수정하는 대로 아래 미리보기에 바로 반영됩니다.
