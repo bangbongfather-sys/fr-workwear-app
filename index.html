@@ -14767,7 +14767,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   // 발주서 공유 — 이미지(PNG)로 만들어 기기 공유창(카톡·메일·문자)으로 전달, 미지원 환경은 다운로드 폴백
   const sharePODoc = async (title, supplierName) => {
     if (typeof html2canvas === "undefined") { showToast("이미지 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
-    const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc");
+    const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc, .official-doc");
     if (!target) { showToast("발주서 화면을 먼저 열어주세요."); return; }
     try {
       const canvas = await capturePOCanvas(target);
@@ -14803,7 +14803,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
   const downloadPOasPDF = async () => {
     if (typeof html2canvas === "undefined" || !window.jspdf) { showToast("PDF 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
-    const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc");
+    const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc, .official-doc");
     if (!target) { showToast("발주서 미리보기를 먼저 생성해주세요."); return; }
     try {
       const canvas = await capturePOCanvas(target);
@@ -17608,10 +17608,24 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </div>
                 <div className="no-print" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: T.text2, letterSpacing: 0.3, marginRight: 4 }}>양식</span>
-                  {[["apple", "🍎 Apple Minimal"], ["bold", "🔥 Modern Bold"], ["card", "🃏 Card Layout"], ["korean", "📜 한국 정형"]].map(([id, label]) => (
+                  {[["official", "🏢 정식 발주서"], ["apple", "🍎 Apple Minimal"], ["bold", "🔥 Modern Bold"], ["card", "🃏 Card Layout"], ["korean", "📜 한국 정형"]].map(([id, label]) => (
                     <button key={id} onClick={() => setPoStyle(id)}
                       style={{ padding: "8px 14px", border: `1.5px solid ${poStyle === id ? NAVY : T.divider}`, borderRadius: 10, background: poStyle === id ? (darkMode ? "rgba(219,107,46,0.16)" : "rgba(219,107,46,0.08)") : "transparent", color: poStyle === id ? NAVY : T.text2, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
                   ))}
+                  {/* 회사 도장 등록 — 정식 발주서에 자동 날인 */}
+                  <label style={{ marginLeft: 6, display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 10, border: "1.5px dashed var(--border)", background: "transparent", color: companySeal ? "#00B493" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    {companySeal && <img src={companySeal} alt="" style={{ width: 20, height: 20, objectFit: "contain" }} />}
+                    {companySeal ? "도장 변경" : "🔴 회사 도장 등록"}
+                    <input type="file" accept="image/*" style={{ display: "none" }}
+                      onChange={async e => {
+                        const f = e.target.files && e.target.files[0]; e.target.value = "";
+                        if (!f) return;
+                        try { const durl = await compressImage(f, 400, 0.9); setCompanySeal(durl); showToast("회사 도장을 등록했습니다 — 정식 발주서에 자동으로 날인됩니다", "success"); }
+                        catch (err) { showToast("도장 이미지 처리 실패: " + err.message); }
+                      }} />
+                  </label>
+                  {companySeal && <button onClick={() => { if (window.confirm("등록된 회사 도장을 삭제할까요?")) setCompanySeal(""); }}
+                    style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid rgba(240,68,82,0.4)", background: "transparent", color: "#F04452", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>도장 삭제</button>}
                 </div>
                 {/* 문구 수정 모드 — 본문(마크다운)을 직접 편집, 타이핑 즉시 아래 미리보기에 반영 */}
                 {poBodyEditing && (
