@@ -19811,36 +19811,44 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
       })()}
 
       <div className="schedule-grid">
-        <div className="card" style={{ padding: "18px 18px 22px" }}>
+        <div className="card" style={{ padding: "16px 18px 20px" }}>
+          {/* 노션 캘린더식 월 헤더: 큰 월 표기 + ‹ 오늘 › 내비게이션 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{year}년 {month + 1}월</div>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 2 }}>
+              <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month - 1, 1))} title="이전 달" aria-label="이전 달">‹</button>
+              <button className="sched-navbtn" style={{ width: "auto", padding: "0 12px", fontSize: 12 }}
+                onClick={() => { const t = new Date(); setCursor(new Date(t.getFullYear(), t.getMonth(), 1)); setSelectedDate(ymd(t)); }}>오늘</button>
+              <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month + 1, 1))} title="다음 달" aria-label="다음 달">›</button>
+            </div>
+          </div>
           <div className="sched-scroll-hint">← 좌우로 밀어서 전체 주 확인 · 일정을 길게 누르면 미리보기 →</div>
           {/* 모바일: 캘린더를 축소하지 않고 원본 크기 유지 + 좌우 스크롤 (sched-cal-scroll/inner) */}
           <div className="sched-cal-scroll">
           <div className="sched-cal-inner">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 6 }}>
+          {/* 노션 캘린더식 플랫 그리드: 셀 간격 없이 헤어라인 구분선 */}
+          <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: "1px solid var(--divider)" }}>
             {weekdays.map((w, i) => (
-              <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, padding: "6px 0", color: i === 0 ? "#EF4444" : i === 6 ? "#3B82F6" : "var(--text3)", letterSpacing: 0.4 }}>{w}</div>
+              <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, padding: "8px 0", color: i === 0 ? "rgba(239,68,68,0.8)" : i === 6 ? "rgba(59,130,246,0.8)" : "var(--text3)", letterSpacing: 0.4, borderLeft: i > 0 ? "1px solid var(--divider)" : "none" }}>{w}</div>
             ))}
           </div>
-          {/* 노션 캘린더 스타일: 주별 row + 멀티데이 이벤트는 가로 바로 표시 */}
+          {/* 노션 캘린더 스타일: 주별 row + 이벤트는 제목·날짜·완료 체크가 있는 카드로 표시 */}
           {(() => {
-            // 6주 × 7일 cells를 주 단위로 그룹화
+            // cells를 주 단위로 그룹화 (인접 월 포함, 빈 칸 없음)
             const weeks = [];
-            for (let w = 0; w < 6; w++) weeks.push(cells.slice(w*7, w*7+7));
-            // 노션 스타일 회색 톤 (모든 이벤트 단일 색상)
-            const eventColor = darkMode
-              ? { bg: "rgba(255,255,255,0.10)", soft: "rgba(255,255,255,0.06)", text: "#E5E7EB", border: "rgba(255,255,255,0.18)" }
-              : { bg: "#EFEEEC", soft: "#F5F4F2", text: "#37352F", border: "#E3E2DE" };
-            const colorOf = (_id) => eventColor;
+            for (let w = 0; w < cells.length / 7; w++) weeks.push(cells.slice(w*7, w*7+7));
+            // 노션 스타일 이벤트 카드 톤
+            const ec = darkMode
+              ? { bg: "rgba(255,255,255,0.07)", text: "#E8E8E6", border: "rgba(255,255,255,0.11)", doneBg: "rgba(255,255,255,0.03)" }
+              : { bg: "#FFFFFF", text: "#37352F", border: "#E3E2DE", doneBg: "#FAFAF8" };
+            const fmtK = (ds) => { const [fy, fm, fd] = ds.split("-").map(Number); return `${fy}년 ${fm}월 ${fd}일`; };
 
             return (
-              <div key={monthLabel} className={"sched-month-anim" + (dragTodoId != null ? " sched-dragging" : "")} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div key={monthLabel} className={"sched-month-anim" + (dragTodoId != null ? " sched-dragging" : "")}>
                 {weeks.map((week, wi) => {
-                  // 이번 주 표시 가능 일자 범위
-                  const firstDate = week.find(d => d);
-                  const lastDate = [...week].reverse().find(d => d);
-                  if (!firstDate) return <div key={wi} style={{ minHeight: 32 }}/>;
-                  const weekStart = ymd(firstDate);
-                  const weekEnd = ymd(lastDate);
+                  const weekStart = ymd(week[0].d);
+                  const weekEnd = ymd(week[6].d);
 
                   // 이번 주에 걸치는 이벤트 추출 + 컬럼 위치 계산
                   const weekEvents = [];
@@ -19851,15 +19859,9 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                     if (tEnd < weekStart || tStart > weekEnd) return;
                     // 이번 주 안에서의 시작/끝 컬럼 (0~6)
                     let startCol = 0, endCol = 6;
-                    for (let c = 0; c < 7; c++) {
-                      if (week[c] && ymd(week[c]) === tStart) { startCol = c; break; }
-                      if (week[c] && ymd(week[c]) > tStart) { startCol = c; break; }
-                    }
+                    for (let c = 0; c < 7; c++) { if (ymd(week[c].d) >= tStart) { startCol = c; break; } }
                     if (tStart < weekStart) startCol = 0;
-                    for (let c = 6; c >= 0; c--) {
-                      if (week[c] && ymd(week[c]) === tEnd) { endCol = c; break; }
-                      if (week[c] && ymd(week[c]) < tEnd) { endCol = c; break; }
-                    }
+                    for (let c = 6; c >= 0; c--) { if (ymd(week[c].d) <= tEnd) { endCol = c; break; } }
                     if (tEnd > weekEnd) endCol = 6;
                     if (endCol < startCol) return;
                     weekEvents.push({ t, startCol, endCol, continuesLeft: tStart < weekStart, continuesRight: tEnd > weekEnd });
@@ -19877,60 +19879,61 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                     ev.track = placed;
                   });
                   const maxTrack = tracks.length;
-                  const trackH = 26; // px — 노션식 큰 이벤트 카드 (체크박스 포함)
-                  const headerH = 30; // 날짜 숫자 영역
-                  const rowH = Math.max(104, headerH + Math.max(2, maxTrack) * (trackH + 4) + 10);
+                  const trackH = 76;  // px — 노션식 이벤트 카드 (제목 + 날짜 + 완료 체크)
+                  const trackGap = 6;
+                  const headerH = 34; // 날짜 숫자 영역
+                  const rowH = headerH + Math.max(1, maxTrack) * (trackH + trackGap) + 8;
 
                   return (
-                    <div key={wi} className="sched-weekrow" style={{ position: "relative", minHeight: rowH, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+                    <div key={wi} className="sched-weekrow" style={{ position: "relative", minHeight: rowH, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderTop: wi > 0 ? "1px solid var(--divider)" : "none" }}>
                       {/* 날짜 셀 (배경) */}
-                      {week.map((d, ci) => {
-                        if (!d) return <div key={ci} style={{ minHeight: rowH, borderRadius: 10, background: "transparent" }}/>;
+                      {week.map((cell, ci) => {
+                        const d = cell.d;
                         const k = ymd(d);
                         const isToday = k === todayKey;
                         const isSelected = k === selectedDate;
                         const dow = d.getDay();
-                        const dayColor = dow === 0 ? "#EF4444" : dow === 6 ? "#3B82F6" : "var(--text1)";
+                        const dayColor = cell.out ? "var(--text3)" : dow === 0 ? "#EF4444" : dow === 6 ? "#3B82F6" : "var(--text2)";
                         const isDragOver = dragOverDate === k && dragTodoId != null;
                         return (
-                          <div key={ci} onClick={() => setSelectedDate(k)} onDoubleClick={() => openAdd(k)} className="sched-cell" role="button" tabIndex={0}
+                          <div key={ci} onClick={() => setSelectedDate(k)} onDoubleClick={() => openAdd(k)} className={"sched-cell" + (isSelected ? " sched-sel" : "")} role="button" tabIndex={0}
                             onDragOver={(e) => { if (dragTodoId == null) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOverDate !== k) setDragOverDate(k); }}
                             onDrop={(e) => { e.preventDefault(); moveTodoToDate(dragTodoId, k); clearDrag(); }}
                             style={{
-                              minHeight: rowH, padding: "6px 8px",
-                              border: isDragOver ? "1.5px dashed #DB6B2E" : isSelected ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
-                              borderRadius: 10,
-                              background: isDragOver ? "rgba(219,107,46,0.12)" : isSelected ? "rgba(219,107,46,0.07)" : "var(--surface)",
-                              boxShadow: isSelected && !isDragOver ? "0 0 0 3px rgba(219,107,46,0.12)" : "none",
+                              minHeight: rowH, padding: "5px 6px",
+                              borderLeft: ci > 0 ? "1px solid var(--divider)" : "none",
+                              boxShadow: isDragOver ? "inset 0 0 0 2px #DB6B2E" : "none",
+                              background: isDragOver ? "rgba(219,107,46,0.10)" : isSelected ? "rgba(219,107,46,0.06)" : "transparent",
+                              opacity: cell.out && !isDragOver ? 0.5 : 1,
                               cursor: "pointer", fontFamily: "inherit", textAlign: "left",
                               position: "relative",
                               display: "flex", flexDirection: "column",
                             }}
                           >
+                            {/* 날짜 숫자 — 노션식 오른쪽 위, 오늘은 붉은 원 */}
                             <span style={{
                               fontSize: 12, fontWeight: isToday ? 800 : 600,
                               color: isToday ? "#fff" : dayColor,
                               display: "inline-flex", alignItems: "center", justifyContent: "center",
-                              minWidth: 22, height: 22, borderRadius: 11,
-                              background: isToday ? "#DB6B2E" : "transparent",
-                              boxShadow: isToday ? "0 2px 6px rgba(219,107,46,0.4)" : "none",
-                              alignSelf: "flex-start",
-                            }}>{d.getDate()}</span>
+                              minWidth: 24, height: 24, borderRadius: 12, padding: "0 5px",
+                              background: isToday ? "#E5484D" : "transparent",
+                              alignSelf: "flex-end",
+                              fontVariantNumeric: "tabular-nums",
+                            }}>{d.getDate() === 1 && !isToday ? `${d.getMonth() + 1}월 1일` : d.getDate()}</span>
                             <span className="sched-addbtn" title="일정 추가" onClick={(e) => { e.stopPropagation(); openAdd(k); }}>+</span>
                           </div>
                         );
                       })}
-                      {/* 이벤트 바 (absolute) */}
+                      {/* 이벤트 카드 (absolute) — 노션 캘린더식: 제목 · 날짜 · 완료 체크 */}
                       <div style={{ position: "absolute", top: headerH, left: 0, right: 0, pointerEvents: "none" }}>
                         {weekEvents.map(ev => {
-                          const c = colorOf(ev.t.id);
-                          const left = `calc(${(ev.startCol / 7) * 100}% + 4px)`;
-                          const width = `calc(${((ev.endCol - ev.startCol + 1) / 7) * 100}% - 8px)`;
-                          const top = ev.track * (trackH + 2);
-                          const isMulti = ev.endCol > ev.startCol || ev.continuesLeft || ev.continuesRight;
+                          const left = `calc(${(ev.startCol / 7) * 100}% + ${ev.continuesLeft ? 0 : 4}px)`;
+                          const width = `calc(${((ev.endCol - ev.startCol + 1) / 7) * 100}% - ${(ev.continuesLeft ? 0 : 4) + (ev.continuesRight ? 0 : 4)}px)`;
+                          const top = ev.track * (trackH + trackGap);
+                          const done = ev.t.done;
                           return (
                             <div key={ev.t.id} className={"sched-eventbar" + (ev.endCol >= 5 ? " sched-eventbar-right" : "") + (peekId === ev.t.id ? " sched-peek-open" : "")}
-                              onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } setSelectedDate(ymd(week[ev.startCol] || firstDate)); openDetail(ev.t); }}
+                              onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } setSelectedDate(ymd(week[ev.startCol].d)); openDetail(ev.t); }}
                               onTouchStart={(e) => peekTouchStart(e, ev.t.id)}
                               onTouchMove={peekTouchMove} onTouchEnd={peekTouchCancel} onTouchCancel={peekTouchCancel}
                               draggable
@@ -19941,27 +19944,35 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                                 position: "absolute", left, width, top, height: trackH,
                                 pointerEvents: "auto", cursor: "pointer",
                                 opacity: dragTodoId === ev.t.id ? 0.35 : 1,
-                                background: ev.t.done ? (darkMode ? "rgba(255,255,255,0.04)" : "#F7F6F4") : c.bg,
-                                color: ev.t.done ? "var(--text3)" : c.text,
-                                border: `1px solid ${ev.t.done ? "transparent" : c.border}`,
-                                borderRadius: ev.continuesLeft ? "0 6px 6px 0" : ev.continuesRight ? "6px 0 0 6px" : 6,
-                                paddingLeft: 6, paddingRight: 8,
-                                fontSize: 11.5, fontWeight: 500,
-                                display: "flex", alignItems: "center", gap: 6,
+                                background: done ? ec.doneBg : ec.bg,
+                                color: done ? "var(--text3)" : ec.text,
+                                border: `1px solid ${done ? "transparent" : ec.border}`,
+                                borderRadius: ev.continuesLeft && ev.continuesRight ? 0 : ev.continuesLeft ? "0 8px 8px 0" : ev.continuesRight ? "8px 0 0 8px" : 8,
+                                boxShadow: done ? "none" : (darkMode ? "0 1px 3px rgba(0,0,0,0.28)" : "0 1px 2px rgba(15,15,15,0.06)"),
+                                padding: "7px 9px 6px",
+                                display: "flex", flexDirection: "column", gap: 2,
                               }}
                             >
-                              {/* 완료 체크박스 — 노션처럼 이벤트 카드 안에서 바로 토글 */}
-                              <span onClick={(e) => { e.stopPropagation(); toggleTodo(ev.t.id); }} title={ev.t.done ? "미완료로" : "완료"}
+                              <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                                <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: 12.5, fontWeight: 700, lineHeight: "17px", textDecoration: done ? "line-through" : "none", opacity: done ? 0.65 : 1 }}>{ev.t.text}</span>
+                                {(ev.t.atts || []).length > 0 && <span title={`첨부 ${ev.t.atts.length}개`} style={{ fontSize: 10, flexShrink: 0 }}>📎</span>}
+                              </span>
+                              <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: "14px" }}>
+                                {fmtK(ev.t.date)}{ev.t.endDate && ev.t.endDate !== ev.t.date ? ` → ${fmtK(ev.t.endDate)}` : ""}
+                              </span>
+                              {/* 완료 체크박스 — 노션 To-do처럼 카드 안에서 바로 토글 */}
+                              <span onClick={(e) => { e.stopPropagation(); toggleTodo(ev.t.id); }} title={done ? "미완료로" : "완료로 표시"}
                                 className="sched-evcheck"
-                                style={{
-                                  width: 15, height: 15, borderRadius: 4, flexShrink: 0,
-                                  border: ev.t.done ? "none" : `1.5px solid ${darkMode ? "rgba(255,255,255,0.35)" : "#B9B7B2"}`,
-                                  background: ev.t.done ? "#10B981" : "transparent",
-                                  color: "#fff", fontSize: 10, fontWeight: 800,
+                                style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: "auto", alignSelf: "flex-start", paddingRight: 6 }}>
+                                <span style={{
+                                  width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                                  border: done ? "none" : `1.5px solid ${darkMode ? "rgba(255,255,255,0.35)" : "#B9B7B2"}`,
+                                  background: done ? "#2383E2" : "transparent",
+                                  color: "#fff", fontSize: 9.5, fontWeight: 800,
                                   display: "inline-flex", alignItems: "center", justifyContent: "center",
-                                }}>{ev.t.done ? "✓" : ""}</span>
-                              <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: ev.t.done ? "line-through" : "none" }}>{ev.t.text}</span>
-                              {(ev.t.atts || []).length > 0 && <span title={`첨부 ${ev.t.atts.length}개`} style={{ fontSize: 10, flexShrink: 0 }}>📎</span>}
+                                }}>{done ? "✓" : ""}</span>
+                                <span style={{ fontSize: 10.5, fontWeight: 600, color: "var(--text3)" }}>완료</span>
+                              </span>
                               {/* 호버 확대 프리뷰 (데스크톱) */}
                               <div className="sched-peek">
                                 <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--text1)", lineHeight: 1.45, textDecoration: ev.t.done ? "line-through" : "none", opacity: ev.t.done ? 0.6 : 1 }}>{ev.t.text}</div>
