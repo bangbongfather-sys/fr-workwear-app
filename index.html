@@ -19171,6 +19171,14 @@ function AttachmentField({ value = [], onChange }) {
   const [busy, setBusy] = React.useState(false);
   const [dragOver, setDragOver] = React.useState(false); // 드래그 앤 드롭 하이라이트
   const [viewer, setViewer] = React.useState(null); // 확대 보기 중인 이미지 첨부
+  // 드래그가 창 밖/다른 곳에서 끝나도 하이라이트가 남지 않도록 전역 정리
+  React.useEffect(() => {
+    if (!dragOver) return;
+    const clear = () => setDragOver(false);
+    window.addEventListener("drop", clear);
+    window.addEventListener("dragend", clear);
+    return () => { window.removeEventListener("drop", clear); window.removeEventListener("dragend", clear); };
+  }, [dragOver]);
   const totalBytes = value.reduce((s, a) => s + (a.size || attDataUrlBytes(a.dataUrl)), 0);
   const addFiles = async (fileList) => {
     const files = Array.from(fileList || []);
