@@ -20235,11 +20235,19 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         @keyframes schedSlideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
         @keyframes schedCheckPop { 0% { transform: scale(.5); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
         .sched-month-anim { animation: schedSlideIn .28s cubic-bezier(0,0,.2,1) both; }
-        .sched-cell { transition: background .15s, border-color .15s, transform .13s, box-shadow .18s; }
-        .sched-cell:hover { transform: translateY(-2px); box-shadow: var(--elev-2); border-color: rgba(219,107,46,.35) !important; }
-        .sched-cell:active { transform: translateY(0) scale(.985); }
+        /* 노션식 플랫 셀: 들뜨는 효과 없이 배경 틴트만 */
+        .sched-cell { transition: background .15s, box-shadow .15s, opacity .15s; }
+        .sched-cell:not(.sched-sel):hover { background: var(--row-bg) !important; }
+        .sched-navbtn {
+          width: 30px; height: 30px; border-radius: 8px; border: none;
+          background: transparent; color: var(--text2);
+          cursor: pointer; font-size: 16px; font-weight: 700; font-family: inherit;
+          display: inline-flex; align-items: center; justify-content: center;
+          transition: background .13s, color .13s;
+        }
+        .sched-navbtn:hover { background: var(--surface2); color: var(--text1); }
         .sched-eventbar { transition: filter .12s, box-shadow .15s; }
-        .sched-eventbar:hover { filter: brightness(1.04); box-shadow: var(--elev-1); }
+        .sched-eventbar:hover { filter: brightness(1.04); box-shadow: var(--elev-2); }
         .sched-item { animation: schedSlideIn .3s cubic-bezier(0,0,.2,1) both; transition: border-color .15s, transform .15s, opacity .2s, background .2s; }
         .sched-item:hover { border-color: rgba(219,107,46,.35) !important; transform: translateX(2px); }
         .sched-check { transition: background .18s, border-color .18s; }
