@@ -17178,7 +17178,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           />
         )}
         {tab === "tax" && (
-          <TaxTab taxes={taxes} setTaxes={setTaxes} setTodos={setTodos} darkMode={darkMode} />
+          <TaxTab taxes={taxes} setTaxes={setTaxes} setTodos={setTodos} darkMode={darkMode} apiKey={apiKey} />
         )}
         {tab === "clients" && (
           <ClientsTab
@@ -20602,7 +20602,7 @@ const TAX_CALENDAR_HINTS = [
   ["지방소득세", "법인 4/30 · 개인 5/31"],
 ];
 
-function TaxTab({ taxes = [], setTaxes, setTodos, darkMode }) {
+function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
   const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const todayYmd = ymd(new Date());
   const thisYear = String(new Date().getFullYear());
@@ -20651,6 +20651,102 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode }) {
     showToast("일정에 추가됐습니다 — 일정 탭에서 확인하세요", "success");
   };
 
+  // ── 메일에서 가져오기 — 세무법인 안내 메일을 Claude가 읽어 납부 정보 자동 추출 ──
+  // Gmail 토큰은 메일 탭이 발급·저장한 것(frw_gmail_token)을 재사용. 만료 시 메일 탭에서 재로그인.
+  const [mailImport, setMailImport] = React.useState(null); // null | {step:"list"|"preview", ...}
+  const gmailToken = () => {
+    try { const t = JSON.parse(localStorage.getItem("frw_gmail_token") || "null"); return (t && t.access_token && Date.now() < t.expires_at - 30000) ? t.access_token : null; } catch { return null; }
+  };
+  const gmailGet = async (path) => {
+    const tk = gmailToken();
+    if (!tk) throw new Error("NO_TOKEN");
+    const r = await fetch(`https://gmail.googleapis.com/gmail/v1${path}`, { headers: { Authorization: `Bearer ${tk}` } });
+    if (!r.ok) throw new Error(r.status === 401 ? "NO_TOKEN" : `Gmail API ${r.status}`);
+    return r.json();
+  };
+  const openMailImport = async () => {
+    if (!gmailToken()) { showToast("메일 탭에서 Google 로그인을 먼저 해주세요 (토큰 만료 시 재로그인)"); return; }
+    if (!apiKey.trim()) { showToast("AI 추출에는 Claude API 키가 필요합니다 — 견적 관리의 AI 설정에서 등록해주세요"); return; }
+    setMailImport({ step: "list", mails: [], loading: true });
+    try {
+      const q = encodeURIComponent("(세무 OR 부가세 OR 부가가치세 OR 납부서 OR 원천세 OR 법인세) newer_than:90d");
+      const list = await gmailGet(`/users/me/messages?maxResults=10&q=${q}`);
+      const ids = (list.messages || []).map(m => m.id);
+      const metas = await Promise.all(ids.map(id => gmailGet(`/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`)));
+      const mails = metas.map(m => {
+        const h = (name) => (m.payload?.headers || []).find(x => x.name === name)?.value || "";
+        return { id: m.id, subject: h("Subject"), from: h("From"), date: h("Date"), snippet: m.snippet || "" };
+      });
+      setMailImport({ step: "list", mails, loading: false });
+    } catch (e) {
+      setMailImport(null);
+      showToast(e.message === "NO_TOKEN" ? "Gmail 로그인이 만료됐습니다 — 메일 탭에서 재로그인해주세요" : "메일 목록 실패: " + e.message);
+    }
+  };
+  const pickMail = async (mail) => {
+    setMailImport({ step: "list", mails: [], loading: true, note: "메일 본문을 읽고 AI가 납부 정보를 추출하는 중..." });
+    try {
+      const full = await gmailGet(`/users/me/messages/${mail.id}?format=full`);
+      let text = "", html = "";
+      const walk = (p) => {
+        if (!p) return;
+        if (p.mimeType === "text/plain" && p.body?.data) text += b64UrlDecode(p.body.data);
+        else if (p.mimeType === "text/html" && p.body?.data) html += b64UrlDecode(p.body.data);
+        else if (p.parts) p.parts.forEach(walk);
+      };
+      walk(full.payload);
+      const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ")).replace(/\s+/g, " ").slice(0, 6000);
+      const prompt = `다음은 세무 관련 이메일입니다. 세금 납부 정보를 추출해 JSON 배열로만 응답하세요.
+각 항목: {"biz":"사업장명","taxType":"세목","period":"귀속","amount":숫자,"dueDate":"YYYY-MM-DD","memo":"확인·조치가 필요한 특이사항 요약 (없으면 빈 문자열)"}
+규칙:
+- biz는 반드시 다음 중 가장 가까운 것으로: ${TAX_BIZ.join(", ")}
+- taxType은 반드시 다음 중 하나: ${TAX_TYPES.join(", ")}
+- 기한에 연도가 없으면 메일 날짜(${mail.date})를 기준으로 추정
+- 납부 정보가 없으면 []
+JSON 외 텍스트 금지.
+
+제목: ${mail.subject}
+본문: ${body}`;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
+      });
+      if (!res.ok) throw new Error(`Claude API ${res.status}`);
+      const data = await res.json();
+      const raw = (data.content || []).map(c => c.text || "").join("");
+      const m = raw.match(/\[[\s\S]*\]/);
+      const parsed = m ? JSON.parse(m[0]) : [];
+      if (!Array.isArray(parsed) || parsed.length === 0) { setMailImport(null); showToast("이 메일에서 납부 정보를 찾지 못했습니다"); return; }
+      const records = parsed.map(p => ({
+        biz: TAX_BIZ.includes(p.biz) ? p.biz : TAX_BIZ[0],
+        taxType: TAX_TYPES.includes(p.taxType) ? p.taxType : "기타",
+        period: String(p.period || ""), amount: Number(p.amount) || 0,
+        dueDate: /^\d{4}-\d{2}-\d{2}$/.test(p.dueDate || "") ? p.dueDate : todayYmd,
+        memo: String(p.memo || ""), checked: true,
+      })).filter(r => r.amount > 0);
+      setMailImport({ step: "preview", records, mailSubject: mail.subject });
+    } catch (e) {
+      setMailImport(null);
+      showToast(e.message === "NO_TOKEN" ? "Gmail 로그인이 만료됐습니다 — 메일 탭에서 재로그인해주세요" : "추출 실패: " + e.message);
+    }
+  };
+  const confirmImport = () => {
+    const picked = (mailImport?.records || []).filter(r => r.checked);
+    if (picked.length === 0) { showToast("가져올 항목을 선택하세요"); return; }
+    // (사업장+세목+귀속+기한)이 같으면 중복으로 보고 건너뜀
+    const keyOf = (r) => `${r.biz}|${r.taxType}|${r.period}|${r.dueDate}`;
+    const existing = new Set(taxes.map(keyOf));
+    const fresh = picked.filter(r => !existing.has(keyOf(r)));
+    if (fresh.length > 0) {
+      setTaxes(prev => [...fresh.map(r => ({ id: uid(), biz: r.biz, taxType: r.taxType, period: r.period, amount: r.amount, dueDate: r.dueDate, paidDate: "", memo: r.memo, atts: [], createdAt: Date.now() })), ...prev]);
+    }
+    setMailImport(null);
+    showToast(fresh.length > 0
+      ? `${fresh.length}건을 가져왔습니다${picked.length - fresh.length > 0 ? ` (중복 ${picked.length - fresh.length}건 제외)` : ""}`
+      : "모두 이미 등록된 항목입니다 (중복 제외)", fresh.length > 0 ? "success" : "info");
+  };
+
   const card = { background: "var(--surface)", borderRadius: 14, border: "1px solid var(--border)", padding: 16 };
   const inp = { height: 38, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" };
 
@@ -20687,6 +20783,9 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode }) {
           {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
         <div style={{ flex: 1 }} />
+        <button onClick={openMailImport} title="세무법인 안내 메일에서 납부 정보를 AI로 자동 추출"
+          style={{ height: 38, padding: "0 14px", fontSize: 13, fontWeight: 700, borderRadius: 10, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="mail" size={14}/>메일에서 가져오기</button>
         <button className="btn-orange" onClick={openNew} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>+ 세무 기록 추가</button>
       </div>
 
@@ -20745,6 +20844,53 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode }) {
         ))}
         <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>· 일반 안내입니다. 실제 기한·금액은 세무법인 안내를 우선하세요.</div>
       </div>
+
+      {/* 메일에서 가져오기 모달 — 목록 선택 → AI 추출 미리보기 → 확정 */}
+      {mailImport && (
+        <div onClick={() => !mailImport.loading && setMailImport(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", padding: 20, border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
+            {mailImport.step === "list" && (
+              <>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>메일에서 가져오기</div>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14 }}>최근 90일 세무 관련 메일입니다. 선택하면 AI가 납부 정보를 추출합니다.</div>
+                {mailImport.loading ? (
+                  <div style={{ padding: 28, textAlign: "center", color: "var(--text3)", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <Icon name="refresh" size={14} style={{ animation: "spin 1.4s linear infinite" }}/>{mailImport.note || "메일을 찾는 중..."}
+                  </div>
+                ) : mailImport.mails.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>최근 90일 내 세무 관련 메일이 없습니다</div>
+                ) : mailImport.mails.map((m, i) => (
+                  <div key={m.id} onClick={() => pickMail(m)} style={{ padding: "11px 12px", cursor: "pointer", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: "var(--surface2)" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.subject || "(제목 없음)"}</div>
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.from} · {(m.date || "").slice(0, 25)}</div>
+                  </div>
+                ))}
+              </>
+            )}
+            {mailImport.step === "preview" && (
+              <>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>추출 결과 확인</div>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mailImport.mailSubject}</div>
+                {mailImport.records.map((r, i) => (
+                  <label key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 12px", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: r.checked ? "rgba(219,107,46,0.06)" : "var(--surface2)", cursor: "pointer" }}>
+                    <input type="checkbox" checked={r.checked} style={{ marginTop: 3 }}
+                      onChange={e => setMailImport(mi => ({ ...mi, records: mi.records.map((x, xi) => xi === i ? { ...x, checked: e.target.checked } : x) }))} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{r.taxType} — {r.biz}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--text2)", marginTop: 2 }}>{fmt(r.amount)}원 · 기한 {r.dueDate}{r.period ? ` · ${r.period}` : ""}</span>
+                      {r.memo && <span style={{ display: "block", fontSize: 11, color: "#DB6B2E", marginTop: 2 }}>⚠ {r.memo}</span>}
+                    </span>
+                  </label>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button onClick={() => setMailImport(null)} style={{ padding: "11px 16px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>취소</button>
+                  <button onClick={confirmImport} className="btn-orange" style={{ flex: 1, padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>선택 항목 가져오기</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 추가/수정 모달 */}
       {editing && (
