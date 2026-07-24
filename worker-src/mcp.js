@@ -18,7 +18,7 @@ const ALLOWED_SECTIONS = [
   "clients", "suppliers", "clientAR", "ledgers", "monthlySales", "accounts",
   "products", "materials", "laborItems", "orders", "purchaseOrders", "fabricIntakes",
   "bids", "investments", "cashFlows", "scheduledExpenses", "todos", "notes", "recurringSchedules",
-  "stock", "payables", "bankDeposits", "prodTrash", "companySeal",
+  "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes",
 ];
 
 // 단가 계산기 로직 (index.html computeProduct와 동일 공식) ──
@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-24-peek-large", note: "일정 호버 미리보기 확대 — 팝업 최소 320px·최대 460px, 제목 16.5px·날짜/메모 13.5px, 메모 표시 영역 130px, 첨부 썸네일 56px (노션 캘린더식 재디자인 포함)"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-24-tax-tab", note: "세무 관리 탭 신규 — 사업장 3곳 세금 납부 기록(세목·귀속·금액·기한·완납·첨부), 다가오는 납부 D-day, 일정 추가 연동, 통합검색 포함. + 통합검색 개선(초성·공백무시·다단어·모바일 오버레이), 일정→중요메모 이관, 일정 호버 미리보기 확대(vm)"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);

@@ -1217,7 +1217,7 @@ const ORANGE = "#F59E0B";
 
 // 클라우드 동기화 섹션 목록 (top-level key 단위). 섹션별 자동 병합·충돌 판정의 기준.
 // 여기 순서/이름이 Firebase /frw 의 top-level key 및 _revs 키와 1:1 대응한다.
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -13345,6 +13345,7 @@ function App() {
   const [bids, setBids] = useState(() => load("frw_bids", []));
   const [todos, setTodos] = useState(() => load("frw_todos", []));
   const [notes, setNotes] = useState(() => load("frw_notes", []));
+  const [taxes, setTaxes] = useState(() => load("frw_taxes", [])); // 세무 관리 — 사업장별 세금 납부 기록
   const [recurringSchedules, setRecurringSchedules] = useState(() => load("frw_recurring", []));
   const [ledgers, setLedgers] = useState(() => load("frw_ledgers", {}));
   const [companyFiles, setCompanyFiles] = useState({ subtabs: [{ id: "general", name: "일반" }], items: { general: [] } });
@@ -13771,6 +13772,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.bids !== undefined) setBids(d.bids);
     if (d.todos !== undefined) setTodos(d.todos);
     if (d.notes !== undefined) setNotes(d.notes);
+    if (d.taxes !== undefined) setTaxes(d.taxes);
     if (d.recurringSchedules !== undefined) setRecurringSchedules(d.recurringSchedules);
     if (d.ledgers !== undefined) setLedgers(d.ledgers);
     if (d.clientAR !== undefined) setClientAR(d.clientAR);
@@ -13917,7 +13919,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR); save("frw_todos", todos);
-    save("frw_notes", notes); save("frw_recurring", recurringSchedules);
+    save("frw_notes", notes); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes);
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
@@ -13927,7 +13929,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_prod_trash", prodTrash);
     save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes };
     if (!initialized.current) { prevSnapshot.current = cur; return; }
     // 폴링/포그라운드 복귀로 받아온 클라우드 데이터를 state에 반영하면 이 effect가 실행되는데,
     // 그건 사용자 입력이 아니므로 다시 푸시하면 안 됨(무한 왕복·불필요 쓰기 방지). baseline만 갱신하고 1회 억제.
@@ -14008,7 +14010,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       };
       doSave(0);
     }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
@@ -14922,12 +14924,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(219,107,46,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
+  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
   // 사이드바 메뉴 그룹 (토스 핸드오프 — 평면 나열 → 그룹 헤더). TABS는 평면 유지(퀵메뉴 등 재사용)
   const TAB_GROUPS = [
     { label: "핵심", ids: ["dashboard", "calc", "quote"] },
     { label: "운영", ids: ["pricedb", "purchase", "inventory", "stock"] },
-    { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury"] },
+    { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury", "tax"] },
     { label: "일정·외부", ids: ["schedule", "bids", "files", "mail", "news"] },
   ];
   // 화면별 페이지 헤더 부제 (토스 핸드오프 — 제목은 TABS label, 부제는 아래 맵)
@@ -14937,6 +14939,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     quote: "견적서 작성·발행·이력 관리",
     purchase: "생산 발주·진행 현황 추적",
     dashboard: "한눈에 보는 매출·마진·미수금 현황",
+    tax: "사업장별 세금 납부 일정·기록 관리",
     ledger: "매출·매입·수금 거래 내역",
     treasury: "현금 흐름·계좌·자금 계획",
     inventory: "원단 입고·매입 내역 관리",
@@ -15345,6 +15348,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     { type:"일정", icon:"calendar", title:t.text, sub:`${t.date||""}${t.endDate?` → ${t.endDate}`:""}${t.done?" · ✓ 완료":""}`, action:()=>{save("frw_schedule_subtab","calendar"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"calendar",date:t.date}})),80);} }));
                   (notes||[]).forEach(n => push(searchScore(q, [n.title, n.body, (n.tags||[]).join(" ")]),
                     { type:"메모", icon:"clipboard", title:n.title||"(제목 없음)", sub:`${n.pinned?"★ ":""}${n.category||""}${n.body?` · ${n.body.slice(0,40)}`:""}`, action:()=>{save("frw_schedule_subtab","notes"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"notes"}})),80);} }));
+                  (taxes||[]).forEach(t => push(searchScore(q, [t.taxType, t.biz, t.period, t.memo]),
+                    { type:"세무", icon:"coins", title:`${t.taxType} — ${t.biz}`, sub:`기한 ${t.dueDate||""} · ${Number(t.amount||0).toLocaleString()}원${t.paidDate?" · ✓ 완납":""}`, action:()=>{setTab("tax"); setGlobalSearch("");} }));
                   // 재고 — 클릭하면 재고 탭으로 이동 + 해당 품목이 검색된 상태로 열림
                   ((stock && stock.items) || []).forEach(it => push(searchScore(q, [it.name, it.code, it.spec]),
                     { type:"재고", icon:"layers", title:it.name,
@@ -17171,6 +17176,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             darkMode={darkMode}
             setTab={setTab} setLedgerFocusClient={setLedgerFocusClient}
           />
+        )}
+        {tab === "tax" && (
+          <TaxTab taxes={taxes} setTaxes={setTaxes} setTodos={setTodos} darkMode={darkMode} />
         )}
         {tab === "clients" && (
           <ClientsTab
@@ -20580,6 +20588,200 @@ function NotesPanel({ notes, setNotes, clients, darkMode }) {
 }
 
 // ─── 정기 일정 패널 ───
+// ─── 세무 관리 탭 ───
+// 사업장 3곳(나정·엔제이세이프티·엔제이)의 세금 납부 일정·금액·증빙(납부서 등)을 한곳에서 관리.
+// 세무법인 안내 메일을 받으면 여기 기록하고, [일정 추가]로 캘린더에도 올린다.
+const TAX_BIZ = ["나정엔터프라이즈", "주식회사 엔제이세이프티", "엔제이"];
+const TAX_TYPES = ["부가가치세", "원천세", "법인세", "종합소득세", "지방소득세", "4대보험", "기타"];
+// 연간 주요 신고·납부 기한 (12월 결산 법인 기준 일반 안내)
+const TAX_CALENDAR_HINTS = [
+  ["부가가치세", "1기 예정 4/25 · 1기 확정 7/25 · 2기 예정 10/25 · 2기 확정 익년 1/25"],
+  ["원천세", "매월 10일 (반기납부 특례: 7/10, 익년 1/10)"],
+  ["법인세", "3/31 신고·납부 · 중간예납 8/31"],
+  ["종합소득세", "5/31 (개인사업자)"],
+  ["지방소득세", "법인 4/30 · 개인 5/31"],
+];
+
+function TaxTab({ taxes = [], setTaxes, setTodos, darkMode }) {
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const todayYmd = ymd(new Date());
+  const thisYear = String(new Date().getFullYear());
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const [filterYear, setFilterYear] = React.useState(thisYear);
+  const [filterBiz, setFilterBiz] = React.useState("");
+  const [editing, setEditing] = React.useState(null); // 레코드 draft or null
+
+  // D-day: 음수면 경과. paidDate 있으면 완납.
+  const dday = (due) => Math.ceil((new Date(due) - new Date(todayYmd)) / 86400000);
+  const statusOf = (r) => r.paidDate ? "완납" : (dday(r.dueDate) < 0 ? "기한 경과" : "예정");
+  const statusColor = { "완납": "#10B981", "기한 경과": "#EF4444", "예정": "#DB6B2E" };
+
+  const years = [...new Set([thisYear, ...taxes.map(r => (r.dueDate || "").slice(0, 4)).filter(Boolean)])].sort().reverse();
+  const filtered = taxes
+    .filter(r => (filterYear === "all" || (r.dueDate || "").startsWith(filterYear)) && (!filterBiz || r.biz === filterBiz))
+    .sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || ""));
+  const upcoming = taxes.filter(r => !r.paidDate).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || "")).slice(0, 3);
+  // 연도 합계 (필터 연도 기준): 사업장별 총액·완납액
+  const yearRecs = taxes.filter(r => filterYear === "all" || (r.dueDate || "").startsWith(filterYear));
+  const bizTotals = TAX_BIZ.map(b => {
+    const rs = yearRecs.filter(r => r.biz === b);
+    return { biz: b, total: rs.reduce((s, r) => s + Number(r.amount || 0), 0), paid: rs.filter(r => r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0) };
+  }).filter(t => t.total > 0);
+
+  const openNew = () => setEditing({ id: null, biz: TAX_BIZ[0], taxType: "부가가치세", period: "", amount: "", dueDate: todayYmd, paidDate: "", memo: "", atts: [] });
+  const saveRec = () => {
+    if (!editing) return;
+    if (!editing.dueDate) { showToast("납부기한을 입력하세요"); return; }
+    const amt = Number(String(editing.amount).replace(/[^\d.-]/g, ""));
+    if (!amt) { showToast("금액을 입력하세요"); return; }
+    const rec = { ...editing, amount: amt, id: editing.id || uid(), createdAt: editing.createdAt || Date.now() };
+    setTaxes(prev => editing.id ? prev.map(r => r.id === editing.id ? rec : r) : [rec, ...prev]);
+    setEditing(null);
+    showToast("세무 기록이 저장됐습니다", "success");
+  };
+  const delRec = (id) => {
+    if (!window.confirm("이 세무 기록을 삭제할까요?")) return;
+    setTaxes(prev => prev.filter(r => r.id !== id));
+    setEditing(null);
+  };
+  const togglePaid = (id) => setTaxes(prev => prev.map(r => r.id === id ? { ...r, paidDate: r.paidDate ? "" : todayYmd } : r));
+  const addToSchedule = (r) => {
+    if (!setTodos) return;
+    setTodos(prev => [...prev, { id: Date.now(), date: r.dueDate, endDate: "", text: `${r.taxType} 납부 — ${r.biz} ${fmt(r.amount)}원`, memo: r.period ? `귀속: ${r.period}` : "", done: false, createdAt: Date.now(), atts: [] }]);
+    showToast("일정에 추가됐습니다 — 일정 탭에서 확인하세요", "success");
+  };
+
+  const card = { background: "var(--surface)", borderRadius: 14, border: "1px solid var(--border)", padding: 16 };
+  const inp = { height: 38, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 다가오는 납부 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+        {upcoming.length === 0 ? (
+          <div style={{ ...card, color: "var(--text3)", fontSize: 13 }}>미납 항목이 없습니다 ✓</div>
+        ) : upcoming.map(r => {
+          const d = dday(r.dueDate);
+          return (
+            <div key={r.id} style={{ ...card, borderLeft: `3px solid ${d < 0 ? "#EF4444" : d <= 7 ? "#DB6B2E" : "var(--border)"}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: d < 0 ? "#EF4444" : "#DB6B2E" }}>{d < 0 ? `${-d}일 경과` : d === 0 ? "오늘 마감" : `D-${d}`}</span>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>{r.dueDate}</span>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", marginBottom: 2 }}>{r.taxType} — {r.biz}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{fmt(r.amount)}원</div>
+              {r.period && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{r.period}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 필터 + 추가 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <select value={filterYear} onChange={e => setFilterYear(e.target.value)} style={inp}>
+          <option value="all">전체 연도</option>
+          {years.map(y => <option key={y} value={y}>{y}년</option>)}
+        </select>
+        <select value={filterBiz} onChange={e => setFilterBiz(e.target.value)} style={inp}>
+          <option value="">전체 사업장</option>
+          {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <div style={{ flex: 1 }} />
+        <button className="btn-orange" onClick={openNew} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>+ 세무 기록 추가</button>
+      </div>
+
+      {/* 사업장별 합계 */}
+      {bizTotals.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+          {bizTotals.map(t => (
+            <div key={t.biz} style={card}>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 4 }}>{t.biz} · {filterYear === "all" ? "전체" : `${filterYear}년`}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>{fmt(t.total)}원</div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>완납 {fmt(t.paid)}원 · 미납 {fmt(t.total - t.paid)}원</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 기록 목록 */}
+      <div style={{ ...card, padding: 0, overflow: "hidden" }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+            기록이 없습니다. [+ 세무 기록 추가]로 시작하세요.<br/>
+            <span style={{ fontSize: 11 }}>예: 세무법인 안내 메일의 부가세 납부액·기한을 그대로 옮겨 적으면 됩니다.</span>
+          </div>
+        ) : filtered.map((r, i) => {
+          const st = statusOf(r);
+          return (
+            <div key={r.id} onClick={() => setEditing({ ...r })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer", borderBottom: i < filtered.length - 1 ? "1px solid var(--divider)" : "none", flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 150 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{r.taxType}{r.period ? ` · ${r.period}` : ""}</div>
+                <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 1 }}>{r.biz}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text2)", minWidth: 86 }}>{r.dueDate}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", minWidth: 100, textAlign: "right" }}>{fmt(r.amount)}원</div>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 100, color: statusColor[st], background: statusColor[st] + "1A", flexShrink: 0 }}>{st}</span>
+              <span style={{ display: "inline-flex", gap: 6 }} onClick={e => e.stopPropagation()}>
+                <button onClick={() => togglePaid(r.id)} title={r.paidDate ? "완납 취소" : "완납 처리"}
+                  style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: r.paidDate ? "var(--text3)" : "#10B981", cursor: "pointer", fontFamily: "inherit" }}>{r.paidDate ? "↩ 취소" : "✓ 완납"}</button>
+                {!r.paidDate && (
+                  <button onClick={() => addToSchedule(r)} title="납부기한을 일정 캘린더에 추가"
+                    style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "#DB6B2E", cursor: "pointer", fontFamily: "inherit" }}>일정 추가</button>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 연간 세무 캘린더 안내 */}
+      <div style={card}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 8 }}>연간 주요 신고·납부 기한</div>
+        {TAX_CALENDAR_HINTS.map(([k, v]) => (
+          <div key={k} style={{ display: "flex", gap: 10, fontSize: 12, padding: "4px 0", borderBottom: "1px dashed var(--divider)" }}>
+            <span style={{ minWidth: 80, fontWeight: 700, color: "var(--text2)" }}>{k}</span>
+            <span style={{ color: "var(--text3)" }}>{v}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>· 일반 안내입니다. 실제 기한·금액은 세무법인 안내를 우선하세요.</div>
+      </div>
+
+      {/* 추가/수정 모달 */}
+      {editing && (
+        <div onClick={() => setEditing(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: 20, border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 14 }}>{editing.id ? "세무 기록 수정" : "세무 기록 추가"}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <select value={editing.biz} onChange={e => setEditing({ ...editing, biz: e.target.value })} style={inp}>
+                  {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <select value={editing.taxType} onChange={e => setEditing({ ...editing, taxType: e.target.value })} style={inp}>
+                  {TAX_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <input value={editing.period} onChange={e => setEditing({ ...editing, period: e.target.value })} placeholder="귀속 (예: 2026년 1기확정)" style={inp} />
+              <input value={editing.amount} onChange={e => setEditing({ ...editing, amount: e.target.value })} placeholder="납부액 (원)" inputMode="numeric" style={inp} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <label style={{ fontSize: 11, color: "var(--text3)" }}>납부기한<input type="date" value={editing.dueDate} onChange={e => setEditing({ ...editing, dueDate: e.target.value })} style={{ ...inp, width: "100%", marginTop: 3 }} /></label>
+                <label style={{ fontSize: 11, color: "var(--text3)" }}>납부일 (완납 시)<input type="date" value={editing.paidDate || ""} onChange={e => setEditing({ ...editing, paidDate: e.target.value })} style={{ ...inp, width: "100%", marginTop: 3 }} /></label>
+              </div>
+              <textarea value={editing.memo} onChange={e => setEditing({ ...editing, memo: e.target.value })} placeholder="메모 (선택) — 중복분 확인 요청, 수정발행 여부 등" rows={3}
+                style={{ ...inp, height: "auto", padding: 10, resize: "vertical", lineHeight: 1.6 }} />
+              <AttachmentField value={editing.atts || []} onChange={arr => setEditing({ ...editing, atts: arr })} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              {editing.id && <button onClick={() => delRec(editing.id)} style={{ padding: "11px 16px", border: "none", borderRadius: 10, background: "rgba(239,68,68,0.10)", color: "#EF4444", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>삭제</button>}
+              <button onClick={() => setEditing(null)} style={{ padding: "11px 16px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>취소</button>
+              <button onClick={saveRec} className="btn-orange" style={{ flex: 1, padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecurringPanel({ recurringSchedules, setRecurringSchedules, darkMode }) {
   const [editing, setEditing] = React.useState(null);
   const [filterCategory, setFilterCategory] = React.useState("");
