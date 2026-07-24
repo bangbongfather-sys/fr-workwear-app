@@ -14796,18 +14796,43 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     } finally { document.body.removeChild(wrap); }
   };
 
-  // 발주서 공유 — 이미지(PNG)로 만들어 기기 공유창(카톡·메일·문자)으로 전달, 미지원 환경은 다운로드 폴백
-  const sharePODoc = async (title, supplierName) => {
-    if (typeof html2canvas === "undefined") { showToast("이미지 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
+  // 발주서 문서 → A4 PDF 생성 (공유·다운로드 공용). { pdf, fname } 반환
+  const makePODocPdf = async (title, supplierName) => {
     const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc, .official-doc");
-    if (!target) { showToast("발주서 화면을 먼저 열어주세요."); return; }
+    if (!target) throw new Error("발주서 화면을 먼저 열어주세요.");
+    const canvas = await capturePOCanvas(target);
+    const imgData = canvas.toDataURL("image/jpeg", 0.92);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageW = 210, pageH = 297, margin = 10;
+    const usableW = pageW - margin * 2, usableH = pageH - margin * 2;
+    const fullH = (canvas.height * usableW) / canvas.width;
+    if (fullH <= usableH * 1.35) {
+      const fit = Math.min(1, usableH / fullH);
+      const w = usableW * fit, h = fullH * fit;
+      pdf.addImage(imgData, "JPEG", (pageW - w) / 2, margin, w, h);
+    } else {
+      let heightLeft = fullH, position = margin;
+      pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
+      heightLeft -= usableH;
+      while (heightLeft > 0) {
+        position = margin - (fullH - heightLeft);
+        pdf.addPage();
+        pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
+        heightLeft -= usableH;
+      }
+    }
+    const base = ((title || "").trim() || (supplierName || "").trim() || "draft").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+    return { pdf, fname: `발주서_${base}_${new Date().toISOString().slice(0, 10)}.pdf` };
+  };
+
+  // 발주서 공유 — PDF 파일로 만들어 기기 공유창(카톡·메일·문자)으로 전달, 미지원 환경은 PDF 다운로드 폴백
+  const sharePODoc = async (title, supplierName) => {
+    if (typeof html2canvas === "undefined" || !window.jspdf) { showToast("PDF 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
     try {
-      const canvas = await capturePOCanvas(target);
-      const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
-      if (!blob) throw new Error("이미지 생성 실패");
-      const base = ((title || "").trim() || (supplierName || "").trim() || "발주서").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
-      const fname = `발주서_${base}_${new Date().toISOString().slice(0, 10)}.png`;
-      const file = new File([blob], fname, { type: "image/png" });
+      const { pdf, fname } = await makePODocPdf(title, supplierName);
+      const blob = pdf.output("blob");
+      const file = new File([blob], fname, { type: "application/pdf" });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({ files: [file], title: fname, text: `${supplierName ? supplierName + " " : ""}발주서입니다.` });
@@ -14817,7 +14842,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob); a.download = fname;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      showToast("이 기기는 바로 공유가 안 돼서 발주서 이미지를 저장했습니다.\n카톡·메일·문자에 첨부해 보내세요.", "info");
+      showToast("이 기기는 바로 공유가 안 돼서 발주서 PDF를 저장했습니다.\n카톡·메일·문자에 첨부해 보내세요.", "info");
     } catch (err) {
       console.error("[PO Share]", err);
       showToast("발주서 공유 오류: " + err.message);
@@ -14835,38 +14860,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
   const downloadPOasPDF = async () => {
     if (typeof html2canvas === "undefined" || !window.jspdf) { showToast("PDF 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
-    const target = document.querySelector(".apple-doc, .bold-doc, .card-doc, .korean-doc, .official-doc");
-    if (!target) { showToast("발주서 미리보기를 먼저 생성해주세요."); return; }
     try {
-      const canvas = await capturePOCanvas(target);
-      const imgData = canvas.toDataURL("image/jpeg", 0.92);
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-      const pageW = 210, pageH = 297;  // A4 mm
-      const margin = 10;
-      const usableW = pageW - margin * 2;
-      const usableH = pageH - margin * 2;
-      const fullH = (canvas.height * usableW) / canvas.width; // 전체 폭 기준 이미지 높이(mm)
-      if (fullH <= usableH * 1.35) {
-        // 기본: 한 장에 맞춤 — 살짝 넘치면 비율을 줄여 한 페이지에 담는다
-        const fit = Math.min(1, usableH / fullH);
-        const w = usableW * fit, h = fullH * fit;
-        pdf.addImage(imgData, "JPEG", (pageW - w) / 2, margin, w, h);
-      } else {
-        // 사진 다수 등 아주 긴 문서만 여러 페이지 분할
-        let heightLeft = fullH;
-        let position = margin;
-        pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
-        heightLeft -= usableH;
-        while (heightLeft > 0) {
-          position = margin - (fullH - heightLeft);
-          pdf.addPage();
-          pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
-          heightLeft -= usableH;
-        }
-      }
-
-      const fname = `발주서_${(poDraft.title || poDraft.supplier?.name || "draft").replace(/[\\/:*?"<>|]/g, "_")}_${new Date().toISOString().slice(0,10)}.pdf`;
+      const { pdf, fname } = await makePODocPdf(poDraft?.title, poDraft?.supplier?.name);
       pdf.save(fname);
     } catch (err) {
       console.error("[PDF Export]", err);
