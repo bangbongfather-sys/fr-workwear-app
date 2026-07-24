@@ -19646,10 +19646,11 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
   const firstDay = new Date(year, month, 1);
   const startOffset = firstDay.getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
+  // 노션 캘린더식: 인접 월 날짜까지 채운 주 단위 그리드 (빈 칸 없이, 인접 월은 흐리게)
   const cells = [];
-  for (let i = 0; i < startOffset; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
-  while (cells.length < 42) cells.push(null);
+  for (let i = 0; i < startOffset; i++) cells.push({ d: new Date(year, month, i - startOffset + 1), out: true });
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ d: new Date(year, month, d), out: false });
+  { let nd = 1; while (cells.length % 7 !== 0) cells.push({ d: new Date(year, month + 1, nd++), out: true }); }
 
   // 업무 기간(범위)을 모든 날짜에 펼쳐서 캘린더에 표시
   const expandRange = (t) => {
