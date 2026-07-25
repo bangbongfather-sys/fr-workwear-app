@@ -20654,6 +20654,7 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
   const fmt = (n) => Number(n || 0).toLocaleString();
   const [filterYear, setFilterYear] = React.useState(thisYear);
   const [filterBiz, setFilterBiz] = React.useState("");
+  const [filterStatus, setFilterStatus] = React.useState(""); // "" 전체 | "unpaid" 미납 | "paid" 완납
   const [editing, setEditing] = React.useState(null); // 레코드 draft or null
 
   // D-day: 음수면 경과. paidDate 있으면 완납.
@@ -20663,7 +20664,9 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
 
   const years = [...new Set([thisYear, ...taxes.map(r => (r.dueDate || "").slice(0, 4)).filter(Boolean)])].sort().reverse();
   const filtered = taxes
-    .filter(r => (filterYear === "all" || (r.dueDate || "").startsWith(filterYear)) && (!filterBiz || r.biz === filterBiz))
+    .filter(r => (filterYear === "all" || (r.dueDate || "").startsWith(filterYear))
+      && (!filterBiz || r.biz === filterBiz)
+      && (!filterStatus || (filterStatus === "paid" ? !!r.paidDate : !r.paidDate)))
     .sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || ""));
   const upcoming = taxes.filter(r => !r.paidDate).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || "")).slice(0, 3);
   // 연도 합계 (필터 연도 기준): 사업장별 총액·완납액
@@ -20954,12 +20957,47 @@ JSON 외 텍스트 금지.
           <option value="">전체 사업장</option>
           {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
+        {/* 납부 상태 필터 — 미납분만 추려 합계를 보는 용도 */}
+        <div style={{ display: "inline-flex", background: "var(--surface2)", border: "1px solid var(--divider)", borderRadius: 10, padding: 2, height: 38 }}>
+          {[["", "전체"], ["unpaid", "미납"], ["paid", "완납"]].map(([v, label]) => (
+            <button key={v} onClick={() => setFilterStatus(v)}
+              style={{
+                padding: "0 13px", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                fontSize: 12, fontWeight: filterStatus === v ? 800 : 600,
+                background: filterStatus === v ? "var(--surface)" : "transparent",
+                color: filterStatus === v ? (v === "unpaid" ? "#DB6B2E" : v === "paid" ? "#10B981" : "var(--text1)") : "var(--text3)",
+                boxShadow: filterStatus === v ? "var(--elev-1, 0 1px 3px rgba(0,0,0,.12))" : "none",
+              }}>{label}</button>
+          ))}
+        </div>
         <div style={{ flex: 1 }} />
         <button onClick={openMailImport} title="세무법인 안내 메일에서 납부 정보를 자동으로 읽어옵니다"
           style={{ height: 38, padding: "0 14px", fontSize: 13, fontWeight: 700, borderRadius: 10, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="mail" size={14}/>메일에서 가져오기</button>
         <button className="btn-orange" onClick={openNew} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>+ 세무 기록 추가</button>
       </div>
+
+      {/* 추려진 결과 합계 — 필터 조건에 걸린 건들의 건수·금액 */}
+      {filtered.length > 0 && (() => {
+        const sum = filtered.reduce((s, r) => s + Number(r.amount || 0), 0);
+        const overdue = filtered.filter(r => !r.paidDate && dday(r.dueDate) < 0);
+        const label = filterStatus === "unpaid" ? "미납" : filterStatus === "paid" ? "완납" : "전체";
+        const tone = filterStatus === "unpaid" ? "#DB6B2E" : filterStatus === "paid" ? "#10B981" : "var(--text1)";
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "11px 14px", borderRadius: 12, background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: tone }}>{label} {filtered.length}건</span>
+            <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(sum)}원</span>
+            {filterStatus !== "paid" && overdue.length > 0 && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#EF4444", background: "rgba(239,68,68,0.10)", padding: "3px 9px", borderRadius: 999 }}>
+                기한 경과 {overdue.length}건 · {fmt(overdue.reduce((s, r) => s + Number(r.amount || 0), 0))}원
+              </span>
+            )}
+            <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: "auto" }}>
+              {filterYear === "all" ? "전체 연도" : `${filterYear}년`}{filterBiz ? ` · ${filterBiz}` : ""}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* 사업장별 합계 */}
       {bizTotals.length > 0 && (
@@ -20978,8 +21016,15 @@ JSON 외 텍스트 금지.
       <div style={{ ...card, padding: 0, overflow: "hidden" }}>
         {filtered.length === 0 ? (
           <div style={{ padding: 32, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
-            기록이 없습니다. [+ 세무 기록 추가]로 시작하세요.<br/>
-            <span style={{ fontSize: 11 }}>예: 세무법인 안내 메일의 부가세 납부액·기한을 그대로 옮겨 적으면 됩니다.</span>
+            {taxes.length === 0 ? (
+              <>기록이 없습니다. [+ 세무 기록 추가]로 시작하세요.<br/>
+              <span style={{ fontSize: 11 }}>예: 세무법인 안내 메일의 부가세 납부액·기한을 그대로 옮겨 적으면 됩니다.</span></>
+            ) : (
+              <>{filterStatus === "unpaid" ? "미납 건이 없습니다 — 모두 완납되었습니다 ✓"
+               : filterStatus === "paid" ? "완납 처리된 건이 없습니다"
+               : "조건에 맞는 기록이 없습니다"}<br/>
+              <span style={{ fontSize: 11 }}>전체 {taxes.length}건 중 조건에 걸린 건이 없습니다 — 필터를 바꿔보세요.</span></>
+            )}
           </div>
         ) : filtered.map((r, i) => {
           const st = statusOf(r);
