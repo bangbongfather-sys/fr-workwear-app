@@ -361,7 +361,29 @@
     }
 
     /* ─── 테이블 ─── */
-    table { width: 100%; border-collapse: collapse; }
+    /* ─── 데이터 표: 좁은 화면에서도 열 너비 유지 + 표 자체가 가로 스크롤 ───
+       창을 줄이면 열이 찌그러지며 글자가 세로로 쌓이던 문제 해결.
+       display:block + width:max-content → 표가 내용에 필요한 만큼 넓어지고,
+       max-width:100% + overflow-x:auto → 넘치는 만큼만 표 안에서 좌우 스크롤.
+       min-width:100% → 내용이 좁을 땐 기존처럼 카드 폭을 꽉 채움. */
+    table {
+      border-collapse: collapse;
+      display: block;
+      width: max-content;
+      min-width: 100%;
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    th, td { white-space: nowrap; }
+    /* 메모·비고처럼 길어도 되는 셀은 줄바꿈 허용 (기존 클래스 유지) */
+    td.allow-wrap, th.allow-wrap, .wrap-cell { white-space: normal; }
+    /* 견적서 등 문서 템플릿은 인쇄 레이아웃이라 원래대로 (width는 각 문서 규칙 유지) */
+    :is(.apple-doc, .bold-doc, .card-doc, .korean-doc) table {
+      display: table; min-width: 0; max-width: none; overflow: visible;
+    }
+    /* sticky 헤더 등 스크롤을 바깥 컨테이너가 맡는 표는 opt-out */
+    table.table-plain { display: table; width: 100%; min-width: 0; max-width: none; overflow: visible; }
     th {
       background: var(--th-bg); color: var(--text2); padding: 10px 14px;
       text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
@@ -11989,7 +12011,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                 {/* 미리보기 테이블 */}
                 {pastePreview.length > 0 && (
                   <div style={{marginTop:10,maxHeight:220,overflowY:"auto",borderRadius:8,background:"var(--surface)",border:"1px solid var(--border)"}}>
-                    <table style={{width:"100%",fontSize:11,fontVariantNumeric:"tabular-nums"}}>
+                    <table className="table-plain" style={{width:"100%",fontSize:11,fontVariantNumeric:"tabular-nums"}}>
                       <thead style={{position:"sticky",top:0,background:"var(--surface2)",zIndex:1}}>
                         <tr>
                           <th style={{padding:"6px 8px",textAlign:"left",borderBottom:"1px solid var(--border)"}}>#</th>
