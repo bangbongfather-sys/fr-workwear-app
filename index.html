@@ -20740,6 +20740,16 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
         else if (p.parts) p.parts.forEach(walk);
       };
       walk(full.payload);
+      // 첨부(신고서·납부서 PDF) 목록 수집 — 확정 단계에서 사업장이 맞는 것만 내려받아 붙인다.
+      const mailAtts = [];
+      const walkAtt = (p) => {
+        if (!p) return;
+        if (p.filename && p.body?.attachmentId) {
+          mailAtts.push({ filename: p.filename, attachmentId: p.body.attachmentId, mime: p.mimeType || "application/octet-stream", size: p.body.size || 0 });
+        }
+        if (p.parts) p.parts.forEach(walkAtt);
+      };
+      walkAtt(full.payload);
       const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ")).replace(/\s+/g, " ").slice(0, 6000);
       const prompt = `다음은 세무 관련 이메일입니다. 세금 납부 정보를 추출해 JSON 배열로만 응답하세요.
 각 항목: {"biz":"사업장명","taxType":"세목","period":"귀속","amount":숫자,"dueDate":"YYYY-MM-DD","memo":"확인·조치가 필요한 특이사항 요약 (없으면 빈 문자열)"}
@@ -20770,26 +20780,76 @@ JSON 외 텍스트 금지.
         dueDate: /^\d{4}-\d{2}-\d{2}$/.test(p.dueDate || "") ? p.dueDate : todayYmd,
         memo: String(p.memo || ""), checked: true,
       })).filter(r => r.amount > 0);
-      setMailImport({ step: "preview", records, mailSubject: mail.subject });
+      setMailImport({ step: "preview", records, mailSubject: mail.subject, mailId: mail.id, mailAtts });
     } catch (e) {
       setMailImport(null);
       showToast(e.message === "NO_TOKEN" ? "Gmail 로그인이 만료됐습니다 — 메일 탭에서 재로그인해주세요" : "추출 실패: " + e.message);
     }
   };
-  const confirmImport = () => {
+  // 첨부 파일명에서 사업장 판별 — "엔제이"가 "주식회사 엔제이세이프티"의 부분문자열이라
+  // 반드시 긴 이름부터 검사해야 엔제이세이프티 파일이 엔제이로 잘못 붙지 않는다.
+  const attNorm = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
+  const bizOfFilename = (filename) => {
+    const f = attNorm(filename);
+    const byLen = [...TAX_BIZ].sort((a, b) => attNorm(b).length - attNorm(a).length);
+    return byLen.find(b => f.includes(attNorm(b))) || null;
+  };
+  const confirmImport = async () => {
     const picked = (mailImport?.records || []).filter(r => r.checked);
     if (picked.length === 0) { showToast("가져올 항목을 선택하세요"); return; }
     // (사업장+세목+귀속+기한)이 같으면 중복으로 보고 건너뜀
     const keyOf = (r) => `${r.biz}|${r.taxType}|${r.period}|${r.dueDate}`;
     const existing = new Set(taxes.map(keyOf));
     const fresh = picked.filter(r => !existing.has(keyOf(r)));
-    if (fresh.length > 0) {
-      setTaxes(prev => [...fresh.map(r => ({ id: uid(), biz: r.biz, taxType: r.taxType, period: r.period, amount: r.amount, dueDate: r.dueDate, paidDate: "", memo: r.memo, atts: [], createdAt: Date.now() })), ...prev]);
+    const dupCount = picked.length - fresh.length;
+    if (fresh.length === 0) {
+      setMailImport(null);
+      showToast("모두 이미 등록된 항목입니다 (중복 제외)", "info");
+      return;
     }
+    // ── 납부서·신고서 PDF 자동 첨부 ──
+    // 파일명의 사업장이 일치하는 첨부만 내려받아 붙인다. 1MB 초과·개수 초과는 조용히 건너뛰지
+    // 않고 건너뛴 수를 토스트로 알린다(공유 드라이브로 안내되도록).
+    const srcAtts = mailImport?.mailAtts || [];
+    const msgId = mailImport?.mailId;
+    const attsByBiz = {};
+    let skipped = 0;
+    if (srcAtts.length > 0 && msgId) {
+      setMailImport(m => ({ ...m, importing: true }));
+      const wanted = new Set(fresh.map(r => r.biz));
+      for (const a of srcAtts) {
+        const biz = bizOfFilename(a.filename);
+        if (!biz || !wanted.has(biz)) continue;
+        if ((attsByBiz[biz] || []).length >= ATT_MAX_COUNT) { skipped++; continue; }
+        if (a.size > ATT_MAX_FILE) { skipped++; continue; }
+        try {
+          const got = await gmailGet(`/users/me/messages/${msgId}/attachments/${a.attachmentId}`);
+          const b64 = String(got.data || "").replace(/-/g, "+").replace(/_/g, "/");
+          if (!b64) { skipped++; continue; }
+          (attsByBiz[biz] = attsByBiz[biz] || []).push({
+            id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+            kind: "file", name: a.filename, mime: a.mime, size: a.size,
+            dataUrl: `data:${a.mime};base64,${b64}`,
+          });
+        } catch { skipped++; }
+      }
+    }
+    const attachedCount = Object.values(attsByBiz).reduce((s, arr) => s + arr.length, 0);
+    setTaxes(prev => [
+      ...fresh.map(r => ({
+        id: uid(), biz: r.biz, taxType: r.taxType, period: r.period, amount: r.amount,
+        dueDate: r.dueDate, paidDate: "", memo: r.memo,
+        atts: (attsByBiz[r.biz] || []).slice(0, ATT_MAX_COUNT), createdAt: Date.now(),
+      })),
+      ...prev,
+    ]);
     setMailImport(null);
-    showToast(fresh.length > 0
-      ? `${fresh.length}건을 가져왔습니다${picked.length - fresh.length > 0 ? ` (중복 ${picked.length - fresh.length}건 제외)` : ""}`
-      : "모두 이미 등록된 항목입니다 (중복 제외)", fresh.length > 0 ? "success" : "info");
+    showToast(
+      `${fresh.length}건을 가져왔습니다` +
+      (attachedCount > 0 ? ` · 첨부 ${attachedCount}개` : "") +
+      (dupCount > 0 ? ` · 중복 ${dupCount}건 제외` : "") +
+      (skipped > 0 ? ` · 첨부 ${skipped}개는 1MB 초과 등으로 제외` : ""),
+      "success");
   };
 
   const card = { background: "var(--surface)", borderRadius: 14, border: "1px solid var(--border)", padding: 16 };
@@ -20927,9 +20987,28 @@ JSON 외 텍스트 금지.
                     </span>
                   </label>
                 ))}
+                {/* 자동 첨부 안내 — 파일명의 사업장이 일치하는 신고서·납부서만 붙는다 */}
+                {(() => {
+                  const pickedBiz = new Set(mailImport.records.filter(r => r.checked).map(r => r.biz));
+                  const matched = (mailImport.mailAtts || []).filter(a => {
+                    const b = bizOfFilename(a.filename);
+                    return b && pickedBiz.has(b) && a.size <= ATT_MAX_FILE;
+                  });
+                  if (matched.length === 0) return null;
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 12px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--divider)", fontSize: 12, color: "var(--text2)" }}>
+                      <Icon name="paperclip" size={13}/>
+                      납부서·신고서 <b style={{ color: "var(--text1)" }}>{matched.length}개</b>가 사업장별로 자동 첨부됩니다
+                    </div>
+                  );
+                })()}
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                  <button onClick={() => setMailImport(null)} style={{ padding: "11px 16px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>취소</button>
-                  <button onClick={confirmImport} className="btn-orange" style={{ flex: 1, padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>선택 항목 가져오기</button>
+                  <button onClick={() => setMailImport(null)} disabled={mailImport.importing} style={{ padding: "11px 16px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: mailImport.importing ? "default" : "pointer", opacity: mailImport.importing ? 0.5 : 1 }}>취소</button>
+                  <button onClick={confirmImport} disabled={mailImport.importing} className="btn-orange" style={{ flex: 1, padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700, opacity: mailImport.importing ? 0.7 : 1 }}>
+                    {mailImport.importing
+                      ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/>첨부 내려받는 중...</span>
+                      : "선택 항목 가져오기"}
+                  </button>
                 </div>
               </>
             )}
