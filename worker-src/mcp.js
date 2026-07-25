@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-24-table-scroll", note: "전 탭 표 가로 스크롤 — 창을 줄여도 열 너비/비율 유지하고 표 안에서 좌우 스크롤(글자가 세로로 쌓이던 문제 해결). 견적서 문서 템플릿은 인쇄 레이아웃 유지. + 세무 관리 탭, 통합검색 개선, 일정→중요메모 이관"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-24-tax-mail-regex", note: "세무 메일 가져오기 — Claude API 키 없이 정규식으로 납부 정보 추출(키 있으면 형식이 다를 때만 AI 재시도). 납부서 PDF 사업장별 자동 첨부. + 전 탭 표 가로 스크롤, 세무 관리 탭, 통합검색 개선"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);

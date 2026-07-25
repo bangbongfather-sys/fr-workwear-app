@@ -20711,7 +20711,7 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
   };
   const openMailImport = async () => {
     if (!gmailToken()) { showToast("메일 탭에서 Google 로그인을 먼저 해주세요 (토큰 만료 시 재로그인)"); return; }
-    if (!apiKey.trim()) { showToast("AI 추출에는 Claude API 키가 필요합니다 — 견적 관리의 AI 설정에서 등록해주세요"); return; }
+    // Claude API 키는 필수가 아니다 — 기본은 정규식 파싱, 키가 있을 때만 실패분을 AI로 재시도.
     setMailImport({ step: "list", mails: [], loading: true });
     try {
       const q = encodeURIComponent("(세무 OR 부가세 OR 부가가치세 OR 납부서 OR 원천세 OR 법인세) newer_than:90d");
@@ -20728,8 +20728,59 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
       showToast(e.message === "NO_TOKEN" ? "Gmail 로그인이 만료됐습니다 — 메일 탭에서 재로그인해주세요" : "메일 목록 실패: " + e.message);
     }
   };
+  // ── 세무 안내 메일 정규식 파싱 (Claude API 키 불필요) ──
+  // 세무법인 메일은 "사업장명 : 1,234,560원   7월 27일까지 납부" 형태로 형식이 일정해서
+  // 정규식으로 정확히 뽑을 수 있다. 키가 없어도 동작하고 비용도 외부 전송도 없다.
+  // 형식이 바뀌어 못 읽으면 (키가 있을 때만) AI로 재시도하고, 그것도 없으면 수동 입력을 안내한다.
+  const TAX_TYPE_HINTS = [
+    [/부가\s*가치\s*세|부가세/, "부가가치세"],
+    [/원천\s*세/, "원천세"],
+    [/법인\s*세/, "법인세"],
+    [/종합\s*소득\s*세|종소세/, "종합소득세"],
+    [/지방\s*소득\s*세/, "지방소득세"],
+    [/4대\s*보험|사대\s*보험/, "4대보험"],
+  ];
+  const guessTaxType = (t) => (TAX_TYPE_HINTS.find(([re]) => re.test(t)) || [null, "기타"])[1];
+  const guessPeriod = (t) => {
+    const m = t.match(/(20\d{2})\s*년\s*([12])\s*기\s*(확정|예정)?/);
+    return m ? `${m[1]}년 ${m[2]}기${m[3] || ""}` : "";
+  };
+  // HTML만 온 메일도 줄 구조를 살려야 줄 단위 파싱이 된다 (블록 태그 → 줄바꿈).
+  const htmlToLines = (html) => html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<(br|\/div|\/p|\/tr|\/li)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  const parseTaxMail = (subject, rawText, mailDate) => {
+    const head = `${subject}\n${rawText}`;
+    const taxType = guessTaxType(head);
+    const period = guessPeriod(head);
+    const md = new Date(mailDate);
+    const mailYear = isNaN(md) ? new Date().getFullYear() : md.getFullYear();
+    const mailMonth = isNaN(md) ? new Date().getMonth() + 1 : md.getMonth() + 1;
+    const out = [];
+    for (const line of String(rawText).split(/\r?\n/)) {
+      // 사업장명 : 금액원 … N월 N일   (구분자는 : 또는 전각 ：)
+      const m = line.match(/^\s*([^:：]{2,40}?)\s*[:：]\s*([\d,]+)\s*원(?:[^0-9]{0,20}(\d{1,2})\s*월\s*(\d{1,2})\s*일)?/);
+      if (!m) continue;
+      const biz = bizOfName(m[1]);
+      if (!biz) continue; // 사업장으로 식별 안 되는 줄(인사말 등)은 건너뜀
+      const amount = Number(m[2].replace(/,/g, ""));
+      if (!amount) continue;
+      let dueDate = "";
+      if (m[3] && m[4]) {
+        const mo = Number(m[3]), day = Number(m[4]);
+        // 안내 메일의 기한은 앞으로의 날짜 — 발신월보다 이르면 다음 해로 본다(12월 발신 → 1월 납부).
+        const y = mo < mailMonth ? mailYear + 1 : mailYear;
+        dueDate = `${y}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      out.push({ biz, taxType, period, amount, dueDate: dueDate || todayYmd, memo: "", checked: true });
+    }
+    return out;
+  };
+
   const pickMail = async (mail) => {
-    setMailImport({ step: "list", mails: [], loading: true, note: "메일 본문을 읽고 AI가 납부 정보를 추출하는 중..." });
+    setMailImport({ step: "list", mails: [], loading: true, note: "메일 본문에서 납부 정보를 찾는 중..." });
     try {
       const full = await gmailGet(`/users/me/messages/${mail.id}?format=full`);
       let text = "", html = "";
@@ -20750,7 +20801,21 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
         if (p.parts) p.parts.forEach(walkAtt);
       };
       walkAtt(full.payload);
-      const body = (text || html.replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ")).replace(/\s+/g, " ").slice(0, 6000);
+      // 1차: 정규식 파싱 — 줄 구조가 필요하므로 공백을 뭉개지 않은 원문을 쓴다.
+      const rawText = text || htmlToLines(html);
+      const byRegex = parseTaxMail(mail.subject, rawText, mail.date);
+      if (byRegex.length > 0) {
+        setMailImport({ step: "preview", records: byRegex, mailSubject: mail.subject, mailId: mail.id, mailAtts, source: "정규식" });
+        return;
+      }
+      // 2차: 형식이 달라 못 읽음 → Claude API 키가 있을 때만 AI로 재시도.
+      if (!apiKey.trim()) {
+        setMailImport(null);
+        showToast("이 메일에서 납부 정보를 자동으로 찾지 못했습니다 — [+ 세무 기록 추가]로 직접 입력해주세요");
+        return;
+      }
+      setMailImport({ step: "list", mails: [], loading: true, note: "형식이 달라 AI로 다시 읽는 중..." });
+      const body = rawText.replace(/\s+/g, " ").slice(0, 6000);
       const prompt = `다음은 세무 관련 이메일입니다. 세금 납부 정보를 추출해 JSON 배열로만 응답하세요.
 각 항목: {"biz":"사업장명","taxType":"세목","period":"귀속","amount":숫자,"dueDate":"YYYY-MM-DD","memo":"확인·조치가 필요한 특이사항 요약 (없으면 빈 문자열)"}
 규칙:
@@ -20780,17 +20845,19 @@ JSON 외 텍스트 금지.
         dueDate: /^\d{4}-\d{2}-\d{2}$/.test(p.dueDate || "") ? p.dueDate : todayYmd,
         memo: String(p.memo || ""), checked: true,
       })).filter(r => r.amount > 0);
-      setMailImport({ step: "preview", records, mailSubject: mail.subject, mailId: mail.id, mailAtts });
+      setMailImport({ step: "preview", records, mailSubject: mail.subject, mailId: mail.id, mailAtts, source: "AI" });
     } catch (e) {
       setMailImport(null);
       showToast(e.message === "NO_TOKEN" ? "Gmail 로그인이 만료됐습니다 — 메일 탭에서 재로그인해주세요" : "추출 실패: " + e.message);
     }
   };
-  // 첨부 파일명에서 사업장 판별 — "엔제이"가 "주식회사 엔제이세이프티"의 부분문자열이라
-  // 반드시 긴 이름부터 검사해야 엔제이세이프티 파일이 엔제이로 잘못 붙지 않는다.
+  // 문자열(첨부 파일명 / 메일 본문의 사업장 칸)에서 사업장 판별.
+  // "엔제이"가 "주식회사 엔제이세이프티"의 부분문자열이라 반드시 긴 이름부터 검사해야
+  // 엔제이세이프티 건이 엔제이로 잘못 매칭되지 않는다.
   const attNorm = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
-  const bizOfFilename = (filename) => {
-    const f = attNorm(filename);
+  const bizOfName = (name) => {
+    const f = attNorm(name);
+    if (!f) return null;
     const byLen = [...TAX_BIZ].sort((a, b) => attNorm(b).length - attNorm(a).length);
     return byLen.find(b => f.includes(attNorm(b))) || null;
   };
@@ -20818,7 +20885,7 @@ JSON 외 텍스트 금지.
       setMailImport(m => ({ ...m, importing: true }));
       const wanted = new Set(fresh.map(r => r.biz));
       for (const a of srcAtts) {
-        const biz = bizOfFilename(a.filename);
+        const biz = bizOfName(a.filename);
         if (!biz || !wanted.has(biz)) continue;
         if ((attsByBiz[biz] || []).length >= ATT_MAX_COUNT) { skipped++; continue; }
         if (a.size > ATT_MAX_FILE) { skipped++; continue; }
@@ -20888,7 +20955,7 @@ JSON 외 텍스트 금지.
           {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
         <div style={{ flex: 1 }} />
-        <button onClick={openMailImport} title="세무법인 안내 메일에서 납부 정보를 AI로 자동 추출"
+        <button onClick={openMailImport} title="세무법인 안내 메일에서 납부 정보를 자동으로 읽어옵니다"
           style={{ height: 38, padding: "0 14px", fontSize: 13, fontWeight: 700, borderRadius: 10, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="mail" size={14}/>메일에서 가져오기</button>
         <button className="btn-orange" onClick={openNew} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>+ 세무 기록 추가</button>
@@ -20957,7 +21024,7 @@ JSON 외 텍스트 금지.
             {mailImport.step === "list" && (
               <>
                 <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>메일에서 가져오기</div>
-                <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14 }}>최근 90일 세무 관련 메일입니다. 선택하면 AI가 납부 정보를 추출합니다.</div>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14 }}>최근 90일 세무 관련 메일입니다. 선택하면 납부 정보를 읽어옵니다.</div>
                 {mailImport.loading ? (
                   <div style={{ padding: 28, textAlign: "center", color: "var(--text3)", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                     <Icon name="refresh" size={14} style={{ animation: "spin 1.4s linear infinite" }}/>{mailImport.note || "메일을 찾는 중..."}
@@ -20974,7 +21041,15 @@ JSON 외 텍스트 금지.
             )}
             {mailImport.step === "preview" && (
               <>
-                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>추출 결과 확인</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4, display: "flex", alignItems: "center", gap: 7 }}>
+                  추출 결과 확인
+                  {mailImport.source && (
+                    <span title={mailImport.source === "AI" ? "메일 형식이 달라 Claude API로 읽었습니다" : "메일 형식을 그대로 읽었습니다 (외부 전송·비용 없음)"}
+                      style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "var(--surface2)", color: "var(--text3)" }}>
+                      {mailImport.source}
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mailImport.mailSubject}</div>
                 {mailImport.records.map((r, i) => (
                   <label key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 12px", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: r.checked ? "rgba(219,107,46,0.06)" : "var(--surface2)", cursor: "pointer" }}>
@@ -20991,7 +21066,7 @@ JSON 외 텍스트 금지.
                 {(() => {
                   const pickedBiz = new Set(mailImport.records.filter(r => r.checked).map(r => r.biz));
                   const matched = (mailImport.mailAtts || []).filter(a => {
-                    const b = bizOfFilename(a.filename);
+                    const b = bizOfName(a.filename);
                     return b && pickedBiz.has(b) && a.size <= ATT_MAX_FILE;
                   });
                   if (matched.length === 0) return null;
