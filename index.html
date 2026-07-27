@@ -19868,11 +19868,28 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
           {/* 노션 캘린더식 월 헤더: 큰 월 표기 + ‹ 오늘 › 내비게이션 */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{year}년 {month + 1}월</div>
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 2 }}>
-              <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month - 1, 1))} title="이전 달" aria-label="이전 달">‹</button>
-              <button className="sched-navbtn" style={{ width: "auto", padding: "0 12px", fontSize: 12 }}
-                onClick={() => { const t = new Date(); setCursor(new Date(t.getFullYear(), t.getMonth(), 1)); setSelectedDate(ymd(t)); }}>오늘</button>
-              <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month + 1, 1))} title="다음 달" aria-label="다음 달">›</button>
+            {/* 이동 버튼 — "오늘"이 화살표 사이에 있으면 현재 달 라벨처럼 읽혀서 분리했다.
+                오늘로 이동은 독립 버튼, 달 이동은 라벨을 붙인 한 쌍(좁은 화면에선 라벨만 숨김). */}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              {(() => {
+                const t = new Date();
+                const isThisMonth = year === t.getFullYear() && month === t.getMonth();
+                return (
+                  <button className="sched-todaybtn" disabled={isThisMonth}
+                    title={isThisMonth ? "이미 이번 달을 보고 있습니다" : "오늘로 이동"}
+                    onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); setSelectedDate(ymd(n)); }}>
+                    오늘로 이동
+                  </button>
+                );
+              })()}
+              <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month - 1, 1))} title="이전 달" aria-label="이전 달">
+                  <span aria-hidden="true">‹</span><span className="sched-navlabel">이전 달</span>
+                </button>
+                <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month + 1, 1))} title="다음 달" aria-label="다음 달">
+                  <span className="sched-navlabel">다음 달</span><span aria-hidden="true">›</span>
+                </button>
+              </div>
             </div>
           </div>
           <div className="sched-scroll-hint">← 좌우로 밀어서 전체 주 확인 · 일정을 길게 누르면 미리보기 →</div>
@@ -20292,12 +20309,28 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         .sched-cell { transition: background .15s, box-shadow .15s, opacity .15s; }
         .sched-cell:not(.sched-sel):hover { background: var(--row-bg) !important; }
         .sched-navbtn {
-          width: 30px; height: 30px; border-radius: 8px; border: none;
+          min-width: 30px; height: 30px; padding: 0 9px; border-radius: 8px; border: none;
           background: transparent; color: var(--text2);
           cursor: pointer; font-size: 16px; font-weight: 700; font-family: inherit;
-          display: inline-flex; align-items: center; justify-content: center;
+          display: inline-flex; align-items: center; justify-content: center; gap: 4px;
           transition: background .13s, color .13s;
         }
+        /* 화살표 옆 '이전 달/다음 달' 라벨 — 좁은 화면에선 숨기고 화살표만 남긴다 */
+        .sched-navlabel { font-size: 12px; font-weight: 700; }
+        @media (max-width: 640px) {
+          .sched-navlabel { display: none; }
+          .sched-navbtn { padding: 0; width: 30px; }  /* 라벨이 없으니 정사각 아이콘 버튼으로 복귀 */
+        }
+        /* 오늘로 이동 — 달 이동과 성격이 달라 화살표 쌍에서 떼어냈다 */
+        .sched-todaybtn {
+          height: 30px; padding: 0 12px; border-radius: 8px;
+          border: 1px solid var(--divider); background: var(--surface);
+          color: var(--text1); font-size: 12px; font-weight: 700; font-family: inherit;
+          cursor: pointer; white-space: nowrap;
+          transition: background .13s, color .13s, opacity .13s;
+        }
+        .sched-todaybtn:hover:not(:disabled) { background: var(--surface2); }
+        .sched-todaybtn:disabled { opacity: .4; cursor: default; }
         .sched-navbtn:hover { background: var(--surface2); color: var(--text1); }
         .sched-eventbar { transition: filter .12s, box-shadow .15s; }
         .sched-eventbar:hover { filter: brightness(1.04); box-shadow: var(--elev-2); }
