@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-24-tax-mail-regex", note: "세무 메일 가져오기 — Claude API 키 없이 정규식으로 납부 정보 추출(키 있으면 형식이 다를 때만 AI 재시도). 납부서 PDF 사업장별 자동 첨부. + 전 탭 표 가로 스크롤, 세무 관리 탭, 통합검색 개선"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-27-tax-redesign", note: "세무 관리 탭 재구성 — 미납 총액 히어로(다음 납부 D-day 포함), 월별 세금 부담 타임라인(완납/미납 스택 막대, 클릭 시 해당 월로 스크롤), 월별 그룹 리스트(월 소계·미납 소계). + 일정 캘린더 '오늘로 이동' 버튼 분리"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);

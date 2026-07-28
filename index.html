@@ -20709,6 +20709,37 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
     return { biz: b, total: rs.reduce((s, r) => s + Number(r.amount || 0), 0), paid: rs.filter(r => r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0) };
   }).filter(t => t.total > 0);
 
+  // 압축 금액 표기 (히어로·차트용) — 1.6억 / 4,167만
+  const fmtCompact = (n) => {
+    n = Number(n || 0);
+    if (n >= 100000000) { const v = n / 100000000; return (v >= 10 ? Math.round(v).toLocaleString() : Math.round(v * 10) / 10) + "억"; }
+    if (n >= 10000) return Math.round(n / 10000).toLocaleString() + "만";
+    return n.toLocaleString();
+  };
+  // 미납 히어로 — 연도 필터와 무관하게 "안 낸 돈 전부"가 기준 (미납은 해가 바뀌어도 미납이므로)
+  const unpaidAll = taxes.filter(r => !r.paidDate).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
+  const unpaidSum = unpaidAll.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const overdueAll = unpaidAll.filter(r => dday(r.dueDate) < 0);
+  // 월별 타임라인 — 연도·사업장 필터 반영, 상태 필터는 무시(완납/미납을 막대 색으로 함께 보여줌)
+  const chartYear = filterYear === "all" ? thisYear : filterYear;
+  const monthData = Array.from({ length: 12 }, (_, i) => {
+    const mm = `${chartYear}-${String(i + 1).padStart(2, "0")}`;
+    const rs = taxes.filter(r => (r.dueDate || "").startsWith(mm) && (!filterBiz || r.biz === filterBiz));
+    return {
+      paid: rs.filter(r => r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0),
+      unpaid: rs.filter(r => !r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0),
+    };
+  });
+  const monthMax = Math.max(...monthData.map(m => m.paid + m.unpaid), 1);
+  // 월별 그룹 리스트 — 연초→연말 순으로 "YYYY-MM" 단위 묶음
+  const sortedAsc = [...filtered].sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
+  const monthGroups = [];
+  for (const r of sortedAsc) {
+    const key = (r.dueDate || "").slice(0, 7) || "기타";
+    const g = monthGroups[monthGroups.length - 1];
+    if (g && g.key === key) g.recs.push(r); else monthGroups.push({ key, recs: [r] });
+  }
+
   const openNew = () => setEditing({ id: null, biz: TAX_BIZ[0], taxType: "부가가치세", period: "", amount: "", dueDate: todayYmd, paidDate: "", memo: "", atts: [] });
   const saveRec = () => {
     if (!editing) return;
@@ -20960,6 +20991,38 @@ JSON 외 텍스트 금지.
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 미납 총액 히어로 — 탭을 열면 "앞으로 내야 할 돈"이 가장 먼저 보인다 */}
+      <div style={{ ...card, borderLeft: `3px solid ${unpaidAll.length ? "#DB6B2E" : "#10B981"}`, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        {unpaidAll.length === 0 ? (
+          <>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#10B981", marginBottom: 3 }}>미납 세금 없음</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.5 }}>모두 완납 ✓</div>
+            </div>
+            <div style={{ marginLeft: "auto", fontSize: 12, color: "var(--text3)" }}>등록된 세금 {taxes.length}건이 전부 납부 완료 상태입니다</div>
+          </>
+        ) : (
+          <>
+            <div style={{ minWidth: 180 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#DB6B2E", marginBottom: 3 }}>미납 세금 · {unpaidAll.length}건</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.5, fontVariantNumeric: "tabular-nums" }}>{fmt(unpaidSum)}원</div>
+            </div>
+            {overdueAll.length > 0 && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#EF4444", background: "rgba(239,68,68,0.10)", padding: "5px 11px", borderRadius: 999 }}>
+                기한 경과 {overdueAll.length}건 · {fmtCompact(overdueAll.reduce((s, r) => s + Number(r.amount || 0), 0))}원
+              </span>
+            )}
+            <div style={{ marginLeft: "auto", textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 2 }}>다음 납부</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
+                {(() => { const d = dday(unpaidAll[0].dueDate); return d < 0 ? `${-d}일 경과` : d === 0 ? "오늘" : `D-${d}`; })()} · {unpaidAll[0].dueDate.slice(5).replace("-", "/")} {fmtCompact(unpaidAll[0].amount)}원
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 1 }}>{unpaidAll[0].taxType} — {unpaidAll[0].biz}</div>
+            </div>
+          </>
+        )}
+      </div>
+
       {/* 다가오는 납부 */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
         {upcoming.length === 0 ? (
@@ -21010,6 +21073,43 @@ JSON 외 텍스트 금지.
         <button className="btn-orange" onClick={openNew} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>+ 세무 기록 추가</button>
       </div>
 
+      {/* 월별 세금 부담 타임라인 — 한 해 자금 소요가 어느 달에 몰리는지 한눈에.
+          완납은 초록(연하게)·미납은 주황 스택 막대, 막대 클릭 시 아래 해당 월 그룹으로 스크롤 */}
+      {monthData.some(m => m.paid + m.unpaid > 0) && (
+        <div style={card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>월별 세금 부담 · {chartYear}년{filterBiz ? ` · ${filterBiz}` : ""}</div>
+            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 12, fontSize: 11, color: "var(--text3)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: "#DB6B2E" }}/>미납</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: "#10B981", opacity: .55 }}/>완납</span>
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 6, marginTop: 14 }}>
+            {monthData.map((m, i) => {
+              const total = m.paid + m.unpaid;
+              const isNow = Number(chartYear) === new Date().getFullYear() && new Date().getMonth() === i;
+              const mmKey = `${chartYear}-${String(i + 1).padStart(2, "0")}`;
+              return (
+                <div key={i} title={total > 0 ? `${i + 1}월 ${fmt(total)}원 (미납 ${fmt(m.unpaid)} · 완납 ${fmt(m.paid)})` : `${i + 1}월 — 없음`}
+                  onClick={() => { if (total > 0) { const el = document.getElementById(`tax-mg-${mmKey}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); } }}
+                  style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: total > 0 ? "pointer" : "default" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: total > 0 ? "var(--text2)" : "transparent", whiteSpace: "nowrap" }}>{total > 0 ? fmtCompact(total) : "0"}</div>
+                  <div style={{ width: "100%", maxWidth: 34, height: 104, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+                    {total > 0 ? (
+                      <>
+                        {m.unpaid > 0 && <div style={{ height: Math.max(4, Math.round(m.unpaid / monthMax * 96)), background: "#DB6B2E", borderRadius: m.paid > 0 ? "5px 5px 0 0" : 5 }}/>}
+                        {m.paid > 0 && <div style={{ height: Math.max(4, Math.round(m.paid / monthMax * 96)), background: "#10B981", opacity: .55, borderRadius: m.unpaid > 0 ? "0 0 5px 5px" : 5 }}/>}
+                      </>
+                    ) : <div style={{ height: 3, background: "var(--divider)", borderRadius: 2 }}/>}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: isNow ? 800 : 600, color: isNow ? "#DB6B2E" : "var(--text3)" }}>{i + 1}월</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 추려진 결과 합계 — 필터 조건에 걸린 건들의 건수·금액 */}
       {filtered.length > 0 && (() => {
         const sum = filtered.reduce((s, r) => s + Number(r.amount || 0), 0);
@@ -21059,25 +21159,41 @@ JSON 외 텍스트 금지.
               <span style={{ fontSize: 11 }}>전체 {taxes.length}건 중 조건에 걸린 건이 없습니다 — 필터를 바꿔보세요.</span></>
             )}
           </div>
-        ) : filtered.map((r, i) => {
-          const st = statusOf(r);
+        ) : monthGroups.map((g, gi) => {
+          // 월 헤더 + 그 달의 건들. 헤더의 id는 타임라인 막대 클릭 스크롤의 목적지.
+          const gSum = g.recs.reduce((s, r) => s + Number(r.amount || 0), 0);
+          const gUnpaid = g.recs.filter(r => !r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0);
+          const [gy, gm] = g.key.split("-");
+          const isLastGroup = gi === monthGroups.length - 1;
           return (
-            <div key={r.id} onClick={() => setEditing({ ...r })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer", borderBottom: i < filtered.length - 1 ? "1px solid var(--divider)" : "none", flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 150 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{r.taxType}{r.period ? ` · ${r.period}` : ""}</div>
-                <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 1 }}>{r.biz}</div>
+            <div key={g.key} id={`tax-mg-${g.key}`}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", background: "var(--surface2)", borderTop: gi > 0 ? "1px solid var(--divider)" : "none", borderBottom: "1px solid var(--divider)" }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text1)" }}>{gm ? `${Number(gy)}년 ${Number(gm)}월` : "날짜 미지정"}</span>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>{g.recs.length}건 · {fmt(gSum)}원</span>
+                {gUnpaid > 0 && <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#DB6B2E" }}>미납 {fmt(gUnpaid)}원</span>}
               </div>
-              <div style={{ fontSize: 12, color: "var(--text2)", minWidth: 86 }}>{r.dueDate}</div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", minWidth: 100, textAlign: "right" }}>{fmt(r.amount)}원</div>
-              <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 100, color: statusColor[st], background: statusColor[st] + "1A", flexShrink: 0 }}>{st}</span>
-              <span style={{ display: "inline-flex", gap: 6 }} onClick={e => e.stopPropagation()}>
-                <button onClick={() => togglePaid(r.id)} title={r.paidDate ? "완납 취소" : "완납 처리"}
-                  style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: r.paidDate ? "var(--text3)" : "#10B981", cursor: "pointer", fontFamily: "inherit" }}>{r.paidDate ? "↩ 취소" : "✓ 완납"}</button>
-                {!r.paidDate && (
-                  <button onClick={() => addToSchedule(r)} title="납부기한을 일정 캘린더에 추가"
-                    style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "#DB6B2E", cursor: "pointer", fontFamily: "inherit" }}>일정 추가</button>
-                )}
-              </span>
+              {g.recs.map((r, i) => {
+                const st = statusOf(r);
+                return (
+                  <div key={r.id} onClick={() => setEditing({ ...r })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer", borderBottom: (isLastGroup && i === g.recs.length - 1) ? "none" : "1px solid var(--divider)", flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 150 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{r.taxType}{r.period ? ` · ${r.period}` : ""}</div>
+                      <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 1 }}>{r.biz}</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text2)", minWidth: 86 }}>{r.dueDate}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", minWidth: 100, textAlign: "right" }}>{fmt(r.amount)}원</div>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 100, color: statusColor[st], background: statusColor[st] + "1A", flexShrink: 0 }}>{st}</span>
+                    <span style={{ display: "inline-flex", gap: 6 }} onClick={e => e.stopPropagation()}>
+                      <button onClick={() => togglePaid(r.id)} title={r.paidDate ? "완납 취소" : "완납 처리"}
+                        style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: r.paidDate ? "var(--text3)" : "#10B981", cursor: "pointer", fontFamily: "inherit" }}>{r.paidDate ? "↩ 취소" : "✓ 완납"}</button>
+                      {!r.paidDate && (
+                        <button onClick={() => addToSchedule(r)} title="납부기한을 일정 캘린더에 추가"
+                          style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "#DB6B2E", cursor: "pointer", fontFamily: "inherit" }}>일정 추가</button>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           );
         })}
