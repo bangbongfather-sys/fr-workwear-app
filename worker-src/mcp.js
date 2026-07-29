@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-29-quote-spec-badge", note: "견적 관리 탭 요척서 표시 — 견적 포함 제품 각 행에 지금 선택된 요척서를 '📋 요척서 N' 칩으로 표시, 요척서가 2개 이상이면 등급 버튼 위에 요척서 전환 버튼을 두어 견적 관리 탭에서 바로 변경 가능(전환 시 단가 즉시 반영)"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-29-spec-duplicate", note: "요척서 복제 — 단가 계산기 요척서 칩마다 복제 버튼 추가(비활성 요척서도 지정 복제 가능). 원단·공임·마진·오버라이드까지 그대로 복사해 원본 바로 뒤에 삽입하고 사본을 활성화, 이름은 '○○ (사본)' → 중복 시 (사본 2)로 자동 증가(중첩 방지). + 견적 관리 탭 요척서 표시·전환"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
