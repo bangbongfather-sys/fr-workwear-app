@@ -15739,6 +15739,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               }}>
                               <span onDoubleClick={e => { e.stopPropagation(); setEditingSpec({ id: s.id, value: s.name }); }} title="더블클릭으로 이름 수정">{s.name}</span>
                               {dateStr && <span style={{ fontSize: 10, opacity: isActive ? 0.8 : 0.5, fontWeight: 500 }}>· {dateStr}</span>}
+                              {/* 현재 견적서가 이 요척서로 계산됐음을 표시 */}
+                              {activeProdStamp && activeProdStamp.specId === s.id && (
+                                <span title="현재 견적서가 이 요척서 기준으로 작성됐습니다"
+                                  style={{
+                                    display: "inline-flex", alignItems: "center", gap: 3,
+                                    marginLeft: 2, padding: "2px 7px", borderRadius: 100,
+                                    fontSize: 10, fontWeight: 800, whiteSpace: "nowrap",
+                                    background: isActive ? "rgba(255,255,255,0.22)" : "rgba(16,185,129,0.14)",
+                                    color: isActive ? "#fff" : "#10B981",
+                                  }}>✓ 견적 반영중</span>
+                              )}
                               {isActive && (
                                 <span onClick={e => { e.stopPropagation(); setEditingSpec({ id: s.id, value: s.name }); }} title="이름 수정" style={{ fontSize: 10, opacity: 0.85, cursor: "pointer" }}><Icon name="edit" size={14}/></span>
                               )}
