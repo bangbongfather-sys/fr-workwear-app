@@ -13270,6 +13270,20 @@ function App() {
     window.__njDeferredPrompt = null;
   };
   const [quote, setQuote] = useState("");
+  // ── 견적 도장 (quote stamp) ──
+  // 현재 견적서가 "어느 요척서로 계산됐는지" 기록. { [제품id]: { specId, specName, at } }
+  // quote 텍스트와 수명을 맞춘다(세션 한정) — 새로고침 후 quote가 비면 뱃지/배너도 안 보이므로
+  // 실제와 어긋난 표시가 남지 않는다. 장기 보관은 견적 이력의 products[].specName이 담당.
+  const [quoteStamp, setQuoteStamp] = useState({});
+  const stampFromItems = (items) => {
+    const now = Date.now();
+    const st = {};
+    items.forEach(({ p }) => {
+      const s = getActiveSpec(p);
+      if (s) st[p.id] = { specId: s.id, specName: s.name, at: now };
+    });
+    return st;
+  };
   const [generating, setGenerating] = useState(false);
   const [apiError, setApiError] = useState("");
   const [editingQuote, setEditingQuote] = useState(false);
