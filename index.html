@@ -14289,7 +14289,9 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   const marginAmt = calc.marginAmt;
   const finalPrice = calc.finalPrice;
   // 시장 소비자가 — 요약 카드에서 납품가가 시장가 대비 어디쯤인지 바로 보여주는 데 쓴다.
-  const marketPriceNum = parseFloat(rawActiveProd?.marketPrice) || 0;
+  // 소비자가는 제품이 아니라 요척서(spec) 단위다. rawActiveProd에서 읽으면 요척서를 바꿔도
+  // 항상 같은(레거시) 값이 나오므로 활성 요척서 기준인 activeProd를 쓴다.
+  const marketPriceNum = parseFloat(activeProd.marketPrice) || 0;
 
   const updProd = (field, value) =>
     setProducts(ps => ps.map(p => {
