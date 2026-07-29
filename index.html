@@ -14288,6 +14288,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   const overriddenGrades = calc.overridden;
   const marginAmt = calc.marginAmt;
   const finalPrice = calc.finalPrice;
+  // 시장 소비자가 — 요약 카드에서 납품가가 시장가 대비 어디쯤인지 바로 보여주는 데 쓴다.
+  const marketPriceNum = parseFloat(rawActiveProd?.marketPrice) || 0;
 
   const updProd = (field, value) =>
     setProducts(ps => ps.map(p => {
@@ -16303,6 +16305,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       </span>
                     </div>
                   )}
+                  {/* 시장 소비자가 — 납품가만 보면 이 가격이 시장에서 어느 위치인지 알 수 없다.
+                      요약 카드에서 소비자가와 할인율을 같이 보여줘 협상 근거로 바로 쓰게 한다. */}
+                  <div style={{ marginTop: 12, paddingTop: 10, borderTop: `1px dashed ${T.divider}` }}>
+                    <div className="row-item" style={{ padding: 0 }}>
+                      <span style={{ fontSize: 12, color: "var(--text2)" }}>시장 소비자가</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: marketPriceNum > 0 ? NAVY : "var(--text3)", fontVariantNumeric: "tabular-nums" }}>
+                        {marketPriceNum > 0 ? `${marketPriceNum.toLocaleString()}원` : "미입력"}
+                      </span>
+                    </div>
+                    {marketPriceNum > 0 && finalPrice > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", marginTop: 6, fontSize: 11, color: "var(--text3)" }}>
+                        <span>소비자가 대비 <strong style={{ color: NAVY }}>{Math.round(finalPrice / marketPriceNum * 100)}%</strong></span>
+                        <span>할인율 <strong style={{ color: ORANGE }}>{Math.round((1 - finalPrice / marketPriceNum) * 100)}%</strong></span>
+                        <span>차액 <strong style={{ color: "var(--text2)" }}>{Math.round(marketPriceNum - finalPrice).toLocaleString()}원</strong></span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {activeProd.fabrics.some(f => f.matId && f.qty) && (
