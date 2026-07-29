@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-29-spec-stamp-empty", note: "요척서 견적 반영 표시(보완) — 기록이 없는 제품에 '견적서를 생성하면 기준 요척서에 ✓ 견적 반영중 표시가 붙습니다' 안내 + [견적서 생성] 버튼 노출. 기능 도입 전 저장된 견적서에는 요척서 정보가 없어 뱃지 근거가 없던 빈 화면 문제 해결"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-29-quote-spec-badge", note: "견적 관리 탭 요척서 표시 — 견적 포함 제품 각 행에 지금 선택된 요척서를 '📋 요척서 N' 칩으로 표시, 요척서가 2개 이상이면 등급 버튼 위에 요척서 전환 버튼을 두어 견적 관리 탭에서 바로 변경 가능(전환 시 단가 즉시 반영)"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
