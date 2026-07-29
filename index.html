@@ -14431,11 +14431,11 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     }
 
     // 제품 단가 표 (제품명 / 수량 / 단가 / 시장 소비자가)
-    const hasMarketPrice = items.some(({ p }) => p.marketPrice && parseFloat(p.marketPrice) > 0);
+    const hasMarketPrice = items.some(({ p }) => parseFloat(getMarketPrice(p)) > 0);
     const showMarketPrice = includeMarketPrice && hasMarketPrice;
     const priceTable = showMarketPrice
       ? items.map(({ p, c }) => {
-          const mp = parseFloat(p.marketPrice);
+          const mp = parseFloat(getMarketPrice(p));
           const mpStr = (!isNaN(mp) && mp > 0) ? `${Math.round(mp).toLocaleString()}원` : `—`;
           return `| ${p.name} | 1 | ${Math.round(c.finalPrice).toLocaleString()}원 | ${mpStr} |`;
         }).join("\n")
