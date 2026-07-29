@@ -1691,7 +1691,8 @@ const getActiveSpec = (p) => {
 // 활성 요척서의 시장 소비자가. 아직 마이그레이션되지 않은 데이터는 제품 레벨 값으로 폴백.
 const getMarketPrice = (p) => {
   const s = getActiveSpec(p);
-  const v = s && s.marketPrice !== undefined && s.marketPrice !== "" ? s.marketPrice : (p && p.marketPrice);
+  // 빈 문자열은 "사용자가 지운 값"이므로 폴백하지 않는다 (폴백하면 삭제가 안 됨)
+  const v = s && s.marketPrice !== undefined ? s.marketPrice : (p && p.marketPrice);
   return v === undefined || v === null ? "" : v;
 };
 const migrateProduct = (p) => {
