@@ -1688,6 +1688,12 @@ const getActiveSpec = (p) => {
   }
   return null;
 };
+// 활성 요척서의 시장 소비자가. 아직 마이그레이션되지 않은 데이터는 제품 레벨 값으로 폴백.
+const getMarketPrice = (p) => {
+  const s = getActiveSpec(p);
+  const v = s && s.marketPrice !== undefined && s.marketPrice !== "" ? s.marketPrice : (p && p.marketPrice);
+  return v === undefined || v === null ? "" : v;
+};
 const migrateProduct = (p) => {
   // 신규 포맷 (specs 배열 있음)
   if (p.specs && Array.isArray(p.specs) && p.specs.length > 0) {
