@@ -14973,7 +14973,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     const now = new Date();
     const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,"0")}.${String(now.getDate()).padStart(2,"0")}`;
     const timeStr = `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`;
-    const entry = { id: uid(), title, dateStr, timeStr, savedAt: now.getTime(), quote, quoteClient: quoteClient.trim(), quoteStyle, products: items.map(({ p, c }) => ({ name: p.name, grade: c.selectedGrade || "A", price: Math.round(c.finalPrice) })) };
+    // 제품별로 "이 견적서가 어느 요척서 기준인지"를 함께 보관 —
+    // 생성 시 찍힌 도장(quoteStamp)이 있으면 그 값이 견적서 본문과 일치하므로 우선한다.
+    const entry = { id: uid(), title, dateStr, timeStr, savedAt: now.getTime(), quote, quoteClient: quoteClient.trim(), quoteStyle, products: items.map(({ p, c }) => {
+      const st = quoteStamp[p.id];
+      const act = getActiveSpec(p);
+      return {
+        productId: p.id,
+        name: p.name,
+        grade: c.selectedGrade || "A",
+        price: Math.round(c.finalPrice),
+        specId: st ? st.specId : (act ? act.id : null),
+        specName: st ? st.specName : (act ? act.name : ""),
+      };
+    }) };
     const next = [entry, ...savedQuotes];
     setSavedQuotes(next);
     save("frw_quote_history", stripQuoteImages(next));
