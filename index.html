@@ -16559,6 +16559,27 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = T.text2; e.currentTarget.style.borderColor = T.border; }}
                           >이동 →</button>
                         </div>
+                        {/* 요척서 선택 — 여러 버전이 있을 때 견적서에 쓸 요척서를 여기서 바로 전환 */}
+                        {hasData && (p.specs || []).length > 1 && (
+                          <div style={{ display: "flex", gap: 4, padding: "0 12px 8px", alignItems: "center", flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 10, color: T.empty, fontWeight: 600, letterSpacing: 0.5, marginRight: 4, whiteSpace: "nowrap" }}>요척서</span>
+                            {(p.specs || []).map(s => {
+                              const isSel = s.id === p.activeSpecId;
+                              return (
+                                <button key={s.id}
+                                  onClick={() => setProducts(ps => ps.map(x => x.id === p.id ? { ...x, activeSpecId: s.id } : x))}
+                                  title={`'${s.name}' 기준으로 견적서에 반영`}
+                                  style={{
+                                    padding: "4px 10px", borderRadius: 100,
+                                    border: `1.5px solid ${isSel ? ACCENT : T.divider}`,
+                                    background: isSel ? ACCENT : T.ghostBg, color: isSel ? "#fff" : T.text2,
+                                    fontSize: 10.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                                    transition: "all 0.12s", whiteSpace: "nowrap",
+                                  }}>{s.name}</button>
+                              );
+                            })}
+                          </div>
+                        )}
                         {/* 하단: 등급 선택 버튼 */}
                         {hasData && (
                           <div style={{ display: "flex", gap: 4, padding: "0 12px 10px", alignItems: "center", flexWrap: "wrap" }}>
