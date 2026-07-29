@@ -15763,6 +15763,19 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       );
                     })}
                   </div>
+                  {/* 견적서에 반영된 요척서 ≠ 지금 보고 있는 요척서 → 재생성 안내 (옛 단가로 견적 나가는 사고 방지) */}
+                  {specStampMismatch && (
+                    <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11.5, color: "var(--text1)", lineHeight: 1.55, flex: 1, minWidth: 200 }}>
+                        <span style={{ fontWeight: 800, color: "#B45309" }}>⚠️ 현재 견적서는 '{activeProdStamp.specName}' 기준</span>입니다.
+                        지금 보고 있는 <b>'{activeSpec.name}'</b>의 단가를 반영하려면 견적서를 다시 생성하세요.
+                      </span>
+                      <button onClick={generateQuote} disabled={generating}
+                        style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: "#B45309", color: "#fff", fontSize: 11.5, fontWeight: 700, cursor: generating ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0 }}>
+                        {generating ? "생성 중…" : "견적서 다시 생성"}
+                      </button>
+                    </div>
+                  )}
                   <div style={{ fontSize: 10, color: "var(--text3)", marginTop: 8, lineHeight: 1.5 }}><Icon name="lightbulb" size={11} style={{marginRight:4, verticalAlign:"-2px"}}/>원단 단가가 바뀌면 [+ 요척서 추가]로 새 버전을 만들어 비교하세요. 새 요척서는 현재 활성 요척서의 값을 그대로 복사해서 시작합니다.</div>
                 </div>
               </div>
