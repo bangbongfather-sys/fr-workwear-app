@@ -14168,8 +14168,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       const idx = (p.specs || []).findIndex(s => s.id === specId);
       if (idx < 0) return p;
       const src = p.specs[idx];
-      let name = `${src.name} (사본)`;
-      for (let n = 2; p.specs.some(s => s.name === name); n++) name = `${src.name} (사본 ${n})`;
+      // 사본을 또 복제해도 "(사본) (사본)"으로 중첩되지 않도록 기존 접미사를 떼고 번호를 올린다
+      const base = src.name.replace(/\s*\(사본(?:\s*\d+)?\)\s*$/, "");
+      let name = `${base} (사본)`;
+      for (let n = 2; p.specs.some(s => s.name === name); n++) name = `${base} (사본 ${n})`;
       const copy = {
         ...src,
         id: uid(),
