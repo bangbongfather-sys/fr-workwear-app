@@ -14158,6 +14158,34 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       return { ...p, specs: [...p.specs, s], activeSpecId: s.id };
     }));
   };
+  // 지정한 요척서를 그대로 복제 — 활성 여부와 무관하게 원하는 버전을 골라 복사한다.
+  // 원본 바로 뒤에 넣고 새 사본을 활성화. 이름은 "○○ (사본)", 중복이면 (사본 2), (사본 3)…
+  const duplicateSpec = (specId) => {
+    pushHistory();
+    setProducts(ps => ps.map(p => {
+      if (p.id !== activeProdId) return p;
+      const idx = (p.specs || []).findIndex(s => s.id === specId);
+      if (idx < 0) return p;
+      const src = p.specs[idx];
+      let name = `${src.name} (사본)`;
+      for (let n = 2; p.specs.some(s => s.name === name); n++) name = `${src.name} (사본 ${n})`;
+      const copy = {
+        ...src,
+        id: uid(),
+        name,
+        fabrics: (src.fabrics || []).map(f => ({ ...f, id: uid() })),
+        extras: (src.extras || []).map(e => ({ ...e, id: uid() })),
+        grades: [...(src.grades || GRADES)],
+        margins: { ...(src.margins || DEFAULT_MARGINS) },
+        priceOverrides: { ...(src.priceOverrides || { A: "", B: "", C: "", D: "" }) },
+        createdAt: Date.now(),
+      };
+      const newSpecs = [...p.specs];
+      newSpecs.splice(idx + 1, 0, copy);
+      return { ...p, specs: newSpecs, activeSpecId: copy.id };
+    }));
+    showToast("요척서를 복제했습니다 — 이름을 더블클릭해 바꿀 수 있어요", "success");
+  };
   const deleteSpec = (specId) => {
     pushHistory();
     setProducts(ps => ps.map(p => {
