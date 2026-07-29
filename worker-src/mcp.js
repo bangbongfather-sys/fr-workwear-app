@@ -18,7 +18,7 @@ const ALLOWED_SECTIONS = [
   "clients", "suppliers", "clientAR", "ledgers", "monthlySales", "accounts",
   "products", "materials", "laborItems", "orders", "purchaseOrders", "fabricIntakes",
   "bids", "investments", "cashFlows", "scheduledExpenses", "todos", "notes", "recurringSchedules",
-  "stock", "payables", "bankDeposits", "prodTrash", "companySeal",
+  "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings",
 ];
 
 // 단가 계산기 로직 (index.html computeProduct와 동일 공식) ──
@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-24-spec-stamp", note: "요척서 견적 반영 표시 — 견적서 생성 시 제품별 요척서 도장 기록, 반영된 요척서 칩에 '✓ 견적 반영중' 뱃지, 다른 요척서 선택 시 불일치 경고 배너 + [견적서 다시 생성] 버튼, 견적 이력 카드에 요척서명 표기"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-29-spec-stamp", note: "요척서 견적 반영 표시 — 견적서 생성 시 제품별 요척서 도장 기록, 반영된 요척서 칩에 '✓ 견적 반영중' 뱃지, 다른 요척서 선택 시 불일치 경고 배너 + [견적서 다시 생성] 버튼, 견적 이력 카드에 요척서명 표기 (회의록 탭·세무 탭 재구성 포함)"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);

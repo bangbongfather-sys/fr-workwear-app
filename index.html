@@ -361,7 +361,51 @@
     }
 
     /* ─── 테이블 ─── */
-    table { width: 100%; border-collapse: collapse; }
+    /* ─── 데이터 표: 좁은 화면에서도 열 너비 유지 + 표 자체가 가로 스크롤 ───
+       창을 줄이면 열이 찌그러지며 글자가 세로로 쌓이던 문제 해결.
+       display:block + width:max-content → 표가 내용에 필요한 만큼 넓어지고,
+       max-width:100% + overflow-x:auto → 넘치는 만큼만 표 안에서 좌우 스크롤.
+       min-width:100% → 내용이 좁을 땐 기존처럼 카드 폭을 꽉 채움. */
+    table {
+      border-collapse: collapse;
+      display: block;
+      width: max-content;
+      min-width: 100%;
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    th, td { white-space: nowrap; }
+    /* 메모·비고처럼 길어도 되는 셀은 줄바꿈 허용 (기존 클래스 유지) */
+    td.allow-wrap, th.allow-wrap, .wrap-cell { white-space: normal; }
+    /* 견적서 등 문서 템플릿은 인쇄 레이아웃이라 원래대로 (width는 각 문서 규칙 유지) */
+    :is(.apple-doc, .bold-doc, .card-doc, .korean-doc) table {
+      display: table; min-width: 0; max-width: none; overflow: visible;
+    }
+    /* sticky 헤더 등 스크롤을 바깥 컨테이너가 맡는 표는 opt-out */
+    table.table-plain { display: table; width: 100%; min-width: 0; max-width: none; overflow: visible; }
+
+    /* ─── div 그리드로 만든 표(발주 관리·장부·재고 등) ───
+       <table>이 아니라 display:grid 로 그린 목록은 위 규칙이 안 걸린다.
+       헤더와 행이 반드시 같은 최소 너비를 가져야 열이 어긋나지 않으므로,
+       공통 최소 너비를 --gt-min 변수로 컨테이너에 한 번만 지정한다. */
+    .grid-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .grid-table-scroll .grid-table { min-width: var(--gt-min, 880px); }
+    .grid-table > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ─── 데스크톱·태블릿: 창을 줄여도 화면 비율 유지 + 좌우 스크롤 ───
+       .app-main 이 min-width:0 이라 창을 줄이면 콘텐츠가 끝없이 눌리고
+       글자가 세로로 쌓였다. 769px 이상에서는 최소 폭을 보장해 원래 비율을
+       유지하고, 모자란 폭은 .main-content(overflow:auto)가 좌우 스크롤로 처리.
+       768px 이하 모바일은 기존 반응형 레이아웃을 그대로 사용. */
+    @media (min-width: 769px) {
+      .main-content > * { min-width: 1024px; }
+    }
+    /* 인쇄(견적서·발주서)는 용지 폭에 맞춰야 하므로 최소 폭 해제 */
+    @media print {
+      .main-content > * { min-width: 0 !important; }
+      table { display: table; min-width: 0; max-width: none; overflow: visible; }
+    }
     th {
       background: var(--th-bg); color: var(--text2); padding: 10px 14px;
       text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
@@ -1217,7 +1261,7 @@ const ORANGE = "#F59E0B";
 
 // 클라우드 동기화 섹션 목록 (top-level key 단위). 섹션별 자동 병합·충돌 판정의 기준.
 // 여기 순서/이름이 Firebase /frw 의 top-level key 및 _revs 키와 1:1 대응한다.
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -11989,7 +12033,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                 {/* 미리보기 테이블 */}
                 {pastePreview.length > 0 && (
                   <div style={{marginTop:10,maxHeight:220,overflowY:"auto",borderRadius:8,background:"var(--surface)",border:"1px solid var(--border)"}}>
-                    <table style={{width:"100%",fontSize:11,fontVariantNumeric:"tabular-nums"}}>
+                    <table className="table-plain" style={{width:"100%",fontSize:11,fontVariantNumeric:"tabular-nums"}}>
                       <thead style={{position:"sticky",top:0,background:"var(--surface2)",zIndex:1}}>
                         <tr>
                           <th style={{padding:"6px 8px",textAlign:"left",borderBottom:"1px solid var(--border)"}}>#</th>
@@ -13367,6 +13411,8 @@ function App() {
   const [bids, setBids] = useState(() => load("frw_bids", []));
   const [todos, setTodos] = useState(() => load("frw_todos", []));
   const [notes, setNotes] = useState(() => load("frw_notes", []));
+  const [taxes, setTaxes] = useState(() => load("frw_taxes", [])); // 세무 관리 — 사업장별 세금 납부 기록
+  const [meetings, setMeetings] = useState(() => load("frw_meetings", [])); // 회의록 — 노션 「회의 진행 내역」 연동
   const [recurringSchedules, setRecurringSchedules] = useState(() => load("frw_recurring", []));
   const [ledgers, setLedgers] = useState(() => load("frw_ledgers", {}));
   const [companyFiles, setCompanyFiles] = useState({ subtabs: [{ id: "general", name: "일반" }], items: { general: [] } });
@@ -13793,6 +13839,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.bids !== undefined) setBids(d.bids);
     if (d.todos !== undefined) setTodos(d.todos);
     if (d.notes !== undefined) setNotes(d.notes);
+    if (d.taxes !== undefined) setTaxes(d.taxes);
+    if (d.meetings !== undefined && Array.isArray(d.meetings)) setMeetings(d.meetings);
     if (d.recurringSchedules !== undefined) setRecurringSchedules(d.recurringSchedules);
     if (d.ledgers !== undefined) setLedgers(d.ledgers);
     if (d.clientAR !== undefined) setClientAR(d.clientAR);
@@ -13939,7 +13987,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR); save("frw_todos", todos);
-    save("frw_notes", notes); save("frw_recurring", recurringSchedules);
+    save("frw_notes", notes); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
@@ -13949,7 +13997,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_prod_trash", prodTrash);
     save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings };
     if (!initialized.current) { prevSnapshot.current = cur; return; }
     // 폴링/포그라운드 복귀로 받아온 클라우드 데이터를 state에 반영하면 이 effect가 실행되는데,
     // 그건 사용자 입력이 아니므로 다시 푸시하면 안 됨(무한 왕복·불필요 쓰기 방지). baseline만 갱신하고 1회 억제.
@@ -14030,7 +14078,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       };
       doSave(0);
     }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
@@ -14950,13 +14998,13 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(219,107,46,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
+  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["meeting", "회의록", "clipboard"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
   // 사이드바 메뉴 그룹 (토스 핸드오프 — 평면 나열 → 그룹 헤더). TABS는 평면 유지(퀵메뉴 등 재사용)
   const TAB_GROUPS = [
     { label: "핵심", ids: ["dashboard", "calc", "quote"] },
     { label: "운영", ids: ["pricedb", "purchase", "inventory", "stock"] },
-    { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury"] },
-    { label: "일정·외부", ids: ["schedule", "bids", "files", "mail", "news"] },
+    { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury", "tax"] },
+    { label: "일정·외부", ids: ["schedule", "meeting", "bids", "files", "mail", "news"] },
   ];
   // 화면별 페이지 헤더 부제 (토스 핸드오프 — 제목은 TABS label, 부제는 아래 맵)
   const PAGE_SUBTITLES = {
@@ -14965,6 +15013,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     quote: "견적서 작성·발행·이력 관리",
     purchase: "생산 발주·진행 현황 추적",
     dashboard: "한눈에 보는 매출·마진·미수금 현황",
+    tax: "사업장별 세금 납부 일정·기록 관리",
     ledger: "매출·매입·수금 거래 내역",
     treasury: "현금 흐름·계좌·자금 계획",
     inventory: "원단 입고·매입 내역 관리",
@@ -14972,6 +15021,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     clients: "거래처별 납품 단가·등급 관리",
     suppliers: "원단·부자재 공급처 정보",
     schedule: "납기·미팅·생산 일정 관리",
+    meeting: "회의록 작성·노션 「회의 진행 내역」 연동",
     bids: "조달청 입찰 공고·응찰 일정",
     files: "서류·양식·자료 보관",
     mail: "거래처 메일 확인·발송",
@@ -15386,6 +15436,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     { type:"일정", icon:"calendar", title:t.text, sub:`${t.date||""}${t.endDate?` → ${t.endDate}`:""}${t.done?" · ✓ 완료":""}`, action:()=>{save("frw_schedule_subtab","calendar"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"calendar",date:t.date}})),80);} }));
                   (notes||[]).forEach(n => push(searchScore(q, [n.title, n.body, (n.tags||[]).join(" ")]),
                     { type:"메모", icon:"clipboard", title:n.title||"(제목 없음)", sub:`${n.pinned?"★ ":""}${n.category||""}${n.body?` · ${n.body.slice(0,40)}`:""}`, action:()=>{save("frw_schedule_subtab","notes"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"notes"}})),80);} }));
+                  (taxes||[]).forEach(t => push(searchScore(q, [t.taxType, t.biz, t.period, t.memo]),
+                    { type:"세무", icon:"coins", title:`${t.taxType} — ${t.biz}`, sub:`기한 ${t.dueDate||""} · ${Number(t.amount||0).toLocaleString()}원${t.paidDate?" · ✓ 완납":""}`, action:()=>{setTab("tax"); setGlobalSearch("");} }));
+                  (meetings||[]).forEach(mt => push(searchScore(q, [mt.title, mt.summary, (mt.items||[]).join(" "), (mt.attendees||[]).join(" "), mt.memo]),
+                    { type:"회의록", icon:"clipboard", title:mt.title||"(제목 없음)", sub:`${mt.date||""}${mt.meetingType?` · ${mt.meetingType}`:""}${mt.summary?` · ${mt.summary.slice(0,40)}`:""}`, action:()=>{setTab("meeting"); setGlobalSearch("");} }));
                   // 재고 — 클릭하면 재고 탭으로 이동 + 해당 품목이 검색된 상태로 열림
                   ((stock && stock.items) || []).forEach(it => push(searchScore(q, [it.name, it.code, it.spec]),
                     { type:"재고", icon:"layers", title:it.name,
@@ -17249,6 +17303,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             setTab={setTab} setLedgerFocusClient={setLedgerFocusClient}
           />
         )}
+        {tab === "tax" && (
+          <TaxTab taxes={taxes} setTaxes={setTaxes} setTodos={setTodos} darkMode={darkMode} apiKey={apiKey} />
+        )}
+        {tab === "meeting" && (
+          <MeetingTab meetings={meetings} setMeetings={setMeetings} setTodos={setTodos} clients={clients} darkMode={darkMode} />
+        )}
         {tab === "clients" && (
           <ClientsTab
             clients={clients}
@@ -17982,9 +18042,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           {sorted.length === 0 ? (
                             <div className="card" style={{ padding: 40, textAlign: "center", color: T.text3, fontSize: 14 }}>조건에 맞는 발주가 없습니다</div>
                           ) : (
-                            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                            <div className="card grid-table-scroll" style={{ padding: 0, "--gt-min": "900px" }}>
                               {/* 목록 헤더 */}
-                              <div style={{ display: "grid", gridTemplateColumns: "26px 108px 1.1fr 1.4fr 62px 158px 132px", gap: 12, padding: "10px 16px", background: "var(--surface2)", borderBottom: `1px solid ${T.divider}`, fontSize: 11, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                              <div className="grid-table" style={{ display: "grid", gridTemplateColumns: "26px 108px 1.1fr 1.4fr 62px 158px 132px", gap: 12, padding: "10px 16px", background: "var(--surface2)", borderBottom: `1px solid ${T.divider}`, fontSize: 11, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>
                                 <div/>
                                 <div>발주일자</div>
                                 <div>거래처</div>
@@ -18001,6 +18061,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 return (
                                   <React.Fragment key={po.id}>
                                   <div
+                                    className="grid-table"
                                     onClick={() => togglePOExpand(po.id)}
                                     style={{
                                       display: "grid", gridTemplateColumns: "26px 108px 1.1fr 1.4fr 62px 158px 132px", gap: 12,
@@ -19892,11 +19953,28 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
           {/* 노션 캘린더식 월 헤더: 큰 월 표기 + ‹ 오늘 › 내비게이션 */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <div style={{ fontSize: 19, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{year}년 {month + 1}월</div>
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 2 }}>
-              <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month - 1, 1))} title="이전 달" aria-label="이전 달">‹</button>
-              <button className="sched-navbtn" style={{ width: "auto", padding: "0 12px", fontSize: 12 }}
-                onClick={() => { const t = new Date(); setCursor(new Date(t.getFullYear(), t.getMonth(), 1)); setSelectedDate(ymd(t)); }}>오늘</button>
-              <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month + 1, 1))} title="다음 달" aria-label="다음 달">›</button>
+            {/* 이동 버튼 — "오늘"이 화살표 사이에 있으면 현재 달 라벨처럼 읽혀서 분리했다.
+                오늘로 이동은 독립 버튼, 달 이동은 라벨을 붙인 한 쌍(좁은 화면에선 라벨만 숨김). */}
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+              {(() => {
+                const t = new Date();
+                const isThisMonth = year === t.getFullYear() && month === t.getMonth();
+                return (
+                  <button className="sched-todaybtn" disabled={isThisMonth}
+                    title={isThisMonth ? "이미 이번 달을 보고 있습니다" : "오늘로 이동"}
+                    onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); setSelectedDate(ymd(n)); }}>
+                    오늘로 이동
+                  </button>
+                );
+              })()}
+              <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month - 1, 1))} title="이전 달" aria-label="이전 달">
+                  <span aria-hidden="true">‹</span><span className="sched-navlabel">이전 달</span>
+                </button>
+                <button className="sched-navbtn" onClick={() => setCursor(new Date(year, month + 1, 1))} title="다음 달" aria-label="다음 달">
+                  <span className="sched-navlabel">다음 달</span><span aria-hidden="true">›</span>
+                </button>
+              </div>
             </div>
           </div>
           <div className="sched-scroll-hint">← 좌우로 밀어서 전체 주 확인 · 일정을 길게 누르면 미리보기 →</div>
@@ -20316,12 +20394,28 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         .sched-cell { transition: background .15s, box-shadow .15s, opacity .15s; }
         .sched-cell:not(.sched-sel):hover { background: var(--row-bg) !important; }
         .sched-navbtn {
-          width: 30px; height: 30px; border-radius: 8px; border: none;
+          min-width: 30px; height: 30px; padding: 0 9px; border-radius: 8px; border: none;
           background: transparent; color: var(--text2);
           cursor: pointer; font-size: 16px; font-weight: 700; font-family: inherit;
-          display: inline-flex; align-items: center; justify-content: center;
+          display: inline-flex; align-items: center; justify-content: center; gap: 4px;
           transition: background .13s, color .13s;
         }
+        /* 화살표 옆 '이전 달/다음 달' 라벨 — 좁은 화면에선 숨기고 화살표만 남긴다 */
+        .sched-navlabel { font-size: 12px; font-weight: 700; }
+        @media (max-width: 640px) {
+          .sched-navlabel { display: none; }
+          .sched-navbtn { padding: 0; width: 30px; }  /* 라벨이 없으니 정사각 아이콘 버튼으로 복귀 */
+        }
+        /* 오늘로 이동 — 달 이동과 성격이 달라 화살표 쌍에서 떼어냈다 */
+        .sched-todaybtn {
+          height: 30px; padding: 0 12px; border-radius: 8px;
+          border: 1px solid var(--divider); background: var(--surface);
+          color: var(--text1); font-size: 12px; font-weight: 700; font-family: inherit;
+          cursor: pointer; white-space: nowrap;
+          transition: background .13s, color .13s, opacity .13s;
+        }
+        .sched-todaybtn:hover:not(:disabled) { background: var(--surface2); }
+        .sched-todaybtn:disabled { opacity: .4; cursor: default; }
         .sched-navbtn:hover { background: var(--surface2); color: var(--text1); }
         .sched-eventbar { transition: filter .12s, box-shadow .15s; }
         .sched-eventbar:hover { filter: brightness(1.04); box-shadow: var(--elev-2); }
@@ -20657,6 +20751,1093 @@ function NotesPanel({ notes, setNotes, clients, darkMode }) {
 }
 
 // ─── 정기 일정 패널 ───
+// ─── 회의록 탭 ───
+// 노션 「회의 진행 내역」 DB와 양방향 연동. 앱에서 쓰면 노션에 페이지가 생기고,
+// 노션에서 작성한 회의도 [노션에서 가져오기]로 끌어온다.
+// 참석자·첨부파일은 노션 속성이 계정/파일 업로드를 요구해 그대로는 못 쓴다 —
+// 참석자는 노션 본문 첫 줄("참석: …")로, 첨부는 앱에만 보관(본문엔 개수만).
+const MEETING_TYPES = ["긴급회의", "프로젝트 회의", "브레인스토밍", "전략회의"];
+const MEETING_TAGS = ["전략기획", "마케팅", "인사관리", "백엔드", "프론트엔드", "고객관리", "회계", "콘텐츠", "세무", "단가조정"];
+const MEETING_TYPE_COLOR = { "긴급회의": "#EF4444", "프로젝트 회의": "#10B981", "브레인스토밍": "#3B82F6", "전략회의": "#DB6B2E" };
+
+function MeetingTab({ meetings = [], setMeetings, setTodos, clients = [], darkMode }) {
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const todayYmd = ymd(new Date());
+  const [search, setSearch] = React.useState("");
+  const [filterType, setFilterType] = React.useState("");
+  const [filterTag, setFilterTag] = React.useState("");
+  const [editing, setEditing] = React.useState(null);
+  const [notionStatus, setNotionStatus] = React.useState("");   // "" | syncing | synced | error | off
+  const [notionMsg, setNotionMsg] = React.useState("");
+  const [importModal, setImportModal] = React.useState(null);   // null | { loading, list, note }
+  const API = "/api/notion/meeting";
+
+  // ── 노션 호출 헬퍼 — 실패해도 앱 흐름은 막지 않는다(로컬 저장이 우선) ──
+  const notionPayload = (m) => ({
+    title: m.title, date: m.date, meetingType: m.meetingType, tags: m.tags || [],
+    summary: m.summary || "", items: m.items || [], memo: m.memo || "",
+    actions: m.actions || [], attendees: m.attendees || [], attCount: (m.atts || []).length,
+  });
+  const notionCreate = async (m) => {
+    try {
+      setNotionStatus("syncing");
+      const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notionPayload(m)) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (/환경변수/.test(d.error || "")) { setNotionStatus("off"); setNotionMsg("노션 미설정"); }
+        else { setNotionStatus("error"); setNotionMsg(d.error || `HTTP ${r.status}`); }
+        return null;
+      }
+      setNotionStatus("synced"); setNotionMsg("");
+      return { notionPageId: d.notionPageId, notionUrl: d.url || "" };
+    } catch (e) { setNotionStatus("error"); setNotionMsg(e.message || "네트워크 오류"); return null; }
+  };
+  const notionPatch = async (m) => {
+    if (!m.notionPageId) return;
+    try {
+      setNotionStatus("syncing");
+      const r = await fetch(`${API}/${m.notionPageId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(notionPayload(m)) });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); setNotionStatus("error"); setNotionMsg(d.error || `HTTP ${r.status}`); return; }
+      setNotionStatus("synced"); setNotionMsg("");
+    } catch (e) { setNotionStatus("error"); setNotionMsg(e.message); }
+  };
+  const notionArchive = async (pageId) => {
+    if (!pageId) return;
+    try { await fetch(`${API}/${pageId}`, { method: "DELETE" }); } catch {}
+  };
+
+  const blank = () => ({
+    id: null, title: "", date: todayYmd, meetingType: "프로젝트 회의", tags: [],
+    attendees: [], summary: "", items: [""], memo: "", actions: [], atts: [],
+    notionPageId: "", notionUrl: "",
+  });
+  const openNew = () => setEditing(blank());
+  const openEdit = (m) => setEditing({ ...m, items: (m.items || []).length ? [...m.items] : [""], tags: [...(m.tags || [])], attendees: [...(m.attendees || [])], actions: (m.actions || []).map(a => ({ ...a })), atts: [...(m.atts || [])] });
+
+  const saveRec = async () => {
+    if (!editing) return;
+    const title = (editing.title || "").trim();
+    if (!title) { showToast("회의 제목을 입력하세요"); return; }
+    const rec = {
+      ...editing, title,
+      items: (editing.items || []).map(s => String(s || "").trim()).filter(Boolean),
+      actions: (editing.actions || []).filter(a => a && String(a.text || "").trim()),
+      id: editing.id || uid(), createdAt: editing.createdAt || Date.now(), updatedAt: Date.now(),
+    };
+    const isNew = !editing.id;
+    setMeetings(prev => isNew ? [rec, ...prev] : prev.map(x => x.id === rec.id ? rec : x));
+    setEditing(null);
+    showToast(isNew ? "회의록이 저장됐습니다" : "회의록이 수정됐습니다", "success");
+    if (isNew) {
+      const res = await notionCreate(rec);
+      if (res) setMeetings(prev => prev.map(x => x.id === rec.id ? { ...x, ...res } : x));
+    } else if (rec.notionPageId) {
+      notionPatch(rec);
+    }
+  };
+  // 삭제는 기본적으로 "앱에서만" 지운다.
+  // 예전엔 노션 페이지까지 무조건 보관 처리했는데, 노션이 원본인 회의록(AI 회의노트 등)을
+  // 앱에서 정리하려다 원본이 통째로 휴지통으로 가는 사고가 났다. 노션 삭제는 별도 확인.
+  const delRec = async (m) => {
+    if (!window.confirm(`"${m.title}" 회의록을 앱에서 삭제할까요?${m.notionPageId ? "\n(노션 페이지는 그대로 남습니다)" : ""}`)) return;
+    setMeetings(prev => prev.filter(x => x.id !== m.id));
+    setEditing(null);
+    if (m.notionPageId && window.confirm("노션 원본 페이지도 휴지통으로 보낼까요?\n\n확인 = 노션에서도 삭제 (노션 휴지통에서 복원 가능)\n취소 = 노션에는 그대로 둠")) {
+      notionArchive(m.notionPageId);
+      showToast("앱·노션 모두 삭제됐습니다", "success");
+      return;
+    }
+    showToast("앱에서만 삭제됐습니다", "success");
+  };
+  // 노션에 아직 안 올라간 회의록 일괄 업로드
+  const bulkPush = async () => {
+    const pending = meetings.filter(m => !m.notionPageId);
+    if (!pending.length) { showToast("노션에 올릴 회의록이 없습니다 ✓"); return; }
+    if (!window.confirm(`${pending.length}건을 노션에 올릴까요?`)) return;
+    let ok = 0;
+    for (const m of pending) {
+      const res = await notionCreate(m);
+      if (!res) break;
+      ok++;
+      setMeetings(prev => prev.map(x => x.id === m.id ? { ...x, ...res } : x));
+    }
+    showToast(ok > 0 ? `${ok}건을 노션에 올렸습니다` : `업로드 실패: ${notionMsg}`, ok > 0 ? "success" : "error");
+  };
+  // ── 노션에서 가져오기 ──
+  const openImport = async () => {
+    setImportModal({ loading: true, list: [] });
+    try {
+      const r = await fetch(`${API}?limit=25`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setImportModal(null); showToast("노션 목록 실패: " + (d.error || r.status)); return; }
+      const have = new Set(meetings.map(m => m.notionPageId).filter(Boolean));
+      setImportModal({ loading: false, list: (d.meetings || []).map(m => ({ ...m, already: have.has(m.notionPageId) })) });
+    } catch (e) { setImportModal(null); showToast("노션 목록 실패: " + e.message); }
+  };
+  const importOne = async (row) => {
+    setImportModal(m => ({ ...m, loading: true, note: "회의 내용을 불러오는 중..." }));
+    try {
+      const r = await fetch(`${API}/${row.notionPageId}`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { showToast("불러오기 실패: " + (d.error || r.status)); setImportModal(m => ({ ...m, loading: false })); return; }
+      // 다시 가져오기일 수 있으므로 기존 레코드의 앱 전용 데이터(첨부·id)는 살린다.
+      const prevRec = meetings.find(x => x.notionPageId === d.notionPageId);
+      const rec = {
+        id: prevRec?.id || uid(), title: d.title || "(제목 없음)", date: d.date || todayYmd,
+        meetingType: d.meetingType || "", tags: d.tags || [], attendees: d.attendees || [],
+        summary: d.summary || "", items: d.items || [], memo: d.memo || "", actions: d.actions || [],
+        atts: prevRec?.atts || [], notionPageId: d.notionPageId, notionUrl: d.notionUrl || "",
+        createdAt: prevRec?.createdAt || Date.now(), updatedAt: Date.now(),
+      };
+      setMeetings(prev => [rec, ...prev.filter(x => x.notionPageId !== rec.notionPageId)]);
+      setImportModal(null);
+      showToast(`"${rec.title}" 회의록을 가져왔습니다`, "success");
+    } catch (e) { showToast("불러오기 실패: " + e.message); setImportModal(m => ({ ...m, loading: false })); }
+  };
+  // 액션 아이템 → 일정 캘린더
+  const actionToSchedule = (m, a) => {
+    if (!setTodos) return;
+    setTodos(prev => [...prev, {
+      id: Date.now() + Math.floor(Math.random() * 1000), date: a.due || m.date, endDate: "",
+      text: a.text + (a.owner ? ` (${a.owner})` : ""),
+      memo: `회의: ${m.title} (${m.date})`, done: !!a.done, createdAt: Date.now(), atts: [],
+    }]);
+    showToast("일정에 추가됐습니다", "success");
+  };
+  const allActionsToSchedule = (m) => {
+    const open = (m.actions || []).filter(a => !a.done);
+    if (!open.length) { showToast("보낼 액션 아이템이 없습니다"); return; }
+    if (!window.confirm(`미완료 액션 ${open.length}건을 일정에 추가할까요?`)) return;
+    open.forEach(a => actionToSchedule(m, a));
+  };
+
+  const q = search.trim().toLowerCase();
+  const filtered = meetings
+    .filter(m => !filterType || m.meetingType === filterType)
+    .filter(m => !filterTag || (m.tags || []).includes(filterTag))
+    .filter(m => !q || searchScore(q, [m.title, m.summary, (m.items || []).join(" "), (m.attendees || []).join(" "), m.memo]) > 0)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+  const openActions = meetings.reduce((s, m) => s + (m.actions || []).filter(a => !a.done).length, 0);
+  const notSynced = meetings.filter(m => !m.notionPageId).length;
+  const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16 };
+  const inp = { height: 38, padding: "0 12px", fontSize: 13, borderRadius: 10, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" };
+
+  // 편집 모달 내 항목 조작
+  const setE = (patch) => setEditing(e => ({ ...e, ...patch }));
+  const setItem = (i, v) => setEditing(e => ({ ...e, items: e.items.map((x, xi) => xi === i ? v : x) }));
+  const addItem = () => setEditing(e => ({ ...e, items: [...e.items, ""] }));
+  const delItem = (i) => setEditing(e => ({ ...e, items: e.items.filter((_, xi) => xi !== i).length ? e.items.filter((_, xi) => xi !== i) : [""] }));
+  const moveItem = (i, dir) => setEditing(e => {
+    const arr = [...e.items], j = i + dir;
+    if (j < 0 || j >= arr.length) return e;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    return { ...e, items: arr };
+  });
+  const setAction = (i, patch) => setEditing(e => ({ ...e, actions: e.actions.map((a, ai) => ai === i ? { ...a, ...patch } : a) }));
+  const addAction = () => setEditing(e => ({ ...e, actions: [...(e.actions || []), { text: "", owner: "", due: "", done: false }] }));
+  const delAction = (i) => setEditing(e => ({ ...e, actions: e.actions.filter((_, ai) => ai !== i) }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 상단 요약 + 노션 상태 */}
+      <div style={{ ...card, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 3 }}>회의록</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.4 }}>{meetings.length}건</div>
+        </div>
+        {openActions > 0 && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "5px 11px", borderRadius: 999 }}>
+            미완료 액션 {openActions}건
+          </span>
+        )}
+        <span style={{
+          fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 999,
+          background: notionStatus === "error" ? "rgba(239,68,68,.10)" : notionStatus === "off" ? "var(--surface2)" : "rgba(16,185,129,.10)",
+          color: notionStatus === "error" ? "#EF4444" : notionStatus === "off" ? "var(--text3)" : "#10B981",
+        }} title={notionMsg || "노션 「회의 진행 내역」 DB와 연동됩니다"}>
+          {notionStatus === "syncing" ? "노션 동기화 중…" : notionStatus === "error" ? `노션 오류 · ${notionMsg}` : notionStatus === "off" ? "노션 미설정" : "노션 연동"}
+        </span>
+        {notSynced > 0 && (
+          <button onClick={bulkPush} title="아직 노션에 없는 회의록을 일괄 업로드"
+            style={{ height: 32, padding: "0 12px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit" }}>
+            ↑ 노션에 올리기 ({notSynced})
+          </button>
+        )}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={openImport} title="노션 「회의 진행 내역」에서 회의록을 가져옵니다"
+            style={{ height: 38, padding: "0 14px", fontSize: 13, fontWeight: 700, borderRadius: 10, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="download" size={14}/>노션에서 가져오기</button>
+          <button className="btn-orange" onClick={openNew} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>+ 회의록 작성</button>
+        </div>
+      </div>
+
+      {/* 검색 + 필터 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="회의 제목·내용·참석자 검색 (초성 가능)"
+          style={{ ...inp, flex: "1 1 240px", minWidth: 200 }} />
+        <select value={filterType} onChange={e => setFilterType(e.target.value)} style={inp}>
+          <option value="">전체 유형</option>
+          {MEETING_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select value={filterTag} onChange={e => setFilterTag(e.target.value)} style={inp}>
+          <option value="">전체 분류</option>
+          {MEETING_TAGS.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+
+      {/* 목록 */}
+      {filtered.length === 0 ? (
+        <div style={{ ...card, padding: 32, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+          {meetings.length === 0
+            ? <>회의록이 없습니다. [+ 회의록 작성]으로 시작하거나, [노션에서 가져오기]로 기존 회의를 끌어오세요.</>
+            : <>조건에 맞는 회의록이 없습니다 — 전체 {meetings.length}건</>}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filtered.map(m => {
+            const open = (m.actions || []).filter(a => !a.done).length;
+            return (
+              <div key={m.id} onClick={() => openEdit(m)} style={{ ...card, cursor: "pointer", borderLeft: `3px solid ${MEETING_TYPE_COLOR[m.meetingType] || "var(--border)"}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{m.title}</span>
+                  {m.meetingType && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, color: MEETING_TYPE_COLOR[m.meetingType] || "var(--text3)", background: (MEETING_TYPE_COLOR[m.meetingType] || "#888") + "1A" }}>{m.meetingType}</span>}
+                  {(m.tags || []).map(t => <span key={t} style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 6, background: "var(--surface2)", color: "var(--text3)" }}>{t}</span>)}
+                  <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{m.date}</span>
+                </div>
+                {m.summary && <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.6 }}>{m.summary}</div>}
+                {/* 논의 항목 미리보기 — 건수만 보여주면 매번 열어봐야 해서 앞 3개를 바로 노출 */}
+                {(m.items || []).length > 0 && (
+                  <div style={{ marginTop: 8, paddingLeft: 2 }}>
+                    {m.items.slice(0, 3).map((it, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, fontSize: 12, color: "var(--text2)", lineHeight: 1.65 }}>
+                        <span style={{ color: "var(--text3)", flexShrink: 0, minWidth: 13 }}>{i + 1}.</span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it}</span>
+                      </div>
+                    ))}
+                    {m.items.length > 3 && (
+                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3, paddingLeft: 19 }}>… 외 {m.items.length - 3}항목 (클릭해서 전체 보기)</div>
+                    )}
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap", fontSize: 11, color: "var(--text3)" }}>
+                  {(m.items || []).length > 0 && <span>논의 {m.items.length}항목</span>}
+                  {open > 0 && <span style={{ color: "#DB6B2E", fontWeight: 700 }}>미완료 액션 {open}건</span>}
+                  {(m.attendees || []).length > 0 && <span>참석 {m.attendees.join(", ")}</span>}
+                  {(m.atts || []).length > 0 && <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="paperclip" size={11}/>{m.atts.length}</span>}
+                  <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8 }} onClick={e => e.stopPropagation()}>
+                    {m.notionUrl
+                      ? <a href={m.notionUrl} target="_blank" rel="noreferrer" style={{ color: "#10B981", fontWeight: 700, textDecoration: "none" }}>노션에서 열기 ↗</a>
+                      : <span style={{ color: "var(--text3)" }}>노션 미연결</span>}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 노션에서 가져오기 모달 */}
+      {importModal && (
+        <div onClick={() => !importModal.loading && setImportModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", padding: 20, border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>노션에서 가져오기</div>
+            <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14 }}>「회의 진행 내역」 최근 25건입니다. 선택하면 본문·액션까지 가져옵니다.</div>
+            {importModal.loading ? (
+              <div style={{ padding: 28, textAlign: "center", color: "var(--text3)", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Icon name="refresh" size={14} style={{ animation: "spin 1.4s linear infinite" }}/>{importModal.note || "노션에서 목록을 불러오는 중..."}
+              </div>
+            ) : (importModal.list || []).length === 0 ? (
+              <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>노션에 회의록이 없습니다</div>
+            ) : importModal.list.map(row => (
+              // 이미 가져온 건도 다시 누를 수 있어야 한다 — 예전에 잘못 가져왔거나
+              // 노션에서 내용이 바뀐 경우 최신본으로 덮어쓸 방법이 필요하다.
+              <div key={row.notionPageId} onClick={() => importOne(row)}
+                title={row.already ? "다시 가져와 최신 내용으로 덮어씁니다" : "이 회의록을 가져옵니다"}
+                style={{ padding: "11px 12px", cursor: "pointer", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: "var(--surface2)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.title}</span>
+                  {row.already && <span style={{ fontSize: 10, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,.10)", padding: "2px 7px", borderRadius: 999, flexShrink: 0 }}>다시 가져오기</span>}
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text3)", flexShrink: 0 }}>{row.date}</span>
+                </div>
+                {row.summary && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.summary}</div>}
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button onClick={() => setImportModal(null)} style={{ flex: 1, padding: "11px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 작성/수정 모달 */}
+      {editing && (
+        <div onClick={() => setEditing(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 620, maxHeight: "90vh", overflowY: "auto", padding: 20, border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)" }}>{editing.id ? "회의록 수정" : "회의록 작성"}</span>
+              {editing.notionUrl && <a href={editing.notionUrl} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: "#10B981", fontWeight: 700, textDecoration: "none" }}>노션 ↗</a>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input value={editing.title} onChange={e => setE({ title: e.target.value })} placeholder="회의 제목" style={{ ...inp, fontSize: 15, fontWeight: 700, height: 44 }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <label style={{ fontSize: 11, color: "var(--text3)" }}>날짜
+                  <input type="date" value={editing.date} onChange={e => setE({ date: e.target.value })} style={{ ...inp, width: "100%", marginTop: 3 }} /></label>
+                <label style={{ fontSize: 11, color: "var(--text3)" }}>회의 유형
+                  <select value={editing.meetingType} onChange={e => setE({ meetingType: e.target.value })} style={{ ...inp, width: "100%", marginTop: 3 }}>
+                    <option value="">(없음)</option>
+                    {MEETING_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select></label>
+              </div>
+              {/* 관련 분류 — 노션 multi_select */}
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 5 }}>관련 분류</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {MEETING_TAGS.map(t => {
+                    const on = (editing.tags || []).includes(t);
+                    return (
+                      <button key={t} onClick={() => setE({ tags: on ? editing.tags.filter(x => x !== t) : [...(editing.tags || []), t] })}
+                        style={{ padding: "5px 11px", fontSize: 12, fontWeight: on ? 800 : 600, borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                          border: `1px solid ${on ? "#DB6B2E" : "var(--divider)"}`, background: on ? "rgba(219,107,46,.10)" : "var(--surface2)", color: on ? "#DB6B2E" : "var(--text3)" }}>{t}</button>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* 참석자 — 노션 person 속성은 계정 연결이라 앱에선 이름 텍스트로 관리 */}
+              <label style={{ fontSize: 11, color: "var(--text3)" }}>참석자 <span style={{ color: "var(--text3)" }}>(쉼표로 구분 · 노션엔 본문 첫 줄로 기록)</span>
+                <input value={(editing.attendees || []).join(", ")} onChange={e => setE({ attendees: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })}
+                  placeholder="예: 나방봉, 안팀장, 김대리" list="frw-meeting-people" style={{ ...inp, width: "100%", marginTop: 3 }} />
+              </label>
+              <datalist id="frw-meeting-people">
+                {[...new Set(meetings.flatMap(m => m.attendees || []).concat(clients.map(c => c.name).filter(Boolean)))].slice(0, 60).map(n => <option key={n} value={n}/>)}
+              </datalist>
+              <label style={{ fontSize: 11, color: "var(--text3)" }}>주요 결정 &amp; 액션 아이템 <span>(노션 속성으로 저장 — 한 줄 요약)</span>
+                <textarea value={editing.summary} onChange={e => setE({ summary: e.target.value })} rows={2} placeholder="예: 추후 단가는 재미팅해서 결정, 가온 발주량까지 추가발주 예정"
+                  style={{ ...inp, width: "100%", height: "auto", padding: 10, marginTop: 3, resize: "vertical", lineHeight: 1.6 }} /></label>
+
+              {/* 논의 내용 — 번호 항목. 노션 본문에 numbered list로 저장 */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text1)" }}>회의록 (논의 내용)</span>
+                  <button onClick={addItem} style={{ marginLeft: "auto", height: 28, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit" }}>+ 항목</button>
+                </div>
+                {(editing.items || []).map((it, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 6 }}>
+                    <span style={{ width: 20, textAlign: "right", fontSize: 12, fontWeight: 700, color: "var(--text3)", paddingTop: 10, flexShrink: 0 }}>{i + 1}.</span>
+                    <textarea value={it} onChange={e => setItem(i, e.target.value)} rows={1}
+                      ref={el => { if (el) { el.style.height = "auto"; el.style.height = Math.max(38, el.scrollHeight) + "px"; } }}
+                      placeholder="논의 내용을 입력하세요"
+                      style={{ ...inp, flex: 1, height: "auto", minHeight: 38, padding: "9px 10px", resize: "none", overflow: "hidden", lineHeight: 1.5 }} />
+                    <span style={{ display: "inline-flex", flexDirection: "column", gap: 2, flexShrink: 0 }}>
+                      <button onClick={() => moveItem(i, -1)} disabled={i === 0} title="위로" style={{ width: 24, height: 18, border: "none", borderRadius: 4, background: "var(--surface2)", color: "var(--text3)", cursor: i === 0 ? "default" : "pointer", fontSize: 10, opacity: i === 0 ? .3 : 1, fontFamily: "inherit" }}>▲</button>
+                      <button onClick={() => moveItem(i, 1)} disabled={i === editing.items.length - 1} title="아래로" style={{ width: 24, height: 18, border: "none", borderRadius: 4, background: "var(--surface2)", color: "var(--text3)", cursor: i === editing.items.length - 1 ? "default" : "pointer", fontSize: 10, opacity: i === editing.items.length - 1 ? .3 : 1, fontFamily: "inherit" }}>▼</button>
+                    </span>
+                    <button onClick={() => delItem(i)} title="삭제" style={{ width: 26, height: 38, border: "none", borderRadius: 6, background: "transparent", color: "#EF4444", cursor: "pointer", fontSize: 13, flexShrink: 0, fontFamily: "inherit" }}>✕</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* 액션 아이템 체크리스트 */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text1)" }}>액션 아이템</span>
+                  <button onClick={addAction} style={{ marginLeft: "auto", height: 28, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit" }}>+ 할 일</button>
+                </div>
+                {(editing.actions || []).length === 0 && <div style={{ fontSize: 11, color: "var(--text3)", padding: "4px 0" }}>회의에서 나온 할 일을 담당자·기한과 함께 적어두면 일정으로 보낼 수 있습니다.</div>}
+                {(editing.actions || []).map((a, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                    <input type="checkbox" checked={!!a.done} onChange={e => setAction(i, { done: e.target.checked })} style={{ flexShrink: 0 }} />
+                    <input value={a.text} onChange={e => setAction(i, { text: e.target.value })} placeholder="할 일" style={{ ...inp, flex: "2 1 160px", minWidth: 130, textDecoration: a.done ? "line-through" : "none" }} />
+                    <input value={a.owner || ""} onChange={e => setAction(i, { owner: e.target.value })} placeholder="담당자" style={{ ...inp, flex: "1 1 90px", minWidth: 80 }} />
+                    <input type="date" value={a.due || ""} onChange={e => setAction(i, { due: e.target.value })} title="기한" style={{ ...inp, flex: "1 1 130px", minWidth: 125 }} />
+                    <button onClick={() => delAction(i)} title="삭제" style={{ width: 26, height: 38, border: "none", borderRadius: 6, background: "transparent", color: "#EF4444", cursor: "pointer", fontSize: 13, flexShrink: 0, fontFamily: "inherit" }}>✕</button>
+                  </div>
+                ))}
+                {editing.id && (editing.actions || []).some(a => !a.done) && (
+                  <button onClick={() => allActionsToSchedule(editing)} title="미완료 액션을 일정 캘린더로 보냅니다"
+                    style={{ marginTop: 4, height: 32, padding: "0 12px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "#DB6B2E", cursor: "pointer", fontFamily: "inherit" }}>
+                    미완료 액션을 일정에 추가
+                  </button>
+                )}
+              </div>
+
+              <label style={{ fontSize: 11, color: "var(--text3)" }}>자유 메모 (선택)
+                <textarea value={editing.memo} onChange={e => setE({ memo: e.target.value })} rows={3} placeholder="번호로 정리하기 애매한 내용"
+                  style={{ ...inp, width: "100%", height: "auto", padding: 10, marginTop: 3, resize: "vertical", lineHeight: 1.6 }} /></label>
+              <AttachmentField value={editing.atts || []} onChange={arr => setE({ atts: arr })} />
+              <div style={{ fontSize: 11, color: "var(--text3)" }}>· 첨부는 앱에만 보관됩니다 (노션 본문에는 개수만 표기).</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              {editing.id && (
+                <button onClick={() => delRec(editing)} style={{ padding: "11px 16px", border: "none", borderRadius: 10, background: "rgba(239,68,68,0.10)", color: "#EF4444", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>삭제</button>
+              )}
+              <button onClick={() => setEditing(null)} style={{ padding: "11px 16px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>취소</button>
+              <button onClick={saveRec} className="btn-orange" style={{ flex: 1, padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>
+                {editing.id ? "저장 (노션 반영)" : "저장 후 노션에 생성"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── 세무 관리 탭 ───
+// 사업장 3곳(나정·엔제이세이프티·엔제이)의 세금 납부 일정·금액·증빙(납부서 등)을 한곳에서 관리.
+// 세무법인 안내 메일을 받으면 여기 기록하고, [일정 추가]로 캘린더에도 올린다.
+const TAX_BIZ = ["나정엔터프라이즈", "주식회사 엔제이세이프티", "엔제이"];
+const TAX_TYPES = ["부가가치세", "원천세", "법인세", "종합소득세", "지방소득세", "4대보험", "기타"];
+// 연간 주요 신고·납부 기한 (12월 결산 법인 기준 일반 안내)
+const TAX_CALENDAR_HINTS = [
+  ["부가가치세", "1기 예정 4/25 · 1기 확정 7/25 · 2기 예정 10/25 · 2기 확정 익년 1/25"],
+  ["원천세", "매월 10일 (반기납부 특례: 7/10, 익년 1/10)"],
+  ["법인세", "3/31 신고·납부 · 중간예납 8/31"],
+  ["종합소득세", "5/31 (개인사업자)"],
+  ["지방소득세", "법인 4/30 · 개인 5/31"],
+];
+
+function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const todayYmd = ymd(new Date());
+  const thisYear = String(new Date().getFullYear());
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const [filterYear, setFilterYear] = React.useState(thisYear);
+  const [filterBiz, setFilterBiz] = React.useState("");
+  const [filterStatus, setFilterStatus] = React.useState(""); // "" 전체 | "unpaid" 미납 | "paid" 완납
+  const [editing, setEditing] = React.useState(null); // 레코드 draft or null
+
+  // D-day: 음수면 경과. paidDate 있으면 완납.
+  const dday = (due) => Math.ceil((new Date(due) - new Date(todayYmd)) / 86400000);
+  const statusOf = (r) => r.paidDate ? "완납" : (dday(r.dueDate) < 0 ? "기한 경과" : "예정");
+  const statusColor = { "완납": "#10B981", "기한 경과": "#EF4444", "예정": "#DB6B2E" };
+
+  const years = [...new Set([thisYear, ...taxes.map(r => (r.dueDate || "").slice(0, 4)).filter(Boolean)])].sort().reverse();
+  const filtered = taxes
+    .filter(r => (filterYear === "all" || (r.dueDate || "").startsWith(filterYear))
+      && (!filterBiz || r.biz === filterBiz)
+      && (!filterStatus || (filterStatus === "paid" ? !!r.paidDate : !r.paidDate)))
+    .sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || ""));
+  const upcoming = taxes.filter(r => !r.paidDate).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || "")).slice(0, 3);
+  // 연도 합계 (필터 연도 기준): 사업장별 총액·완납액
+  const yearRecs = taxes.filter(r => filterYear === "all" || (r.dueDate || "").startsWith(filterYear));
+  const bizTotals = TAX_BIZ.map(b => {
+    const rs = yearRecs.filter(r => r.biz === b);
+    return { biz: b, total: rs.reduce((s, r) => s + Number(r.amount || 0), 0), paid: rs.filter(r => r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0) };
+  }).filter(t => t.total > 0);
+
+  // 압축 금액 표기 (히어로·차트용) — 1.6억 / 4,167만
+  const fmtCompact = (n) => {
+    n = Number(n || 0);
+    if (n >= 100000000) { const v = n / 100000000; return (v >= 10 ? Math.round(v).toLocaleString() : Math.round(v * 10) / 10) + "억"; }
+    if (n >= 10000) return Math.round(n / 10000).toLocaleString() + "만";
+    return n.toLocaleString();
+  };
+  // 미납 히어로 — 연도 필터와 무관하게 "안 낸 돈 전부"가 기준 (미납은 해가 바뀌어도 미납이므로)
+  const unpaidAll = taxes.filter(r => !r.paidDate).sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
+  const unpaidSum = unpaidAll.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const overdueAll = unpaidAll.filter(r => dday(r.dueDate) < 0);
+  // 월별 타임라인 — 연도·사업장 필터 반영, 상태 필터는 무시(완납/미납을 막대 색으로 함께 보여줌)
+  const chartYear = filterYear === "all" ? thisYear : filterYear;
+  const monthData = Array.from({ length: 12 }, (_, i) => {
+    const mm = `${chartYear}-${String(i + 1).padStart(2, "0")}`;
+    const rs = taxes.filter(r => (r.dueDate || "").startsWith(mm) && (!filterBiz || r.biz === filterBiz));
+    return {
+      paid: rs.filter(r => r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0),
+      unpaid: rs.filter(r => !r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0),
+    };
+  });
+  const monthMax = Math.max(...monthData.map(m => m.paid + m.unpaid), 1);
+  // 월별 그룹 리스트 — 연초→연말 순으로 "YYYY-MM" 단위 묶음
+  const sortedAsc = [...filtered].sort((a, b) => (a.dueDate || "").localeCompare(b.dueDate || ""));
+  const monthGroups = [];
+  for (const r of sortedAsc) {
+    const key = (r.dueDate || "").slice(0, 7) || "기타";
+    const g = monthGroups[monthGroups.length - 1];
+    if (g && g.key === key) g.recs.push(r); else monthGroups.push({ key, recs: [r] });
+  }
+
+  const openNew = () => setEditing({ id: null, biz: TAX_BIZ[0], taxType: "부가가치세", period: "", amount: "", dueDate: todayYmd, paidDate: "", memo: "", atts: [] });
+  const saveRec = () => {
+    if (!editing) return;
+    if (!editing.dueDate) { showToast("납부기한을 입력하세요"); return; }
+    const amt = Number(String(editing.amount).replace(/[^\d.-]/g, ""));
+    if (!amt) { showToast("금액을 입력하세요"); return; }
+    const rec = { ...editing, amount: amt, id: editing.id || uid(), createdAt: editing.createdAt || Date.now() };
+    setTaxes(prev => editing.id ? prev.map(r => r.id === editing.id ? rec : r) : [rec, ...prev]);
+    setEditing(null);
+    showToast("세무 기록이 저장됐습니다", "success");
+  };
+  const delRec = (id) => {
+    if (!window.confirm("이 세무 기록을 삭제할까요?")) return;
+    setTaxes(prev => prev.filter(r => r.id !== id));
+    setEditing(null);
+  };
+  const togglePaid = (id) => setTaxes(prev => prev.map(r => r.id === id ? { ...r, paidDate: r.paidDate ? "" : todayYmd } : r));
+  const addToSchedule = (r) => {
+    if (!setTodos) return;
+    setTodos(prev => [...prev, { id: Date.now(), date: r.dueDate, endDate: "", text: `${r.taxType} 납부 — ${r.biz} ${fmt(r.amount)}원`, memo: r.period ? `귀속: ${r.period}` : "", done: false, createdAt: Date.now(), atts: [] }]);
+    showToast("일정에 추가됐습니다 — 일정 탭에서 확인하세요", "success");
+  };
+
+  // ── 메일에서 가져오기 — 세무법인 안내 메일을 Claude가 읽어 납부 정보 자동 추출 ──
+  // Gmail 토큰은 메일 탭이 발급·저장한 것(frw_gmail_token)을 재사용. 만료 시 메일 탭에서 재로그인.
+  const [mailImport, setMailImport] = React.useState(null); // null | {step:"list"|"preview", ...}
+  const gmailToken = () => {
+    try { const t = JSON.parse(localStorage.getItem("frw_gmail_token") || "null"); return (t && t.access_token && Date.now() < t.expires_at - 30000) ? t.access_token : null; } catch { return null; }
+  };
+  const gmailGet = async (path) => {
+    const tk = gmailToken();
+    if (!tk) throw new Error("NO_TOKEN");
+    const r = await fetch(`https://gmail.googleapis.com/gmail/v1${path}`, { headers: { Authorization: `Bearer ${tk}` } });
+    if (!r.ok) throw new Error(r.status === 401 ? "NO_TOKEN" : `Gmail API ${r.status}`);
+    return r.json();
+  };
+  const openMailImport = async () => {
+    if (!gmailToken()) { showToast("메일 탭에서 Google 로그인을 먼저 해주세요 (토큰 만료 시 재로그인)"); return; }
+    // Claude API 키는 필수가 아니다 — 기본은 정규식 파싱, 키가 있을 때만 실패분을 AI로 재시도.
+    setMailImport({ step: "list", mails: [], loading: true });
+    try {
+      const q = encodeURIComponent("(세무 OR 부가세 OR 부가가치세 OR 납부서 OR 원천세 OR 법인세) newer_than:90d");
+      const list = await gmailGet(`/users/me/messages?maxResults=10&q=${q}`);
+      const ids = (list.messages || []).map(m => m.id);
+      const metas = await Promise.all(ids.map(id => gmailGet(`/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`)));
+      const mails = metas.map(m => {
+        const h = (name) => (m.payload?.headers || []).find(x => x.name === name)?.value || "";
+        return { id: m.id, subject: h("Subject"), from: h("From"), date: h("Date"), snippet: m.snippet || "" };
+      });
+      setMailImport({ step: "list", mails, loading: false });
+    } catch (e) {
+      setMailImport(null);
+      showToast(e.message === "NO_TOKEN" ? "Gmail 로그인이 만료됐습니다 — 메일 탭에서 재로그인해주세요" : "메일 목록 실패: " + e.message);
+    }
+  };
+  // ── 세무 안내 메일 정규식 파싱 (Claude API 키 불필요) ──
+  // 세무법인 메일은 "사업장명 : 1,234,560원   7월 27일까지 납부" 형태로 형식이 일정해서
+  // 정규식으로 정확히 뽑을 수 있다. 키가 없어도 동작하고 비용도 외부 전송도 없다.
+  // 형식이 바뀌어 못 읽으면 (키가 있을 때만) AI로 재시도하고, 그것도 없으면 수동 입력을 안내한다.
+  const TAX_TYPE_HINTS = [
+    [/부가\s*가치\s*세|부가세/, "부가가치세"],
+    [/원천\s*세/, "원천세"],
+    [/법인\s*세/, "법인세"],
+    [/종합\s*소득\s*세|종소세/, "종합소득세"],
+    [/지방\s*소득\s*세/, "지방소득세"],
+    [/4대\s*보험|사대\s*보험/, "4대보험"],
+  ];
+  const guessTaxType = (t) => (TAX_TYPE_HINTS.find(([re]) => re.test(t)) || [null, "기타"])[1];
+  const guessPeriod = (t) => {
+    const m = t.match(/(20\d{2})\s*년\s*([12])\s*기\s*(확정|예정)?/);
+    return m ? `${m[1]}년 ${m[2]}기${m[3] || ""}` : "";
+  };
+  // HTML만 온 메일도 줄 구조를 살려야 줄 단위 파싱이 된다 (블록 태그 → 줄바꿈).
+  const htmlToLines = (html) => html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<(br|\/div|\/p|\/tr|\/li)[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  const parseTaxMail = (subject, rawText, mailDate) => {
+    const head = `${subject}\n${rawText}`;
+    const taxType = guessTaxType(head);
+    const period = guessPeriod(head);
+    const md = new Date(mailDate);
+    const mailYear = isNaN(md) ? new Date().getFullYear() : md.getFullYear();
+    const mailMonth = isNaN(md) ? new Date().getMonth() + 1 : md.getMonth() + 1;
+    const out = [];
+    for (const line of String(rawText).split(/\r?\n/)) {
+      // 사업장명 : 금액원 … N월 N일   (구분자는 : 또는 전각 ：)
+      const m = line.match(/^\s*([^:：]{2,40}?)\s*[:：]\s*([\d,]+)\s*원(?:[^0-9]{0,20}(\d{1,2})\s*월\s*(\d{1,2})\s*일)?/);
+      if (!m) continue;
+      const biz = bizOfName(m[1]);
+      if (!biz) continue; // 사업장으로 식별 안 되는 줄(인사말 등)은 건너뜀
+      const amount = Number(m[2].replace(/,/g, ""));
+      if (!amount) continue;
+      let dueDate = "";
+      if (m[3] && m[4]) {
+        const mo = Number(m[3]), day = Number(m[4]);
+        // 안내 메일의 기한은 앞으로의 날짜 — 발신월보다 이르면 다음 해로 본다(12월 발신 → 1월 납부).
+        const y = mo < mailMonth ? mailYear + 1 : mailYear;
+        dueDate = `${y}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+      out.push({ biz, taxType, period, amount, dueDate: dueDate || todayYmd, memo: "", checked: true });
+    }
+    return out;
+  };
+
+  const pickMail = async (mail) => {
+    setMailImport({ step: "list", mails: [], loading: true, note: "메일 본문에서 납부 정보를 찾는 중..." });
+    try {
+      const full = await gmailGet(`/users/me/messages/${mail.id}?format=full`);
+      let text = "", html = "";
+      const walk = (p) => {
+        if (!p) return;
+        if (p.mimeType === "text/plain" && p.body?.data) text += b64UrlDecode(p.body.data);
+        else if (p.mimeType === "text/html" && p.body?.data) html += b64UrlDecode(p.body.data);
+        else if (p.parts) p.parts.forEach(walk);
+      };
+      walk(full.payload);
+      // 첨부(신고서·납부서 PDF) 목록 수집 — 확정 단계에서 사업장이 맞는 것만 내려받아 붙인다.
+      const mailAtts = [];
+      const walkAtt = (p) => {
+        if (!p) return;
+        if (p.filename && p.body?.attachmentId) {
+          mailAtts.push({ filename: p.filename, attachmentId: p.body.attachmentId, mime: p.mimeType || "application/octet-stream", size: p.body.size || 0 });
+        }
+        if (p.parts) p.parts.forEach(walkAtt);
+      };
+      walkAtt(full.payload);
+      // 1차: 정규식 파싱 — 줄 구조가 필요하므로 공백을 뭉개지 않은 원문을 쓴다.
+      const rawText = text || htmlToLines(html);
+      const byRegex = parseTaxMail(mail.subject, rawText, mail.date);
+      if (byRegex.length > 0) {
+        setMailImport({ step: "preview", records: byRegex, mailSubject: mail.subject, mailId: mail.id, mailAtts, source: "정규식" });
+        return;
+      }
+      // 2차: 형식이 달라 못 읽음 → Claude API 키가 있을 때만 AI로 재시도.
+      if (!apiKey.trim()) {
+        setMailImport(null);
+        showToast("이 메일에서 납부 정보를 자동으로 찾지 못했습니다 — [+ 세무 기록 추가]로 직접 입력해주세요");
+        return;
+      }
+      setMailImport({ step: "list", mails: [], loading: true, note: "형식이 달라 AI로 다시 읽는 중..." });
+      const body = rawText.replace(/\s+/g, " ").slice(0, 6000);
+      const prompt = `다음은 세무 관련 이메일입니다. 세금 납부 정보를 추출해 JSON 배열로만 응답하세요.
+각 항목: {"biz":"사업장명","taxType":"세목","period":"귀속","amount":숫자,"dueDate":"YYYY-MM-DD","memo":"확인·조치가 필요한 특이사항 요약 (없으면 빈 문자열)"}
+규칙:
+- biz는 반드시 다음 중 가장 가까운 것으로: ${TAX_BIZ.join(", ")}
+- taxType은 반드시 다음 중 하나: ${TAX_TYPES.join(", ")}
+- 기한에 연도가 없으면 메일 날짜(${mail.date})를 기준으로 추정
+- 납부 정보가 없으면 []
+JSON 외 텍스트 금지.
+
+제목: ${mail.subject}
+본문: ${body}`;
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
+      });
+      if (!res.ok) throw new Error(`Claude API ${res.status}`);
+      const data = await res.json();
+      const raw = (data.content || []).map(c => c.text || "").join("");
+      const m = raw.match(/\[[\s\S]*\]/);
+      const parsed = m ? JSON.parse(m[0]) : [];
+      if (!Array.isArray(parsed) || parsed.length === 0) { setMailImport(null); showToast("이 메일에서 납부 정보를 찾지 못했습니다"); return; }
+      const records = parsed.map(p => ({
+        biz: TAX_BIZ.includes(p.biz) ? p.biz : TAX_BIZ[0],
+        taxType: TAX_TYPES.includes(p.taxType) ? p.taxType : "기타",
+        period: String(p.period || ""), amount: Number(p.amount) || 0,
+        dueDate: /^\d{4}-\d{2}-\d{2}$/.test(p.dueDate || "") ? p.dueDate : todayYmd,
+        memo: String(p.memo || ""), checked: true,
+      })).filter(r => r.amount > 0);
+      setMailImport({ step: "preview", records, mailSubject: mail.subject, mailId: mail.id, mailAtts, source: "AI" });
+    } catch (e) {
+      setMailImport(null);
+      showToast(e.message === "NO_TOKEN" ? "Gmail 로그인이 만료됐습니다 — 메일 탭에서 재로그인해주세요" : "추출 실패: " + e.message);
+    }
+  };
+  // 문자열(첨부 파일명 / 메일 본문의 사업장 칸)에서 사업장 판별.
+  // "엔제이"가 "주식회사 엔제이세이프티"의 부분문자열이라 반드시 긴 이름부터 검사해야
+  // 엔제이세이프티 건이 엔제이로 잘못 매칭되지 않는다.
+  const attNorm = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
+  const bizOfName = (name) => {
+    const f = attNorm(name);
+    if (!f) return null;
+    const byLen = [...TAX_BIZ].sort((a, b) => attNorm(b).length - attNorm(a).length);
+    return byLen.find(b => f.includes(attNorm(b))) || null;
+  };
+  const confirmImport = async () => {
+    const picked = (mailImport?.records || []).filter(r => r.checked);
+    if (picked.length === 0) { showToast("가져올 항목을 선택하세요"); return; }
+    // (사업장+세목+귀속+기한)이 같으면 중복으로 보고 건너뜀
+    const keyOf = (r) => `${r.biz}|${r.taxType}|${r.period}|${r.dueDate}`;
+    const existing = new Set(taxes.map(keyOf));
+    const fresh = picked.filter(r => !existing.has(keyOf(r)));
+    const dupCount = picked.length - fresh.length;
+    if (fresh.length === 0) {
+      setMailImport(null);
+      showToast("모두 이미 등록된 항목입니다 (중복 제외)", "info");
+      return;
+    }
+    // ── 납부서·신고서 PDF 자동 첨부 ──
+    // 파일명의 사업장이 일치하는 첨부만 내려받아 붙인다. 1MB 초과·개수 초과는 조용히 건너뛰지
+    // 않고 건너뛴 수를 토스트로 알린다(공유 드라이브로 안내되도록).
+    const srcAtts = mailImport?.mailAtts || [];
+    const msgId = mailImport?.mailId;
+    const attsByBiz = {};
+    let skipped = 0;
+    if (srcAtts.length > 0 && msgId) {
+      setMailImport(m => ({ ...m, importing: true }));
+      const wanted = new Set(fresh.map(r => r.biz));
+      for (const a of srcAtts) {
+        const biz = bizOfName(a.filename);
+        if (!biz || !wanted.has(biz)) continue;
+        if ((attsByBiz[biz] || []).length >= ATT_MAX_COUNT) { skipped++; continue; }
+        if (a.size > ATT_MAX_FILE) { skipped++; continue; }
+        try {
+          const got = await gmailGet(`/users/me/messages/${msgId}/attachments/${a.attachmentId}`);
+          const b64 = String(got.data || "").replace(/-/g, "+").replace(/_/g, "/");
+          if (!b64) { skipped++; continue; }
+          (attsByBiz[biz] = attsByBiz[biz] || []).push({
+            id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+            kind: "file", name: a.filename, mime: a.mime, size: a.size,
+            dataUrl: `data:${a.mime};base64,${b64}`,
+          });
+        } catch { skipped++; }
+      }
+    }
+    const attachedCount = Object.values(attsByBiz).reduce((s, arr) => s + arr.length, 0);
+    setTaxes(prev => [
+      ...fresh.map(r => ({
+        id: uid(), biz: r.biz, taxType: r.taxType, period: r.period, amount: r.amount,
+        dueDate: r.dueDate, paidDate: "", memo: r.memo,
+        atts: (attsByBiz[r.biz] || []).slice(0, ATT_MAX_COUNT), createdAt: Date.now(),
+      })),
+      ...prev,
+    ]);
+    setMailImport(null);
+    showToast(
+      `${fresh.length}건을 가져왔습니다` +
+      (attachedCount > 0 ? ` · 첨부 ${attachedCount}개` : "") +
+      (dupCount > 0 ? ` · 중복 ${dupCount}건 제외` : "") +
+      (skipped > 0 ? ` · 첨부 ${skipped}개는 1MB 초과 등으로 제외` : ""),
+      "success");
+  };
+
+  const card = { background: "var(--surface)", borderRadius: 14, border: "1px solid var(--border)", padding: 16 };
+  const inp = { height: 38, padding: "0 10px", fontSize: 13, borderRadius: 8, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 미납 총액 히어로 — 탭을 열면 "앞으로 내야 할 돈"이 가장 먼저 보인다 */}
+      <div style={{ ...card, borderLeft: `3px solid ${unpaidAll.length ? "#DB6B2E" : "#10B981"}`, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        {unpaidAll.length === 0 ? (
+          <>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#10B981", marginBottom: 3 }}>미납 세금 없음</div>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.5 }}>모두 완납 ✓</div>
+            </div>
+            <div style={{ marginLeft: "auto", fontSize: 12, color: "var(--text3)" }}>등록된 세금 {taxes.length}건이 전부 납부 완료 상태입니다</div>
+          </>
+        ) : (
+          <>
+            <div style={{ minWidth: 180 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#DB6B2E", marginBottom: 3 }}>미납 세금 · {unpaidAll.length}건</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.5, fontVariantNumeric: "tabular-nums" }}>{fmt(unpaidSum)}원</div>
+            </div>
+            {overdueAll.length > 0 && (
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#EF4444", background: "rgba(239,68,68,0.10)", padding: "5px 11px", borderRadius: 999 }}>
+                기한 경과 {overdueAll.length}건 · {fmtCompact(overdueAll.reduce((s, r) => s + Number(r.amount || 0), 0))}원
+              </span>
+            )}
+            <div style={{ marginLeft: "auto", textAlign: "right" }}>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 2 }}>다음 납부</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
+                {(() => { const d = dday(unpaidAll[0].dueDate); return d < 0 ? `${-d}일 경과` : d === 0 ? "오늘" : `D-${d}`; })()} · {unpaidAll[0].dueDate.slice(5).replace("-", "/")} {fmtCompact(unpaidAll[0].amount)}원
+              </div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 1 }}>{unpaidAll[0].taxType} — {unpaidAll[0].biz}</div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* 다가오는 납부 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+        {upcoming.length === 0 ? (
+          <div style={{ ...card, color: "var(--text3)", fontSize: 13 }}>미납 항목이 없습니다 ✓</div>
+        ) : upcoming.map(r => {
+          const d = dday(r.dueDate);
+          return (
+            <div key={r.id} style={{ ...card, borderLeft: `3px solid ${d < 0 ? "#EF4444" : d <= 7 ? "#DB6B2E" : "var(--border)"}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: d < 0 ? "#EF4444" : "#DB6B2E" }}>{d < 0 ? `${-d}일 경과` : d === 0 ? "오늘 마감" : `D-${d}`}</span>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>{r.dueDate}</span>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", marginBottom: 2 }}>{r.taxType} — {r.biz}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{fmt(r.amount)}원</div>
+              {r.period && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{r.period}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 필터 + 추가 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <select value={filterYear} onChange={e => setFilterYear(e.target.value)} style={inp}>
+          <option value="all">전체 연도</option>
+          {years.map(y => <option key={y} value={y}>{y}년</option>)}
+        </select>
+        <select value={filterBiz} onChange={e => setFilterBiz(e.target.value)} style={inp}>
+          <option value="">전체 사업장</option>
+          {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        {/* 납부 상태 필터 — 미납분만 추려 합계를 보는 용도 */}
+        <div style={{ display: "inline-flex", background: "var(--surface2)", border: "1px solid var(--divider)", borderRadius: 10, padding: 2, height: 38 }}>
+          {[["", "전체"], ["unpaid", "미납"], ["paid", "완납"]].map(([v, label]) => (
+            <button key={v} onClick={() => setFilterStatus(v)}
+              style={{
+                padding: "0 13px", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                fontSize: 12, fontWeight: filterStatus === v ? 800 : 600,
+                background: filterStatus === v ? "var(--surface)" : "transparent",
+                color: filterStatus === v ? (v === "unpaid" ? "#DB6B2E" : v === "paid" ? "#10B981" : "var(--text1)") : "var(--text3)",
+                boxShadow: filterStatus === v ? "var(--elev-1, 0 1px 3px rgba(0,0,0,.12))" : "none",
+              }}>{label}</button>
+          ))}
+        </div>
+        <div style={{ flex: 1 }} />
+        <button onClick={openMailImport} title="세무법인 안내 메일에서 납부 정보를 자동으로 읽어옵니다"
+          style={{ height: 38, padding: "0 14px", fontSize: 13, fontWeight: 700, borderRadius: 10, border: "1.5px solid var(--divider)", background: "var(--surface)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="mail" size={14}/>메일에서 가져오기</button>
+        <button className="btn-orange" onClick={openNew} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>+ 세무 기록 추가</button>
+      </div>
+
+      {/* 월별 세금 부담 타임라인 — 한 해 자금 소요가 어느 달에 몰리는지 한눈에.
+          완납은 초록(연하게)·미납은 주황 스택 막대, 막대 클릭 시 아래 해당 월 그룹으로 스크롤 */}
+      {monthData.some(m => m.paid + m.unpaid > 0) && (
+        <div style={card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>월별 세금 부담 · {chartYear}년{filterBiz ? ` · ${filterBiz}` : ""}</div>
+            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 12, fontSize: 11, color: "var(--text3)" }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: "#DB6B2E" }}/>미납</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 9, height: 9, borderRadius: 3, background: "#10B981", opacity: .55 }}/>완납</span>
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 6, marginTop: 14 }}>
+            {monthData.map((m, i) => {
+              const total = m.paid + m.unpaid;
+              const isNow = Number(chartYear) === new Date().getFullYear() && new Date().getMonth() === i;
+              const mmKey = `${chartYear}-${String(i + 1).padStart(2, "0")}`;
+              return (
+                <div key={i} title={total > 0 ? `${i + 1}월 ${fmt(total)}원 (미납 ${fmt(m.unpaid)} · 완납 ${fmt(m.paid)})` : `${i + 1}월 — 없음`}
+                  onClick={() => { if (total > 0) { const el = document.getElementById(`tax-mg-${mmKey}`); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); } }}
+                  style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: total > 0 ? "pointer" : "default" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: total > 0 ? "var(--text2)" : "transparent", whiteSpace: "nowrap" }}>{total > 0 ? fmtCompact(total) : "0"}</div>
+                  <div style={{ width: "100%", maxWidth: 34, height: 104, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+                    {total > 0 ? (
+                      <>
+                        {m.unpaid > 0 && <div style={{ height: Math.max(4, Math.round(m.unpaid / monthMax * 96)), background: "#DB6B2E", borderRadius: m.paid > 0 ? "5px 5px 0 0" : 5 }}/>}
+                        {m.paid > 0 && <div style={{ height: Math.max(4, Math.round(m.paid / monthMax * 96)), background: "#10B981", opacity: .55, borderRadius: m.unpaid > 0 ? "0 0 5px 5px" : 5 }}/>}
+                      </>
+                    ) : <div style={{ height: 3, background: "var(--divider)", borderRadius: 2 }}/>}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: isNow ? 800 : 600, color: isNow ? "#DB6B2E" : "var(--text3)" }}>{i + 1}월</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 추려진 결과 합계 — 필터 조건에 걸린 건들의 건수·금액 */}
+      {filtered.length > 0 && (() => {
+        const sum = filtered.reduce((s, r) => s + Number(r.amount || 0), 0);
+        const overdue = filtered.filter(r => !r.paidDate && dday(r.dueDate) < 0);
+        const label = filterStatus === "unpaid" ? "미납" : filterStatus === "paid" ? "완납" : "전체";
+        const tone = filterStatus === "unpaid" ? "#DB6B2E" : filterStatus === "paid" ? "#10B981" : "var(--text1)";
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "11px 14px", borderRadius: 12, background: "var(--surface)", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: tone }}>{label} {filtered.length}건</span>
+            <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(sum)}원</span>
+            {filterStatus !== "paid" && overdue.length > 0 && (
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#EF4444", background: "rgba(239,68,68,0.10)", padding: "3px 9px", borderRadius: 999 }}>
+                기한 경과 {overdue.length}건 · {fmt(overdue.reduce((s, r) => s + Number(r.amount || 0), 0))}원
+              </span>
+            )}
+            <span style={{ fontSize: 11, color: "var(--text3)", marginLeft: "auto" }}>
+              {filterYear === "all" ? "전체 연도" : `${filterYear}년`}{filterBiz ? ` · ${filterBiz}` : ""}
+            </span>
+          </div>
+        );
+      })()}
+
+      {/* 사업장별 합계 */}
+      {bizTotals.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+          {bizTotals.map(t => (
+            <div key={t.biz} style={card}>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginBottom: 4 }}>{t.biz} · {filterYear === "all" ? "전체" : `${filterYear}년`}</div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>{fmt(t.total)}원</div>
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>완납 {fmt(t.paid)}원 · 미납 {fmt(t.total - t.paid)}원</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 기록 목록 */}
+      <div style={{ ...card, padding: 0, overflow: "hidden" }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+            {taxes.length === 0 ? (
+              <>기록이 없습니다. [+ 세무 기록 추가]로 시작하세요.<br/>
+              <span style={{ fontSize: 11 }}>예: 세무법인 안내 메일의 부가세 납부액·기한을 그대로 옮겨 적으면 됩니다.</span></>
+            ) : (
+              <>{filterStatus === "unpaid" ? "미납 건이 없습니다 — 모두 완납되었습니다 ✓"
+               : filterStatus === "paid" ? "완납 처리된 건이 없습니다"
+               : "조건에 맞는 기록이 없습니다"}<br/>
+              <span style={{ fontSize: 11 }}>전체 {taxes.length}건 중 조건에 걸린 건이 없습니다 — 필터를 바꿔보세요.</span></>
+            )}
+          </div>
+        ) : monthGroups.map((g, gi) => {
+          // 월 헤더 + 그 달의 건들. 헤더의 id는 타임라인 막대 클릭 스크롤의 목적지.
+          const gSum = g.recs.reduce((s, r) => s + Number(r.amount || 0), 0);
+          const gUnpaid = g.recs.filter(r => !r.paidDate).reduce((s, r) => s + Number(r.amount || 0), 0);
+          const [gy, gm] = g.key.split("-");
+          const isLastGroup = gi === monthGroups.length - 1;
+          return (
+            <div key={g.key} id={`tax-mg-${g.key}`}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", background: "var(--surface2)", borderTop: gi > 0 ? "1px solid var(--divider)" : "none", borderBottom: "1px solid var(--divider)" }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "var(--text1)" }}>{gm ? `${Number(gy)}년 ${Number(gm)}월` : "날짜 미지정"}</span>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>{g.recs.length}건 · {fmt(gSum)}원</span>
+                {gUnpaid > 0 && <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#DB6B2E" }}>미납 {fmt(gUnpaid)}원</span>}
+              </div>
+              {g.recs.map((r, i) => {
+                const st = statusOf(r);
+                return (
+                  <div key={r.id} onClick={() => setEditing({ ...r })} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer", borderBottom: (isLastGroup && i === g.recs.length - 1) ? "none" : "1px solid var(--divider)", flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 150 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{r.taxType}{r.period ? ` · ${r.period}` : ""}</div>
+                      <div style={{ fontSize: 11, color: "var(--text2)", marginTop: 1 }}>{r.biz}</div>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--text2)", minWidth: 86 }}>{r.dueDate}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", minWidth: 100, textAlign: "right" }}>{fmt(r.amount)}원</div>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 100, color: statusColor[st], background: statusColor[st] + "1A", flexShrink: 0 }}>{st}</span>
+                    <span style={{ display: "inline-flex", gap: 6 }} onClick={e => e.stopPropagation()}>
+                      <button onClick={() => togglePaid(r.id)} title={r.paidDate ? "완납 취소" : "완납 처리"}
+                        style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: r.paidDate ? "var(--text3)" : "#10B981", cursor: "pointer", fontFamily: "inherit" }}>{r.paidDate ? "↩ 취소" : "✓ 완납"}</button>
+                      {!r.paidDate && (
+                        <button onClick={() => addToSchedule(r)} title="납부기한을 일정 캘린더에 추가"
+                          style={{ height: 30, padding: "0 10px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "1px solid var(--divider)", background: "var(--surface2)", color: "#DB6B2E", cursor: "pointer", fontFamily: "inherit" }}>일정 추가</button>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 연간 세무 캘린더 안내 */}
+      <div style={card}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 8 }}>연간 주요 신고·납부 기한</div>
+        {TAX_CALENDAR_HINTS.map(([k, v]) => (
+          <div key={k} style={{ display: "flex", gap: 10, fontSize: 12, padding: "4px 0", borderBottom: "1px dashed var(--divider)" }}>
+            <span style={{ minWidth: 80, fontWeight: 700, color: "var(--text2)" }}>{k}</span>
+            <span style={{ color: "var(--text3)" }}>{v}</span>
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8 }}>· 일반 안내입니다. 실제 기한·금액은 세무법인 안내를 우선하세요.</div>
+      </div>
+
+      {/* 메일에서 가져오기 모달 — 목록 선택 → AI 추출 미리보기 → 확정 */}
+      {mailImport && (
+        <div onClick={() => !mailImport.loading && setMailImport(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 560, maxHeight: "88vh", overflowY: "auto", padding: 20, border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
+            {mailImport.step === "list" && (
+              <>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>메일에서 가져오기</div>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14 }}>최근 90일 세무 관련 메일입니다. 선택하면 납부 정보를 읽어옵니다.</div>
+                {mailImport.loading ? (
+                  <div style={{ padding: 28, textAlign: "center", color: "var(--text3)", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <Icon name="refresh" size={14} style={{ animation: "spin 1.4s linear infinite" }}/>{mailImport.note || "메일을 찾는 중..."}
+                  </div>
+                ) : mailImport.mails.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>최근 90일 내 세무 관련 메일이 없습니다</div>
+                ) : mailImport.mails.map((m, i) => (
+                  <div key={m.id} onClick={() => pickMail(m)} style={{ padding: "11px 12px", cursor: "pointer", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: "var(--surface2)" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.subject || "(제목 없음)"}</div>
+                    <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.from} · {(m.date || "").slice(0, 25)}</div>
+                  </div>
+                ))}
+              </>
+            )}
+            {mailImport.step === "preview" && (
+              <>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 4, display: "flex", alignItems: "center", gap: 7 }}>
+                  추출 결과 확인
+                  {mailImport.source && (
+                    <span title={mailImport.source === "AI" ? "메일 형식이 달라 Claude API로 읽었습니다" : "메일 형식을 그대로 읽었습니다 (외부 전송·비용 없음)"}
+                      style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "var(--surface2)", color: "var(--text3)" }}>
+                      {mailImport.source}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mailImport.mailSubject}</div>
+                {mailImport.records.map((r, i) => (
+                  <label key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 12px", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: r.checked ? "rgba(219,107,46,0.06)" : "var(--surface2)", cursor: "pointer" }}>
+                    <input type="checkbox" checked={r.checked} style={{ marginTop: 3 }}
+                      onChange={e => setMailImport(mi => ({ ...mi, records: mi.records.map((x, xi) => xi === i ? { ...x, checked: e.target.checked } : x) }))} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{r.taxType} — {r.biz}</span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--text2)", marginTop: 2 }}>{fmt(r.amount)}원 · 기한 {r.dueDate}{r.period ? ` · ${r.period}` : ""}</span>
+                      {r.memo && <span style={{ display: "block", fontSize: 11, color: "#DB6B2E", marginTop: 2 }}>⚠ {r.memo}</span>}
+                    </span>
+                  </label>
+                ))}
+                {/* 자동 첨부 안내 — 파일명의 사업장이 일치하는 신고서·납부서만 붙는다 */}
+                {(() => {
+                  const pickedBiz = new Set(mailImport.records.filter(r => r.checked).map(r => r.biz));
+                  const matched = (mailImport.mailAtts || []).filter(a => {
+                    const b = bizOfName(a.filename);
+                    return b && pickedBiz.has(b) && a.size <= ATT_MAX_FILE;
+                  });
+                  if (matched.length === 0) return null;
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 12px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--divider)", fontSize: 12, color: "var(--text2)" }}>
+                      <Icon name="paperclip" size={13}/>
+                      납부서·신고서 <b style={{ color: "var(--text1)" }}>{matched.length}개</b>가 사업장별로 자동 첨부됩니다
+                    </div>
+                  );
+                })()}
+                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                  <button onClick={() => setMailImport(null)} disabled={mailImport.importing} style={{ padding: "11px 16px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: mailImport.importing ? "default" : "pointer", opacity: mailImport.importing ? 0.5 : 1 }}>취소</button>
+                  <button onClick={confirmImport} disabled={mailImport.importing} className="btn-orange" style={{ flex: 1, padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700, opacity: mailImport.importing ? 0.7 : 1 }}>
+                    {mailImport.importing
+                      ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/>첨부 내려받는 중...</span>
+                      : "선택 항목 가져오기"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 추가/수정 모달 */}
+      {editing && (
+        <div onClick={() => setEditing(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 480, maxHeight: "88vh", overflowY: "auto", padding: 20, border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)" }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginBottom: 14 }}>{editing.id ? "세무 기록 수정" : "세무 기록 추가"}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <select value={editing.biz} onChange={e => setEditing({ ...editing, biz: e.target.value })} style={inp}>
+                  {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <select value={editing.taxType} onChange={e => setEditing({ ...editing, taxType: e.target.value })} style={inp}>
+                  {TAX_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <input value={editing.period} onChange={e => setEditing({ ...editing, period: e.target.value })} placeholder="귀속 (예: 2026년 1기확정)" style={inp} />
+              <input value={editing.amount} onChange={e => setEditing({ ...editing, amount: e.target.value })} placeholder="납부액 (원)" inputMode="numeric" style={inp} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <label style={{ fontSize: 11, color: "var(--text3)" }}>납부기한<input type="date" value={editing.dueDate} onChange={e => setEditing({ ...editing, dueDate: e.target.value })} style={{ ...inp, width: "100%", marginTop: 3 }} /></label>
+                <label style={{ fontSize: 11, color: "var(--text3)" }}>납부일 (완납 시)<input type="date" value={editing.paidDate || ""} onChange={e => setEditing({ ...editing, paidDate: e.target.value })} style={{ ...inp, width: "100%", marginTop: 3 }} /></label>
+              </div>
+              <textarea value={editing.memo} onChange={e => setEditing({ ...editing, memo: e.target.value })} placeholder="메모 (선택) — 중복분 확인 요청, 수정발행 여부 등" rows={3}
+                style={{ ...inp, height: "auto", padding: 10, resize: "vertical", lineHeight: 1.6 }} />
+              <AttachmentField value={editing.atts || []} onChange={arr => setEditing({ ...editing, atts: arr })} />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              {editing.id && <button onClick={() => delRec(editing.id)} style={{ padding: "11px 16px", border: "none", borderRadius: 10, background: "rgba(239,68,68,0.10)", color: "#EF4444", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>삭제</button>}
+              <button onClick={() => setEditing(null)} style={{ padding: "11px 16px", border: "1px solid var(--divider)", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>취소</button>
+              <button onClick={saveRec} className="btn-orange" style={{ flex: 1, padding: "11px", borderRadius: 10, fontSize: 13, fontWeight: 700 }}>저장</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecurringPanel({ recurringSchedules, setRecurringSchedules, darkMode }) {
   const [editing, setEditing] = React.useState(null);
   const [filterCategory, setFilterCategory] = React.useState("");
