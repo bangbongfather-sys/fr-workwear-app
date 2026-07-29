@@ -14501,10 +14501,10 @@ ${priceTable}
     const totalSum = items.reduce((s, x) => s + x.c.finalPrice, 0);
 
     // 거래처용: 제품명·단가만 전달 (등급/원가 디테일은 절대 포함 금지)
-    const hasMarketPriceAI = items.some(({ p }) => p.marketPrice && parseFloat(p.marketPrice) > 0);
+    const hasMarketPriceAI = items.some(({ p }) => parseFloat(getMarketPrice(p)) > 0);
     const showMarketPriceAI = includeMarketPrice && hasMarketPriceAI;
     const productList = items.map(({ p, c }) => {
-      const mp = parseFloat(p.marketPrice);
+      const mp = parseFloat(getMarketPrice(p));
       const mpStr = (!isNaN(mp) && mp > 0) ? ` / 시장가 ${Math.round(mp).toLocaleString()}원` : "";
       return `- ${p.name}: ${Math.round(c.finalPrice).toLocaleString()}원${showMarketPriceAI ? mpStr : ""}`;
     }).join("\n");
