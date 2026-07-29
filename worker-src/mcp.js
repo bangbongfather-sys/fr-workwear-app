@@ -18,7 +18,7 @@ const ALLOWED_SECTIONS = [
   "clients", "suppliers", "clientAR", "ledgers", "monthlySales", "accounts",
   "products", "materials", "laborItems", "orders", "purchaseOrders", "fabricIntakes",
   "bids", "investments", "cashFlows", "scheduledExpenses", "todos", "notes", "recurringSchedules",
-  "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes",
+  "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings",
 ];
 
 // 단가 계산기 로직 (index.html computeProduct와 동일 공식) ──
@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-27-tax-redesign", note: "세무 관리 탭 재구성 — 미납 총액 히어로(다음 납부 D-day 포함), 월별 세금 부담 타임라인(완납/미납 스택 막대, 클릭 시 해당 월로 스크롤), 월별 그룹 리스트(월 소계·미납 소계). + 일정 캘린더 '오늘로 이동' 버튼 분리"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-29-meeting-tab", note: "회의록 탭 신규 — 노션 「회의 진행 내역」 DB 양방향 연동(생성·수정·아카이브·가져오기), 번호 항목 회의록 본문, 액션 아이템 체크리스트→일정 캘린더 전송, 회의 유형·관련 분류·참석자·첨부. + 세무 탭 재구성"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);

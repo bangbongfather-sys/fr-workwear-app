@@ -150,6 +150,11 @@ async function handleNotionApi(request, env, url) {
     "Content-Type": "application/json",
   };
 
+  // 회의록은 별도 DB(회의 진행 내역)를 쓴다 — 라우팅을 먼저 가로챈다.
+  if (url.pathname.startsWith("/api/notion/meeting")) {
+    return handleNotionMeeting(request, env, url, notionHeaders);
+  }
+
   // /api/notion/todo            → POST(생성)
   // /api/notion/todo/<pageId>   → PATCH(수정), DELETE(아카이브)
   const m = url.pathname.match(/^\/api\/notion\/todo(?:\/([a-zA-Z0-9-]+))?\/?$/);
@@ -303,6 +308,213 @@ function buildProperties(body) {
     props["상태 구분"] = { status: { name: body.done ? "완료" : "시작 전" } };
   }
   return props;
+}
+
+
+// ─── 노션 회의록 연동 (「회의 진행 내역」 DB) ───
+// 일정 To Do와 다른 DB라 핸들러를 분리했다. 속성 스키마:
+//   회의 제목(title) / 날짜(date) / 회의 유형(select) / 관련(multi_select)
+//   주요 결정 & 액션 아이템(rich_text) / 참석자(person) / 첨부파일(file)
+// 참석자·첨부파일은 노션 계정·파일 업로드가 필요해 속성으로는 못 쓴다.
+//   참석자 → 본문 첫 줄("참석: …")로 기록, 첨부 → 앱에만 보관(본문에 개수만 표기).
+function buildMeetingProperties(body) {
+  const props = {};
+  if (body.title !== undefined) {
+    props["회의 제목"] = { title: [{ text: { content: String(body.title || "").slice(0, 1900) } }] };
+  }
+  if (body.date !== undefined) {
+    props["날짜"] = body.date ? { date: { start: body.date } } : { date: null };
+  }
+  if (body.meetingType !== undefined) {
+    props["회의 유형"] = body.meetingType ? { select: { name: body.meetingType } } : { select: null };
+  }
+  if (body.tags !== undefined) {
+    props["관련"] = { multi_select: (body.tags || []).filter(Boolean).map((name) => ({ name })) };
+  }
+  if (body.summary !== undefined) {
+    props["주요 결정 & 액션 아이템"] = { rich_text: [{ text: { content: String(body.summary || "").slice(0, 1900) } }] };
+  }
+  return props;
+}
+
+const mkText = (s) => [{ type: "text", text: { content: String(s || "").slice(0, 1900) } }];
+
+function buildMeetingBlocks(body) {
+  const blocks = [];
+  const attendees = (body.attendees || []).filter(Boolean);
+  if (attendees.length) {
+    blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: mkText(`참석: ${attendees.join(", ")}`) } });
+  }
+  const items = (body.items || []).map((s) => String(s || "").trim()).filter(Boolean);
+  if (items.length) {
+    blocks.push({ object: "block", type: "heading_3", heading_3: { rich_text: mkText("회의록") } });
+    for (const it of items.slice(0, 90)) {
+      blocks.push({ object: "block", type: "numbered_list_item", numbered_list_item: { rich_text: mkText(it) } });
+    }
+  }
+  if (body.memo && String(body.memo).trim()) {
+    blocks.push({ object: "block", type: "heading_3", heading_3: { rich_text: mkText("메모") } });
+    for (const line of String(body.memo).split(/\r?\n/).slice(0, 30)) {
+      blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: mkText(line) } });
+    }
+  }
+  const actions = (body.actions || []).filter((a) => a && String(a.text || "").trim());
+  if (actions.length) {
+    blocks.push({ object: "block", type: "heading_3", heading_3: { rich_text: mkText("액션 아이템") } });
+    for (const a of actions.slice(0, 60)) {
+      const meta = [a.owner, a.due].filter(Boolean).join(" · ");
+      blocks.push({
+        object: "block", type: "to_do",
+        to_do: { checked: !!a.done, rich_text: mkText(`${a.text}${meta ? ` (${meta})` : ""}`) },
+      });
+    }
+  }
+  const attCount = Number(body.attCount || 0);
+  if (attCount > 0) {
+    blocks.push({ object: "block", type: "paragraph", paragraph: { rich_text: mkText(`첨부 ${attCount}개 — NJ SAFETY 앱 회의록에 보관`) } });
+  }
+  return blocks;
+}
+
+// 노션 페이지 → 앱 레코드. rich_text 배열을 평문으로 합친다.
+const rtPlain = (rt) => (rt || []).map((t) => t.plain_text ?? t?.text?.content ?? "").join("");
+
+function parseMeetingPage(page) {
+  const p = page.properties || {};
+  return {
+    notionPageId: page.id,
+    notionUrl: page.url || "",
+    title: rtPlain(p["회의 제목"]?.title) || "(제목 없음)",
+    date: p["날짜"]?.date?.start ? String(p["날짜"].date.start).slice(0, 10) : "",
+    meetingType: p["회의 유형"]?.select?.name || "",
+    tags: (p["관련"]?.multi_select || []).map((o) => o.name),
+    summary: rtPlain(p["주요 결정 & 액션 아이템"]?.rich_text),
+    lastEdited: page.last_edited_time || "",
+  };
+}
+
+// 본문 블록 → { items, memo, actions, attendees }
+function parseMeetingBlocks(results) {
+  const items = [], memoLines = [], actions = [];
+  let attendees = [], section = "";
+  for (const b of results || []) {
+    if (b.type === "heading_3") {
+      const h = rtPlain(b.heading_3?.rich_text);
+      section = /액션/.test(h) ? "actions" : /메모/.test(h) ? "memo" : "items";
+      continue;
+    }
+    if (b.type === "numbered_list_item") { items.push(rtPlain(b.numbered_list_item?.rich_text)); continue; }
+    if (b.type === "to_do") {
+      const raw = rtPlain(b.to_do?.rich_text);
+      const m = raw.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+      const meta = m ? m[2].split("·").map((s) => s.trim()) : [];
+      const due = meta.find((s) => /^\d{4}-\d{2}-\d{2}$/.test(s)) || "";
+      const owner = meta.find((s) => s && s !== due) || "";
+      actions.push({ text: m ? m[1] : raw, owner, due, done: !!b.to_do?.checked });
+      continue;
+    }
+    if (b.type === "paragraph") {
+      const t = rtPlain(b.paragraph?.rich_text);
+      if (/^참석:/.test(t)) { attendees = t.replace(/^참석:\s*/, "").split(",").map((s) => s.trim()).filter(Boolean); continue; }
+      if (/^첨부 \d+개/.test(t)) continue;   // 앱이 다시 만들어주는 안내 줄
+      if (section === "memo" && t) memoLines.push(t);
+      else if (section === "items" && t) items.push(t);
+    }
+  }
+  return { items: items.filter(Boolean), memo: memoLines.join("\n"), actions, attendees };
+}
+
+// 본문 전체 교체 — 노션은 블록 일괄 치환 API가 없어 기존 자식을 지우고 새로 붙인다.
+async function replaceMeetingBlocks(pageId, blocks, notionHeaders) {
+  const listRes = await fetch(`${NOTION_API}/blocks/${pageId}/children?page_size=100`, { headers: notionHeaders });
+  if (listRes.ok) {
+    const listed = await listRes.json();
+    for (const b of listed.results || []) {
+      await fetch(`${NOTION_API}/blocks/${b.id}`, { method: "DELETE", headers: notionHeaders });
+    }
+  }
+  if (blocks.length) {
+    await fetch(`${NOTION_API}/blocks/${pageId}/children`, {
+      method: "PATCH", headers: notionHeaders, body: JSON.stringify({ children: blocks }),
+    });
+  }
+}
+
+async function handleNotionMeeting(request, env, url, notionHeaders) {
+  const dsid = env.NOTION_MEETING_DSID;
+  if (!dsid) {
+    return new Response(JSON.stringify({ error: "NOTION_MEETING_DSID 환경변수가 설정되지 않았습니다." }), { status: 500, headers: corsHeaders });
+  }
+  const m = url.pathname.match(/^\/api\/notion\/meeting(?:\/([a-zA-Z0-9-]+))?\/?$/);
+  if (!m) return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: corsHeaders });
+  const pageId = m[1];
+
+  try {
+    // 목록 — 앱의 "노션에서 가져오기"용. 최신 회의부터.
+    if (request.method === "GET" && !pageId) {
+      const limit = Math.min(Number(url.searchParams.get("limit") || 25), 100);
+      const res = await fetch(`${NOTION_API}/databases/${dsid}/query`, {
+        method: "POST", headers: notionHeaders,
+        body: JSON.stringify({ page_size: limit, sorts: [{ property: "날짜", direction: "descending" }] }),
+      });
+      const data = await res.json();
+      if (!res.ok) return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}` }), { status: res.status, headers: corsHeaders });
+      return new Response(JSON.stringify({ meetings: (data.results || []).map(parseMeetingPage) }), { status: 200, headers: corsHeaders });
+    }
+
+    // 단건 상세 — 속성 + 본문 블록
+    if (request.method === "GET" && pageId) {
+      const [pRes, bRes] = await Promise.all([
+        fetch(`${NOTION_API}/pages/${pageId}`, { headers: notionHeaders }),
+        fetch(`${NOTION_API}/blocks/${pageId}/children?page_size=100`, { headers: notionHeaders }),
+      ]);
+      const pData = await pRes.json();
+      if (!pRes.ok) return new Response(JSON.stringify({ error: pData.message || `Notion HTTP ${pRes.status}` }), { status: pRes.status, headers: corsHeaders });
+      const bData = bRes.ok ? await bRes.json() : { results: [] };
+      return new Response(JSON.stringify({ ...parseMeetingPage(pData), ...parseMeetingBlocks(bData.results) }), { status: 200, headers: corsHeaders });
+    }
+
+    if (request.method === "POST" && !pageId) {
+      const body = await request.json();
+      if (!body.title) return new Response(JSON.stringify({ error: "title 필수" }), { status: 400, headers: corsHeaders });
+      const res = await fetch(`${NOTION_API}/pages`, {
+        method: "POST", headers: notionHeaders,
+        body: JSON.stringify({
+          parent: { database_id: dsid },
+          properties: buildMeetingProperties(body),
+          children: buildMeetingBlocks(body).slice(0, 100),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}`, details: data }), { status: res.status, headers: corsHeaders });
+      return new Response(JSON.stringify({ notionPageId: data.id, url: data.url }), { status: 200, headers: corsHeaders });
+    }
+
+    if (request.method === "PATCH" && pageId) {
+      const body = await request.json();
+      const res = await fetch(`${NOTION_API}/pages/${pageId}`, {
+        method: "PATCH", headers: notionHeaders,
+        body: JSON.stringify({ properties: buildMeetingProperties(body) }),
+      });
+      const data = await res.json();
+      if (!res.ok) return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}`, details: data }), { status: res.status, headers: corsHeaders });
+      if (body.syncBody !== false) await replaceMeetingBlocks(pageId, buildMeetingBlocks(body).slice(0, 100), notionHeaders);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    if (request.method === "DELETE" && pageId) {
+      const res = await fetch(`${NOTION_API}/pages/${pageId}`, {
+        method: "PATCH", headers: notionHeaders, body: JSON.stringify({ archived: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}` }), { status: res.status, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+    }
+
+    return new Response(JSON.stringify({ error: "지원하지 않는 메서드/경로" }), { status: 405, headers: corsHeaders });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: e.message || "내부 오류" }), { status: 500, headers: corsHeaders });
+  }
 }
 
 
