@@ -17142,6 +17142,18 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       <span>제품 <b style={{ color: T.text }}>{productCount}</b>종</span>
                                       <span style={{ color: "var(--text3)" }}>·</span>
                                       <span style={{ fontWeight: 700, color: NAVY, fontVariantNumeric: "tabular-nums" }}>{totalAmount.toLocaleString()}원</span>
+                                      {/* 이 견적서가 어느 요척서로 계산됐는지 (구버전 항목은 정보가 없어 미표시) */}
+                                      {(() => {
+                                        const names = [...new Set((q.products || []).map(p => p.specName).filter(Boolean))];
+                                        if (names.length === 0) return null;
+                                        const label = names.length === 1 ? names[0] : `${names[0]} 외 ${names.length - 1}`;
+                                        return (
+                                          <span title={`요척서 기준: ${names.join(", ")}`}
+                                            style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "1px 8px", borderRadius: 100, background: "rgba(219,107,46,0.10)", color: ACCENT, fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+                                            📋 {label}
+                                          </span>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
                                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
