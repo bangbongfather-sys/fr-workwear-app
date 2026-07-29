@@ -13315,10 +13315,12 @@ function App() {
   };
   const [quote, setQuote] = useState("");
   // ── 견적 도장 (quote stamp) ──
-  // 현재 견적서가 "어느 요척서로 계산됐는지" 기록. { [제품id]: { specId, specName, at } }
-  // quote 텍스트와 수명을 맞춘다(세션 한정) — 새로고침 후 quote가 비면 뱃지/배너도 안 보이므로
-  // 실제와 어긋난 표시가 남지 않는다. 장기 보관은 견적 이력의 products[].specName이 담당.
-  const [quoteStamp, setQuoteStamp] = useState({});
+  // 견적서가 "어느 요척서로 계산됐는지" 기록. { [제품id]: { specId, specName, at } }
+  // 견적서 본문(quote)은 세션 한정이지만 도장은 localStorage에 남긴다 —
+  // "마지막으로 내보낸 견적서가 어느 요척서 기준인지"는 앱을 껐다 켜도 유효한 정보이고,
+  // 계산기에서 요척서를 볼 때 항상 확인할 수 있어야 하기 때문.
+  const [quoteStamp, setQuoteStamp] = useState(() => load("frw_quote_stamp", {}));
+  useEffect(() => { save("frw_quote_stamp", quoteStamp); }, [quoteStamp]);
   const stampFromItems = (items) => {
     const now = Date.now();
     const st = {};
