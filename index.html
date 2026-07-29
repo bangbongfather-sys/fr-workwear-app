@@ -16531,7 +16531,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => { setActiveProdId(p.id); setTab("calc"); }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
                             {hasData
-                              ? <div style={{ fontSize: 11, color: T.text2, marginTop: 1 }}>{c.selectedGrade || "A"}급 · {Math.round(c.finalPrice).toLocaleString()}원</div>
+                              ? <div style={{ fontSize: 11, color: T.text2, marginTop: 1, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                                  <span>{c.selectedGrade || "A"}급 · {Math.round(c.finalPrice).toLocaleString()}원</span>
+                                  {/* 이 견적서에 반영되는 요척서 — 계산기에서 선택한 활성 요척서 */}
+                                  {(() => {
+                                    const act = getActiveSpec(p);
+                                    if (!act) return null;
+                                    return (
+                                      <span title={`이 제품은 '${act.name}' 기준으로 견적서에 반영됩니다`}
+                                        style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "1px 7px", borderRadius: 100, background: "rgba(219,107,46,0.10)", color: ACCENT, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+                                        📋 {act.name}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
                               : <div style={{ fontSize: 11, color: "#CDD2D7", marginTop: 1 }}>원가 미입력</div>
                             }
                           </div>
