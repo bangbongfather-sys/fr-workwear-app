@@ -20758,12 +20758,19 @@ function MeetingTab({ meetings = [], setMeetings, setTodos, clients = [], darkMo
       notionPatch(rec);
     }
   };
+  // 삭제는 기본적으로 "앱에서만" 지운다.
+  // 예전엔 노션 페이지까지 무조건 보관 처리했는데, 노션이 원본인 회의록(AI 회의노트 등)을
+  // 앱에서 정리하려다 원본이 통째로 휴지통으로 가는 사고가 났다. 노션 삭제는 별도 확인.
   const delRec = async (m) => {
-    if (!window.confirm(`"${m.title}" 회의록을 삭제할까요?${m.notionPageId ? "\n노션 페이지도 함께 보관 처리됩니다." : ""}`)) return;
+    if (!window.confirm(`"${m.title}" 회의록을 앱에서 삭제할까요?${m.notionPageId ? "\n(노션 페이지는 그대로 남습니다)" : ""}`)) return;
     setMeetings(prev => prev.filter(x => x.id !== m.id));
     setEditing(null);
-    if (m.notionPageId) notionArchive(m.notionPageId);
-    showToast("삭제됐습니다", "success");
+    if (m.notionPageId && window.confirm("노션 원본 페이지도 휴지통으로 보낼까요?\n\n확인 = 노션에서도 삭제 (노션 휴지통에서 복원 가능)\n취소 = 노션에는 그대로 둠")) {
+      notionArchive(m.notionPageId);
+      showToast("앱·노션 모두 삭제됐습니다", "success");
+      return;
+    }
+    showToast("앱에서만 삭제됐습니다", "success");
   };
   // 노션에 아직 안 올라간 회의록 일괄 업로드
   const bulkPush = async () => {

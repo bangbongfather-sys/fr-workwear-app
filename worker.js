@@ -401,8 +401,13 @@ function parseMeetingBlocks(results) {
   let attendees = [], section = "items";
   for (const b of results || []) {
     if (b.type === "heading_1" || b.type === "heading_2" || b.type === "heading_3") {
-      const h = rtPlain(b[b.type]?.rich_text);
-      section = /액션|할\s*일|todo/i.test(h) ? "actions" : /메모|비고/.test(h) ? "memo" : "items";
+      const h = rtPlain(b[b.type]?.rich_text).trim();
+      if (/액션|할\s*일|todo|action/i.test(h)) { section = "actions"; continue; }
+      if (/메모|비고/.test(h)) { section = "memo"; continue; }
+      section = "items";
+      // 구획 이름이 아닌 제목은 내용이다. 노션에서 회의록을 제목 블록만으로 쓴 경우
+      // (「가온 방염복 봉제 시작.」처럼) 여기서 버리면 본문이 통째로 사라진다.
+      if (h && !/^(회의록|회의\s*내용|논의\s*내용)$/.test(h)) items.push(h.replace(/^\s*\d+\s*[.)]\s*/, ""));
       continue;
     }
     if (b.type === "to_do") {
@@ -434,12 +439,46 @@ function parseMeetingBlocks(results) {
   return { items: items.filter(Boolean), memo: memoLines.join("\n"), actions, attendees };
 }
 
-// 본문 전체 교체 — 노션은 블록 일괄 치환 API가 없어 기존 자식을 지우고 새로 붙인다.
+// 노션 AI 회의노트(transcription 블록) 펼치기.
+// 이 블록은 rich_text가 없어서 그냥 두면 본문이 통째로 비어 보인다.
+// 실제 내용은 children.summary_block_id 아래에 heading/불릿/to_do로 들어 있으므로
+// 그걸 가져와 일반 블록인 것처럼 끼워 넣는다.
+async function expandTranscriptionBlocks(results, notionHeaders) {
+  const out = [];
+  for (const b of results || []) {
+    if (b.type !== "transcription") { out.push(b); continue; }
+    const title = rtPlain(b.transcription?.title);
+    if (title) out.push({ type: "heading_3", heading_3: { rich_text: [{ plain_text: title }] } });
+    const sid = b.transcription?.children?.summary_block_id;
+    if (!sid) continue;
+    const res = await fetch(`${NOTION_API}/blocks/${sid}/children?page_size=100`, { headers: notionHeaders });
+    if (!res.ok) continue;
+    const data = await res.json();
+    for (const c of data.results || []) {
+      out.push(c);
+      // 요약은 불릿 아래에 하위 불릿이 한 겹 더 붙는 경우가 있다. 한 단계만 더 펼친다.
+      if (!c.has_children) continue;
+      const sub = await fetch(`${NOTION_API}/blocks/${c.id}/children?page_size=100`, { headers: notionHeaders });
+      if (sub.ok) out.push(...((await sub.json()).results || []));
+    }
+  }
+  return out;
+}
+
+// 앱이 직접 써 넣는 블록 타입. 본문 동기화 때 이것만 지운다 —
+// 노션 AI 회의노트/이미지/파일/표처럼 앱이 만들지 않은 블록은 절대 건드리지 않는다.
+const APP_BLOCK_TYPES = new Set(["paragraph", "heading_3", "numbered_list_item", "to_do"]);
+
+// 본문 교체 — 노션은 블록 일괄 치환 API가 없어 기존 자식을 지우고 새로 붙인다.
 async function replaceMeetingBlocks(pageId, blocks, notionHeaders) {
   const listRes = await fetch(`${NOTION_API}/blocks/${pageId}/children?page_size=100`, { headers: notionHeaders });
   if (listRes.ok) {
     const listed = await listRes.json();
-    for (const b of listed.results || []) {
+    const results = listed.results || [];
+    // 노션 AI 회의노트가 있는 페이지는 노션이 원본이다. 앱 본문으로 덮어쓰지 않는다.
+    if (results.some((b) => b.type === "transcription")) return false;
+    for (const b of results) {
+      if (!APP_BLOCK_TYPES.has(b.type)) continue;
       await fetch(`${NOTION_API}/blocks/${b.id}`, { method: "DELETE", headers: notionHeaders });
     }
   }
@@ -448,6 +487,7 @@ async function replaceMeetingBlocks(pageId, blocks, notionHeaders) {
       method: "PATCH", headers: notionHeaders, body: JSON.stringify({ children: blocks }),
     });
   }
+  return true;
 }
 
 async function handleNotionMeeting(request, env, url, notionHeaders) {
@@ -481,7 +521,12 @@ async function handleNotionMeeting(request, env, url, notionHeaders) {
       const pData = await pRes.json();
       if (!pRes.ok) return new Response(JSON.stringify({ error: pData.message || `Notion HTTP ${pRes.status}` }), { status: pRes.status, headers: corsHeaders });
       const bData = bRes.ok ? await bRes.json() : { results: [] };
-      return new Response(JSON.stringify({ ...parseMeetingPage(pData), ...parseMeetingBlocks(bData.results) }), { status: 200, headers: corsHeaders });
+      // ?raw=1 — 본문이 비어 보일 때 실제 블록 타입을 확인하는 진단용
+      if (url.searchParams.get("raw") === "1") {
+        return new Response(JSON.stringify({ types: (bData.results || []).map((b) => b.type), results: bData.results }), { status: 200, headers: corsHeaders });
+      }
+      const blocks = await expandTranscriptionBlocks(bData.results, notionHeaders);
+      return new Response(JSON.stringify({ ...parseMeetingPage(pData), ...parseMeetingBlocks(blocks) }), { status: 200, headers: corsHeaders });
     }
 
     if (request.method === "POST" && !pageId) {
@@ -500,6 +545,18 @@ async function handleNotionMeeting(request, env, url, notionHeaders) {
       return new Response(JSON.stringify({ notionPageId: data.id, url: data.url }), { status: 200, headers: corsHeaders });
     }
 
+    // 휴지통 복원 — 보관(archived) 처리된 페이지를 되살린다.
+    // Notion은 archive를 soft delete로 다루므로 본문/속성이 그대로 남아 있고,
+    // archived:false 한 번이면 원상복구된다. (30일 지나 영구삭제되면 불가)
+    if (request.method === "PATCH" && pageId && url.searchParams.get("restore") === "1") {
+      const res = await fetch(`${NOTION_API}/pages/${pageId}`, {
+        method: "PATCH", headers: notionHeaders, body: JSON.stringify({ archived: false }),
+      });
+      const data = await res.json();
+      if (!res.ok) return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}` }), { status: res.status, headers: corsHeaders });
+      return new Response(JSON.stringify({ ok: true, url: data.url }), { status: 200, headers: corsHeaders });
+    }
+
     if (request.method === "PATCH" && pageId) {
       const body = await request.json();
       const res = await fetch(`${NOTION_API}/pages/${pageId}`, {
@@ -508,8 +565,15 @@ async function handleNotionMeeting(request, env, url, notionHeaders) {
       });
       const data = await res.json();
       if (!res.ok) return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}`, details: data }), { status: res.status, headers: corsHeaders });
-      if (body.syncBody !== false) await replaceMeetingBlocks(pageId, buildMeetingBlocks(body).slice(0, 100), notionHeaders);
-      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+      // 본문 동기화는 "덮어쓰기"라 기존 블록을 전부 지우고 다시 쓴다.
+      // 앱 쪽 본문이 비어 있으면(가져오기 실패 등) 노션의 멀쩡한 회의록을 통째로 날리게 되므로,
+      // 쓸 내용이 하나도 없을 땐 본문에 손대지 않는다. 속성만 갱신하고 끝.
+      const nextBlocks = buildMeetingBlocks(body).slice(0, 100);
+      let bodySynced = false;
+      if (body.syncBody !== false && nextBlocks.length) {
+        bodySynced = await replaceMeetingBlocks(pageId, nextBlocks, notionHeaders);
+      }
+      return new Response(JSON.stringify({ ok: true, bodySynced }), { status: 200, headers: corsHeaders });
     }
 
     if (request.method === "DELETE" && pageId) {
