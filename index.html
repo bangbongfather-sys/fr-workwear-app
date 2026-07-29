@@ -20796,12 +20796,14 @@ function MeetingTab({ meetings = [], setMeetings, setTodos, clients = [], darkMo
       const r = await fetch(`${API}/${row.notionPageId}`);
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { showToast("불러오기 실패: " + (d.error || r.status)); setImportModal(m => ({ ...m, loading: false })); return; }
+      // 다시 가져오기일 수 있으므로 기존 레코드의 앱 전용 데이터(첨부·id)는 살린다.
+      const prevRec = meetings.find(x => x.notionPageId === d.notionPageId);
       const rec = {
-        id: uid(), title: d.title || "(제목 없음)", date: d.date || todayYmd,
+        id: prevRec?.id || uid(), title: d.title || "(제목 없음)", date: d.date || todayYmd,
         meetingType: d.meetingType || "", tags: d.tags || [], attendees: d.attendees || [],
         summary: d.summary || "", items: d.items || [], memo: d.memo || "", actions: d.actions || [],
-        atts: [], notionPageId: d.notionPageId, notionUrl: d.notionUrl || "",
-        createdAt: Date.now(), updatedAt: Date.now(),
+        atts: prevRec?.atts || [], notionPageId: d.notionPageId, notionUrl: d.notionUrl || "",
+        createdAt: prevRec?.createdAt || Date.now(), updatedAt: Date.now(),
       };
       setMeetings(prev => [rec, ...prev.filter(x => x.notionPageId !== rec.notionPageId)]);
       setImportModal(null);
@@ -20920,6 +20922,20 @@ function MeetingTab({ meetings = [], setMeetings, setTodos, clients = [], darkMo
                   <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{m.date}</span>
                 </div>
                 {m.summary && <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 6, lineHeight: 1.6 }}>{m.summary}</div>}
+                {/* 논의 항목 미리보기 — 건수만 보여주면 매번 열어봐야 해서 앞 3개를 바로 노출 */}
+                {(m.items || []).length > 0 && (
+                  <div style={{ marginTop: 8, paddingLeft: 2 }}>
+                    {m.items.slice(0, 3).map((it, i) => (
+                      <div key={i} style={{ display: "flex", gap: 6, fontSize: 12, color: "var(--text2)", lineHeight: 1.65 }}>
+                        <span style={{ color: "var(--text3)", flexShrink: 0, minWidth: 13 }}>{i + 1}.</span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it}</span>
+                      </div>
+                    ))}
+                    {m.items.length > 3 && (
+                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3, paddingLeft: 19 }}>… 외 {m.items.length - 3}항목 (클릭해서 전체 보기)</div>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap", fontSize: 11, color: "var(--text3)" }}>
                   {(m.items || []).length > 0 && <span>논의 {m.items.length}항목</span>}
                   {open > 0 && <span style={{ color: "#DB6B2E", fontWeight: 700 }}>미완료 액션 {open}건</span>}
@@ -20950,11 +20966,14 @@ function MeetingTab({ meetings = [], setMeetings, setTodos, clients = [], darkMo
             ) : (importModal.list || []).length === 0 ? (
               <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>노션에 회의록이 없습니다</div>
             ) : importModal.list.map(row => (
-              <div key={row.notionPageId} onClick={() => !row.already && importOne(row)}
-                style={{ padding: "11px 12px", cursor: row.already ? "default" : "pointer", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: row.already ? "transparent" : "var(--surface2)", opacity: row.already ? .5 : 1 }}>
+              // 이미 가져온 건도 다시 누를 수 있어야 한다 — 예전에 잘못 가져왔거나
+              // 노션에서 내용이 바뀐 경우 최신본으로 덮어쓸 방법이 필요하다.
+              <div key={row.notionPageId} onClick={() => importOne(row)}
+                title={row.already ? "다시 가져와 최신 내용으로 덮어씁니다" : "이 회의록을 가져옵니다"}
+                style={{ padding: "11px 12px", cursor: "pointer", borderRadius: 10, border: "1px solid var(--divider)", marginBottom: 8, background: "var(--surface2)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.title}</span>
-                  {row.already && <span style={{ fontSize: 10, color: "var(--text3)", flexShrink: 0 }}>이미 있음</span>}
+                  {row.already && <span style={{ fontSize: 10, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,.10)", padding: "2px 7px", borderRadius: 999, flexShrink: 0 }}>다시 가져오기</span>}
                   <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text3)", flexShrink: 0 }}>{row.date}</span>
                 </div>
                 {row.summary && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.summary}</div>}
