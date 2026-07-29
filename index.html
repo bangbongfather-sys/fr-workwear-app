@@ -14131,7 +14131,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   // 견적서에 반영된 요척서와 지금 보고 있는 요척서가 다른 상태 (원단가 변경 후 재생성을 잊는 사고 방지)
   const specStampMismatch = !!activeProdStamp && activeProdStamp.specId !== activeSpec.id;
 
-  const PRODUCT_LEVEL_FIELDS = new Set(["name", "include", "marketPrice"]);
+  // marketPrice는 요척서(spec) 단위 — 여기 넣으면 제품 전체에 공유돼 요척서끼리 값이 섞인다
+  const PRODUCT_LEVEL_FIELDS = new Set(["name", "include"]);
   const updateActiveSpec = (updater) =>
     setProducts(ps => ps.map(p => {
       if (p.id !== activeProdId) return p;
