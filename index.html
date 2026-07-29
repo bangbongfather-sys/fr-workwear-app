@@ -14060,6 +14060,12 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     adminRate: activeSpec.adminRate ?? 10,
   };
 
+  // 현재 제품의 견적 도장 — "지금 견적서가 이 제품의 어느 요척서로 계산됐는지".
+  // quote가 비어 있으면(새로고침 직후 등) null → 뱃지·배너 미표시로 실제와 어긋난 안내를 남기지 않는다.
+  const activeProdStamp = quote ? (quoteStamp[activeProdId] || null) : null;
+  // 견적서에 반영된 요척서와 지금 보고 있는 요척서가 다른 상태 (원단가 변경 후 재생성을 잊는 사고 방지)
+  const specStampMismatch = !!activeProdStamp && activeProdStamp.specId !== activeSpec.id;
+
   const PRODUCT_LEVEL_FIELDS = new Set(["name", "include", "marketPrice"]);
   const updateActiveSpec = (updater) =>
     setProducts(ps => ps.map(p => {
