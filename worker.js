@@ -396,14 +396,15 @@ function parseMeetingPage(page) {
 // 본문 블록 → { items, memo, actions, attendees }
 function parseMeetingBlocks(results) {
   const items = [], memoLines = [], actions = [];
-  let attendees = [], section = "";
+  // 기본 구획은 "items" — 앱이 만든 글은 「회의록」 제목으로 시작하지만, 사람이 노션에서
+  // 직접 쓴 기존 회의록은 제목 없이 "1.납기일정…" 평문으로 바로 시작한다. ""로 두면 전부 버려짐.
+  let attendees = [], section = "items";
   for (const b of results || []) {
-    if (b.type === "heading_3") {
-      const h = rtPlain(b.heading_3?.rich_text);
-      section = /액션/.test(h) ? "actions" : /메모/.test(h) ? "memo" : "items";
+    if (b.type === "heading_1" || b.type === "heading_2" || b.type === "heading_3") {
+      const h = rtPlain(b[b.type]?.rich_text);
+      section = /액션|할\s*일|todo/i.test(h) ? "actions" : /메모|비고/.test(h) ? "memo" : "items";
       continue;
     }
-    if (b.type === "numbered_list_item") { items.push(rtPlain(b.numbered_list_item?.rich_text)); continue; }
     if (b.type === "to_do") {
       const raw = rtPlain(b.to_do?.rich_text);
       const m = raw.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
@@ -413,12 +414,21 @@ function parseMeetingBlocks(results) {
       actions.push({ text: m ? m[1] : raw, owner, due, done: !!b.to_do?.checked });
       continue;
     }
-    if (b.type === "paragraph") {
-      const t = rtPlain(b.paragraph?.rich_text);
+    // 본문 줄은 블록 타입이 제각각이다 — 사람이 쓴 노션 회의록은 번호목록/불릿/문단이
+    // 섞여 있다. 텍스트를 가진 블록은 한 갈래로 모아 동일하게 처리한다.
+    const TEXTY = ["paragraph", "bulleted_list_item", "numbered_list_item", "quote", "callout", "toggle"];
+    if (TEXTY.includes(b.type)) {
+      const t = rtPlain(b[b.type]?.rich_text).trim();
+      if (!t) continue;                                  // 줄 띄우기용 빈 블록은 버림
       if (/^참석:/.test(t)) { attendees = t.replace(/^참석:\s*/, "").split(",").map((s) => s.trim()).filter(Boolean); continue; }
+      // 제목 대신 평문으로 쓴 구획 머리말("회의록", "액션 아이템" 등)도 구획 전환으로 처리
+      if (/^(회의록|회의\s*내용|논의\s*내용)$/.test(t)) { section = "items"; continue; }
+      if (/^(액션\s*아이템|할\s*일|todo)$/i.test(t)) { section = "actions"; continue; }
+      if (/^(메모|비고)$/.test(t)) { section = "memo"; continue; }
       if (/^첨부 \d+개/.test(t)) continue;   // 앱이 다시 만들어주는 안내 줄
-      if (section === "memo" && t) memoLines.push(t);
-      else if (section === "items" && t) items.push(t);
+      if (section === "memo") memoLines.push(t);
+      // 앱이 번호를 다시 매기므로 "1.", "2)" 같은 선행 번호는 떼어낸다(안 그러면 "1. 1.납기…").
+      else items.push(t.replace(/^\s*\d+\s*[.)]\s*/, ""));
     }
   }
   return { items: items.filter(Boolean), memo: memoLines.join("\n"), actions, attendees };
