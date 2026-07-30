@@ -11911,6 +11911,53 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
           }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: "#475569" }}>✓ {selectedIds.size}건 선택됨</span>
+            {/* 선택 항목 합계 — 특정 매입 건들만 골라 금액을 확인 (정산·대사용) */}
+            {(() => {
+              const sel = (fabricIntakes || []).filter(r => selectedIds.has(r.id));
+              const supply = sel.reduce((s, r) => s + parseFloat(r.unitPrice || 0) * parseFloat(r.qty || 0), 0);
+              // 수량은 단위가 섞일 수 있어 단위별로 나눠서 표기 (yard + 벌을 더하면 의미가 없음)
+              const qtyByUnit = sel.reduce((m, r) => { const u = (r.unit || "").trim() || "개"; m[u] = (m[u] || 0) + parseFloat(r.qty || 0); return m; }, {});
+              const qtyStr = Object.entries(qtyByUnit)
+                .filter(([, v]) => v > 0)
+                .map(([u, v]) => `${Number(v.toFixed(2)).toLocaleString()}${u}`)
+                .join(" · ");
+              const suppliers = [...new Set(sel.map(r => (r.supplier || "").trim()).filter(Boolean))];
+              return (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 13 }}>
+                  <span style={{ color: "var(--text3)" }}>|</span>
+                  {qtyStr && <span style={{ color: "var(--text2)", fontWeight: 600 }}>{qtyStr}</span>}
+                  <span style={{ fontWeight: 800, color: "#DB6B2E", fontVariantNumeric: "tabular-nums" }}>
+                    공급가 {Math.round(supply).toLocaleString()}원
+                  </span>
+                  <span style={{ color: "var(--text3)", fontSize: 11.5, fontVariantNumeric: "tabular-nums" }}>
+                    (VAT 포함 {Math.round(supply * 1.1).toLocaleString()}원)
+                  </span>
+                  {suppliers.length > 0 && (
+                    <span title={suppliers.join(", ")} style={{ fontSize: 11, color: "var(--text3)" }}>
+                      · {suppliers.length === 1 ? suppliers[0] : `공급처 ${suppliers.length}곳`}
+                    </span>
+                  )}
+                  <button onClick={() => {
+                    const lines = sel
+                      .slice()
+                      .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+                      .map(r => `${r.date || ""}\t${r.name || ""}\t${r.supplier || ""}\t${r.qty || 0}${r.unit || ""}\t${Math.round(parseFloat(r.unitPrice || 0)).toLocaleString()}원\t${Math.round(parseFloat(r.unitPrice || 0) * parseFloat(r.qty || 0)).toLocaleString()}원`);
+                    const text = [
+                      `선택 매입 ${sel.length}건`,
+                      ...lines,
+                      `합계\t\t\t${qtyStr}\t\t${Math.round(supply).toLocaleString()}원`,
+                      `VAT 포함\t\t\t\t\t${Math.round(supply * 1.1).toLocaleString()}원`,
+                    ].join("\n");
+                    navigator.clipboard.writeText(text)
+                      .then(() => showToast(`선택 ${sel.length}건 합계를 복사했습니다`, "success"))
+                      .catch(() => showToast("복사에 실패했습니다"));
+                  }} title="선택 내역과 합계를 표 형식으로 복사 (엑셀에 붙여넣기 가능)"
+                    style={{ padding: "5px 10px", fontSize: 11, fontWeight: 700, color: "var(--text2)", background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Icon name="copy" size={11}/>합계 복사</span>
+                  </button>
+                </span>
+              );
+            })()}
             <div style={{ flex: 1 }} />
             {/* 선택 항목을 다른 거래처(공급처)로 이동 — 잘못 등록된 거래처 정리용 */}
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
