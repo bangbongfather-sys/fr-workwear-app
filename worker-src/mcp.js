@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-fx-rate", note: "환율 표시 신규 — Worker /api/fx 엔드포인트(외부 제공처 프록시·10분 캐시·장애 시 마지막 값 stale 폴백), 경영 대시보드에 원/달러 KPI 카드(전일 대비 등락·등락률·갱신 시각) + 참고 통화(100엔·위안·유로) 원화 환산 칩. 시장 환율 시간당 갱신 기준"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-fx-welcome", note: "메인(웰컴) 화면 환율 표시 — 상단 통계 카드 두 번째 자리에 원/달러 환율을 큰 글씨로 배치(등락 시 상승 빨강·하락 파랑, 전일 대비·등락률 표기). 환율 로직을 useFxRate 공용 훅으로 분리해 웰컴 화면과 경영 대시보드가 같은 값·규칙 사용"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
