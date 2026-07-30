@@ -4894,9 +4894,45 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
             {kpi("kpi_this_month", "이번 달 매출", thisMonthSales>0?Math.round(thisMonthSales).toLocaleString()+"원":"—", `${now.getFullYear()}년 ${now.getMonth()+1}월`, thisMonthSales>0?"#007AFF":null)}
             {kpi("kpi_cash", "현금 잔고", Math.round(cashTotal).toLocaleString()+"원", cashCount>0?cashCount+"개 계좌 합계":"등록된 계좌 없음", cashTotal>0?"#10B981":null)}
             {kpi("kpi_profit", "추정 순이익", (totalYearRevenue>0 && avgMarginSell>0)?Math.round(estimatedProfit).toLocaleString()+"원":"—", (totalYearRevenue>0 && avgMarginSell>0)?`${thisYear}년 매출 ${Math.round(totalYearRevenue/10000).toLocaleString()}만원 × 평균 마진 ${avgMarginSell.toFixed(1)}%`:"연매출 또는 제품 마진 입력 필요", (totalYearRevenue>0 && avgMarginSell>0)?(estimatedProfit>0?"#10B981":"#F04452"):null)}
+            {(() => {
+              // 환율 카드 — 값/등락/갱신시각. 로딩·오류도 카드 안에서 그대로 알린다.
+              if (fxErr && !fx) return kpi("kpi_fx", "원/달러 환율", "—", `불러오지 못했습니다 · ${fxErr}`, "#F04452");
+              if (!fx) return kpi("kpi_fx", "원/달러 환율", "…", "환율을 불러오는 중", null);
+              const krw = fx.rates.KRW;
+              const diff = fxPrev && fxPrev.krw ? krw - fxPrev.krw : null;
+              const pct = diff !== null && fxPrev.krw ? (diff / fxPrev.krw) * 100 : null;
+              const up = diff !== null && diff > 0;
+              const flat = diff !== null && Math.abs(diff) < 0.005;
+              const upd = new Date(fx.updatedAt);
+              const updStr = `${upd.getMonth()+1}/${upd.getDate()} ${String(upd.getHours()).padStart(2,"0")}:${String(upd.getMinutes()).padStart(2,"0")}`;
+              const sub = diff === null
+                ? `1 USD 기준 · ${updStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`
+                : `${flat ? "보합" : `${up ? "▲" : "▼"} ${Math.abs(diff).toFixed(2)}원 (${up ? "+" : "−"}${Math.abs(pct).toFixed(2)}%)`} · ${fxPrev.date.slice(5).replace("-", "/")} 대비 · ${updStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`;
+              return kpi("kpi_fx", "원/달러 환율",
+                `${krw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}원`,
+                sub,
+                fx.stale ? "#FF9500" : flat ? null : diff === null ? "#007AFF" : (up ? "#F04452" : "#007AFF"));
+            })()}
           </div>
         );
       })()}
+      {/* 참고 통화 — USD 외 결제 통화가 있을 때만 (원단·부자재 수입 대금 환산용) */}
+      {fx && fx.rates && (
+        <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 11.5, color: "var(--text3)" }}>
+          <span style={{ fontWeight: 700, color: "var(--text2)" }}>참고</span>
+          {[["JPY", "100엔", 100], ["CNY", "1위안", 1], ["EUR", "1유로", 1]].map(([code, label, mult]) => {
+            const r = fx.rates[code];
+            if (!r) return null;
+            const krwPer = (fx.rates.KRW / r) * mult;
+            return (
+              <span key={code} style={{ padding: "2px 9px", borderRadius: 100, background: "var(--surface2)", border: "1px solid var(--border)", fontWeight: 600 }}>
+                {label} {krwPer.toLocaleString(undefined, { maximumFractionDigits: 1 })}원
+              </span>
+            );
+          })}
+          <span style={{ opacity: 0.7 }}>· 시장 환율(시간당 갱신) · 실제 결제 환율은 은행 고시 기준</span>
+        </div>
+      )}
       {/* ─── 시즌 발주 시그널: 작년 이맘때 매입량 vs 현재 재고 ─── */}
       {(() => {
         const { months, signals } = computeSeasonSignals(fabricIntakes, stock);
