@@ -23995,8 +23995,25 @@ function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
   const unpaidCount = ((ledgers || {})[thisYM]?.clients || []).filter(c => c.status === "미입금").length;
   const productCount = (products || []).length;
 
+  // 환율 — 경영 대시보드와 같은 훅을 써서 값·등락 규칙을 한 곳에서 관리
+  const { fx, fxErr, fxPrev, krw: fxKrw, diff: fxDiff, pct: fxPct, flat: fxFlat, up: fxUp, updStr: fxUpdStr } = useFxRate();
+  const fxStat = (() => {
+    if (fxErr && !fx) return { label: "원/달러 환율", value: "—", sub: "불러오지 못했습니다", accent: "#F04452" };
+    if (!fx) return { label: "원/달러 환율", value: "…", sub: "불러오는 중" };
+    const sub = fxDiff === null
+      ? `1 USD · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`
+      : `${fxFlat ? "보합" : `${fxUp ? "▲" : "▼"} ${Math.abs(fxDiff).toFixed(2)} (${fxUp ? "+" : "−"}${Math.abs(fxPct).toFixed(2)}%)`} · ${fxPrev.date.slice(5).replace("-", "/")} 대비${fx.stale ? " · 최신값 아님" : ""}`;
+    return {
+      label: "원/달러 환율",
+      value: `₩${fxKrw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      sub,
+      accent: fx.stale ? "#FF9500" : fxFlat ? undefined : (fxUp ? "#F04452" : "#007AFF"),
+    };
+  })();
+
   const stats = [
     { label: "이달 매출", value: monthRevenue > 0 ? `₩${Math.round(monthRevenue).toLocaleString()}` : "—", sub: `${thisYM}` },
+    fxStat,
     { label: "등록 제품", value: `${productCount}개`, sub: "단가 계산기 →", goto: "calc" },
     { label: "이달 미입금", value: `${unpaidCount}곳`, sub: unpaidCount > 0 ? "확인 필요 →" : "장부 보기 →", goto: "ledger" },
     { label: "오늘 날짜", value: today.toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" }), sub: today.toLocaleDateString("ko-KR", { weekday: "long" }) },
