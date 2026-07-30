@@ -4912,10 +4912,11 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
               const sub = fxDiff === null
                 ? `1 USD 기준 · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`
                 : `${fxFlat ? "보합" : `${fxUp ? "▲" : "▼"} ${Math.abs(fxDiff).toFixed(2)}원 (${fxUp ? "+" : "−"}${Math.abs(fxPct).toFixed(2)}%)`} · ${fxPrev.date.slice(5).replace("-", "/")} 대비 · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`;
+              // 값은 다른 KPI 카드와 같은 기본 글자색. 등락 방향은 ▲▼로 충분히 읽힌다.
               return kpi("kpi_fx", "원/달러 환율",
                 `${fxKrw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}원`,
                 sub,
-                fx.stale ? "#FF9500" : fxFlat ? null : fxDiff === null ? "#007AFF" : (fxUp ? "#F04452" : "#007AFF"));
+                null);
             })()}
           </div>
         );
