@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-intake-select-sum", note: "매입 현황 선택 합계 — 항목·매입일 그룹을 체크하면 선택 바에 공급가·VAT 포함액 합계와 수량(단위별 분리 표기)·공급처를 실시간 표시. [합계 복사] 버튼으로 선택 내역+합계를 탭 구분 표로 클립보드 복사(엑셀 붙여넣기용)"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-health-2026-07", note: "2026년 7월 1차 건강보험료 고지 등록 — 나정엔터프라이즈 35,766,480원(건강 31,658,730 + 요양 4,107,750), 납부기한 2026-08-10, 4대보험 유형. 개인별 내역·산출/연말정산 구분을 메모에 기록. 1회 시드로 등록되며 같은 귀속월 기록이 있으면 건너뜀"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);

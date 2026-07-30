@@ -13336,43 +13336,6 @@ function App() {
     }, 15000); // 구조 로직 1차(12초) 이후 실행 — 원본이 살아났으면 건너뜀
     return () => clearTimeout(t);
   }, []);
-  // 2026년 7월 1차 건강보험료 고지 등록 (1회) — 국민건강보험공단 고지 내역서 기준.
-  // 고지금액 35,766,480 = 건강 31,658,730 + 요양 4,107,750 (5인 개인별 합계와 일치 검산 완료).
-  // 납부기한은 직장가입자 고지분 기준 다음 달 10일.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      try {
-        if (load("frw_seed_health_2026_07_done", false)) return;
-        save("frw_seed_health_2026_07_done", true);
-        let added = false;
-        setTaxes(prev => {
-          const list = prev || [];
-          // 같은 귀속월 4대보험 기록이 이미 있으면 건너뜀 (수기 입력과 중복 방지)
-          if (list.some(r => r.taxType === "4대보험" && (r.period || "").includes("2026년 7월"))) return list;
-          added = true;
-          return [{
-            id: 1785400000001,
-            biz: "나정엔터프라이즈",
-            taxType: "4대보험",
-            period: "2026년 7월 1차 (건강보험)",
-            amount: 35766480,
-            dueDate: "2026-08-10",
-            paidDate: "",
-            memo: [
-              "국민건강보험공단 고지 (작성일 2026-07-21 · 사업장관리번호 10109938960 · 전자납부번호 5701460966112)",
-              "건강 31,658,730 + 요양 4,107,750 = 35,766,480",
-              "산출보험료 4,704,060 · 연말정산 31,062,420 (정산분이 고지액의 대부분)",
-              "개인별: 김영자 11,859,010 / 나기정 11,855,500 / 나승민 11,855,500 / 안경미 105,080 / 김지아 91,390",
-            ].join("\n"),
-            atts: [],
-            createdAt: Date.now(),
-          }, ...list];
-        });
-        setTimeout(() => { if (added) showToast("🏥 2026년 7월 건강보험료 고지(35,766,480원)를 세무 관리에 등록했습니다", "info"); }, 400);
-      } catch (e) {}
-    }, 16000);
-    return () => clearTimeout(t);
-  }, []);
   const [newProdName, setNewProdName] = useState("");
   const [apiKey, setApiKey] = useState(() => load("frw_apikey", ""));
   const [includeImages, setIncludeImages] = useState(() => load("frw_quote_include_images", true));
@@ -13511,6 +13474,43 @@ function App() {
   const [todos, setTodos] = useState(() => load("frw_todos", []));
   const [notes, setNotes] = useState(() => load("frw_notes", []));
   const [taxes, setTaxes] = useState(() => load("frw_taxes", [])); // 세무 관리 — 사업장별 세금 납부 기록
+  // 2026년 7월 1차 건강보험료 고지 등록 (1회) — 국민건강보험공단 고지 내역서 기준.
+  // 고지금액 35,766,480 = 건강 31,658,730 + 요양 4,107,750 (5인 개인별 합계와 일치 검산 완료).
+  // 납부기한은 직장가입자 고지분 기준 다음 달 10일.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        if (load("frw_seed_health_2026_07_done", false)) return;
+        save("frw_seed_health_2026_07_done", true);
+        let added = false;
+        setTaxes(prev => {
+          const list = prev || [];
+          // 같은 귀속월 4대보험 기록이 이미 있으면 건너뜀 (수기 입력과 중복 방지)
+          if (list.some(r => r.taxType === "4대보험" && (r.period || "").includes("2026년 7월"))) return list;
+          added = true;
+          return [{
+            id: 1785400000001,
+            biz: "나정엔터프라이즈",
+            taxType: "4대보험",
+            period: "2026년 7월 1차 (건강보험)",
+            amount: 35766480,
+            dueDate: "2026-08-10",
+            paidDate: "",
+            memo: [
+              "국민건강보험공단 고지 (작성일 2026-07-21 · 사업장관리번호 10109938960 · 전자납부번호 5701460966112)",
+              "건강 31,658,730 + 요양 4,107,750 = 35,766,480",
+              "산출보험료 4,704,060 · 연말정산 31,062,420 (정산분이 고지액의 대부분)",
+              "개인별: 김영자 11,859,010 / 나기정 11,855,500 / 나승민 11,855,500 / 안경미 105,080 / 김지아 91,390",
+            ].join("\n"),
+            atts: [],
+            createdAt: Date.now(),
+          }, ...list];
+        });
+        setTimeout(() => { if (added) showToast("🏥 2026년 7월 건강보험료 고지(35,766,480원)를 세무 관리에 등록했습니다", "info"); }, 400);
+      } catch (e) {}
+    }, 16000);
+    return () => clearTimeout(t);
+  }, []);
   const [meetings, setMeetings] = useState(() => load("frw_meetings", [])); // 회의록 — 노션 「회의 진행 내역」 연동
   const [recurringSchedules, setRecurringSchedules] = useState(() => load("frw_recurring", []));
   const [ledgers, setLedgers] = useState(() => load("frw_ledgers", {}));
