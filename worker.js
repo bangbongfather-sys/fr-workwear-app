@@ -22,6 +22,7 @@ import { sendTenderNotification } from "./worker-src/tenders/notify.js";
 import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { handleMcp } from "./worker-src/mcp.js";
+import { handleFxApi } from "./worker-src/fx.js";
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
