@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-29-spec-marketprice", note: "시장 소비자가 요척서별 독립 — 제품 단위로 공유되던 소비자가를 요척서(spec) 단위로 이동. 요척서마다 다른 소비자가 설정 가능하고 서로 영향 없음. 기존 제품 소비자가는 각 요척서로 자동 승계, 견적서 생성·시장가 포함 옵션도 활성 요척서 값 사용"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-intake-select-sum", note: "매입 현황 선택 합계 — 항목·매입일 그룹을 체크하면 선택 바에 공급가·VAT 포함액 합계와 수량(단위별 분리 표기)·공급처를 실시간 표시. [합계 복사] 버튼으로 선택 내역+합계를 탭 구분 표로 클립보드 복사(엑셀 붙여넣기용)"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
