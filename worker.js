@@ -63,6 +63,11 @@ export default {
       return handleTendersApi(request, env, url);
     }
 
+    // 환율 (USD/KRW 등) — 외부 제공처 프록시 + 캐시
+    if (url.pathname === "/api/fx" || url.pathname === "/api/fx/") {
+      return handleFxApi(request, env, url);
+    }
+
     // Claude 커스텀 커넥터용 MCP 서버 (Streamable HTTP, authless)
     if (url.pathname === "/mcp" || url.pathname === "/mcp/") {
       return handleMcp(request, env, url);
