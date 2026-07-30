@@ -237,7 +237,7 @@ async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-fx-plain-color", note: "환율 카드 색상 통일 — 등락에 따라 빨강/파랑으로 바뀌던 환율 숫자를 다른 카드와 동일한 기본 글자색으로 고정(메인 화면·경영 대시보드 모두). 등락 방향은 ▲▼ 화살표와 등락률로 표기"}) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-ledger-row-width", note: "장부 표 행이 짧게 끊기던 문제 수정 — 전역 table 규칙의 display:block 때문에 블록 박스만 늘어나고 thead/tbody는 max-content에 머물러 행·확장 패널이 헤더보다 짧았다(측정 971px vs 헤더 1512px). 월별 장부·거래처별 미수금 표를 table-plain(display:table·width:100%)으로 전환해 헤더와 폭 일치, 가로 스크롤은 기존 래퍼가 담당(모바일 정상)"}) }] };
   }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
