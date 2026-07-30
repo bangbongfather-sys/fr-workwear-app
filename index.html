@@ -4381,6 +4381,50 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
   );
 }
 
+// ── 환율 훅 (USD/KRW) — 웰컴 화면·경영 대시보드 공용 ──
+// Worker의 /api/fx가 외부 제공처를 프록시·캐시한다 (시간당 갱신 소스이므로 10분 주기 폴링).
+// 전일 대비는 제공처가 주지 않아, 날짜별 스냅샷을 로컬에 남겨 "직전 기록"과 비교한다.
+function useFxRate() {
+  const [fx, setFx] = React.useState(null);       // { rates:{KRW,...}, updatedAt, stale? }
+  const [fxErr, setFxErr] = React.useState("");
+  const [fxPrev, setFxPrev] = React.useState(null); // { date, krw } — 비교 기준(다른 날짜의 마지막 기록)
+  React.useEffect(() => {
+    let alive = true;
+    const ymdLocal = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+    const pull = async () => {
+      try {
+        const res = await fetch("/api/fx");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json();
+        if (!alive || !d || !d.rates || !d.rates.KRW) throw new Error("환율 응답 형식 오류");
+        setFx(d); setFxErr("");
+        try {
+          const today = ymdLocal(d.updatedAt || Date.now());
+          const hist = load("frw_fx_hist", []);
+          const prior = hist.filter(h => h.date !== today).sort((a, b) => b.date.localeCompare(a.date))[0] || null;
+          setFxPrev(prior);
+          const next = [...hist.filter(h => h.date !== today), { date: today, krw: d.rates.KRW }]
+            .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+          save("frw_fx_hist", next);
+        } catch {}
+      } catch (e) {
+        if (alive) setFxErr(e.message || "환율을 가져올 수 없습니다");
+      }
+    };
+    pull();
+    const iv = setInterval(pull, 10 * 60 * 1000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  // 표시에 필요한 파생값을 한 곳에서 계산 (양쪽 화면이 같은 규칙을 쓰도록)
+  const krw = fx && fx.rates ? fx.rates.KRW : null;
+  const diff = (krw && fxPrev && fxPrev.krw) ? krw - fxPrev.krw : null;
+  const pct = (diff !== null && fxPrev && fxPrev.krw) ? (diff / fxPrev.krw) * 100 : null;
+  const flat = diff !== null && Math.abs(diff) < 0.005;
+  const up = diff !== null && diff > 0;
+  const updStr = fx ? (() => { const u = new Date(fx.updatedAt); return `${u.getMonth()+1}/${u.getDate()} ${String(u.getHours()).padStart(2,"0")}:${String(u.getMinutes()).padStart(2,"0")}`; })() : "";
+  return { fx, fxErr, fxPrev, krw, diff, pct, flat, up, updStr };
+}
+
 function DashboardTab({ products, setProducts, materials, setMaterials, laborItems, setLaborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {}, clientAR = {}, accounts = [], fabricIntakes = [], scheduledExpenses = [], stock = null }) {
   const [newOrder, setNewOrder] = useState({ date: new Date().toISOString().slice(0,10), productName: "", qty: "1", unitPrice: "", client: "", clientId: "", note: "", paymentDue: "", paidDate: "" });
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
@@ -4711,40 +4755,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
     setOrders(prev => prev.map(x => x.id === editingOrderId ? { ...editOrderDraft } : x));
     setEditingOrderId(null); setEditOrderDraft(null);
   };
-  // ── 환율 (USD/KRW) ──
-  // Worker의 /api/fx가 외부 제공처를 프록시·캐시한다 (시간당 갱신 소스이므로 10분 주기 폴링).
-  // 전일 대비는 제공처가 주지 않아, 날짜별 스냅샷을 로컬에 남겨 "직전 영업일 기록"과 비교한다.
-  const [fx, setFx] = useState(null);       // { rates:{KRW,...}, updatedAt, stale? }
-  const [fxErr, setFxErr] = useState("");
-  const [fxPrev, setFxPrev] = useState(null); // { date, krw } — 비교 기준(다른 날짜의 마지막 기록)
-  useEffect(() => {
-    let alive = true;
-    const ymdLocal = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
-    const pull = async () => {
-      try {
-        const res = await fetch("/api/fx");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const d = await res.json();
-        if (!alive || !d || !d.rates || !d.rates.KRW) throw new Error("환율 응답 형식 오류");
-        setFx(d); setFxErr("");
-        // 날짜별 스냅샷 갱신 (최근 10일치만 보관)
-        try {
-          const today = ymdLocal(d.updatedAt || Date.now());
-          const hist = load("frw_fx_hist", []);
-          const prior = hist.filter(h => h.date !== today).sort((a, b) => b.date.localeCompare(a.date))[0] || null;
-          setFxPrev(prior);
-          const next = [...hist.filter(h => h.date !== today), { date: today, krw: d.rates.KRW }]
-            .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
-          save("frw_fx_hist", next);
-        } catch {}
-      } catch (e) {
-        if (alive) setFxErr(e.message || "환율을 가져올 수 없습니다");
-      }
-    };
-    pull();
-    const iv = setInterval(pull, 10 * 60 * 1000);
-    return () => { alive = false; clearInterval(iv); };
-  }, []);
+  const { fx, fxErr, fxPrev, krw: fxKrw, diff: fxDiff, pct: fxPct, flat: fxFlat, up: fxUp, updStr: fxUpdStr } = useFxRate();
 
   const kpi = (key, label, val, sub, color) => {
     if (hiddenKPIs.includes(key)) return null;
@@ -4898,20 +4909,13 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
               // 환율 카드 — 값/등락/갱신시각. 로딩·오류도 카드 안에서 그대로 알린다.
               if (fxErr && !fx) return kpi("kpi_fx", "원/달러 환율", "—", `불러오지 못했습니다 · ${fxErr}`, "#F04452");
               if (!fx) return kpi("kpi_fx", "원/달러 환율", "…", "환율을 불러오는 중", null);
-              const krw = fx.rates.KRW;
-              const diff = fxPrev && fxPrev.krw ? krw - fxPrev.krw : null;
-              const pct = diff !== null && fxPrev.krw ? (diff / fxPrev.krw) * 100 : null;
-              const up = diff !== null && diff > 0;
-              const flat = diff !== null && Math.abs(diff) < 0.005;
-              const upd = new Date(fx.updatedAt);
-              const updStr = `${upd.getMonth()+1}/${upd.getDate()} ${String(upd.getHours()).padStart(2,"0")}:${String(upd.getMinutes()).padStart(2,"0")}`;
-              const sub = diff === null
-                ? `1 USD 기준 · ${updStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`
-                : `${flat ? "보합" : `${up ? "▲" : "▼"} ${Math.abs(diff).toFixed(2)}원 (${up ? "+" : "−"}${Math.abs(pct).toFixed(2)}%)`} · ${fxPrev.date.slice(5).replace("-", "/")} 대비 · ${updStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`;
+              const sub = fxDiff === null
+                ? `1 USD 기준 · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`
+                : `${fxFlat ? "보합" : `${fxUp ? "▲" : "▼"} ${Math.abs(fxDiff).toFixed(2)}원 (${fxUp ? "+" : "−"}${Math.abs(fxPct).toFixed(2)}%)`} · ${fxPrev.date.slice(5).replace("-", "/")} 대비 · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`;
               return kpi("kpi_fx", "원/달러 환율",
-                `${krw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}원`,
+                `${fxKrw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}원`,
                 sub,
-                fx.stale ? "#FF9500" : flat ? null : diff === null ? "#007AFF" : (up ? "#F04452" : "#007AFF"));
+                fx.stale ? "#FF9500" : fxFlat ? null : fxDiff === null ? "#007AFF" : (fxUp ? "#F04452" : "#007AFF"));
             })()}
           </div>
         );
