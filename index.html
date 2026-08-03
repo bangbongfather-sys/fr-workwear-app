@@ -2675,7 +2675,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const [memoEdit, setMemoEdit] = useState(null);
   const [showNotionImport, setShowNotionImport] = useState(false);
   const [editMat, setEditMat] = useState(null);
-  const [newLab, setNewLab] = useState({ name: "", price: "", unit: "벌" });
+  const [newLab, setNewLab] = useState({ name: "", price: "", unit: "벌", memo: "" });
+  const [labMemoEdit, setLabMemoEdit] = useState(null); // 공임비 메모 인라인 편집 — { id, text }
   const [editLab, setEditLab] = useState(null);
   const dragMat = useRef(null);
   const dragLab = useRef(null);
@@ -2712,10 +2713,16 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
   const addLabor = () => {
     if (!newLab.name.trim() || !newLab.price) return;
-    setLaborItems(ls => [...ls, { id: uid(), name: newLab.name.trim(), price: parseFloat(newLab.price), unit: newLab.unit }]);
-    setNewLab({ name: "", price: "", unit: "벌" });
+    setLaborItems(ls => [...ls, { id: uid(), name: newLab.name.trim(), price: parseFloat(newLab.price), unit: newLab.unit, memo: newLab.memo.trim() }]);
+    setNewLab({ name: "", price: "", unit: "벌", memo: "" });
   };
   const saveLab = () => { setLaborItems(ls => ls.map(l => l.id === editLab.id ? editLab : l)); setEditLab(null); };
+  const saveLabMemo = () => {
+    if (!labMemoEdit) return;
+    const text = (labMemoEdit.text || "").trim();
+    setLaborItems(ls => ls.map(l => l.id === labMemoEdit.id ? { ...l, memo: text } : l));
+    setLabMemoEdit(null);
+  };
 
   const tblBtn = (label, color, onClick) => (
     <button onClick={onClick} style={{ color, background: "none", border: "none", cursor: "pointer", fontWeight: 600, fontFamily: "inherit", fontSize: 13 }}>{label}</button>
@@ -2880,7 +2887,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
         <div style={{ fontSize: 17, fontWeight: 800, color: NAVY, marginBottom: 14, display: "inline-flex", alignItems: "center", gap: 6 }}><Icon name="wrench" size={16}/>공임비 단가표</div>
         <div className="card" style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 공임비 추가</div>
-          <div className="add-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 140px 90px auto", gap: 8 }}>
+          <div className="add-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 140px 90px minmax(140px, 1fr) auto", gap: 8 }}>
             <input placeholder="항목명 (예: 재봉비, 재단비)" value={newLab.name}
               onChange={e => setNewLab({...newLab, name: e.target.value})}
               onKeyDown={e => e.key === "Enter" && addLabor()} />
@@ -2889,6 +2896,10 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
             <select value={newLab.unit} onChange={e => setNewLab({...newLab, unit: e.target.value})}>
               {LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
+            <input placeholder="메모 (선택)" value={newLab.memo}
+              title="업체, 적용 조건, 인상 이력 등 자유롭게"
+              onChange={e => setNewLab({...newLab, memo: e.target.value})}
+              onKeyDown={e => e.key === "Enter" && addLabor()} />
             <button className="btn-orange" onClick={addLabor} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 추가</button>
           </div>
         </div>
@@ -2897,7 +2908,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
             <thead><tr>
               <th style={{ width: 28 }}></th>
               <th>항목명</th><th style={{ textAlign: "right" }}>단가</th>
-              <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
+              <th style={{ textAlign: "center" }}>단위</th>
+              <th title="칸을 눌러 바로 입력할 수 있습니다">메모</th>
+              <th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
               {laborItems.map(l => {
@@ -2905,8 +2918,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                 const isDropBot = labDropInfo?.id === l.id && labDropInfo?.side === "bottom";
                 return (
                   <React.Fragment key={l.id}>
-                    {isDropTop && <InsertRow cols={5} />}
-                    <tr draggable
+                    {isDropTop && <InsertRow cols={6} />}
+                    {/* 편집 중인 행은 드래그를 끈다 — 켜두면 입력칸 안에서 글자를 끌어 선택할 수 없다 */}
+                    <tr draggable={editLab?.id !== l.id && labMemoEdit?.id !== l.id}
                       onDragStart={e => { dragLab.current = l.id; e.currentTarget.style.opacity = "0.4"; }}
                       onDragEnd={e => { e.currentTarget.style.opacity = "1"; setLabDropInfo(null); dragLab.current = null; }}
                       onDragOver={e => {
@@ -2944,6 +2958,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           <td><input value={editLab.name} onChange={e => setEditLab({...editLab, name: e.target.value})} /></td>
                           <td><input type="number" value={editLab.price} style={{ textAlign: "right" }} onChange={e => setEditLab({...editLab, price: parseFloat(e.target.value)})} /></td>
                           <td><select value={editLab.unit} onChange={e => setEditLab({...editLab, unit: e.target.value})}>{LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></td>
+                          <td><input value={editLab.memo ?? ""} placeholder="메모" onChange={e => setEditLab({...editLab, memo: e.target.value})} onKeyDown={e => e.key === "Enter" && saveLab()} /></td>
                           <td style={{ textAlign: "center" }}>
                             {tblBtn("저장", "#00B493", saveLab)}
                             <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
@@ -2955,6 +2970,23 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           <td style={{ fontWeight: 500 }}>{l.name}</td>
                           <td style={{ textAlign: "right", fontWeight: 600 }}>{l.price.toLocaleString()}<span style={{ color: "var(--text2)", fontWeight: 400, fontSize: 12 }}>원</span></td>
                           <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{l.unit}</td>
+                          {/* 메모 — 칸을 누르면 그 자리에서 입력. Enter 저장, Esc 취소, 다른 곳 클릭해도 저장 */}
+                          <td onClick={() => { if (labMemoEdit?.id !== l.id) setLabMemoEdit({ id: l.id, text: l.memo || "" }); }}
+                            style={{ cursor: "text", maxWidth: 240 }}>
+                            {labMemoEdit?.id === l.id ? (
+                              <input autoFocus value={labMemoEdit.text}
+                                onChange={e => setLabMemoEdit({ ...labMemoEdit, text: e.target.value })}
+                                onBlur={saveLabMemo}
+                                onKeyDown={e => {
+                                  if (e.key === "Enter") { e.preventDefault(); saveLabMemo(); }
+                                  else if (e.key === "Escape") { e.preventDefault(); setLabMemoEdit(null); }
+                                }} />
+                            ) : l.memo ? (
+                              <span title={l.memo} style={{ fontSize: 12.5, color: "var(--text2)", display: "block", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.memo}</span>
+                            ) : (
+                              <span style={{ fontSize: 12, color: "var(--text3)" }}>+ 메모</span>
+                            )}
+                          </td>
                           <td style={{ textAlign: "center" }}>
                             {tblBtn("수정", NAVY, () => setEditLab({...l}))}
                             <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
@@ -2963,7 +2995,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                         </>
                       )}
                     </tr>
-                    {isDropBot && <InsertRow cols={5} />}
+                    {isDropBot && <InsertRow cols={6} />}
                   </React.Fragment>
                 );
               })}
