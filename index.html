@@ -2670,7 +2670,9 @@ function NotionSafeStockModal({ materials, setMaterials, onClose }) {
 }
 
 function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {} }) {
-  const [newMat, setNewMat] = useState({ name: "", price: "", unit: "yard", safeStock: "", currentStock: "" });
+  const [newMat, setNewMat] = useState({ name: "", price: "", unit: "yard", safeStock: "", currentStock: "", memo: "" });
+  // 메모는 "수정" 모드에 들어가지 않고 칸을 눌러 바로 쓸 수 있게 한다 — { id, text }
+  const [memoEdit, setMemoEdit] = useState(null);
   const [showNotionImport, setShowNotionImport] = useState(false);
   const [editMat, setEditMat] = useState(null);
   const [newLab, setNewLab] = useState({ name: "", price: "", unit: "벌" });
@@ -2696,10 +2698,17 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
   const addMaterial = () => {
     if (!newMat.name.trim() || !newMat.price) return;
-    setMaterials(ms => [...ms, { id: uid(), name: newMat.name.trim(), price: parseFloat(newMat.price), unit: newMat.unit, safeStock: newMat.safeStock !== "" ? parseFloat(newMat.safeStock) : "", currentStock: newMat.currentStock !== "" ? parseFloat(newMat.currentStock) : "" }]);
-    setNewMat({ name: "", price: "", unit: "yard", safeStock: "", currentStock: "" });
+    setMaterials(ms => [...ms, { id: uid(), name: newMat.name.trim(), price: parseFloat(newMat.price), unit: newMat.unit, safeStock: newMat.safeStock !== "" ? parseFloat(newMat.safeStock) : "", currentStock: newMat.currentStock !== "" ? parseFloat(newMat.currentStock) : "", memo: newMat.memo.trim() }]);
+    setNewMat({ name: "", price: "", unit: "yard", safeStock: "", currentStock: "", memo: "" });
   };
   const saveMat = () => { setMaterials(ms => ms.map(m => m.id === editMat.id ? editMat : m)); setEditMat(null); };
+  // 메모 인라인 저장 — 빈 문자열이면 필드를 지워 데이터가 불필요하게 늘지 않게 한다
+  const saveMemo = () => {
+    if (!memoEdit) return;
+    const text = (memoEdit.text || "").trim();
+    setMaterials(ms => ms.map(m => m.id === memoEdit.id ? { ...m, memo: text } : m));
+    setMemoEdit(null);
+  };
 
   const addLabor = () => {
     if (!newLab.name.trim() || !newLab.price) return;
@@ -2727,7 +2736,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
         {showNotionImport && <NotionSafeStockModal materials={materials} setMaterials={setMaterials} onClose={() => setShowNotionImport(false)} />}
         <div className="card" style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text2)", marginBottom: 10 }}>새 원단 추가</div>
-          <div className="add-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 120px 100px 100px 84px auto", gap: 8 }}>
+          <div className="add-form-grid" style={{ display: "grid", gridTemplateColumns: "1fr 120px 100px 100px 84px minmax(140px, 1fr) auto", gap: 8 }}>
             <input placeholder="원단명 (예: 아라미드 동복용)" value={newMat.name}
               onChange={e => setNewMat({...newMat, name: e.target.value})}
               onKeyDown={e => e.key === "Enter" && addMaterial()} />
@@ -2744,6 +2753,10 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
             <select value={newMat.unit} onChange={e => setNewMat({...newMat, unit: e.target.value})}>
               <option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option>
             </select>
+            <input placeholder="메모 (선택)" value={newMat.memo}
+              title="거래처, 대체 원단, 납기, 협상 메모 등 자유롭게"
+              onChange={e => setNewMat({...newMat, memo: e.target.value})}
+              onKeyDown={e => e.key === "Enter" && addMaterial()} />
             <button className="btn-orange" onClick={addMaterial} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 추가</button>
           </div>
         </div>
@@ -2754,7 +2767,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               <th>원단명</th><th style={{ textAlign: "right" }}>단가</th>
               <th style={{ textAlign: "right" }} title="이 수량 미만이면 재고 현황에서 미달 경보">안전재고</th>
               <th style={{ textAlign: "right" }} title="현재 보유 원단 수량 (직접 입력) — 발주서 작성 시 함께 표시">현재재고</th>
-              <th style={{ textAlign: "center" }}>단위</th><th style={{ textAlign: "center" }}>관리</th>
+              <th style={{ textAlign: "center" }}>단위</th>
+              <th title="칸을 눌러 바로 입력할 수 있습니다">메모</th>
+              <th style={{ textAlign: "center" }}>관리</th>
             </tr></thead>
             <tbody>
               {materials.map(m => {
@@ -2762,8 +2777,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                 const isDropBot = matDropInfo?.id === m.id && matDropInfo?.side === "bottom";
                 return (
                   <React.Fragment key={m.id}>
-                    {isDropTop && <InsertRow cols={7} />}
-                    <tr draggable
+                    {isDropTop && <InsertRow cols={8} />}
+                    {/* 편집 중인 행은 드래그를 끈다 — 켜두면 입력칸 안에서 글자를 끌어 선택할 수 없다 */}
+                    <tr draggable={editMat?.id !== m.id && memoEdit?.id !== m.id}
                       onDragStart={e => { dragMat.current = m.id; e.currentTarget.style.opacity = "0.4"; }}
                       onDragEnd={e => { e.currentTarget.style.opacity = "1"; setMatDropInfo(null); dragMat.current = null; }}
                       onDragOver={e => {
@@ -2803,6 +2819,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           <td><input type="number" value={editMat.safeStock ?? ""} placeholder="—" style={{ textAlign: "right" }} onChange={e => setEditMat({...editMat, safeStock: e.target.value === "" ? "" : parseFloat(e.target.value)})} /></td>
                           <td><input type="number" value={editMat.currentStock ?? ""} placeholder="—" style={{ textAlign: "right" }} title="현재 보유 원단 수량" onChange={e => setEditMat({...editMat, currentStock: e.target.value === "" ? "" : parseFloat(e.target.value)})} /></td>
                           <td><select value={editMat.unit} onChange={e => setEditMat({...editMat, unit: e.target.value})}><option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option></select></td>
+                          <td><input value={editMat.memo ?? ""} placeholder="메모" onChange={e => setEditMat({...editMat, memo: e.target.value})} onKeyDown={e => e.key === "Enter" && saveMat()} /></td>
                           <td style={{ textAlign: "center" }}>
                             {tblBtn("저장", "#00B493", saveMat)}
                             <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
@@ -2823,6 +2840,23 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                             return <span style={{ fontWeight: 600, color }} title={low ? "안전재고 미달" : (cs.manual ? "" : "재고 현황 자동 참조")}>{cs.qty.toLocaleString()}<span style={{ color: "var(--text3)", fontWeight: 400, fontSize: 11, marginLeft: 1 }}>{cs.unit || m.unit}</span>{low ? <span style={{ color: "#FF9500", marginLeft: 3 }}>⚠</span> : null}</span>;
                           })()}</td>
                           <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{m.unit}</td>
+                          {/* 메모 — 칸을 누르면 그 자리에서 입력. Enter 저장, Esc 취소, 다른 곳 클릭해도 저장 */}
+                          <td onClick={() => { if (memoEdit?.id !== m.id) setMemoEdit({ id: m.id, text: m.memo || "" }); }}
+                            style={{ cursor: "text", maxWidth: 240 }}>
+                            {memoEdit?.id === m.id ? (
+                              <input autoFocus value={memoEdit.text}
+                                onChange={e => setMemoEdit({ ...memoEdit, text: e.target.value })}
+                                onBlur={saveMemo}
+                                onKeyDown={e => {
+                                  if (e.key === "Enter") { e.preventDefault(); saveMemo(); }
+                                  else if (e.key === "Escape") { e.preventDefault(); setMemoEdit(null); }
+                                }} />
+                            ) : m.memo ? (
+                              <span title={m.memo} style={{ fontSize: 12.5, color: "var(--text2)", display: "block", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.memo}</span>
+                            ) : (
+                              <span style={{ fontSize: 12, color: "var(--text3)" }}>+ 메모</span>
+                            )}
+                          </td>
                           <td style={{ textAlign: "center" }}>
                             {tblBtn("수정", NAVY, () => setEditMat({...m}))}
                             <span style={{ margin: "0 4px", color: "var(--divider)" }}>|</span>
@@ -2831,7 +2865,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                         </>
                       )}
                     </tr>
-                    {isDropBot && <InsertRow cols={7} />}
+                    {isDropBot && <InsertRow cols={8} />}
                   </React.Fragment>
                 );
               })}
