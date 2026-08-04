@@ -2767,16 +2767,19 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
             <button className="btn-orange" onClick={addMaterial} style={{ height: 42, padding: "0 16px", whiteSpace: "nowrap" }}>+ 추가</button>
           </div>
         </div>
+        {/* table-plain + 바깥 스크롤 div: 표가 항상 카드 폭을 꽉 채우고(왼쪽 쏠림 방지),
+            창이 좁아지면 minWidth 아래로는 이 div가 좌우 스크롤을 맡는다. */}
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <table>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <table className="table-plain" style={{ minWidth: 1020 }}>
             <thead><tr>
               <th style={{ width: 28 }}></th>
-              <th>원단명</th><th style={{ textAlign: "right" }}>단가</th>
-              <th style={{ textAlign: "right" }} title="이 수량 미만이면 재고 현황에서 미달 경보">안전재고</th>
-              <th style={{ textAlign: "right" }} title="현재 보유 원단 수량 (직접 입력) — 발주서 작성 시 함께 표시">현재재고</th>
-              <th style={{ textAlign: "center" }}>단위</th>
-              <th title="칸을 눌러 바로 입력할 수 있습니다">메모</th>
-              <th style={{ textAlign: "center" }}>관리</th>
+              <th>원단명</th><th style={{ textAlign: "right", width: 110 }}>단가</th>
+              <th style={{ textAlign: "right", width: 110 }} title="이 수량 미만이면 재고 현황에서 미달 경보">안전재고</th>
+              <th style={{ textAlign: "right", width: 110 }} title="현재 보유 원단 수량 (직접 입력) — 발주서 작성 시 함께 표시">현재재고</th>
+              <th style={{ textAlign: "center", width: 70 }}>단위</th>
+              <th style={{ width: "28%" }} title="칸을 눌러 바로 입력할 수 있습니다">메모</th>
+              <th style={{ textAlign: "center", width: 110 }}>관리</th>
             </tr></thead>
             <tbody>
               {materials.map(m => {
@@ -2849,7 +2852,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{m.unit}</td>
                           {/* 메모 — 칸을 누르면 그 자리에서 입력. Enter 저장, Esc 취소, 다른 곳 클릭해도 저장 */}
                           <td onClick={() => { if (memoEdit?.id !== m.id) setMemoEdit({ id: m.id, text: m.memo || "" }); }}
-                            style={{ cursor: "text", maxWidth: 240 }}>
+                            style={{ cursor: "text" }}>
                             {memoEdit?.id === m.id ? (
                               <input autoFocus value={memoEdit.text}
                                 onChange={e => setMemoEdit({ ...memoEdit, text: e.target.value })}
@@ -2859,7 +2862,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                                   else if (e.key === "Escape") { e.preventDefault(); setMemoEdit(null); }
                                 }} />
                             ) : m.memo ? (
-                              <span title={m.memo} style={{ fontSize: 12.5, color: "var(--text2)", display: "block", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.memo}</span>
+                              <span title={m.memo} style={{ fontSize: 12.5, color: "var(--text2)", display: "block", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.memo}</span>
                             ) : (
                               <span style={{ fontSize: 12, color: "var(--text3)" }}>+ 메모</span>
                             )}
@@ -2878,6 +2881,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               })}
             </tbody>
           </table>
+          </div>
           {materials.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "var(--empty-color)" }}>등록된 원단이 없습니다</div>}
         </div>
       </div>
@@ -2904,13 +2908,14 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
           </div>
         </div>
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <table>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <table className="table-plain" style={{ minWidth: 1020 }}>
             <thead><tr>
               <th style={{ width: 28 }}></th>
-              <th>항목명</th><th style={{ textAlign: "right" }}>단가</th>
-              <th style={{ textAlign: "center" }}>단위</th>
-              <th title="칸을 눌러 바로 입력할 수 있습니다">메모</th>
-              <th style={{ textAlign: "center" }}>관리</th>
+              <th>항목명</th><th style={{ textAlign: "right", width: 110 }}>단가</th>
+              <th style={{ textAlign: "center", width: 70 }}>단위</th>
+              <th style={{ width: "28%" }} title="칸을 눌러 바로 입력할 수 있습니다">메모</th>
+              <th style={{ textAlign: "center", width: 110 }}>관리</th>
             </tr></thead>
             <tbody>
               {laborItems.map(l => {
@@ -2972,7 +2977,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           <td style={{ textAlign: "center", color: "var(--text2)", fontSize: 13 }}>{l.unit}</td>
                           {/* 메모 — 칸을 누르면 그 자리에서 입력. Enter 저장, Esc 취소, 다른 곳 클릭해도 저장 */}
                           <td onClick={() => { if (labMemoEdit?.id !== l.id) setLabMemoEdit({ id: l.id, text: l.memo || "" }); }}
-                            style={{ cursor: "text", maxWidth: 240 }}>
+                            style={{ cursor: "text" }}>
                             {labMemoEdit?.id === l.id ? (
                               <input autoFocus value={labMemoEdit.text}
                                 onChange={e => setLabMemoEdit({ ...labMemoEdit, text: e.target.value })}
@@ -2982,7 +2987,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                                   else if (e.key === "Escape") { e.preventDefault(); setLabMemoEdit(null); }
                                 }} />
                             ) : l.memo ? (
-                              <span title={l.memo} style={{ fontSize: 12.5, color: "var(--text2)", display: "block", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.memo}</span>
+                              <span title={l.memo} style={{ fontSize: 12.5, color: "var(--text2)", display: "block", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.memo}</span>
                             ) : (
                               <span style={{ fontSize: 12, color: "var(--text3)" }}>+ 메모</span>
                             )}
@@ -3001,6 +3006,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               })}
             </tbody>
           </table>
+          </div>
           {laborItems.length === 0 && <div style={{ textAlign: "center", padding: 40, color: "var(--empty-color)" }}>등록된 공임비가 없습니다</div>}
         </div>
       </div>
