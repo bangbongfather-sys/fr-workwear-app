@@ -10295,6 +10295,94 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
   };
   const setSafeQty = (id, val) => setStock(s => ({ ...s, items: (s.items || []).map(it => it.id === id ? { ...it, safeQty: val } : it) }));
 
+  // ── 품목 선택 → 재고 수량 공유 ──
+  // "그 원단 지금 몇 마 남았어요?" 같은 문의에 바로 답하려고 만든 기능.
+  // 검색으로 좁힌 뒤 필요한 품목만 체크해서 카톡·문자로 보낸다.
+  const [picked, setPicked] = useState(() => new Set());
+  // 엑셀을 새로 올리면 id가 전부 바뀌므로, 현재 목록에 남아 있는 것만 유효한 선택으로 본다.
+  const pickedItems = items.filter(it => picked.has(it.id));
+  const togglePick = (id) => setPicked(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const pickMany = (list, on) => setPicked(prev => {
+    const n = new Set(prev);
+    list.forEach(it => { if (on) n.add(it.id); else n.delete(it.id); });
+    return n;
+  });
+  const allVisiblePicked = visible.length > 0 && visible.every(it => picked.has(it.id));
+  // 선택 품목의 단위가 하나로 통일될 때만 합계가 의미 있다 (yard와 벌을 더할 수는 없으니)
+  const pickedUnits = Array.from(new Set(pickedItems.map(x => x.unit).filter(Boolean)));
+  const pickedSum = pickedItems.reduce((s, x) => s + x.qty, 0);
+  const pickedSumText = pickedUnits.length <= 1 ? `${pickedSum.toLocaleString()}${pickedUnits[0] ? " " + pickedUnits[0] : ""}` : null;
+
+  const pickedText = () => {
+    const lines = ["📦 재고 현황 — NJ SAFETY", `기준: ${stock.updatedAt || "-"}`, ""];
+    pickedItems.forEach((it, i) => {
+      lines.push(`${i + 1}. ${it.name}${it.spec && it.spec !== it.name ? ` (${it.spec})` : ""} : ${fmtQty(it)}`);
+    });
+    if (pickedItems.length > 1 && pickedSumText) lines.push("", `합계 ${pickedSumText}`);
+    return lines.join("\n");
+  };
+
+  const copyPickedText = async () => {
+    const text = pickedText();
+    try { await navigator.clipboard.writeText(text); showToast(`${pickedItems.length}개 품목 재고를 복사했습니다.\n카톡·문자에 붙여넣기 하세요.`, "success"); }
+    catch { showToast(text); }
+  };
+
+  // 표 이미지(PNG)로 만들어 공유 — 텍스트 표는 카톡·문자에서 정렬이 깨진다.
+  // 마이너스 재고 공유와 같은 방식 (흰 배경 고정, 셀마다 색 인라인 명시).
+  const IMG_ROW_CAP = 80;
+  const sharePicked = async () => {
+    if (pickedItems.length === 0) return;
+    const rows = pickedItems.slice(0, IMG_ROW_CAP);
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const node = document.createElement("div");
+    node.style.cssText = "position:fixed;left:-10000px;top:0;width:580px;background:#ffffff;color:#191F28;font-family:'Pretendard Variable',Pretendard,-apple-system,sans-serif;padding:26px;";
+    node.innerHTML =
+      `<div style="font-size:19px;font-weight:800;margin-bottom:3px;color:#191F28;">📦 재고 현황 ${rows.length}건</div>` +
+      `<div style="font-size:12px;color:#8B95A1;margin-bottom:14px;">NJ SAFETY · 기준 ${esc(stock.updatedAt || "-")}${pickedItems.length > IMG_ROW_CAP ? ` · 선택 ${pickedItems.length}건 중 ${IMG_ROW_CAP}건 표시` : ""}</div>` +
+      `<table style="width:100%;border-collapse:collapse;font-size:13px;">` +
+      `<thead><tr style="background:#F2F4F6;">` +
+      `<th style="padding:9px 8px;border:1px solid #E5E8EB;text-align:center;width:34px;color:#4E5968;">#</th>` +
+      `<th style="padding:9px 8px;border:1px solid #E5E8EB;text-align:left;color:#4E5968;">품목명</th>` +
+      `<th style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;width:110px;color:#4E5968;">재고수량</th>` +
+      `</tr></thead><tbody>` +
+      rows.map((it, i) =>
+        `<tr style="background:#ffffff;">` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:center;color:#8B95A1;background:#ffffff;">${i + 1}</td>` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;font-weight:600;color:#191F28;background:#ffffff;">${esc(it.name)}${it.spec && it.spec !== it.name ? ` <span style="color:#8B95A1;font-weight:400;">(${esc(it.spec)})</span>` : ""}</td>` +
+        `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;font-weight:800;color:${it.qty < 0 ? "#F04452" : "#191F28"};background:#ffffff;font-variant-numeric:tabular-nums;">${it.qty.toLocaleString()}${it.unit ? " " + esc(it.unit) : ""}</td>` +
+        `</tr>`
+      ).join("") +
+      (rows.length > 1 && pickedSumText
+        ? `<tr style="background:#F2F4F6;"><td colspan="2" style="padding:9px 8px;border:1px solid #E5E8EB;font-weight:800;color:#4E5968;background:#F2F4F6;">합계</td>` +
+          `<td style="padding:9px 8px;border:1px solid #E5E8EB;text-align:right;font-weight:800;color:#191F28;background:#F2F4F6;font-variant-numeric:tabular-nums;">${esc(pickedSumText)}</td></tr>`
+        : "") +
+      `</tbody></table>`;
+    try {
+      document.body.appendChild(node);
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+      document.body.removeChild(node);
+      const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+      if (!blob) throw new Error("이미지 생성 실패");
+      const fname = `재고현황_${rows.length}건_${(stock.updatedAt || "").slice(0, 10) || "오늘"}.png`;
+      const file = new File([blob], fname, { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: "재고 현황" }); return; }
+        catch (e) { if (e.name === "AbortError") return; }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = fname; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showToast("이 브라우저는 직접 공유가 안 돼서 표 이미지를 다운로드했습니다.\n카톡/문자에 사진으로 첨부해 보내세요.");
+    } catch (err) {
+      try { document.body.removeChild(node); } catch {}
+      const text = pickedText();
+      if (navigator.share) { try { await navigator.share({ title: "재고 현황", text }); return; } catch (e) { if (e.name === "AbortError") return; } }
+      try { await navigator.clipboard.writeText(text); showToast("클립보드에 복사했습니다. 카톡/문자에 붙여넣기 하세요."); } catch { showToast(text); }
+    }
+  };
+
   // ── 마이너스 TOP 10 공유 — 표를 이미지(PNG)로 렌더해 카톡/문자 공유 시트로 전송.
   // 텍스트 표는 카톡·문자에서 정렬이 깨지므로, 흰 배경 표 이미지를 만들어 파일 공유한다.
   const shareMinus = async () => {
@@ -10545,6 +10633,29 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
             </button>
           </div>
         </div>
+        {/* 선택 품목 공유 바 — 체크한 게 있을 때만 나타난다 */}
+        {picked.size > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", marginBottom: 12, borderRadius: 10, border: "1px solid rgba(219,107,46,0.32)", background: "rgba(219,107,46,0.07)" }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "var(--accent)" }}>{pickedItems.length}개 선택</span>
+            {pickedItems.length > 1 && pickedSumText && (
+              <span style={{ fontSize: 12, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>합계 <strong style={{ color: "var(--text1)" }}>{pickedSumText}</strong></span>
+            )}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button onClick={sharePicked} title="선택한 품목의 재고를 표 이미지로 만들어 카톡·문자로 보냅니다"
+                style={{ height: 32, padding: "0 14px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: "none", background: "var(--accent)", color: "#fff", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <Icon name="share" size={13}/>재고 공유
+              </button>
+              <button onClick={copyPickedText} title="글자로 복사 — 카톡 PC판이나 메일에 붙여넣기 좋습니다"
+                style={{ height: 32, padding: "0 12px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: "1.5px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit" }}>
+                텍스트 복사
+              </button>
+              <button onClick={() => setPicked(new Set())}
+                style={{ height: 32, padding: "0 12px", fontSize: 12, fontWeight: 700, borderRadius: 8, border: "1.5px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", fontFamily: "inherit" }}>
+                선택 해제
+              </button>
+            </div>
+          </div>
+        )}
         {items.length === 0 ? (
           <div style={{ textAlign: "center", padding: "40px 24px", color: "var(--text3)", fontSize: 14, lineHeight: 1.8 }}>
             재고 데이터가 없습니다.<br/>위에서 이카운트 재고 엑셀을 업로드하세요.
@@ -10553,6 +10664,10 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
               <thead><tr style={{ color: "var(--text3)", fontSize: 11 }}>
+                <th style={{ width: 34, textAlign: "center", padding: "7px 4px" }}>
+                  <input type="checkbox" checked={allVisiblePicked} onChange={e => pickMany(visible, e.target.checked)}
+                    title={`검색 결과 ${visible.length}개 전체 선택`} style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#DB6B2E" }}/>
+                </th>
                 <th style={{ textAlign: "left", padding: "7px 8px" }}>코드</th>
                 <th style={{ textAlign: "left", padding: "7px 8px" }}>품목명</th>
                 <th style={{ textAlign: "left", padding: "7px 8px" }}>규격</th>
@@ -10565,7 +10680,11 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                 const itemRow = (it, thickTop) => {
                   const val = it.qty > 0 ? it.qty * priceOf(it) : 0;
                   return (
-                    <tr key={it.id} style={{ borderTop: thickTop ? "2px solid var(--divider)" : "1px solid var(--divider)", background: it.qty < 0 ? "rgba(240,68,82,0.05)" : undefined }}>
+                    <tr key={it.id} style={{ borderTop: thickTop ? "2px solid var(--divider)" : "1px solid var(--divider)", background: picked.has(it.id) ? "rgba(219,107,46,0.07)" : (it.qty < 0 ? "rgba(240,68,82,0.05)" : undefined) }}>
+                      <td style={{ padding: "4px 4px", textAlign: "center" }}>
+                        <input type="checkbox" checked={picked.has(it.id)} onChange={() => togglePick(it.id)}
+                          title="선택해서 재고 공유" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#DB6B2E" }}/>
+                      </td>
                       <td style={{ padding: "7px 8px", color: "var(--text3)", fontSize: 12 }}>{it.code || "—"}</td>
                       <td style={{ padding: "7px 8px", fontWeight: 600, color: "var(--text1)" }}>{it.name}</td>
                       <td className="allow-wrap" style={{ padding: "7px 8px", color: "var(--text2)", fontSize: 12 }}>{it.spec || "—"}</td>
@@ -10598,6 +10717,12 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                   return (
                     <tbody key={base}>
                       <tr onClick={() => toggleCat(base)} style={{ cursor: "pointer", background: "var(--surface2)" }} title={isCollapsed ? "펼치기" : "접기"}>
+                        {/* 품명 전체(모든 사이즈) 한 번에 선택 — 접기 클릭과 겹치지 않게 이벤트 차단 */}
+                        <td onClick={e => e.stopPropagation()} style={{ padding: "4px 4px", textAlign: "center", borderTop: "2px solid var(--divider)" }}>
+                          <input type="checkbox" checked={list.every(x => picked.has(x.id))}
+                            onChange={e => pickMany(list, e.target.checked)}
+                            title={`${base} 사이즈 ${list.length}종 전체 선택`} style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#DB6B2E" }}/>
+                        </td>
                         <td colSpan={7} style={{ padding: "9px 10px", borderTop: "2px solid var(--divider)" }}>
                           <span style={{ fontSize: 11, color: "var(--text3)", marginRight: 8, display: "inline-block", width: 12 }}>{isCollapsed ? "▶" : "▼"}</span>
                           <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{base}</span>
