@@ -6909,10 +6909,21 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     showToast(`${fmt(dep.amount)}원 → "${name}" 입금완료 처리했습니다`, "success");
   };
   const undoDeposit = (dep) => {
-    if (!window.confirm(`"${dep.client}" ${fmt(dep.amount)}원 처리를 되돌릴까요?\n연결된 장부/미수금 기록도 함께 복구됩니다.`)) return;
     const link = dep.link || {};
+    // 한 청구를 여러 입금으로 나눠 받은 경우(일괄 처리), 다른 입금이 아직 남아 있으면
+    // 장부는 "입금완료"로 두어야 한다. 안 그러면 한 건만 되돌려도 청구 전체가 미입금이 된다.
+    const siblings = link.kind === "ledger"
+      ? items.filter(x => x.id !== dep.id && x.status === "done" && x.link && x.link.kind === "ledger"
+          && x.link.ym === link.ym && String(x.link.clientId) === String(link.clientId))
+      : [];
+    if (!window.confirm(
+      `"${dep.client}" ${fmt(dep.amount)}원 처리를 되돌릴까요?\n` +
+      (siblings.length > 0
+        ? `같은 청구에 묶인 입금이 ${siblings.length}건 더 있어 장부는 입금완료로 유지됩니다.`
+        : "연결된 장부/미수금 기록도 함께 복구됩니다.")
+    )) return;
     if (link.kind === "ledger") {
-      setLedgers(prev => {
+      if (siblings.length === 0) setLedgers(prev => {
         const m = prev[link.ym]; if (!m) return prev;
         return { ...prev, [link.ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === String(link.clientId) && c.status === "입금완료" ? { ...c, status: "미입금" } : c) } };
       });
@@ -6982,6 +6993,87 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     window.addEventListener("mouseup", end);
     return () => window.removeEventListener("mouseup", end);
   }, [dragSelecting]);
+  // ── 선택 여러 건 → 한 달치 청구에 일괄 입금완료 ──
+  // 거래처가 한 달 청구액을 여러 번 나눠 보내는 경우가 많다. 낱건으로 처리하면
+  // 어느 청구에 붙는지 매번 고르느라 번거롭고 실수도 난다.
+  // 드래그로 훑어 고른 합계가 특정 월 청구액과 맞으면 그 달에 한 번에 붙인다.
+  const selectedPending = selectedItems.filter(x => x.status === "pending");
+  // 대조·처리 기준은 "실제로 처리될 미처리 건"만. 이미 처리된 행이 섞여 있으면
+  // 합계가 부풀어 엉뚱한 달에 일치한 것처럼 보인다.
+  const selectedPendingTotal = selectedPending.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
+  const [bulkClient, setBulkClient] = useState("");
+  const [bulkLink, setBulkLink] = useState("");
+  const selKey = selectedPending.map(x => x.id).join(",");
+  // 선택이 바뀌면 거래처를 자동 추천 — 고른 행들의 추천 거래처 중 가장 많이 나온 이름
+  useEffect(() => {
+    if (selectedPending.length === 0) { setBulkClient(""); return; }
+    const cnt = new Map();
+    selectedPending.forEach(x => {
+      const n = (x.client || suggestClient(x.name) || "").trim();
+      if (n) cnt.set(n, (cnt.get(n) || 0) + 1);
+    });
+    let best = "", bestN = 0;
+    cnt.forEach((v, k) => { if (v > bestN) { best = k; bestN = v; } });
+    setBulkClient(best);
+  }, [selKey]);
+  const bulkUnpaid = React.useMemo(() => unpaidOf(bulkClient), [bulkClient, ledgers]);
+  // 합계가 정확히 맞는 청구 (반올림 원 단위)
+  const bulkMatch = bulkUnpaid.find(u => Math.round(u.total) === Math.round(selectedPendingTotal));
+  useEffect(() => {
+    if (!bulkClient) { setBulkLink(""); return; }
+    if (bulkMatch) setBulkLink(`led|${bulkMatch.ym}|${bulkMatch.id}`);
+    else setBulkLink(bulkUnpaid[0] ? `led|${bulkUnpaid[0].ym}|${bulkUnpaid[0].id}` : "ar");
+  }, [bulkClient, selKey, bulkUnpaid.length]);
+  const bulkTarget = bulkLink.startsWith("led|")
+    ? bulkUnpaid.find(u => `led|${u.ym}|${u.id}` === bulkLink)
+    : null;
+  const bulkDiff = bulkTarget ? Math.round(selectedPendingTotal) - Math.round(bulkTarget.total) : null;
+
+  const completeBulk = () => {
+    const name = (bulkClient || "").trim();
+    if (!name) { showToast("거래처를 선택하세요"); return; }
+    const rows = selectedPending;
+    if (rows.length === 0) return;
+    let link = null;
+    if (bulkLink.startsWith("led|")) {
+      const [, ym, idStr] = bulkLink.split("|");
+      if (bulkDiff !== 0 && !window.confirm(
+        `선택한 ${rows.length}건 합계 ${fmt(selectedPendingTotal)}원이\n${ym} 청구액 ${fmt(bulkTarget ? bulkTarget.total : 0)}원보다 ${fmt(Math.abs(bulkDiff || 0))}원 ${(bulkDiff || 0) > 0 ? "많습니다" : "적습니다"}.\n\n그래도 입금완료 처리할까요?`
+      )) return;
+      setLedgers(prev => {
+        const m = prev[ym]; if (!m) return prev;
+        return { ...prev, [ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === idStr ? { ...c, status: "입금완료" } : c) } };
+      });
+      link = { kind: "ledger", ym, clientId: idStr };
+    }
+    // 행별 link 매핑 — 미수금 원장은 입금 건마다 날짜·금액이 달라 한 건씩 기록한다
+    const base = Date.now();
+    const linkOf = {};
+    if (link) {
+      rows.forEach(r => { linkOf[r.id] = link; });
+    } else if (bulkLink === "ar") {
+      setClientAR(prev => {
+        const cur = prev[name] || { entries: [] };
+        const add = rows.map((r, i) => ({ id: base + i, type: "입금", desc: `은행입금 (${r.name})`, amount: r.amount, date: r.date }));
+        return { ...prev, [name]: { ...cur, entries: [...(cur.entries || []), ...add] } };
+      });
+      rows.forEach((r, i) => { linkOf[r.id] = { kind: "ar", entryId: base + i }; });
+    } else {
+      rows.forEach(r => { linkOf[r.id] = { kind: "none" }; });
+    }
+    setBankDeposits(prev => {
+      const nm = { ...(((prev || {}).nameMap) || {}) };
+      rows.forEach(r => { nm[payablesNameNorm(r.name)] = name; });
+      return {
+        items: (((prev || {}).items) || []).map(x => linkOf[x.id] ? { ...x, status: "done", client: name, link: linkOf[x.id], doneAt: Date.now() } : x),
+        nameMap: nm,
+      };
+    });
+    setSelectedIds(new Set());
+    setOpenId(null);
+    showToast(`${rows.length}건 ${fmt(selectedPendingTotal)}원 → "${name}" 일괄 입금완료 처리했습니다`, "success");
+  };
+
   const chipStyle = (on) => ({
     padding: "7px 14px", borderRadius: 100, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
     background: on ? "rgba(219,107,46,0.10)" : "var(--surface)", color: on ? "#DB6B2E" : "var(--text2)",
@@ -7049,6 +7141,62 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
             </span>
           )}
           {selectedItems.length === 0 && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>체크박스를 클릭하거나 위아래로 드래그해 여러 건 선택 · 다른 탭에 다녀와도 선택은 유지됩니다</span>}
+        </div>
+      )}
+
+      {/* 선택 여러 건 일괄 처리 — 나눠 들어온 입금을 한 달치 청구에 한 번에 붙인다 */}
+      {selectedPending.length >= 2 && (
+        <div style={{ padding: "14px 16px", borderRadius: 12, border: `1.5px solid ${bulkDiff === 0 ? "rgba(0,180,147,0.5)" : "rgba(219,107,46,0.4)"}`, background: bulkDiff === 0 ? "rgba(0,180,147,0.07)" : "rgba(219,107,46,0.05)" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 10 }}>
+            선택 {selectedPending.length}건 일괄 입금완료
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div style={{ minWidth: 190, flex: "1 1 190px" }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", display: "block", marginBottom: 4 }}>거래처</label>
+              <input list="bulk-client-list" value={bulkClient} onChange={e => setBulkClient(e.target.value)}
+                placeholder="거래처명" style={{ width: "100%", height: 38, fontSize: 13 }} />
+              <datalist id="bulk-client-list">{clientNames.map(n => <option key={n} value={n} />)}</datalist>
+            </div>
+            <div style={{ minWidth: 260, flex: "2 1 300px" }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", display: "block", marginBottom: 4 }}>연결할 청구 (월)</label>
+              <select value={bulkLink} onChange={e => setBulkLink(e.target.value)} style={{ width: "100%", height: 38, fontSize: 13 }}>
+                {bulkUnpaid.length === 0 && <option value="ar">미입금 청구 없음 — 미수금 원장에 입금 기록</option>}
+                {bulkUnpaid.map(u => (
+                  <option key={`${u.ym}|${u.id}`} value={`led|${u.ym}|${u.id}`}>
+                    {Math.round(u.total) === Math.round(selectedPendingTotal) ? "✓ 합계 일치 · " : ""}{u.ym} 청구 {fmt(u.total)}원 → 입금완료
+                  </option>
+                ))}
+                {bulkUnpaid.length > 0 && <option value="ar">미수금 원장에 입금으로만 기록</option>}
+                <option value="none">장부 연결 없이 처리완료 표시만</option>
+              </select>
+            </div>
+            <button onClick={completeBulk} disabled={!bulkClient}
+              title={bulkDiff === 0 ? "합계가 청구액과 일치합니다" : "합계가 청구액과 다릅니다 — 눌러도 한 번 더 확인합니다"}
+              style={{ height: 38, padding: "0 18px", fontSize: 13, fontWeight: 800, borderRadius: 9, border: "none", cursor: bulkClient ? "pointer" : "not-allowed", fontFamily: "inherit", whiteSpace: "nowrap", opacity: bulkClient ? 1 : 0.5, background: bulkDiff === 0 ? "#00B493" : "#DB6B2E", color: "#fff" }}>
+              ✓ {selectedPending.length}건 일괄 입금완료
+            </button>
+          </div>
+          {/* 합계 대조 — 맞으면 초록, 다르면 차액을 정확히 알려준다 */}
+          {bulkTarget && (
+            <div style={{ marginTop: 10, fontSize: 12.5, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ color: "var(--text2)" }}>선택 합계 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(selectedPendingTotal)}원</b></span>
+              <span style={{ color: "var(--text3)" }}>vs</span>
+              <span style={{ color: "var(--text2)" }}>{bulkTarget.ym} 청구 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(bulkTarget.total)}원</b></span>
+              {bulkDiff === 0
+                ? <span style={{ fontWeight: 800, color: "#00B493" }}>✓ 정확히 일치</span>
+                : <span style={{ fontWeight: 800, color: "#F04452" }}>차액 {fmt(Math.abs(bulkDiff))}원 {bulkDiff > 0 ? "초과" : "부족"}</span>}
+            </div>
+          )}
+          {!bulkTarget && bulkClient && (
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--text3)" }}>
+              "{bulkClient}"의 미입금 청구가 없습니다. 미수금 원장에 입금으로 기록하거나, 표시만 처리완료로 바꿉니다.
+            </div>
+          )}
+          {selectedItems.length !== selectedPending.length && (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--text3)" }}>
+              선택 {selectedItems.length}건 중 이미 처리된 {selectedItems.length - selectedPending.length}건은 제외하고 {selectedPending.length}건만 처리합니다. (위 대조 합계는 이 {selectedPending.length}건 기준)
+            </div>
+          )}
         </div>
       )}
 
