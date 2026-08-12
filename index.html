@@ -20366,6 +20366,80 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
     }
   };
 
+  // ── 우클릭 컨텍스트 메뉴 (일정 복제·복사) ──
+  // 이벤트 카드 우클릭 → 복제/복사/수정/삭제, 빈 날짜 칸 우클릭 → 추가/붙여넣기.
+  // ctxMenu = { x, y, id } (일정) | { x, y, date } (날짜 칸)
+  const [ctxMenu, setCtxMenu] = React.useState(null);
+  const [clipTodo, setClipTodo] = React.useState(null);   // 앱 내부 클립보드 (복사해 둔 일정)
+  const [copyModal, setCopyModal] = React.useState(null); // { src, date } — 날짜 지정 복사
+  const openCtx = (e, payload) => {
+    e.preventDefault(); e.stopPropagation();
+    clearTimeout(peekTimerRef.current); setPeekId(null);
+    setCtxMenu({ x: e.clientX, y: e.clientY, ...payload });
+  };
+  React.useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    const onKey = (e) => { if (e.key === "Escape") setCtxMenu(null); };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
+
+  const shiftDate = (ds, days) => { const [y, m, d] = ds.split("-").map(Number); return ymd(new Date(y, m - 1, d + days)); };
+
+  // 일정 복제 — 제목·메모·첨부·기간 길이를 그대로 옮긴 새 일정을 만든다.
+  // · 복제본은 항상 미완료로 시작하고, 노션에는 새 페이지로 등록된다(원본 페이지 공유 X).
+  // · 정기 일정에서 자동 생성된 항목을 복제하면 recurringId를 떼어내 독립 일정이 된다
+  //   (규칙을 지워도 복제본은 남는다).
+  // · 같은 날짜에 복제하면 원본과 구분되도록 제목 뒤에 "(사본)"을 붙인다.
+  const duplicateTodo = (src, newDate) => {
+    if (!src || !src.date) return null;
+    const spanDays = src.endDate && src.endDate > src.date
+      ? Math.round((new Date(src.endDate) - new Date(src.date)) / 86400000) : 0;
+    const date = newDate || src.date;
+    const endDate = spanDays > 0 ? shiftDate(date, spanDays) : "";
+    const copy = {
+      id: uid(),
+      text: (date === src.date ? `${src.text || ""} (사본)` : (src.text || "")).trim() || "(제목 없음)",
+      date, endDate,
+      memo: src.memo || "",
+      category: src.category || "",
+      atts: (src.atts || []).map(a => ({ ...a })),
+      done: false,
+      createdAt: Date.now(),
+    };
+    setTodos(prev => [...prev, copy]);
+    setSelectedDate(date);
+    notionCreate(copy).then(pageId => {
+      if (pageId) setTodos(prev => prev.map(x => x.id === copy.id ? { ...x, notionPageId: pageId } : x));
+    });
+    return copy;
+  };
+  const duplicateAndToast = (src, newDate) => {
+    const copy = duplicateTodo(src, newDate);
+    if (!copy) return;
+    const title = (copy.text || "").slice(0, 22);
+    showToast(newDate && newDate !== src.date
+      ? `"${title}" → ${newDate.replace(/-/g, ".")} 로 복사했습니다`
+      : `"${title}" 을(를) 복제했습니다`, "success");
+  };
+  // 일정 내용을 텍스트로 클립보드에 복사 (카톡·메일 붙여넣기용)
+  const copyTodoText = async (t) => {
+    const period = t.endDate && t.endDate !== t.date
+      ? `${t.date.replace(/-/g, ".")} → ${t.endDate.replace(/-/g, ".")}` : (t.date || "").replace(/-/g, ".");
+    const text = [t.text || "", period, (t.memo || "").trim()].filter(Boolean).join("\n");
+    try { await navigator.clipboard.writeText(text); showToast("일정 내용을 클립보드에 복사했습니다", "success"); }
+    catch { showToast(text); }
+  };
+
   // ── 일정 추가 모달 (노션 '새 페이지' 스타일) — 캘린더 셀 + 버튼/더블클릭으로 열림 ──
   const [addModal, setAddModal] = React.useState(null); // { date, endDate, text, memo }
   const openAdd = (dateStr) => setAddModal({ date: dateStr || ymd(new Date()), endDate: "", text: "", memo: "", atts: [] });
@@ -20555,7 +20629,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
           <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.2, display: "inline-flex", alignItems: "center", gap: 8 }}>
             <Icon name="calendar" size={18}/> 일정 / To-do List
           </div>
-          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>날짜별 할 일 등록 · 캘린더 클릭으로 날짜 선택 · 추가/수정 시 노션 To Do List에 자동 동기화</div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>날짜별 할 일 등록 · 캘린더 클릭으로 날짜 선택 · 일정을 <b style={{ color: "var(--text2)" }}>마우스 우클릭</b>하면 복제·복사 메뉴 · 추가/수정 시 노션 To Do List에 자동 동기화</div>
           <div style={{ position: "relative", marginTop: 10, maxWidth: 320 }}>
             <Icon name="search" size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", pointerEvents: "none" }}/>
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="일정 검색 (내용으로 찾기)"
@@ -20743,6 +20817,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                         const isDragOver = dragOverDate === k && dragTodoId != null;
                         return (
                           <div key={ci} onClick={() => setSelectedDate(k)} onDoubleClick={() => openAdd(k)} className={"sched-cell" + (isSelected ? " sched-sel" : "")} role="button" tabIndex={0}
+                            onContextMenu={(e) => { setSelectedDate(k); openCtx(e, { date: k }); }}
                             onDragOver={(e) => { if (dragTodoId == null) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOverDate !== k) setDragOverDate(k); }}
                             onDrop={(e) => { e.preventDefault(); moveTodoToDate(dragTodoId, k); clearDrag(); }}
                             style={{
@@ -20780,12 +20855,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                           return (
                             <div key={ev.t.id} className={"sched-eventbar" + (ev.endCol >= 5 ? " sched-eventbar-right" : "") + (peekId === ev.t.id ? " sched-peek-open" : "")}
                               onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } setSelectedDate(ymd(week[ev.startCol].d)); openDetail(ev.t); }}
+                              onContextMenu={(e) => openCtx(e, { id: ev.t.id })}
                               onTouchStart={(e) => peekTouchStart(e, ev.t.id)}
                               onTouchMove={peekTouchMove} onTouchEnd={peekTouchCancel} onTouchCancel={peekTouchCancel}
                               draggable
                               onDragStart={(e) => { clearTimeout(peekTimerRef.current); setPeekId(null); e.dataTransfer.setData("text/plain", String(ev.t.id)); e.dataTransfer.effectAllowed = "move"; setDragTodoId(ev.t.id); }}
                               onDragEnd={clearDrag}
-                              title="드래그하여 다른 날짜로 이동"
+                              title="드래그하여 다른 날짜로 이동 · 마우스 우클릭으로 복제/복사"
                               style={{
                                 position: "absolute", left, width, top, height: trackH,
                                 pointerEvents: "auto", cursor: "pointer",
@@ -20872,6 +20948,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
               const rangeDays = hasRange ? Math.round((new Date(t.endDate) - new Date(t.date)) / 86400000) + 1 : 0;
               return (
                 <div key={t.id} onClick={() => { setSelectedDate(t.date); openDetail(t); }} className="sched-up-row"
+                  onContextMenu={(e) => openCtx(e, { id: t.id })}
                   style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--border)", cursor: "pointer", animationDelay: `${ui * 0.04}s` }}>
                   <span style={{
                     fontSize: 11, fontWeight: 800, minWidth: 56, textAlign: "center",
@@ -21064,6 +21141,15 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                 background: "rgba(239,68,68,0.10)", color: "#EF4444",
                 fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer",
               }}>삭제</button>
+              {/* 복제 — 폰·태블릿은 우클릭이 없어 상세 모달에서도 복제할 수 있게 둔다 */}
+              <button title="이 일정을 복사해 새 일정으로 만듭니다"
+                onClick={() => { duplicateAndToast({ ...(orig || {}), text: detail.text, memo: detail.memo, date: detail.date, endDate: detail.endDate, atts: detail.atts }, detail.date); closeDetail(true); }}
+                style={{
+                  padding: "11px 16px", border: "none", borderRadius: 10,
+                  background: "var(--surface2)", color: "var(--text1)",
+                  fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                }}><Icon name="copy" size={13}/>복제</button>
               <button onClick={() => closeDetail(true)} style={{
                 flex: 1, padding: "11px", border: "none", borderRadius: 10,
                 background: "#DB6B2E", color: "#fff",
@@ -21075,8 +21161,126 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         );
       })()}
 
+      {/* ── 우클릭 컨텍스트 메뉴 — 일정 카드: 복제/복사/수정/삭제, 빈 날짜 칸: 추가/붙여넣기 ── */}
+      {ctxMenu && (() => {
+        const t = ctxMenu.id != null ? todos.find(x => x.id === ctxMenu.id) : null;
+        if (ctxMenu.id != null && !t) return null;
+        const dot = (ds) => (ds || "").replace(/-/g, ".");
+        const items = [];
+        if (t) {
+          const tomorrow = shiftDate(t.date, 1), nextWeek = shiftDate(t.date, 7);
+          items.push({ icon: "copy",     label: "여기에 복제",      sub: "같은 날짜에 사본", on: () => duplicateAndToast(t, t.date) });
+          items.push({ icon: "calendar", label: "내일로 복사",      sub: dot(tomorrow),      on: () => duplicateAndToast(t, tomorrow) });
+          items.push({ icon: "calendar", label: "다음 주로 복사",   sub: dot(nextWeek),      on: () => duplicateAndToast(t, nextWeek) });
+          items.push({ icon: "calendar", label: "날짜 지정해 복사…",                         on: () => setCopyModal({ src: t, date: tomorrow }) });
+          items.push({ sep: true });
+          items.push({ icon: "clipboard", label: "복사해 두기", sub: "붙여넣기용", on: () => { setClipTodo(t); showToast(`"${(t.text || "").slice(0, 20)}" 복사됨\n원하는 날짜 칸을 우클릭해 붙여넣으세요`, "success"); } });
+          items.push({ icon: "document",  label: "내용 텍스트 복사", sub: "카톡·메일용",            on: () => copyTodoText(t) });
+          items.push({ sep: true });
+          items.push({ icon: "check", label: t.done ? "미완료로 표시" : "완료로 표시", on: () => toggleTodo(t.id) });
+          items.push({ icon: "edit",  label: "상세 열기 / 수정", on: () => { setSelectedDate(t.date); openDetail(t); } });
+          items.push({ icon: "trash", label: "삭제", danger: true, on: () => { if (window.confirm(`"${t.text}" 일정을 삭제할까요?`)) removeTodo(t.id); } });
+        } else {
+          items.push({ icon: "plus", label: "여기에 일정 추가", sub: dot(ctxMenu.date), on: () => openAdd(ctxMenu.date) });
+          if (clipTodo) {
+            const src = todos.find(x => x.id === clipTodo.id) || clipTodo;
+            items.push({ icon: "copy", label: "여기에 붙여넣기", sub: (src.text || "").slice(0, 18), on: () => duplicateAndToast(src, ctxMenu.date) });
+            items.push({ sep: true });
+            items.push({ icon: "close", label: "복사해 둔 일정 비우기", on: () => { setClipTodo(null); showToast("복사해 둔 일정을 비웠습니다"); } });
+          }
+        }
+        const MENU_W = 236;
+        const MENU_H = items.reduce((s, it) => s + (it.sep ? 9 : 38), 0) + 12 + (t ? 42 : 0);
+        const left = Math.max(8, Math.min(ctxMenu.x, window.innerWidth - MENU_W - 8));
+        const top  = Math.max(8, Math.min(ctxMenu.y, window.innerHeight - MENU_H - 8));
+        return (
+          <div style={{ position: "fixed", inset: 0, zIndex: 10040 }}
+            onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}>
+            <div className="sched-ctxmenu" onClick={e => e.stopPropagation()}
+              style={{ position: "fixed", left, top, width: MENU_W }}>
+              {t && (
+                <div style={{ padding: "9px 12px 8px", borderBottom: "1px solid var(--divider)", marginBottom: 4 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</div>
+                  <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2 }}>{dot(t.date)}{t.endDate && t.endDate !== t.date ? ` → ${dot(t.endDate)}` : ""}</div>
+                </div>
+              )}
+              {items.map((it, i) => it.sep
+                ? <div key={`s${i}`} style={{ height: 1, background: "var(--divider)", margin: "4px 0" }} />
+                : (
+                  <button key={it.label} className={"sched-ctxitem" + (it.danger ? " sched-ctxitem-danger" : "")}
+                    onClick={() => { setCtxMenu(null); it.on(); }}>
+                    <Icon name={it.icon} size={14} style={{ flexShrink: 0, opacity: 0.8 }} />
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.label}</span>
+                    {it.sub && <span style={{ flexShrink: 0, fontSize: 10.5, color: "var(--text3)", fontWeight: 600, maxWidth: 92, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sub}</span>}
+                  </button>
+                ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── 날짜 지정 복사 모달 ── */}
+      {copyModal && (() => {
+        const src = copyModal.src;
+        const spanDays = src.endDate && src.endDate > src.date
+          ? Math.round((new Date(src.endDate) - new Date(src.date)) / 86400000) : 0;
+        const newEnd = spanDays > 0 ? shiftDate(copyModal.date, spanDays) : "";
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 10045, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+            onClick={() => setCopyModal(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", borderRadius: 16, width: "100%", maxWidth: 400, border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)", overflow: "hidden" }}>
+              <div style={{ padding: "18px 20px 12px" }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 7 }}>
+                  <Icon name="copy" size={16} /> 일정 복사
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 8, padding: "9px 11px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--border)" }}>
+                  <b style={{ color: "var(--text1)" }}>{src.text}</b>
+                  <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+                    원본 {(src.date || "").replace(/-/g, ".")}{spanDays > 0 ? ` → ${(src.endDate || "").replace(/-/g, ".")} (${spanDays + 1}일간)` : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text2)" }}>복사할 날짜</span>
+                  <input type="date" autoFocus value={copyModal.date}
+                    onChange={e => setCopyModal({ ...copyModal, date: e.target.value })}
+                    style={{ height: 36, minHeight: 36, padding: "0 10px", fontSize: 13, borderRadius: 8 }} />
+                </div>
+                <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 8, lineHeight: 1.6 }}>
+                  {spanDays > 0
+                    ? `기간 ${spanDays + 1}일을 유지해 ${(copyModal.date || "").replace(/-/g, ".")} → ${newEnd.replace(/-/g, ".")} 로 만들어집니다`
+                    : "메모·첨부까지 그대로 복사되며, 복사본은 미완료 상태로 만들어집니다"}
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 20px 18px" }}>
+                <button onClick={() => setCopyModal(null)} style={{ height: 38, padding: "0 16px", background: "var(--surface2)", color: "var(--text1)", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                <button className="btn-orange" disabled={!copyModal.date}
+                  onClick={() => { if (!copyModal.date) return; duplicateAndToast(src, copyModal.date); setCopyModal(null); }}
+                  style={{ height: 38, padding: "0 18px" }}>복사하기</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <style>{`
         @media (max-width: 768px) { .schedule-grid { grid-template-columns: 1fr !important; } }
+        /* ── 우클릭 컨텍스트 메뉴 ── */
+        .sched-ctxmenu {
+          background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+          padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,0.28);
+          animation: schedCtxIn .12s cubic-bezier(0,0,.2,1) both;
+        }
+        @keyframes schedCtxIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+        .sched-ctxitem {
+          display: flex; align-items: center; gap: 9px; width: 100%;
+          height: 34px; padding: 0 10px; margin: 2px 0;
+          border: none; border-radius: 8px; background: transparent;
+          color: var(--text1); font-family: inherit; font-size: 12.5px; font-weight: 600;
+          text-align: left; cursor: pointer; transition: background .12s, color .12s;
+        }
+        .sched-ctxitem:hover { background: var(--row-bg); }
+        .sched-ctxitem-danger { color: #EF4444; }
+        .sched-ctxitem-danger:hover { background: rgba(239,68,68,0.10); }
         /* ── 일정 탭 마이크로 애니메이션 ── */
         @keyframes schedSlideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
         @keyframes schedCheckPop { 0% { transform: scale(.5); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
