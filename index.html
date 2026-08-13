@@ -15358,19 +15358,13 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   };
 
   // ─────────────────────────────────────────────────────────────
-  // 발주서 — 엑셀 드래그&드롭 자동 입력
+  // 발주서 — 표(rows) → 품목 자동 입력
   // ─────────────────────────────────────────────────────────────
-  const importPOFromExcel = (file) => {
-    if (!file) return;
-    if (typeof XLSX === "undefined") { showToast("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = new Uint8Array(ev.target.result);
-        const wb = XLSX.read(data, { type: "array" });
-        const sheet = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: false });
-        if (!rows || rows.length === 0) { showToast("빈 엑셀 파일입니다."); return; }
+  // rows = 2차원 배열(엑셀 sheet_to_json header:1 형식). 엑셀 업로드와 붙여넣기가
+  // 같은 파서를 쓰도록 분리했다. 성공 시 true, 인식 실패 시 false 반환.
+  const applyPORows = (rows, srcLabel = "엑셀") => {
+      {
+        if (!rows || rows.length === 0) { showToast(`빈 ${srcLabel} 내용입니다.`); return false; }
 
         // 헤더 행 찾기 (품명/품목/품목명/수량/단가 키워드 포함된 행)
         const headerKeys = ["품명","품목","품목명","품목 명","item","제품명","원단","원단명","수량","qty","quantity","단가","단가(원)","price","unit price","단위","unit","비고","memo","note","공급처","담당자","전화"];
@@ -15381,7 +15375,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           const hits = cells.filter(c => headerKeys.some(k => c.includes(norm(k))));
           if (hits.length >= 2) { headerIdx = i; break; }
         }
-        if (headerIdx === -1) { showToast("엑셀 양식을 인식하지 못했습니다.\n\n첫 행 또는 상단 10행 이내에 다음 컬럼명 중 2개 이상 필요:\n품명/품목명, 수량, 단가, 단위, 비고"); return; }
+        if (headerIdx === -1) { showToast(`${srcLabel} 양식을 인식하지 못했습니다.\n\n첫 행 또는 상단 10행 이내에 다음 컬럼명 중 2개 이상 필요:\n품명/품목명, 수량, 단가, 단위, 비고`); return false; }
 
         const headers = rows[headerIdx].map(c => norm(c));
         const findCol = (...keywords) => {
@@ -15394,7 +15388,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         const colUnit = findCol("단위","unit");
         const colNote = findCol("비고","memo","note","메모");
 
-        if (colName === -1 || colQty === -1) { showToast("필수 컬럼(품명, 수량)을 찾지 못했습니다."); return; }
+        if (colName === -1 || colQty === -1) { showToast("필수 컬럼(품명, 수량)을 찾지 못했습니다."); return false; }
 
         // 공급처 + 날짜 정보 자동 추출 (헤더 위쪽 행에서)
         let supplierUpdate = null;
@@ -15425,17 +15419,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             id: uid(),
             kind: "custom",
             name,
-            qty: String(parseFloat(qty) || qty).replace(/,/g, ""),
+            // "20,000" · "20,000 EA" 처럼 천단위 콤마·단위가 붙어도 숫자만 뽑는다
+            qty: String(qty).replace(/[^\d.]/g, "") || String(parseFloat(qty) || ""),
             unit: colUnit >= 0 ? (String(r[colUnit] || "").trim() || "yard") : "yard",
             unitPrice: colPrice >= 0 ? String(r[colPrice] || "").replace(/[^0-9.]/g, "") : "",
             note: colNote >= 0 ? String(r[colNote] || "").trim() : "",
+            // 비고는 품목 메모 입력칸(it.memo)에도 넣어야 화면에서 보이고 수정할 수 있다
+            memo: colNote >= 0 ? String(r[colNote] || "").trim() : "",
           });
         }
 
-        if (newItems.length === 0) { showToast("유효한 품목 행을 찾지 못했습니다."); return; }
+        if (newItems.length === 0) { showToast("유효한 품목 행을 찾지 못했습니다."); return false; }
 
         const replaceConfirm = (poDraft && poDraft.items || []).filter(it => (it.name||"").trim() || it.qty).length > 0
-          ? window.confirm(`엑셀에서 ${newItems.length}건의 품목을 가져왔습니다.\n\n확인: 기존 품목 모두 교체\n취소: 기존 품목 끝에 추가`)
+          ? window.confirm(`${srcLabel}에서 ${newItems.length}건의 품목을 가져왔습니다.\n\n확인: 기존 품목 모두 교체\n취소: 기존 품목 끝에 추가`)
           : true;
 
         const dateUpdate = {};
@@ -15453,12 +15450,52 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           dateUpdate.deliveryDate ? `납기: ${dateUpdate.deliveryDate}` : ""
         ].filter(Boolean).join(" / ");
         showToast(`✅ ${newItems.length}건 입력 완료${supplierUpdate ? `\n공급처: ${supplierUpdate.name}`:""}${dateMsg?`\n${dateMsg}`:""}`);
+        return true;
+      }
+  };
+
+  // 발주서 — 엑셀 드래그&드롭/업로드 자동 입력
+  const importPOFromExcel = (file) => {
+    if (!file) return;
+    if (typeof XLSX === "undefined") { showToast("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도해주세요."); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target.result);
+        const wb = XLSX.read(data, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: false });
+        applyPORows(rows, "엑셀");
       } catch (err) {
         console.error("[Excel Import]", err);
         showToast("엑셀 파싱 오류: " + err.message);
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  // 발주서 — 표 텍스트 붙여넣기 자동 입력
+  // 엑셀·구글시트에서 복사한 탭 구분, 또는 쉼표(CSV)·파이프(|) 구분 표를 모두 인식.
+  // 구분자는 첫 몇 줄에서 가장 많이 쓰인 것을 자동 선택하고, 2칸 이상 공백도 허용한다.
+  const [poPasteOpen, setPoPasteOpen] = useState(false);
+  const [poPasteText, setPoPasteText] = useState("");
+  const parsePastedTable = (text) => {
+    const lines = String(text || "").split(/\r?\n/).filter(l => l.trim());
+    if (lines.length === 0) return [];
+    const sample = lines.slice(0, 6).join("\n");
+    const count = (re) => (sample.match(re) || []).length;
+    const tabs = count(/\t/g), pipes = count(/\|/g), commas = count(/,/g);
+    // 파이프 > 탭 > 쉼표 > 2칸 이상 공백 순으로 판정 (쉼표는 금액 천단위와 헷갈리므로 마지막)
+    const splitter = pipes >= lines.length ? /\s*\|\s*/
+      : tabs > 0 ? /\t/
+      : commas >= lines.length ? /\s*,\s*/
+      : /\s{2,}/;
+    return lines.map(l => l.replace(/^\s*\|\s*|\s*\|\s*$/g, "").split(splitter).map(c => c.trim()));
+  };
+  const importPOFromPaste = () => {
+    const rows = parsePastedTable(poPasteText);
+    if (rows.length === 0) { showToast("붙여넣은 내용이 없습니다."); return; }
+    if (applyPORows(rows, "붙여넣기")) { setPoPasteText(""); setPoPasteOpen(false); }
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -18175,10 +18212,37 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) importPOFromExcel(f); e.target.value = ""; }}
                         />
                       </label>
+                      <button className="btn-orange" onClick={() => setPoPasteOpen(o => !o)}
+                        title="엑셀·발주서의 표를 복사해서 붙여넣으면 품목이 한 번에 입력됩니다"
+                        style={{ padding: "8px 14px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <Icon name="clipboard" size={13}/>{poPasteOpen ? "붙여넣기 닫기" : "붙여넣기 입력"}
+                      </button>
                       <button className="btn-orange" onClick={() => setPoDraft({ ...poDraft, items: [...(poDraft.items || []), { id: uid(), kind: "custom", name: "", unit: "yard", qty: "", unitPrice: "", note: "" }] })}
                         style={{ padding: "8px 16px", fontSize: 13 }}>+ 품목 추가</button>
                     </div>
                   </div>
+
+                  {/* 📋 표 붙여넣기 패널 — 엑셀/발주서 표를 그대로 붙여넣어 품목 일괄 입력 */}
+                  {poPasteOpen && (
+                    <div style={{ marginBottom: 14, padding: 14, borderRadius: 12, background: darkMode ? "rgba(219,107,46,0.10)" : "rgba(219,107,46,0.05)", border: "1.5px dashed rgba(219,107,46,0.45)" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text1)", marginBottom: 8 }}>
+                        <Icon name="clipboard" size={14} style={{ marginRight: 6, verticalAlign: "middle" }}/>표 붙여넣기 <span style={{ color: "var(--text3)", fontWeight: 600, marginLeft: 4 }}>· 탭/쉼표/| 구분 자동 인식</span>
+                      </div>
+                      <textarea value={poPasteText} onChange={e => setPoPasteText(e.target.value)}
+                        placeholder={"첫 줄에 컬럼명, 다음 줄부터 품목을 붙여넣으세요\n\n품목명\t단위\t수량\t단가\t비고\n상의 가슴 반사 전사\tEA\t20,000\t200\t낱개 재단"}
+                        rows={7}
+                        style={{ width: "100%", fontSize: 12.5, lineHeight: 1.6, borderRadius: 10, padding: "10px 12px", resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, color: "var(--text3)", flex: 1, minWidth: 180 }}>
+                          인식 컬럼: <b>품명/품목명, 수량</b>(필수) · <b>단가, 단위, 비고</b>(선택) · 표 위쪽에 <b>공급처 / 발주일자 / 납기일 / 전화</b>를 함께 붙여넣으면 그 값도 자동 입력됩니다
+                        </span>
+                        <button onClick={() => { setPoPasteText(""); setPoPasteOpen(false); }}
+                          style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                        <button className="btn-orange" onClick={importPOFromPaste} disabled={!poPasteText.trim()}
+                          style={{ height: 34, padding: "0 16px", fontSize: 12, opacity: poPasteText.trim() ? 1 : 0.5 }}>품목 입력</button>
+                      </div>
+                    </div>
+                  )}
                   <div style={{ marginBottom: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(219,107,46,0.06)", border: "1px dashed rgba(219,107,46,0.30)", fontSize: 12, color: "var(--text2)", display: "flex", alignItems: "center", gap: 8 }}>
                     <Icon name="clipboard" size={16}/>
                     <span>엑셀 파일을 이 영역에 <b>드래그&amp;드롭</b>하면 품목을 자동 입력합니다 — 인식 컬럼: <b>품명/품목명, 수량, 단가, 단위, 비고</b> · 상단에 <b>공급처 / 발주일자 / 납기일 / 전화</b>도 자동 인식</span>
