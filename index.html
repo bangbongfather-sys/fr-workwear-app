@@ -1781,7 +1781,15 @@ const INIT_PRODUCTS = [newProduct("자켓"), newProduct("바지"), newProduct("�
 
 const LABOR_UNITS = ["벌", "장", "개", "pc", "m", "yard", "식"];
 // 발주/매입 등 단위 입력 공용 후보 (datalist 드롭다운 + 직접 입력 병행)
-const UNIT_OPTIONS = ["yard", "m", "kg", "롤", "마", "필", "벌", "장", "개", "세트", "식", "pc", "ea", "박스", "매", "켤레", "묶음", "타"];
+// 발주 품목 단위 — 원단(길이) → 낱개/세트 → 포장 → 무게 → 기타 순.
+// 자주 쓰는 것을 앞에 두어 드롭다운 상단에서 바로 고를 수 있게 했다.
+const UNIT_OPTIONS = [
+  "yard", "m", "마", "필", "롤", "cm", "mm", "자", "㎡",
+  "EA", "개", "벌", "장", "매", "세트", "쌍", "켤레", "족", "pc",
+  "박스", "팩", "묶음", "타", "통", "권",
+  "kg", "g", "톤",
+  "식", "건", "회", "공수",
+];
 
 // 연매출 추이 — 사용자 첨부 엑셀에서 추출·검증한 초기 8년치 월별 데이터.
 // 각 연도 monthly 합계가 알려진 연간 총액과 일치함을 확인.
@@ -15479,6 +15487,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   // 구분자는 첫 몇 줄에서 가장 많이 쓰인 것을 자동 선택하고, 2칸 이상 공백도 허용한다.
   const [poPasteOpen, setPoPasteOpen] = useState(false);
   const [poPasteText, setPoPasteText] = useState("");
+  // 단위를 목록 대신 직접 입력 중인 품목 id 모음 (발주 품목 행의 단위 칸)
+  const [poUnitCustomIds, setPoUnitCustomIds] = useState(() => new Set());
   const parsePastedTable = (text) => {
     const lines = String(text || "").split(/\r?\n/).filter(l => l.trim());
     if (lines.length === 0) return [];
@@ -18307,14 +18317,33 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             }} />
                           )}
 
-                          {/* 단위 — 드롭다운 선택 + 직접 입력 (datalist) */}
-                          <input list="po-unit-options" style={{ flex: "0 0 80px" }} placeholder="단위" value={it.unit} onChange={e => {
-                            const items = [...poDraft.items]; items[idx] = { ...items[idx], unit: e.target.value };
-                            setPoDraft({ ...poDraft, items });
-                          }} />
-                          <datalist id="po-unit-options">
-                            {UNIT_OPTIONS.map(u => <option key={u} value={u} />)}
-                          </datalist>
+                          {/* 단위 — 목록 선택 + 직접 입력.
+                              datalist(input list=)는 브라우저가 현재 입력값으로 목록을 걸러 보여줘서
+                              "yard"가 들어 있으면 yard 하나만 뜬다. 항상 전체가 보이도록 select로 교체. */}
+                          {poUnitCustomIds.has(it.id) ? (
+                            <div style={{ flex: "0 0 108px", display: "flex", gap: 3 }}>
+                              <input autoFocus style={{ flex: 1, minWidth: 0 }} placeholder="단위" value={it.unit} onChange={e => {
+                                const items = [...poDraft.items]; items[idx] = { ...items[idx], unit: e.target.value };
+                                setPoDraft({ ...poDraft, items });
+                              }} />
+                              <button title="목록에서 고르기" onClick={() => setPoUnitCustomIds(prev => { const n = new Set(prev); n.delete(it.id); return n; })}
+                                style={{ flex: "0 0 24px", border: "none", borderRadius: 8, background: "var(--surface2)", color: T.text2, cursor: "pointer", fontFamily: "inherit", fontSize: 11 }}>▾</button>
+                            </div>
+                          ) : (
+                            <select style={{ flex: "0 0 96px" }} value={it.unit && !UNIT_OPTIONS.includes(it.unit) ? "__cur" : (it.unit || "")}
+                              onChange={e => {
+                                const v = e.target.value;
+                                if (v === "__cur") return;                      // 목록에 없는 기존 단위 — 그대로 유지
+                                if (v === "__custom") { setPoUnitCustomIds(prev => new Set(prev).add(it.id)); return; }
+                                const items = [...poDraft.items]; items[idx] = { ...items[idx], unit: v };
+                                setPoDraft({ ...poDraft, items });
+                              }}>
+                              {it.unit && !UNIT_OPTIONS.includes(it.unit) && <option value="__cur">{it.unit}</option>}
+                              {!it.unit && <option value="">단위</option>}
+                              {UNIT_OPTIONS.map(u => <option key={u} value={u}>{u}</option>)}
+                              <option value="__custom">＋ 직접 입력…</option>
+                            </select>
+                          )}
 
                           {/* 수량 */}
                           <input style={{ flex: "0 0 90px" }} type="number" placeholder="수량" value={it.qty} onChange={e => {
