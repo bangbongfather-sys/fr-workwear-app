@@ -28,6 +28,86 @@ const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 
+// ─── 서버 인증 ───
+// 예전엔 로그인 검증이 index.html 안(클라이언트)에만 있어서, /api/* 를 URL만 알면
+// 인증 없이 전부 읽고 쓸 수 있었다. 이제 모든 /api/* 는 로그인에서 발급한
+// HMAC 서명 토큰(Authorization: Bearer)을 요구한다.
+//
+// 필요한 Secrets (wrangler secret put):
+//   AUTH_SECRET   — 토큰 서명 키 (랜덤 64 hex)
+//   AUTH_ID       — 로그인 아이디
+//   AUTH_PW_SALT  — 비밀번호 해시 소금 (랜덤 hex)
+//   AUTH_PW_HASH  — sha256(AUTH_PW_SALT + 비밀번호) hex
+//   MCP_SECRET    — /mcp 접근 키 (커넥터 URL의 ?key=)
+const AUTH_TOKEN_TTL_MS = 30 * 24 * 3600 * 1000; // 30일 — 사내 도구라 매일 로그인은 과함
+
+const _te = new TextEncoder();
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+async function sha256Hex(s) {
+  const d = await crypto.subtle.digest("SHA-256", _te.encode(s));
+  return Array.from(new Uint8Array(d)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function hmacB64u(secret, data) {
+  const key = await crypto.subtle.importKey("raw", _te.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64u(await crypto.subtle.sign("HMAC", key, _te.encode(data)));
+}
+async function makeAuthToken(env, user) {
+  const payload = btoa(JSON.stringify({ u: user, exp: Date.now() + AUTH_TOKEN_TTL_MS })).replace(/=+$/, "");
+  return `${payload}.${await hmacB64u(env.AUTH_SECRET, payload)}`;
+}
+async function verifyAuthToken(env, token) {
+  if (!env.AUTH_SECRET || !token) return false;
+  const i = token.lastIndexOf(".");
+  if (i < 1) return false;
+  const payload = token.slice(0, i), sig = token.slice(i + 1);
+  const expect = await hmacB64u(env.AUTH_SECRET, payload);
+  // 길이 비교 후 문자 비교 — subtle하게라도 타이밍 차이를 줄인다
+  if (sig.length !== expect.length) return false;
+  let diff = 0;
+  for (let j = 0; j < sig.length; j++) diff |= sig.charCodeAt(j) ^ expect.charCodeAt(j);
+  if (diff !== 0) return false;
+  try { return (JSON.parse(atob(payload)).exp || 0) > Date.now(); } catch { return false; }
+}
+// 로그인 실패 제한 — isolate 메모리 기반 최선책 (5회 실패 → 10분 잠금).
+// Workers isolate가 재활용되면 초기화되지만, 무차별 대입 속도를 늦추는 데는 충분.
+const _loginFails = new Map(); // ip → { n, until }
+function loginRateCheck(ip) {
+  const rec = _loginFails.get(ip);
+  if (rec && rec.until > Date.now()) return false;
+  return true;
+}
+function loginRateHit(ip, ok) {
+  if (ok) { _loginFails.delete(ip); return; }
+  const rec = _loginFails.get(ip) || { n: 0, until: 0 };
+  rec.n += 1;
+  if (rec.n >= 5) { rec.until = Date.now() + 10 * 60 * 1000; rec.n = 0; }
+  _loginFails.set(ip, rec);
+}
+async function handleAuthApi(request, env, url) {
+  if (url.pathname === "/api/auth/login" && request.method === "POST") {
+    if (!env.AUTH_SECRET || !env.AUTH_ID || !env.AUTH_PW_HASH) {
+      return new Response(JSON.stringify({ error: "서버 인증 설정이 없습니다 (AUTH_* secrets 미등록)" }), { status: 500, headers: corsHeaders });
+    }
+    const ip = request.headers.get("CF-Connecting-IP") || "?";
+    if (!loginRateCheck(ip)) {
+      return new Response(JSON.stringify({ error: "로그인 시도가 너무 많습니다. 10분 후 다시 시도하세요." }), { status: 429, headers: corsHeaders });
+    }
+    let body = {};
+    try { body = await request.json(); } catch {}
+    const id = String(body.id || "").trim();
+    const pw = String(body.pw || "");
+    const hash = await sha256Hex((env.AUTH_PW_SALT || "") + pw);
+    const ok = id === env.AUTH_ID && hash === env.AUTH_PW_HASH;
+    loginRateHit(ip, ok);
+    if (!ok) {
+      await new Promise(r => setTimeout(r, 400)); // 실패 응답 지연 — 자동화 시도 속도 제한
+      return new Response(JSON.stringify({ error: "아이디 또는 비밀번호가 일치하지 않습니다" }), { status: 401, headers: corsHeaders });
+    }
+    return new Response(JSON.stringify({ token: await makeAuthToken(env, id), ttlMs: AUTH_TOKEN_TTL_MS }), { status: 200, headers: corsHeaders });
+  }
+  return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: corsHeaders });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -38,10 +118,36 @@ export default {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
           "Access-Control-Max-Age": "86400",
         },
       });
+    }
+
+    // ── 인증 게이트 ──
+    // 정적 자산(index.html)과 아래 예외를 뺀 모든 /api/*, /mcp 는 인증 필수.
+    //  - /api/auth/*      : 로그인 자체 (여기서 토큰 발급)
+    //  - /api/kakao/login·callback : 카카오 OAuth 브라우저 이동 — 헤더를 못 붙임 (자체 state 검증)
+    //  - /mcp             : Claude 커넥터는 로그인 토큰이 없으므로 별도 키(?key=MCP_SECRET)로 통과
+    const path = url.pathname;
+    if (path.startsWith("/api/auth/")) {
+      return handleAuthApi(request, env, url);
+    }
+    const isProtected = path.startsWith("/api/") || path === "/mcp" || path === "/mcp/";
+    const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback";
+    if (isProtected && !isPublic) {
+      if (path === "/mcp" || path === "/mcp/") {
+        // /mcp 는 handleMcp 안의 자체 잠금(MCP_TOKEN, ?k=)이 검증한다 — 기존 커넥터 URL 유지.
+        // 단 MCP_TOKEN이 등록돼 있지 않으면 무방비이므로 여기서 차단.
+        if (!env.MCP_TOKEN) {
+          return new Response(JSON.stringify({ error: "unauthorized (MCP_TOKEN 미설정)" }), { status: 401, headers: corsHeaders });
+        }
+      } else {
+        const m = (request.headers.get("Authorization") || "").match(/^Bearer\s+(.+)$/);
+        if (!(m && await verifyAuthToken(env, m[1]))) {
+          return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: corsHeaders });
+        }
+      }
     }
 
     // 노션 동기화 API

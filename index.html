@@ -1252,6 +1252,42 @@ function Icon({ name, size = 18, strokeWidth = 1.7, style, className }) {
 // Firebase RTDB는 Cloudflare Worker(/api/sync)를 통해 프록시. Worker가 FIREBASE_DB_SECRET를
 // 부착해 인증하므로 클라이언트엔 시크릿/실제 RTDB URL이 노출되지 않음. (2026-05-14 보안 강화)
 const FB_URL = "/api/sync";
+
+// ─── 서버 인증 토큰 ───
+// 로그인(/api/auth/login)에서 받은 HMAC 토큰. 모든 /api/* 요청에 자동 첨부된다.
+// 검증은 전부 서버(Worker)에서 — 클라이언트에는 더 이상 아이디/비밀번호가 없다.
+const AUTH_TOKEN_KEY = "frw_auth_token";
+const getAuthToken = () => { try { return localStorage.getItem(AUTH_TOKEN_KEY) || ""; } catch { return ""; } };
+const authTokenValid = () => {
+  try {
+    const t = getAuthToken();
+    if (!t) return false;
+    return (JSON.parse(atob(t.split(".")[0])).exp || 0) > Date.now();
+  } catch { return false; }
+};
+// fetch 패치 — 앱의 모든 /api 호출(수십 곳)에 헤더를 일일이 붙이는 대신 여기서 한 번에.
+// 401이 오면 토큰이 만료/폐기된 것 → 토큰을 지우고 로그인 화면으로 되돌린다.
+const _njFetch = window.fetch.bind(window);
+window.fetch = (input, init) => {
+  try {
+    const u = typeof input === "string" ? input : ((input && input.url) || "");
+    if (u.startsWith("/api/") && !u.startsWith("/api/auth/")) {
+      const h = new Headers((init && init.headers) || (typeof input !== "string" && input.headers) || {});
+      const t = getAuthToken();
+      if (t && !h.has("Authorization")) h.set("Authorization", "Bearer " + t);
+      return _njFetch(u, { ...(init || {}), method: (init && init.method) || (typeof input !== "string" ? input.method : undefined), body: (init && init.body) || undefined, headers: h }).then(res => {
+        if (res.status === 401 && !window.__njAuthExpired) {
+          window.__njAuthExpired = true;
+          try { localStorage.removeItem(AUTH_TOKEN_KEY); sessionStorage.removeItem("nj_auth"); } catch {}
+          try { showToast("로그인이 만료되었습니다. 다시 로그인해 주세요."); } catch {}
+          setTimeout(() => window.location.reload(), 900);
+        }
+        return res;
+      });
+    }
+  } catch { /* 패치 실패 시 원본 fetch로 */ }
+  return _njFetch(input, init);
+};
 const GMAIL_CLIENT_ID = "483707566941-58n12qi4jeepusbeg09n26iurt0199u7.apps.googleusercontent.com";
 const GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send";
 const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile";
@@ -24476,8 +24512,8 @@ function b64UrlDecode(s) {
   catch { try { return atob(str); } catch { return ""; } }
 }
 
-const CORRECT_ID = "njsafety91";
-const CORRECT_PW = "911201";
+// 로그인 검증은 서버(/api/auth/login)에서 한다 — 자격증명을 클라이언트에 두지 않는다.
+// (예전엔 아이디/비밀번호가 이 파일에 평문으로 있어 소스 보기만으로 노출됐음)
 
 // NJ Logo Mark — 디자인 시안 기반 (SVG)
 function NJMark({ size = 32, mono = false }) {
@@ -24533,19 +24569,38 @@ function LoginScreen({ onSuccess }) {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const handleSubmit = (e) => {
+  // 검증은 서버(/api/auth/login)가 한다 — 성공 시 30일짜리 서명 토큰을 받아 저장.
+  const [busy, setBusy] = React.useState(false);
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (id.trim() === CORRECT_ID && pw === CORRECT_PW) {
-      sessionStorage.setItem("nj_auth", "1");
-      sessionStorage.removeItem("nj_welcome_seen");
-      if (rememberId) localStorage.setItem("nj_saved_id", id.trim());
-      else localStorage.removeItem("nj_saved_id");
-      onSuccess();
-    } else {
-      setErr(true);
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/auth/login", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: id.trim(), pw }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.token) {
+        try { localStorage.setItem(AUTH_TOKEN_KEY, j.token); } catch {}
+        sessionStorage.setItem("nj_auth", "1");
+        sessionStorage.removeItem("nj_welcome_seen");
+        if (rememberId) localStorage.setItem("nj_saved_id", id.trim());
+        else localStorage.removeItem("nj_saved_id");
+        window.__njAuthExpired = false;
+        onSuccess();
+      } else {
+        setErr(r.status === 429 ? "tooMany" : true);
+        setShake(true);
+        setPw("");
+        setTimeout(() => setShake(false), 500);
+      }
+    } catch {
+      setErr("network");
       setShake(true);
-      setPw("");
       setTimeout(() => setShake(false), 500);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -24651,13 +24706,13 @@ function LoginScreen({ onSuccess }) {
               style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer" }}/>
             아이디 저장
           </label>
-          {err && <div style={{ fontSize: 12, color: "#D9342B", marginBottom: 12 }}>아이디 또는 비밀번호가 일치하지 않습니다.</div>}
+          {err && <div style={{ fontSize: 12, color: "#D9342B", marginBottom: 12 }}>{err === "tooMany" ? "로그인 시도가 너무 많습니다. 10분 후 다시 시도하세요." : err === "network" ? "서버에 연결할 수 없습니다. 네트워크를 확인해 주세요." : "아이디 또는 비밀번호가 일치하지 않습니다."}</div>}
           <button type="submit" style={{
             width: "100%", height: 48, background: "#DB6B2E", color: "#fff", border: "none",
             borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
             display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8,
             boxShadow: "var(--elev-2)",
-          }}>입장하기 <Icon name="arrowRight" size={16}/></button>
+          }}>{busy ? "확인 중..." : <>입장하기 <Icon name="arrowRight" size={16}/></>}</button>
 
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 20, fontSize: 12, color: "var(--text3)" }}>
             <span>비밀번호 분실 시 관리자 문의</span>
@@ -25021,7 +25076,8 @@ function PWAInstallBanner() {
 }
 
 function Root() {
-  const [authed, setAuthed] = React.useState(() => sessionStorage.getItem("nj_auth") === "1");
+  // 서명 토큰이 유효하면 로그인 유지 (30일). 토큰이 없거나 만료면 로그인 화면.
+  const [authed, setAuthed] = React.useState(() => authTokenValid());
   const [welcomeSeen, setWelcomeSeen] = React.useState(() => sessionStorage.getItem("nj_welcome_seen") === "1");
   const [pendingTab, setPendingTab] = React.useState(null);
 
