@@ -16496,19 +16496,34 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     <div style={{ fontSize: 13, color: T.empty, padding: "8px 4px" }}>검색 결과 없음</div>
                   )}
                 </div>
-                {/* 현재 제품의 카테고리 지정 */}
-                {rawActiveProd && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12, fontSize: 12 }}>
-                    <span style={{ color: "var(--text3)", fontWeight: 600 }}>
-                      <b style={{ color: "var(--text2)" }}>{rawActiveProd.name}</b> 카테고리
-                    </span>
-                    <select value={(rawActiveProd.category || "").trim()} onChange={e => updProd("category", e.target.value)}
-                      style={{ height: 32, fontSize: 12, minWidth: 110 }}>
-                      <option value="">미분류</option>
-                      {prodCats.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                )}
+                {/* 현재 제품의 카테고리 지정 — 아래 '새 제품명' 입력과 같은 높이·라운드·플로팅 라벨로 통일 */}
+                {rawActiveProd && (() => {
+                  const curCat = (rawActiveProd.category || "").trim();
+                  return (
+                    <div style={{ position: "relative", marginBottom: 8 }}>
+                      <select value={curCat} onChange={e => updProd("category", e.target.value)}
+                        style={{
+                          width: "100%", height: 52, padding: "18px 36px 4px 14px",
+                          fontSize: 14, fontWeight: 600, lineHeight: 1.2,
+                          borderRadius: 12, border: `1.5px solid ${curCat ? NAVY : T.divider}`,
+                          color: curCat ? "var(--text1)" : T.empty,
+                          background: "var(--surface)", cursor: "pointer",
+                          transition: "border-color 0.18s", appearance: "auto",
+                        }}>
+                        <option value="">미분류</option>
+                        {prodCats.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <label style={{
+                        position: "absolute", left: 14, top: 7,
+                        fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+                        color: curCat ? NAVY : "var(--text3)", pointerEvents: "none",
+                        maxWidth: "calc(100% - 48px)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}>
+                        카테고리 · {rawActiveProd.name}
+                      </label>
+                    </div>
+                  );
+                })()}
                 {/* 새 제품 추가 — Toss 스타일 */}
                 <div style={{ position: "relative", display: "flex", gap: 8, alignItems: "center" }}>
                   <div style={{ flex: 1, position: "relative" }}>
