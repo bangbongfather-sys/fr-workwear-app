@@ -16941,11 +16941,26 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 cursor: "pointer",
                               }}>{g}</div>
                           )}
-                          {/* 마진율 input */}
-                          <input type="number" value={rate}
-                            title="마진율"
-                            style={{ width: 56, height: 36, textAlign: "center", fontWeight: 700, padding: "0 4px", fontSize: 14, flexShrink: 0 }}
-                            onChange={e => updProd("margins", { ...activeProd.margins, [g]: Math.max(0, Number(e.target.value) || 0) })} />
+                          {/* 마진율 input — 단가를 직접 입력한 등급은 그 단가 기준 "실제 마진율"을 보여준다.
+                              (예전엔 설정값 그대로 남아, 115,000원을 쳐도 18%로 표시되는 불일치가 있었음) */}
+                          {(() => {
+                            const impliedRate = isOverridden && beforeMargin > 0
+                              ? Number((((parseFloat(overrideVal) || 0) / beforeMargin - 1) * 100).toFixed(1))
+                              : null;
+                            return (
+                          <input type="number" value={impliedRate != null ? impliedRate : rate}
+                            title={impliedRate != null
+                              ? "직접 입력한 단가 기준 실제 마진율 (원가 대비 자동 계산).\n이 값을 수정하면 단가 직접입력이 해제되고 마진율 기준 자동 계산으로 돌아갑니다."
+                              : "마진율"}
+                            style={{ width: 56, height: 36, textAlign: "center", fontWeight: 700, padding: "0 4px", fontSize: 14, flexShrink: 0, color: impliedRate != null ? ORANGE : undefined }}
+                            onChange={e => {
+                              const v = Math.max(0, Number(e.target.value) || 0);
+                              updProd("margins", { ...activeProd.margins, [g]: v });
+                              // 마진율을 직접 만지면 "이 %로 계산해 달라"는 뜻 → 단가 직접입력 해제
+                              if (isOverridden) updProd("priceOverrides", { ...activeProd.priceOverrides, [g]: "" });
+                            }} />
+                            );
+                          })()}
                           <span style={{ fontSize: 12, color: T.ghostColor, fontWeight: 600, flexShrink: 0 }}>%</span>
                           {/* 단가 input (편집 가능) */}
                           <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 4, minWidth: 100 }}>
@@ -17025,7 +17040,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     })}
                   </div>
                   <div style={{ marginTop: 12, padding: "10px 12px", background: darkMode ? "rgba(154,52,18,0.2)" : "#FBF1E8", borderRadius: 10, fontSize: 12, color: darkMode ? "#FB923C" : "#9A3412", lineHeight: 1.6 }}>
-                    <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>단가 칸이 비어있으면 마진율 기준 자동 계산값을 사용합니다. 직접 입력한 단가는 <strong style={{ color: ORANGE }}>주황색</strong>으로 표시되며 ↻ 버튼으로 초기화할 수 있습니다.
+                    <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>단가 칸이 비어있으면 마진율 기준 자동 계산값을 사용합니다. 직접 입력한 단가는 <strong style={{ color: ORANGE }}>주황색</strong>으로 표시되고, 왼쪽 마진율도 그 단가 기준 실제 값으로 자동 계산됩니다. ↻ 버튼으로 초기화, 마진율을 직접 수정하면 다시 마진율 기준 계산으로 돌아갑니다.
                   </div>
                 </div>
 
