@@ -354,6 +354,15 @@
       transition: border-color 0.15s;
     }
     .fabric-row:hover { border-color: rgba(219,107,46,0.3); }
+
+    /* ─── 단가계산기 편집 잠금 ───
+       보기 모드에서는 입력류 클릭을 통째로 차단한다 (스크롤 중 오터치 방지).
+       버튼은 눌리게 두되 JS 가드가 토스트로 안내 — 제품 검색처럼 데이터를
+       바꾸지 않는 입력만 .calc-edit-exempt 로 예외. */
+    .calc-locked input:not(.calc-edit-exempt), .calc-locked select, .calc-locked textarea {
+      pointer-events: none;
+    }
+    .calc-locked .calc-lock-dim { opacity: 0.75; }
     .fabric-row select, .fabric-row input[type=number], .fabric-row input[type=text] {
       height: 38px !important;
       padding: 0 10px !important;
@@ -1220,6 +1229,7 @@ const ICON_PATHS = {
   star:       <><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></>,
   building:   <><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M16 6h.01M12 6h.01M12 10h.01M16 10h.01M8 10h.01M8 14h.01M12 14h.01M16 14h.01"/></>,
   clock:      <><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></>,
+  lock:       <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
   shirt:      <><path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23z"/></>,
   bot:        <><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></>,
   // 토스 ② 이모지 교체 2차분 — Lucide
@@ -13934,6 +13944,7 @@ function App() {
     setActiveProdId(id);
   };
   const addProdCategory = () => {
+    if (!requireCalcEdit()) return;
     const name = (window.prompt("새 카테고리 이름 (예: 방한, 시제품)") || "").trim();
     if (!name) return;
     if (name === "전체" || name === "미분류" || prodCats.includes(name)) { showToast("이미 있는 이름입니다"); return; }
@@ -13942,6 +13953,7 @@ function App() {
     showToast(`'${name}' 카테고리를 만들었습니다 — 아래에서 제품에 지정하세요`, "success");
   };
   const removeProdCategory = (cat) => {
+    if (!requireCalcEdit()) return;
     const n = products.filter(p => (p.category || "").trim() === cat).length;
     if (!window.confirm(`'${cat}' 카테고리를 삭제할까요?${n ? `\n${n}개 제품은 미분류로 돌아갑니다.` : ""}`)) return;
     if (n) { pushHistory(); setProducts(ps => ps.map(p => (p.category || "").trim() === cat ? { ...p, category: "" } : p)); }
@@ -14169,6 +14181,58 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   const PO_SUBTABS = { current: { label: "발주서 작성", icon: "purchase" }, history: { label: "발주 이력", icon: "history" } };
   const poSubOrder = useSubtabOrder("frw_po_subtab_order", ["current", "history"], "data-po-sub");
   const [calcSubTab, setCalcSubTab] = useState(() => load("frw_calc_subtab", "calculator")); // "calculator" | "profitability"
+
+  // ── 단가계산기 편집 잠금 ──
+  // 요척·마진·단가는 견적의 근거가 되는 핵심 숫자인데, 스크롤·클릭 중 실수로
+  // 값이 바뀌는 사고가 실제로 있었다 (등급 클릭 → 마진율 변경). 그래서 계산기는
+  // 기본 "보기 모드"로 잠그고, [수정]을 눌러야 값이 바뀐다. 모든 변경 함수가
+  // requireCalcEdit()를 통과해야 하므로 어떤 경로로도 잠금을 우회할 수 없다.
+  const [calcEdit, setCalcEdit] = useState(false); // 탭에 들어올 때마다 잠금으로 시작 (의도적으로 저장 안 함)
+  const calcEditRef = useRef(false);
+  useEffect(() => { calcEditRef.current = calcEdit; }, [calcEdit]);
+  const calcLockToastAt = useRef(0);
+  const requireCalcEdit = () => {
+    if (calcEditRef.current) return true;
+    const now = Date.now();
+    if (now - calcLockToastAt.current > 2500) { // 연타에 토스트 도배 방지
+      calcLockToastAt.current = now;
+      showToast("🔒 보기 모드입니다 — 위의 [수정] 버튼을 누르면 편집할 수 있어요");
+    }
+    return false;
+  };
+  const calcEditSnapshot = useRef(null); // 수정 시작 시점의 products — 완료 때 변경 여부 안내용
+  const calcEditTouch = useRef(0);
+  const startCalcEdit = () => {
+    calcEditTouch.current = Date.now();
+    calcEditSnapshot.current = JSON.stringify((latestSnapshot.current || {}).products ?? null);
+    setCalcEdit(true);
+  };
+  const finishCalcEdit = (reason) => {
+    setCalcEdit(false);
+    const cur = JSON.stringify((latestSnapshot.current || {}).products ?? null);
+    const changed = calcEditSnapshot.current != null && calcEditSnapshot.current !== cur;
+    calcEditSnapshot.current = null;
+    if (reason === "idle") showToast(changed ? "2분간 입력이 없어 자동으로 잠갔습니다 — 변경사항은 저장됐습니다 🔒" : "2분간 입력이 없어 자동으로 잠갔습니다 🔒");
+    else showToast(changed ? "수정 완료 — 변경사항이 저장·동기화됩니다 🔒" : "변경 없음 — 다시 잠갔습니다 🔒", changed ? "success" : undefined);
+  };
+  // 수정 중 2분간 아무 입력이 없으면 자동 잠금 + Esc로 즉시 완료
+  useEffect(() => {
+    if (!calcEdit) return;
+    const touch = () => { calcEditTouch.current = Date.now(); };
+    const onKey = (e) => { if (e.key === "Escape") finishCalcEdit(); };
+    window.addEventListener("pointerdown", touch);
+    window.addEventListener("keydown", touch);
+    window.addEventListener("keydown", onKey);
+    const id = setInterval(() => {
+      if (Date.now() - calcEditTouch.current > 120000) finishCalcEdit("idle");
+    }, 5000);
+    return () => {
+      window.removeEventListener("pointerdown", touch);
+      window.removeEventListener("keydown", touch);
+      window.removeEventListener("keydown", onKey);
+      clearInterval(id);
+    };
+  }, [calcEdit]);
   useEffect(() => { save("frw_calc_subtab", calcSubTab); }, [calcSubTab]);
   const CALC_SUBTABS = { calculator: { label: "단가 계산", icon: "calc" }, profitability: { label: "제품별 수익성 분석", icon: "trendingUp" }, simulator: { label: "인상 시뮬레이터", icon: "flame" } };
   const calcSubOrder = useSubtabOrder("frw_calc_subtab_order", ["calculator", "profitability", "simulator"], "data-calc-sub");
@@ -14807,7 +14871,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
 
   // marketPrice는 요척서(spec) 단위 — 여기 넣으면 제품 전체에 공유돼 요척서끼리 값이 섞인다
   const PRODUCT_LEVEL_FIELDS = new Set(["name", "include", "category"]);
-  const updateActiveSpec = (updater) =>
+  const updateActiveSpec = (updater) => {
+    if (!requireCalcEdit()) return;
     setProducts(ps => ps.map(p => {
       if (p.id !== activeProdId) return p;
       const idx = p.specs.findIndex(s => s.id === p.activeSpecId);
@@ -14816,9 +14881,11 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       newSpecs[idx] = updater(newSpecs[idx]);
       return { ...p, specs: newSpecs };
     }));
+  };
 
   // 요척서 (spec) 관리
   const addSpec = () => {
+    if (!requireCalcEdit()) return;
     pushHistory();
     setProducts(ps => ps.map(p => {
       if (p.id !== activeProdId) return p;
@@ -14843,6 +14910,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   // 지정한 요척서를 그대로 복제 — 활성 여부와 무관하게 원하는 버전을 골라 복사한다.
   // 원본 바로 뒤에 넣고 새 사본을 활성화. 이름은 "○○ (사본)", 중복이면 (사본 2), (사본 3)…
   const duplicateSpec = (specId) => {
+    if (!requireCalcEdit()) return;
     pushHistory();
     setProducts(ps => ps.map(p => {
       if (p.id !== activeProdId) return p;
@@ -14871,6 +14939,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     showToast("요척서를 복제했습니다 — 이름을 더블클릭해 바꿀 수 있어요", "success");
   };
   const deleteSpec = (specId) => {
+    if (!requireCalcEdit()) return;
     pushHistory();
     setProducts(ps => ps.map(p => {
       if (p.id !== activeProdId) return p;
@@ -14881,6 +14950,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     }));
   };
   const renameSpec = (specId, name) => {
+    if (!requireCalcEdit()) return;
     setProducts(ps => ps.map(p => p.id !== activeProdId ? p : {
       ...p,
       specs: p.specs.map(s => s.id === specId ? { ...s, name } : s),
@@ -14892,6 +14962,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   // 요척서 칩 드래그 정렬 — dropId 칩의 왼쪽/오른쪽에 dragId를 끼워 넣는다
   const reorderSpecs = (dragId, dropId, side) => {
     if (!dragId || dragId === dropId) return;
+    if (!requireCalcEdit()) return;
     pushHistory();
     setProducts(ps => ps.map(p => {
       if (p.id !== activeProdId) return p;
@@ -14915,6 +14986,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     return "신규";
   };
   const insertGrade = (afterIdx) => {
+    if (!requireCalcEdit()) return;
     pushHistory();
     updateActiveSpec(s => {
       const grades = [...(s.grades || [...GRADES])];
@@ -14937,6 +15009,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     });
   };
   const deleteGrade = (g) => {
+    if (!requireCalcEdit()) return;
     updateActiveSpec(s => {
       const grades = (s.grades || [...GRADES]).filter(x => x !== g);
       if (grades.length === 0) return s;
@@ -14947,6 +15020,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     });
   };
   const renameGrade = (oldName, newName) => {
+    if (!requireCalcEdit()) return;
     if (!newName || oldName === newName) return;
     updateActiveSpec(s => {
       const grades = (s.grades || [...GRADES]).map(x => x === oldName ? newName : x);
@@ -14975,7 +15049,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   // 항상 같은(레거시) 값이 나오므로 활성 요척서 기준인 activeProd를 쓴다.
   const marketPriceNum = parseFloat(activeProd.marketPrice) || 0;
 
-  const updProd = (field, value) =>
+  const updProd = (field, value) => {
+    if (!requireCalcEdit()) return;
     setProducts(ps => ps.map(p => {
       if (p.id !== activeProdId) return p;
       if (PRODUCT_LEVEL_FIELDS.has(field)) {
@@ -14987,14 +15062,17 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       newSpecs[idx] = { ...newSpecs[idx], [field]: value };
       return { ...p, specs: newSpecs };
     }));
+  };
 
   const addProduct = () => {
     if (!newProdName.trim()) return;
+    if (!requireCalcEdit()) return;
     pushHistory();
     const p = newProduct(newProdName.trim());
     setProducts(ps => [...ps, p]); setActiveProdId(p.id); setNewProdName("");
   };
   const deleteProduct = (id) => {
+    if (!requireCalcEdit()) return;
     if (products.length <= 1) return;
     const victim = products.find(p => p.id === id);
     if (!window.confirm(`"${victim ? victim.name : "이 제품"}" 을(를) 삭제할까요?\n\n삭제해도 '삭제된 제품 복구'에서 90일간 되살릴 수 있습니다.`)) return;
@@ -15012,6 +15090,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   };
   // 휴지통에서 제품 복구
   const restoreProduct = (t) => {
+    if (!requireCalcEdit()) return;
     pushHistory();
     const { _deletedAt, ...prod } = t;
     const newId = products.some(p => p.id === prod.id) ? uid() : prod.id;
@@ -15023,6 +15102,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     showToast(`"${prod.name}" 을(를) 복구했습니다`, "success");
   };
   const duplicateProduct = (id) => {
+    if (!requireCalcEdit()) return;
     const src = products.find(p => p.id === id);
     if (!src) return;
     pushHistory();
@@ -15061,6 +15141,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     setEditingProdName(null);
   };
   const startEditProdName = (p, e) => {
+    if (!requireCalcEdit()) return;
     e && e.stopPropagation();
     setEditingProdName({ id: p.id, value: p.name });
   };
@@ -16372,6 +16453,29 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               })}
             </div>
             {calcSubTab === "calculator" && (
+          <div className={calcEdit ? "" : "calc-locked"}>
+          {/* 편집 잠금 배너 — 계산기의 모든 숫자는 여기서 열어야 바뀐다 */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+            padding: "10px 14px", borderRadius: 12, marginBottom: 14,
+            border: calcEdit ? "1.5px solid rgba(245,158,11,0.55)" : "1px solid var(--divider)",
+            background: calcEdit ? (darkMode ? "rgba(120,53,15,0.25)" : "rgba(245,158,11,0.08)") : "var(--surface2)",
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: calcEdit ? "#B45309" : "var(--text2)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {calcEdit ? <><Icon name="edit" size={14}/>수정 중 — 값 변경 가능</> : <><Icon name="lock" size={14}/>보기 모드 — 실수로 값이 바뀌지 않게 잠겨 있습니다</>}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>
+              {calcEdit ? "2분간 입력이 없으면 자동으로 잠깁니다 · Esc = 완료" : "제품·요척서 이동과 견적서 생성은 그대로 됩니다"}
+            </span>
+            <button onClick={() => calcEdit ? finishCalcEdit() : startCalcEdit()}
+              style={{
+                marginLeft: "auto", height: 34, padding: "0 18px", borderRadius: 9, border: "none",
+                fontWeight: 800, fontSize: 13, cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
+                background: calcEdit ? "#00B493" : "var(--accent)", color: "#fff", boxShadow: "var(--elev-2)",
+              }}>
+              {calcEdit ? "✓ 완료" : "수정"}
+            </button>
+          </div>
           <div className="calc-grid" style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 20, alignItems: "start" }}>
 
             {/* 왼쪽 */}
@@ -16438,7 +16542,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 {/* 검색 입력 */}
                 {showProdSearch && (
                   <div style={{ marginBottom: 10, position: "relative" }}>
-                    <input autoFocus placeholder="제품명 검색..." value={prodSearch}
+                    <input autoFocus className="calc-edit-exempt" placeholder="제품명 검색..." value={prodSearch}
                       onChange={e => setProdSearch(e.target.value)}
                       style={{ width: "100%", paddingLeft: 36, height: 40, fontSize: 13, borderRadius: 10, border: `1.5px solid ${NAVY}` }} />
                     <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: T.text2, pointerEvents: "none", display:"inline-flex" }}><Icon name="search" size={14}/></span>
@@ -16485,6 +16589,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       onDragOver={(e) => { e.preventDefault(); }}
                       onDrop={() => {
                         if (!dragProd.current || dragProd.current === p.id) return;
+                        if (!requireCalcEdit()) return;
                         pushHistory();
                         setProducts(ps => {
                           const arr = [...ps];
@@ -16663,7 +16768,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 boxShadow: isActive ? "0 2px 8px rgba(219,107,46,0.3)" : "none",
                                 transition: "all 0.15s",
                               }}>
-                              <span onDoubleClick={e => { e.stopPropagation(); setEditingSpec({ id: s.id, value: s.name }); }} title="더블클릭으로 이름 수정">{s.name}</span>
+                              <span onDoubleClick={e => { e.stopPropagation(); if (!requireCalcEdit()) return; setEditingSpec({ id: s.id, value: s.name }); }} title="더블클릭으로 이름 수정">{s.name}</span>
                               {dateStr && <span style={{ fontSize: 10, opacity: isActive ? 0.8 : 0.5, fontWeight: 500 }}>· {dateStr}</span>}
                               {/* 현재 견적서가 이 요척서로 계산됐음을 표시 */}
                               {activeProdStamp && activeProdStamp.specId === s.id && (
@@ -16679,7 +16784,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   }}>✓ 견적 반영중</span>
                               )}
                               {isActive && (
-                                <span onClick={e => { e.stopPropagation(); setEditingSpec({ id: s.id, value: s.name }); }} title="이름 수정" style={{ fontSize: 10, opacity: 0.85, cursor: "pointer" }}><Icon name="edit" size={14}/></span>
+                                <span onClick={e => { e.stopPropagation(); if (!requireCalcEdit()) return; setEditingSpec({ id: s.id, value: s.name }); }} title="이름 수정" style={{ fontSize: 10, opacity: 0.85, cursor: "pointer" }}><Icon name="edit" size={14}/></span>
                               )}
                               {/* 이 요척서를 그대로 복제 — 원단·공임·마진까지 복사한 새 버전 */}
                               <span onClick={e => { e.stopPropagation(); duplicateSpec(s.id); }} title={`'${s.name}' 복제 — 값을 그대로 복사한 새 요척서`}
@@ -16954,7 +17059,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               style={{ width: 64, height: 28, padding: "0 6px", textAlign: "center", fontWeight: 800, fontSize: 12, borderRadius: 8, border: `2px solid ${ACCENT}`, flexShrink: 0 }}
                             />
                           ) : (
-                            <div onDoubleClick={() => setEditingGradeName({ name: g, value: g })} title="더블클릭으로 이름 수정"
+                            <div onDoubleClick={() => { if (!requireCalcEdit()) return; setEditingGradeName({ name: g, value: g }); }} title="더블클릭으로 이름 수정"
                               style={{
                                 minWidth: 28, height: 28, padding: "0 8px", borderRadius: 8,
                                 background: isSel ? ACCENT : T.ghostBg,
@@ -17110,6 +17215,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 <ImageUploader
                   value={activeProd.image || ""}
                   onChange={dataUrl => {
+                    if (!requireCalcEdit()) return;
                     setProducts(ps => ps.map(p => p.id === activeProd.id ? { ...p, image: dataUrl } : p));
                     if (dataUrl) prodImgSet(activeProd.id, dataUrl); else prodImgDel(activeProd.id);
                   }}
@@ -17295,6 +17401,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 )}
               </div>
             </div>
+          </div>
           </div>
             )}
             {calcSubTab === "profitability" && (
