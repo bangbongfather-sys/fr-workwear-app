@@ -20761,26 +20761,152 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
     const t = setTimeout(close, 4000); // 4초 뒤 자동 닫힘
     return () => { document.removeEventListener("touchstart", close); clearTimeout(t); };
   }, [peekId]);
-  const peekStartPosRef = React.useRef(null); // 롱프레스 시작 좌표 (실기기 손떨림 허용용)
-  const peekTouchStart = (e, id) => {
-    suppressClickRef.current = false; // 이전 롱프레스의 잔여 플래그 초기화 (iOS는 롱프레스 후 click 미발생)
-    const t = e.touches && e.touches[0];
-    peekStartPosRef.current = t ? { x: t.clientX, y: t.clientY } : null;
-    clearTimeout(peekTimerRef.current);
-    peekTimerRef.current = setTimeout(() => { suppressClickRef.current = true; setPeekId(id); }, 400);
-  };
-  // 실기기는 누르고만 있어도 touchmove가 미세하게 발생 → 12px 넘게 움직였을 때만 취소
-  const peekTouchMove = (e) => {
-    const s = peekStartPosRef.current, t = e.touches && e.touches[0];
-    if (!s || !t) { clearTimeout(peekTimerRef.current); return; }
-    if (Math.abs(t.clientX - s.x) > 12 || Math.abs(t.clientY - s.y) > 12) clearTimeout(peekTimerRef.current);
-  };
-  const peekTouchCancel = () => clearTimeout(peekTimerRef.current);
+  // 롱프레스 타이머는 아래 beginDrag(포인터 드래그)가 함께 관리한다.
+  // 터치로 길게 누르면 먼저 미리보기가 뜨고, 그대로 끌면 날짜 이동으로 이어진다.
 
-  // ── 드래그 앤 드롭으로 일정 날짜 이동 (데스크톱 마우스) ──
+  // ── 드래그로 일정 날짜 이동 (마우스 + 터치 공용, Pointer Events) ──
+  // 예전엔 HTML5 draggable을 썼는데 ① 폰·태블릿에서 아예 안 되고 ② 화면 밖 주로 옮길 때
+  // 자동 스크롤이 없고 ③ 카드 글자를 잡으면 텍스트 선택이 먼저 걸려서 자주 실패했다.
+  // 포인터 이벤트로 직접 구현해 다음을 보장한다.
+  //   · 마우스: 5px 이상 움직이면 즉시 드래그 시작 (클릭·우클릭과 충돌 없음)
+  //   · 터치: 400ms 길게 누른 뒤 끌면 이동 (그 전에 움직이면 평소처럼 화면 스크롤)
+  //   · 화면 가장자리에서 자동 스크롤 (세로 스크롤 컨테이너 + 캘린더 가로 스크롤)
+  //   · 기간 일정은 "잡은 날짜"가 놓는 날짜로 오도록 이동 (기간 길이 유지)
+  //   · Esc 로 취소, 손을 떼면 그 자리 날짜로 확정
   const [dragTodoId, setDragTodoId] = React.useState(null);   // 드래그 중인 일정 id
   const [dragOverDate, setDragOverDate] = React.useState(null); // 드롭 대상 날짜 (하이라이트)
-  const clearDrag = () => { setDragTodoId(null); setDragOverDate(null); };
+  const [dragText, setDragText] = React.useState("");         // 따라다니는 미리보기 라벨
+  const dragRef = React.useRef(null);        // 드래그 상태(동기) — 리렌더 없이 매 프레임 갱신
+  const dragListenersRef = React.useRef(null);
+  const ghostRef = React.useRef(null);       // 커서를 따라다니는 카드 (transform만 직접 갱신)
+  const calScrollRef = React.useRef(null);   // .sched-cal-scroll (가로 스크롤 영역)
+  const clearDrag = () => { setDragTodoId(null); setDragOverDate(null); setDragText(""); };
+
+  // 화면 좌표 → 그 자리의 날짜 (셀 위에 이벤트 카드가 겹쳐 있어 elementsFromPoint로 훑는다)
+  const dateFromPoint = (x, y) => {
+    const els = document.elementsFromPoint(x, y) || [];
+    for (const el of els) {
+      const hit = el.closest && el.closest("[data-sched-date]");
+      if (hit) return hit.getAttribute("data-sched-date");
+    }
+    return null;
+  };
+  const dayDiff = (from, to) => Math.round((new Date(to) - new Date(from)) / 86400000);
+  // 세로로 스크롤되는 조상 (앱은 .main-content가 스크롤을 맡는 경우가 있어 window로 단정하지 않는다)
+  const scrollParentOf = (el) => {
+    for (let n = el && el.parentElement; n; n = n.parentElement) {
+      const ov = getComputedStyle(n).overflowY;
+      if ((ov === "auto" || ov === "scroll") && n.scrollHeight > n.clientHeight + 4) return n;
+    }
+    return null;
+  };
+  // 가장자리 자동 스크롤 — 포인터가 "움직이는 동안에만" 스크롤한다.
+  // rAF로 계속 굴리면 손을 멈춘 뒤에도 화면이 더 밀려서(관성) 엉뚱한 날짜에 떨어졌다.
+  // 이동 이벤트마다 조금씩 밀면 멈추는 즉시 정지 → 보이는 칸 = 놓이는 칸.
+  const autoScrollOnMove = (d) => {
+    const EDGE = 64, MAX = 13;
+    const sp = d.scroller;
+    const rect = sp ? sp.getBoundingClientRect() : null;
+    const top = rect ? rect.top : 0;
+    const bottom = rect ? rect.bottom : window.innerHeight;
+    const canUp = sp ? sp.scrollTop > 0 : window.scrollY > 0;
+    const canDown = sp ? sp.scrollTop + sp.clientHeight < sp.scrollHeight - 1
+                       : window.scrollY + window.innerHeight < document.documentElement.scrollHeight - 1;
+    const speed = (dist) => Math.max(2, Math.ceil(MAX * (1 - Math.max(0, dist) / EDGE)));
+    let dy = 0;
+    if (d.y < top + EDGE && canUp) dy = -speed(d.y - top);
+    else if (d.y > bottom - EDGE && canDown) dy = speed(bottom - d.y);
+    if (dy) { if (sp) sp.scrollTop += dy; else window.scrollBy(0, dy); }
+    const sc = calScrollRef.current;
+    if (sc && sc.scrollWidth > sc.clientWidth + 4) {
+      const r = sc.getBoundingClientRect();
+      if (d.x < r.left + EDGE) sc.scrollLeft -= speed(d.x - r.left);
+      else if (d.x > r.right - EDGE) sc.scrollLeft += speed(r.right - d.x);
+    }
+  };
+  const moveGhost = (x, y) => {
+    const g = ghostRef.current;
+    if (g) g.style.transform = `translate3d(${x + 14}px, ${y + 14}px, 0)`;
+  };
+  const finishDrag = (commit) => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (dragListenersRef.current) { dragListenersRef.current(); dragListenersRef.current = null; }
+    if (!d) return;
+    if (commit && d.active && d.targetDate) {
+      // 잡은 지점의 날짜가 놓은 날짜가 되도록 시작일을 역산 (기간 일정도 자연스럽게)
+      const newStart = shiftDate(d.targetDate, -d.offsetDays);
+      moveTodoToDate(d.id, newStart);
+    }
+    clearDrag();
+  };
+  const beginDrag = (e, t) => {
+    if (e.button != null && e.button !== 0) return;         // 우클릭·가운데 클릭 제외
+    if (e.target && e.target.closest && e.target.closest(".sched-evcheck")) return; // 완료 체크는 드래그 아님
+    const isTouch = e.pointerType !== "mouse";
+    const grabDate = dateFromPoint(e.clientX, e.clientY) || t.date;
+    dragRef.current = {
+      id: t.id, pointerId: e.pointerId, isTouch,
+      startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY,
+      offsetDays: Math.max(0, dayDiff(t.date, grabDate)),
+      armed: !isTouch,          // 터치는 롱프레스(400ms) 뒤에 무장
+      active: false, targetDate: null,
+      scroller: scrollParentOf(e.currentTarget),
+      text: t.text || "",
+    };
+    if (!isTouch) e.preventDefault();  // 마우스: 텍스트 선택·이미지 드래그 방지
+    if (isTouch) {
+      clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = setTimeout(() => {
+        const d = dragRef.current;
+        if (!d) return;
+        d.armed = true;
+        suppressClickRef.current = true;
+        setPeekId(t.id);                // 길게 누르면 우선 미리보기 — 여기서 끌면 이동으로 전환
+      }, 400);
+    }
+    const onMove = (ev) => {
+      const d = dragRef.current;
+      if (!d || ev.pointerId !== d.pointerId) return;
+      const dx = ev.clientX - d.startX, dy = ev.clientY - d.startY;
+      if (!d.active) {
+        const moved = Math.hypot(dx, dy);
+        if (!d.armed) { if (moved > 12) finishDrag(false); return; }   // 터치: 무장 전 이동 → 화면 스크롤 양보
+        if (moved < (d.isTouch ? 6 : 5)) return;
+        d.active = true;
+        clearTimeout(peekTimerRef.current);
+        setPeekId(null);
+        suppressClickRef.current = true;
+        setDragTodoId(d.id);
+        setDragText(d.text);
+      }
+      if (ev.cancelable) ev.preventDefault();
+      d.x = ev.clientX; d.y = ev.clientY;
+      moveGhost(d.x, d.y);
+      autoScrollOnMove(d);                 // 스크롤 후의 좌표 기준으로 대상 날짜 재계산
+      const nd = dateFromPoint(d.x, d.y);
+      if (nd !== d.targetDate) { d.targetDate = nd; setDragOverDate(nd); }
+    };
+    const onUp = (ev) => { const d = dragRef.current; if (d && ev.pointerId !== d.pointerId) return; clearTimeout(peekTimerRef.current); finishDrag(true); };
+    const onCancel = () => { clearTimeout(peekTimerRef.current); finishDrag(false); };
+    const onKey = (ev) => { if (ev.key === "Escape") { clearTimeout(peekTimerRef.current); finishDrag(false); } };
+    // 드래그 중 터치 스크롤 차단 (passive:false 여야 preventDefault가 먹는다)
+    const onTouchMove = (ev) => { const d = dragRef.current; if (d && d.active && ev.cancelable) ev.preventDefault(); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    dragListenersRef.current = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("touchmove", onTouchMove);
+    };
+  };
+  // 탭을 벗어나거나 언마운트될 때 리스너가 남지 않도록
+  React.useEffect(() => () => { if (dragListenersRef.current) dragListenersRef.current(); }, []);
   const moveTodoToDate = (id, newDate) => {
     if (id == null || !newDate) return;
     let target = null;
@@ -21179,9 +21305,9 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
               </div>
             </div>
           </div>
-          <div className="sched-scroll-hint">← 좌우로 밀어서 전체 주 확인 · 일정을 길게 누르면 미리보기 →</div>
+          <div className="sched-scroll-hint">← 좌우로 밀어서 전체 주 확인 · 일정을 끌어서 날짜 이동 (폰은 길게 누른 뒤 끌기) →</div>
           {/* 모바일: 캘린더를 축소하지 않고 원본 크기 유지 + 좌우 스크롤 (sched-cal-scroll/inner) */}
-          <div className="sched-cal-scroll">
+          <div className="sched-cal-scroll" ref={calScrollRef}>
           <div className="sched-cal-inner">
           {/* 노션 캘린더식 플랫 그리드: 셀 간격 없이 헤어라인 구분선 */}
           <div style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
@@ -21254,9 +21380,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                         const isDragOver = dragOverDate === k && dragTodoId != null;
                         return (
                           <div key={ci} onClick={() => setSelectedDate(k)} onDoubleClick={() => openAdd(k)} className={"sched-cell" + (isSelected ? " sched-sel" : "")} role="button" tabIndex={0}
+                            data-sched-date={k}
                             onContextMenu={(e) => { setSelectedDate(k); openCtx(e, { date: k }); }}
-                            onDragOver={(e) => { if (dragTodoId == null) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (dragOverDate !== k) setDragOverDate(k); }}
-                            onDrop={(e) => { e.preventDefault(); moveTodoToDate(dragTodoId, k); clearDrag(); }}
                             style={{
                               minHeight: rowH, padding: "5px 6px",
                               borderLeft: ci > 0 ? "1px solid var(--divider)" : "none",
@@ -21293,16 +21418,14 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                             <div key={ev.t.id} className={"sched-eventbar" + (ev.endCol >= 5 ? " sched-eventbar-right" : "") + (peekId === ev.t.id ? " sched-peek-open" : "")}
                               onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } setSelectedDate(ymd(week[ev.startCol].d)); openDetail(ev.t); }}
                               onContextMenu={(e) => openCtx(e, { id: ev.t.id })}
-                              onTouchStart={(e) => peekTouchStart(e, ev.t.id)}
-                              onTouchMove={peekTouchMove} onTouchEnd={peekTouchCancel} onTouchCancel={peekTouchCancel}
-                              draggable
-                              onDragStart={(e) => { clearTimeout(peekTimerRef.current); setPeekId(null); e.dataTransfer.setData("text/plain", String(ev.t.id)); e.dataTransfer.effectAllowed = "move"; setDragTodoId(ev.t.id); }}
-                              onDragEnd={clearDrag}
-                              title="드래그하여 다른 날짜로 이동 · 마우스 우클릭으로 복제/복사"
+                              onPointerDown={(e) => beginDrag(e, ev.t)}
+                              draggable={false}
+                              title="끌어서 다른 날짜로 이동 (폰은 길게 누른 뒤 끌기) · 마우스 우클릭으로 복제/복사"
                               style={{
                                 position: "absolute", left, width, top, height: trackH,
-                                pointerEvents: "auto", cursor: "pointer",
-                                opacity: dragTodoId === ev.t.id ? 0.35 : 1,
+                                pointerEvents: "auto", cursor: dragTodoId === ev.t.id ? "grabbing" : "grab",
+                                opacity: dragTodoId === ev.t.id ? 0.3 : 1,
+                                touchAction: "pan-y",
                                 background: done ? ec.doneBg : ec.bg,
                                 color: done ? "var(--text3)" : ec.text,
                                 border: `1px solid ${done ? "transparent" : ec.border}`,
@@ -21598,6 +21721,18 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         );
       })()}
 
+      {/* ── 드래그 중 따라다니는 카드 — 놓을 날짜를 항상 보여준다 ── */}
+      {dragTodoId != null && (
+        <div ref={ghostRef} className="sched-ghost">
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{dragText}</span>
+          <span style={{ fontSize: 11, fontWeight: 800, color: dragOverDate ? "#DB6B2E" : "var(--text3)" }}>
+            {dragOverDate
+              ? `→ ${(() => { const [gy, gm, gd] = shiftDate(dragOverDate, -(dragRef.current ? dragRef.current.offsetDays : 0)).split("-").map(Number); return `${gm}월 ${gd}일`; })()} 로 이동`
+              : "달력 위에 놓아주세요"}
+          </span>
+        </div>
+      )}
+
       {/* ── 우클릭 컨텍스트 메뉴 — 일정 카드: 복제/복사/수정/삭제, 빈 날짜 칸: 추가/붙여넣기 ── */}
       {ctxMenu && (() => {
         const t = ctxMenu.id != null ? todos.find(x => x.id === ctxMenu.id) : null;
@@ -21815,6 +21950,21 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
         .sched-eventbar.sched-peek-open .sched-peek { display: block; opacity: 1; transform: translateY(0) scale(1); }
         /* 드래그 중: 이벤트 바가 드롭 대상 셀을 가리지 않도록 + 프리뷰 억제 */
         .sched-dragging .sched-eventbar { pointer-events: none; }
+        /* 드래그 미리보기 카드 — 커서를 따라다닌다 (위치는 transform으로만 갱신) */
+        .sched-ghost {
+          position: fixed; left: 0; top: 0; z-index: 10060; pointer-events: none;
+          max-width: 260px; padding: 8px 11px; border-radius: 10px;
+          background: var(--surface); border: 1.5px solid #DB6B2E;
+          box-shadow: 0 12px 30px rgba(0,0,0,0.30);
+          font-size: 12.5px; font-weight: 700; color: var(--text1);
+          display: flex; flex-direction: column; gap: 2px;
+          will-change: transform;
+        }
+        /* 드래그 중에는 글자 선택·길게 눌러 나오는 메뉴가 방해하지 않도록 */
+        .sched-dragging, .sched-dragging * { user-select: none !important; -webkit-user-select: none !important; }
+        /* 드래그 중에는 칸 하이라이트가 커서를 즉시 따라오도록 트랜지션 제거
+           (기본 .15s 페이드가 남아 있으면 대상 칸이 한 박자 늦게 보인다) */
+        .sched-dragging .sched-cell { cursor: grabbing; transition: none !important; }
         .sched-dragging .sched-peek { display: none !important; }
         /* 오른쪽 끝(금·토) 열 일정은 프리뷰를 왼쪽으로 펼쳐 화면 밖 잘림 방지 */
         .sched-eventbar-right .sched-peek { left: auto; right: 0; transform-origin: bottom right; }
