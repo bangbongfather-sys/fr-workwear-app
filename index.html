@@ -14553,7 +14553,18 @@ function App() {
     { id: "won",    label: "수주",    color: "var(--accent)" },
     { id: "lost",   label: "실패",    color: "var(--negative)" },
   ];
-  const [historyView, setHistoryView] = useState(() => load("frw_quote_history_view", "board")); // board | list
+  // 견적 수량 — 제품별 { [productId]: 수량 }. 지금까지 견적서는 모든 줄이 1이었다.
+  // 수량이 생기면 견적서 합계와 손익이 실제 금액이 된다.
+  // 한 줄 담기(시안 F) 입력 상태
+  const [quoteCmd, setQuoteCmd] = useState("");
+  const [cmdSel, setCmdSel] = useState(0);
+  const [lastPickedId, setLastPickedId] = useState(null);
+  const [quoteQty, setQuoteQty] = useState(() => load("frw_quote_qty", {}));
+  useEffect(() => { save("frw_quote_qty", quoteQty); }, [quoteQty]);
+  const qtyOf = (id) => { const n = parseFloat(quoteQty[id]); return (!isNaN(n) && n > 0) ? n : 1; };
+  const setQty = (id, v) => setQuoteQty(m => ({ ...m, [id]: v }));
+
+  const [historyView, setHistoryView] = useState(() => load("frw_quote_history_view", "list")); // board | list
   useEffect(() => { save("frw_quote_history_view", historyView); }, [historyView]);
   const [boardDragId, setBoardDragId] = useState(null);
   const [boardDragOver, setBoardDragOver] = useState(null);
@@ -15859,7 +15870,9 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     const items = getQuotedProducts();
     const today = new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
     const quoteId = `NJ-${new Date().toISOString().slice(0,10).replace(/-/g,"")}-${String(new Date().getHours()).padStart(2,"0")}${String(new Date().getMinutes()).padStart(2,"0")}`;
-    const totalSum = items.reduce((s, x) => s + x.c.finalPrice, 0);
+    const totalSum = items.reduce((s, x) => s + x.c.finalPrice * qtyOf(x.p.id), 0);
+    // 수량이 하나라도 1이 아니면 금액 열을 함께 보여준다 (전부 1이면 예전 모양 그대로)
+    const anyQty = items.some(x => qtyOf(x.p.id) !== 1);
 
     if (items.length === 0) {
       return `# 견적서 (Quotation)\n\n원가가 입력된 제품이 없습니다.`;
@@ -15868,19 +15881,24 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     // 제품 단가 표 (제품명 / 수량 / 단가 / 시장 소비자가)
     const hasMarketPrice = items.some(({ p }) => parseFloat(getMarketPrice(p)) > 0);
     const showMarketPrice = includeMarketPrice && hasMarketPrice;
+    const amtCol = (c, q) => anyQty ? ` ${Math.round(c.finalPrice * q).toLocaleString()}원 |` : "";
     const priceTable = showMarketPrice
       ? items.map(({ p, c }) => {
+          const q = qtyOf(p.id);
           const mp = parseFloat(getMarketPrice(p));
           const mpStr = (!isNaN(mp) && mp > 0) ? `${Math.round(mp).toLocaleString()}원` : `—`;
-          return `| ${p.name} | 1 | ${Math.round(c.finalPrice).toLocaleString()}원 | ${mpStr} |`;
+          return `| ${p.name} | ${q.toLocaleString()} | ${Math.round(c.finalPrice).toLocaleString()}원 |${amtCol(c, q)} ${mpStr} |`;
         }).join("\n")
-      : items.map(({ p, c }) =>
-          `| ${p.name} | 1 | ${Math.round(c.finalPrice).toLocaleString()}원 |`
-        ).join("\n");
+      : items.map(({ p, c }) => {
+          const q = qtyOf(p.id);
+          return `| ${p.name} | ${q.toLocaleString()} | ${Math.round(c.finalPrice).toLocaleString()}원 |${amtCol(c, q)}`;
+        }).join("\n");
 
+    const amtHead = anyQty ? " 금액 |" : "";
+    const amtSep = anyQty ? "---|" : "";
     const tableHeader = showMarketPrice
-      ? `| 제품명 | 수량 | 납품 단가 | 시장 소비자가 |\n|---|---|---|---|`
-      : `| 제품명 | 수량 | 단가 |\n|---|---|---|`;
+      ? `| 제품명 | 수량 | 납품 단가 |${amtHead} 시장 소비자가 |\n|---|---|---|${amtSep}---|`
+      : `| 제품명 | 수량 | 단가 |${amtHead}\n|---|---|---|${amtSep}`;
 
     // 이미지가 있는 제품만 갤러리 섹션에 포함 (사용자 토글 적용)
     const itemsWithImage = includeImages ? items.filter(({ p }) => p.image && typeof p.image === "string" && p.image.length > 50) : [];
@@ -16580,6 +16598,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         productId: p.id,
         name: p.name,
         grade: c.selectedGrade || "A",
+        qty: qtyOf(p.id),
         price: Math.round(c.finalPrice),
         specId: st ? st.specId : (act ? act.id : null),
         specName: st ? st.specName : (act ? act.name : ""),
@@ -18142,6 +18161,108 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "quote" && quoteSubTab === "builder" && (
           <div className="calc-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+              {/* ── 한 줄로 담기 (시안 F) ──
+                  앱에는 이미 초성까지 되는 검색(searchScore)이 있다. 그걸 견적 조립기로 쓴다.
+                  제품명을 치면 담기고, 숫자를 이어 치면 그 제품의 수량이 된다.
+                  아래 상세 목록은 그대로 남는다 — 등급·요척서를 세밀하게 만질 때 쓴다. */}
+              {(() => {
+                const raw = quoteCmd;
+                const numMatch = raw.trim().match(/^(\d+)$/);
+                const q = raw.trim();
+                // 숫자만 쳤으면 "마지막에 담은 제품의 수량"으로 해석한다
+                const qtyMode = !!numMatch && !!lastPickedId;
+                const cands = q && !qtyMode
+                  ? products
+                      .map(p => ({ p, sc: searchScore(q, [p.name]) }))
+                      .filter(x => x.sc > 0)
+                      .sort((a, b) => b.sc - a.sc)
+                      .slice(0, 6)
+                  : [];
+                const pick = (p) => {
+                  const c = computeProduct(p, materials, laborItems);
+                  if (!(c && c.base > 0)) { showToast("이 제품은 원가가 입력되지 않아 견적에 담을 수 없습니다"); return; }
+                  setProducts(ps => ps.map(x => x.id === p.id ? { ...x, include: true } : x));
+                  setLastPickedId(p.id);
+                  setQuoteCmd("");
+                  showToast(`'${p.name}' 담았습니다 — 숫자를 치면 수량이 됩니다`, "success");
+                };
+                const applyQty = () => {
+                  const n = parseInt(numMatch[1], 10);
+                  if (!n || n <= 0) return;
+                  setQty(lastPickedId, n);
+                  const nm = (products.find(x => x.id === lastPickedId) || {}).name || "";
+                  setQuoteCmd("");
+                  showToast(`${nm} 수량 ${n.toLocaleString()}`, "success");
+                };
+                const included = products.filter(p => p.include !== false)
+                  .map(p => ({ p, c: computeProduct(p, materials, laborItems) }))
+                  .filter(x => x.c.base > 0);
+                const sum = included.reduce((s, { p, c }) => s + c.finalPrice * qtyOf(p.id), 0);
+                const cost = included.reduce((s, { p, c }) => s + c.beforeMargin * qtyOf(p.id), 0);
+                return (
+                  <div className="card" style={{ marginBottom: 14, padding: 16 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "12px 15px", borderRadius: 13, background: "var(--surface)", border: `2px solid ${quoteCmd ? "var(--accent)" : "var(--border)"}`, transition: "border-color 0.15s" }}>
+                      <Icon name="search" size={17} style={{ color: quoteCmd ? "var(--accent)" : "var(--text3)", flexShrink: 0 }} />
+                      <input value={quoteCmd} onChange={e => setQuoteCmd(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (qtyMode) applyQty();
+                            else if (cands.length > 0) pick(cands[Math.min(cmdSel, cands.length - 1)].p);
+                          } else if (e.key === "ArrowDown") { e.preventDefault(); setCmdSel(i => Math.min(i + 1, Math.max(cands.length - 1, 0))); }
+                          else if (e.key === "ArrowUp") { e.preventDefault(); setCmdSel(i => Math.max(i - 1, 0)); }
+                          else if (e.key === "Escape") { setQuoteCmd(""); }
+                          else setCmdSel(0);
+                        }}
+                        placeholder="제품명을 치면 담깁니다 — 초성도 됩니다 (ㅎㄱㅈㅋ). 담은 뒤 숫자를 치면 수량"
+                        style={{ flex: 1, height: 30, padding: 0, background: "none", border: "none", fontSize: 15, minWidth: 0 }} />
+                      {qtyMode && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--accent-strong)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                          Enter → {(products.find(x => x.id === lastPickedId) || {}).name} 수량 {parseInt(numMatch[1], 10).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    {cands.length > 0 && (
+                      <div style={{ border: "1px solid var(--border)", borderRadius: 12, marginTop: 8, overflow: "hidden", boxShadow: "var(--elev-2)" }}>
+                        {cands.map(({ p, sc }, i) => {
+                          const c = computeProduct(p, materials, laborItems);
+                          const on = i === Math.min(cmdSel, cands.length - 1);
+                          const already = p.include !== false;
+                          return (
+                            <div key={p.id} onClick={() => pick(p)} onMouseEnter={() => setCmdSel(i)}
+                              style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 14px", cursor: "pointer",
+                                borderBottom: i < cands.length - 1 ? "1px solid var(--divider)" : "none",
+                                background: on ? "var(--accent-tonal)" : "transparent" }}>
+                              <span style={{ padding: "2px 8px", borderRadius: 6, background: already ? "var(--positive-bg)" : "var(--surface2)", color: already ? "var(--positive-text)" : "var(--text3)", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>{already ? "담김" : "제품"}</span>
+                              <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: on ? 700 : 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                              <span style={{ fontSize: 12, color: "var(--text3)", flexShrink: 0 }}>
+                                {c.base > 0 ? `${c.selectedGrade || "A"}급 ${Math.round(c.finalPrice).toLocaleString()}원` : "원가 미입력"}
+                              </span>
+                              {on && <span style={{ padding: "2px 7px", borderRadius: 5, background: "var(--text1)", color: "var(--surface)", fontSize: 10, fontWeight: 700, flexShrink: 0 }}>Enter</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {included.length > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 13, padding: "12px 15px", borderRadius: 12, background: "#17181A", color: "#fff", flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 10.5, fontWeight: 600, color: "#8B909B" }}>견적 합계 (VAT 별도) · 제품 {included.length}종</div>
+                          <div style={{ fontSize: 23, fontWeight: 800, letterSpacing: "-0.02em", marginTop: 1, fontVariantNumeric: "tabular-nums" }}>{Math.round(sum).toLocaleString()}<span style={{ fontSize: 12, color: "#8B909B" }}> 원</span></div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 600, color: "#F0B48E" }}>남는 돈</div>
+                          <div style={{ fontSize: 17, fontWeight: 800, color: "#F0B48E", letterSpacing: "-0.015em", fontVariantNumeric: "tabular-nums" }}>{Math.round(sum - cost).toLocaleString()}<span style={{ fontSize: 11 }}> 원</span></div>
+                        </div>
+                        <button onClick={() => { const its = getQuotedProducts(); setQuote(generateTemplate()); setQuoteStamp(stampFromItems(its)); setQuoteTitle(""); setQuoteSubTab("current"); }}
+                          style={{ padding: "11px 20px", borderRadius: 11, border: "none", background: "var(--accent)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                          견적서 만들기 →
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {/* 견적 포함 제품 */}
               <div className="card">
                 <div className="section-header" style={{ marginBottom: 14 }}>
@@ -18261,6 +18382,16 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             onMouseEnter={e => { e.currentTarget.style.background = ACCENT; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = ACCENT; }}
                             onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = T.text2; e.currentTarget.style.borderColor = T.border; }}
                           >이동 →</button>
+                          {/* 수량 — 견적서 합계·손익이 이 값으로 계산된다 (비우면 1) */}
+                          {isInc && hasData && (
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                              <span style={{ fontSize: 11, color: "var(--text3)", whiteSpace: "nowrap" }}>수량</span>
+                              <input type="number" min={1} value={quoteQty[p.id] ?? ""} placeholder="1"
+                                onChange={e => setQty(p.id, e.target.value)}
+                                title="이 제품을 몇 벌 견적에 넣을지 — 비워두면 1벌"
+                                style={{ width: 68, height: 32, textAlign: "right", fontSize: 12.5, fontWeight: 700, padding: "0 8px" }} />
+                            </div>
+                          )}
                         </div>
                         {/* 요척서 선택 — 여러 버전이 있을 때 견적서에 쓸 요척서를 여기서 바로 전환 */}
                         {hasData && (p.specs || []).length > 1 && (
@@ -18795,10 +18926,11 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     const price = c.finalPrice * (1 - d);
                     const cost = c.beforeMargin;
                     const m = price > 0 ? (price - cost) / price * 100 : 0;
-                    return { id: p.id, name: p.name, grade: c.selectedGrade, price, cost, m };
+                    return { id: p.id, name: p.name, grade: c.selectedGrade, price, cost, m, qty: qtyOf(p.id) };
                   });
-                  const sumPrice = rows.reduce((s, r) => s + r.price, 0);
-                  const sumCost = rows.reduce((s, r) => s + r.cost, 0);
+                  // 합계는 수량을 곱한 실제 금액 (마진율은 수량과 무관하므로 단가 기준 그대로)
+                  const sumPrice = rows.reduce((s, r) => s + r.price * r.qty, 0);
+                  const sumCost = rows.reduce((s, r) => s + r.cost * r.qty, 0);
                   const profit = sumPrice - sumCost;
                   const avgM = sumPrice > 0 ? profit / sumPrice * 100 : 0;
                   const risky = rows.filter(r => r.m < quoteFloor).length;
@@ -18832,7 +18964,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                         <span style={{ flex: 1 }} />
                         {!showProfit && (
                           <span style={{ fontSize: 12.5, fontWeight: 700, color: "#F0B48E" }}>
-                            제품당 {Math.round(profit).toLocaleString()}원 · 마진 {avgM.toFixed(1)}%
+                            남는 돈 {Math.round(profit).toLocaleString()}원 · 마진 {avgM.toFixed(1)}%
                           </span>
                         )}
                         <span style={{ fontSize: 12, color: "#8B909B" }}>{showProfit ? "접기 ▴" : "펼치기 ▾"}</span>
@@ -18842,7 +18974,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           {/* 요약 */}
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 14 }}>
                             {[
-                              ["제품 합계 (1벌 기준)", Math.round(sumPrice).toLocaleString(), "원", null],
+                              ["견적 합계", Math.round(sumPrice).toLocaleString(), "원", null],
                               ["원가 합계", Math.round(sumCost).toLocaleString(), "원", null],
                               ["남는 돈", Math.round(profit).toLocaleString(), "원", "var(--accent-strong)"],
                               ["평균 마진", avgM.toFixed(1), "%", avgM >= quoteFloor ? "var(--positive-text)" : "var(--negative-text)"],
@@ -18883,17 +19015,18 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
                           {/* 제품별 */}
                           <div style={{ border: "1px solid var(--divider)", borderRadius: 12, overflow: "hidden" }}>
-                            <div style={{ display: "grid", gridTemplateColumns: "1.6fr 46px 92px 92px 1fr 58px", gap: 10, padding: "9px 12px", background: "var(--row-bg)", borderBottom: "1px solid var(--divider)" }}>
-                              {["제품", "등급", "원가", quoteDiscount > 0 ? "할인가" : "납품가", "마진", ""].map((h, i) => (
-                                <div key={i} style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.5, textAlign: i >= 2 && i <= 3 ? "right" : "left" }}>{h}</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1.6fr 46px 58px 92px 92px 1fr 58px", gap: 10, padding: "9px 12px", background: "var(--row-bg)", borderBottom: "1px solid var(--divider)" }}>
+                              {["제품", "등급", "수량", "원가", quoteDiscount > 0 ? "할인가" : "납품가", "마진", ""].map((h, i) => (
+                                <div key={i} style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.5, textAlign: i >= 2 && i <= 4 ? "right" : "left" }}>{h}</div>
                               ))}
                             </div>
                             {rows.map((r, i) => {
                               const [bar, txt, bg, tag] = tone(r.m);
                               return (
-                                <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.6fr 46px 92px 92px 1fr 58px", gap: 10, alignItems: "center", padding: "10px 12px", borderBottom: i < rows.length - 1 ? "1px solid var(--divider)" : "none" }}>
+                                <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1.6fr 46px 58px 92px 92px 1fr 58px", gap: 10, alignItems: "center", padding: "10px 12px", borderBottom: i < rows.length - 1 ? "1px solid var(--divider)" : "none" }}>
                                   <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
                                   <div style={{ fontSize: 11.5, color: "var(--text3)" }}>{r.grade}</div>
+                                  <div style={{ fontSize: 12, color: "var(--text2)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.qty.toLocaleString()}</div>
                                   <div style={{ fontSize: 12, color: "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(r.cost).toLocaleString()}</div>
                                   <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(r.price).toLocaleString()}</div>
                                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -18910,7 +19043,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             })}
                           </div>
                           <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 9, lineHeight: 1.5 }}>
-                            제품 1벌 기준입니다. 할인 슬라이더는 화면에서만 계산해 보는 값이라 견적서 본문은 바뀌지 않습니다 — 실제로 반영하려면 단가 계산기에서 단가를 조정하세요.
+                            수량은 「제품 선택 &amp; 생성」에서 정합니다. 할인 슬라이더는 화면에서만 계산해 보는 값이라 견적서 본문은 바뀌지 않습니다 — 실제로 반영하려면 단가 계산기에서 단가를 조정하세요.
                           </div>
                         </div>
                       )}
