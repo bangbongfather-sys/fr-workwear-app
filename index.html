@@ -3471,7 +3471,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
             {/* 목록은 화면 높이에 맞춰 자체 스크롤 — 항목이 많아도 페이지가 끝없이 길어지지 않고
                 오른쪽 상세 패널이 늘 같은 자리에 보인다. */}
-            <div className="pdb-list" style={{ display: "flex", flexDirection: "column", gap: 3, overflowY: "auto", overflowX: "hidden", maxHeight: "calc(100vh - 340px)", minHeight: 220, paddingRight: 4 }}>
+            <div className="pdb-list" style={{ display: "flex", flexDirection: "column", gap: 3, overflowY: "auto", overflowX: "hidden", maxHeight: "calc(100vh - 400px)", minHeight: 220, paddingRight: 4, scrollPaddingTop: 4 }}>
               {showMats && <>
                 {bothKinds && kindDivider("재고 관리 자재")}
                 {visMats.map(({ m, st }) => {
@@ -3665,14 +3665,15 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
                   {/* 헤더 */}
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
                         {custom ? `${pdbTab} 상세` : "원단 상세"}
                         {custom && <span title="요척(yard·m·pc)으로 계산하고 재고를 관리하는 항목입니다" style={{ padding: "1px 7px", borderRadius: 5, background: "var(--surface2)", color: "var(--text3)", fontSize: 10, fontWeight: 700 }}>재고 관리 자재</span>}
                       </div>
                       {editing ? (
                         <input value={editMat.name} onChange={e => setEditMat({ ...editMat, name: e.target.value })}
-                          style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
+                          placeholder="원단명"
+                          style={{ width: "100%", height: 42, fontSize: 17, fontWeight: 700, padding: "0 12px" }} />
                       ) : (
                         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.015em", wordBreak: "keep-all" }}>{selMat.name}</div>
                       )}
@@ -3810,14 +3811,15 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               return (
                 <div style={{ border: "1px solid var(--divider)", borderRadius: 16, padding: "20px 24px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
                         {custom ? `${pdbTab} 상세` : "공임 상세"}
                         {custom && <span title="완성품 1벌당 원가에 붙는 항목입니다 — 재고는 관리하지 않습니다" style={{ padding: "1px 7px", borderRadius: 5, background: "var(--surface2)", color: "var(--text3)", fontSize: 10, fontWeight: 700 }}>원가 항목</span>}
                       </div>
                       {editing ? (
                         <input value={editLab.name} onChange={e => setEditLab({ ...editLab, name: e.target.value })}
-                          style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
+                          placeholder="항목명"
+                          style={{ width: "100%", height: 42, fontSize: 17, fontWeight: 700, padding: "0 12px" }} />
                       ) : (
                         <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.015em", wordBreak: "keep-all" }}>{selLab.name}</div>
                       )}
