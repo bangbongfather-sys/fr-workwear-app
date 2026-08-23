@@ -3069,17 +3069,29 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const isCustomTab = (t) => t !== TAB_MAT && t !== TAB_LAB;
   const inTab = (x, tab, home) => isCustomTab(tab) ? sheetOf(x) === tab : (tab === home && !sheetOf(x));
 
+  const TAB_MAT_ID = "mat";   // 옛 저장형식 마이그레이션용 (TAB_MAT와 같은 값)
+
   // ── 하위 카테고리 (하계/동계/춘추 등) ──
   // 단가표 탭이 "어느 표에 있느냐"라면, 카테고리는 그 표 안에서의 분류다.
   // 항목의 category 값으로만 구분하므로 탭을 옮겨도 분류는 따라간다.
   const catOf = (x) => (x.category || "").trim();
-  const [pdbCats, setPdbCats] = useState(() => load("frw_pdb_categories", []));
+  // 카테고리 목록은 단가표 탭마다 독립이다 — { [탭]: [이름들] }.
+  // 원단에서 만든 「하계」가 공임비 탭에 0개짜리로 따라붙지 않게.
+  const [pdbCats, setPdbCats] = useState(() => {
+    const v = load("frw_pdb_categories", {});
+    // 옛 형식(전 탭 공용 배열)이면 만들었던 자리인 원단 탭으로 옮긴다
+    return Array.isArray(v) ? { [TAB_MAT_ID]: v } : (v && typeof v === "object" ? v : {});
+  });
   useEffect(() => { save("frw_pdb_categories", pdbCats); }, [pdbCats]);
+  const myCats = pdbCats[pdbTab] || [];
+  const setMyCats = (fn) => setPdbCats(all => ({ ...all, [pdbTab]: fn(all[pdbTab] || []) }));
   const [catFilter, setCatFilter] = useState("all");   // all | __none | 카테고리명
+  // 탭을 옮기면 그 탭에 없는 분류가 걸린 채로 남아 빈 화면이 되므로 초기화한다
+  useEffect(() => { setCatFilter("all"); }, [pdbTab]);
   // 지금 탭에 실제로 담긴 항목들
   const tabItems = [...materials.filter(m => inTab(m, pdbTab, TAB_MAT)), ...laborItems.filter(l => inTab(l, pdbTab, TAB_LAB))];
-  // 칩 목록 = 사용자가 만든 이름 + 이 탭에서 실제로 쓰이는 이름
-  const catList = Array.from(new Set([...pdbCats, ...tabItems.map(catOf).filter(Boolean)]));
+  // 칩 목록 = 이 탭에서 만든 이름 + 이 탭에서 실제로 쓰이는 이름
+  const catList = Array.from(new Set([...myCats, ...tabItems.map(catOf).filter(Boolean)]));
   const catCount = (c) => tabItems.filter(x => catOf(x) === c).length;
   const noneCount = tabItems.filter(x => !catOf(x)).length;
   const inCat = (x) => catFilter === "all" || (catFilter === "__none" ? !catOf(x) : catOf(x) === catFilter);
@@ -3088,7 +3100,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
     const name = (window.prompt("새 카테고리 이름 (예: 하계, 동계, 춘추)") || "").trim();
     if (!name) return;
     if (name === "전체" || name === "미분류" || catList.includes(name)) { showToast("이미 있는 이름입니다"); return; }
-    setPdbCats(cs => [...cs, name]);
+    setMyCats(cs => [...cs, name]);
     setCatFilter(name);
     showToast(`'${name}' 카테고리를 만들었습니다 — 항목 상세에서 지정하세요`, "success");
   };
@@ -3096,9 +3108,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
     const name = (window.prompt(`'${cat}' 카테고리의 새 이름`, cat) || "").trim();
     if (!name || name === cat) return;
     if (name === "전체" || name === "미분류" || catList.includes(name)) { showToast("이미 있는 이름입니다"); return; }
-    setMaterials(ms => ms.map(m => catOf(m) === cat ? { ...m, category: name } : m));
-    setLaborItems(ls => ls.map(l => catOf(l) === cat ? { ...l, category: name } : l));
-    setPdbCats(cs => cs.map(c => c === cat ? name : c));
+    setMaterials(ms => ms.map(m => (catOf(m) === cat && inTab(m, pdbTab, TAB_MAT)) ? { ...m, category: name } : m));
+    setLaborItems(ls => ls.map(l => (catOf(l) === cat && inTab(l, pdbTab, TAB_LAB)) ? { ...l, category: name } : l));
+    setMyCats(cs => cs.map(c => c === cat ? name : c));
     setCatFilter(f => f === cat ? name : f);
     showToast("이름을 바꿨습니다", "success");
   };
@@ -3106,10 +3118,10 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
     const n = catCount(cat);
     if (!window.confirm(`'${cat}' 카테고리를 삭제할까요?${n ? `\n${n}개 항목은 미분류로 돌아갑니다. 항목 자체는 지워지지 않습니다.` : ""}`)) return;
     if (n) {
-      setMaterials(ms => ms.map(m => catOf(m) === cat ? { ...m, category: "" } : m));
-      setLaborItems(ls => ls.map(l => catOf(l) === cat ? { ...l, category: "" } : l));
+      setMaterials(ms => ms.map(m => (catOf(m) === cat && inTab(m, pdbTab, TAB_MAT)) ? { ...m, category: "" } : m));
+      setLaborItems(ls => ls.map(l => (catOf(l) === cat && inTab(l, pdbTab, TAB_LAB)) ? { ...l, category: "" } : l));
     }
-    setPdbCats(cs => cs.filter(c => c !== cat));
+    setMyCats(cs => cs.filter(c => c !== cat));
     if (catFilter === cat) setCatFilter("all");
   };
   const moveToCategory = (kind, id, cat) => {
