@@ -18184,6 +18184,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       </span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>
                         마진 {(marginAmt / finalPrice * 100).toFixed(1)}%
+                        <span style={{ fontWeight: 600, color: "var(--text3)" }}> · </span>
+                        <span style={{ color: marginAmt >= 0 ? "var(--positive-text)" : "var(--negative-text)" }} title="납품가 − 관리비 포함 원가">
+                          {Math.round(marginAmt).toLocaleString()}원
+                        </span>
                       </span>
                     </div>
                   )}
@@ -18299,8 +18303,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           }}>{g}</span>
                           <span style={{ fontSize: 11, color: T.text2, flexShrink: 0, minWidth: 28 }}>{r}%</span>
                           {isOv && <span title="수동 수정됨" style={{ fontSize: 9, fontWeight: 800, color: ORANGE, padding: "1px 5px", borderRadius: 4, background: darkMode ? "rgba(120,53,15,0.4)" : "#FBF1E8", flexShrink: 0 }}>수정</span>}
-                          <span style={{ flex: 1, textAlign: "right", fontSize: 13, fontWeight: isSel ? 800 : 600, color: isSel ? ACCENT : (isOv ? ORANGE : T.ghostColor) }}>
-                            {p > 0 ? `${Math.round(p).toLocaleString()}원` : "—"}
+                          {/* 단가 아래 그 등급에서 실제로 남는 금액 — 등급을 고를 때 %만으로는 감이 안 온다 */}
+                          <span style={{ flex: 1, textAlign: "right", minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: 13, fontWeight: isSel ? 800 : 600, color: isSel ? ACCENT : (isOv ? ORANGE : T.ghostColor), fontVariantNumeric: "tabular-nums" }}>
+                              {p > 0 ? `${Math.round(p).toLocaleString()}원` : "—"}
+                            </span>
+                            {p > 0 && (
+                              <span style={{ display: "block", fontSize: 10.5, fontWeight: 600, marginTop: 1, color: (p - beforeMargin) >= 0 ? "var(--positive-text)" : "var(--negative-text)", fontVariantNumeric: "tabular-nums" }}
+                                title="이 등급으로 팔 때 남는 금액 (단가 − 관리비 포함 원가)">
+                                +{Math.round(p - beforeMargin).toLocaleString()}원
+                              </span>
+                            )}
                           </span>
                         </button>
                       );
@@ -18318,10 +18331,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       const admPct = Math.round(adminAmt / finalPrice * 100);
                       const marPct = Math.max(0, 100 - fabPct - extPct - admPct);
                       const bars = [
-                        { label: "① 원단", pct: fabPct, color: "#DB6B2E" },
-                        { label: "② 공임", pct: extPct, color: "#C55E27" },
-                        { label: "③ 관리비", pct: admPct, color: "#a234c7" },
-                        { label: "마진", pct: marPct, color: "#03b26c" },
+                        { label: "① 원단", pct: fabPct, color: "#DB6B2E", amt: fabricCost },
+                        { label: "② 공임", pct: extPct, color: "#C55E27", amt: extraCost },
+                        { label: "③ 관리비", pct: admPct, color: "#a234c7", amt: adminAmt },
+                        { label: "마진", pct: marPct, color: "#03b26c", amt: marginAmt },
                       ].filter(b => b.pct > 0);
                       return (
                         <>
@@ -18334,7 +18347,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             {bars.map(b => (
                               <div key={b.label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                 <div style={{ width: 8, height: 8, borderRadius: 2, background: b.color, flexShrink: 0 }} />
-                                <span style={{ fontSize: 11, color: "var(--text3)" }}>{b.label}</span>
+                                <span style={{ fontSize: 11, color: "var(--text3)", whiteSpace: "nowrap" }}>{b.label}</span>
+                                <span style={{ fontSize: 10.5, color: "var(--text3)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{Math.round(b.amt).toLocaleString()}원</span>
                                 <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>{b.pct}%</span>
                               </div>
                             ))}
