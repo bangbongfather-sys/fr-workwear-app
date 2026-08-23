@@ -2036,6 +2036,101 @@ async function shareClientStatement(client, ym, ledgers, clientAR) {
 // ─── 견적서 공유 — 화면의 견적서 문서를 흰 배경 PNG로 렌더해 카톡/문자/메일 공유 시트로 전송 ───
 // 다크모드여도 공유 이미지는 항상 라이트(흰 배경) — 문서 스타일이 참조하는 CSS 변수를
 // 클론 래퍼에 라이트 값으로 강제 지정 (다크모드 캡처 시 흰 글자 사라짐 방지, 정산서 공유와 동일 원칙).
+// ─── 견적서 이미지 만들기 ───
+// shareQuoteImage와 같은 방식으로 PNG를 만들지만, 공유 수단을 고르기 전에
+// 이미지만 먼저 만들어 두려고 분리했다. (메일 첨부·저장·기기 공유가 같은 이미지를 쓴다)
+async function buildQuoteImage(nodeId, title, client) {
+  const src = document.getElementById(nodeId);
+  if (!src) throw new Error("견적서 영역을 찾을 수 없습니다");
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "position:fixed;left:-10000px;top:0;width:840px;background:#ffffff;";
+  [
+    ["--doc-bg", "#fff"], ["--doc-text", "#17181A"], ["--doc-text2", "#404652"], ["--doc-text3", "#5A6270"],
+    ["--doc-border", "#D7DBE2"], ["--doc-row-border", "#E5E8ED"], ["--doc-hover", "#F7F8FA"],
+    ["--doc-last", "#17181A"], ["--doc-footer", "#828A98"],
+    ["--text1", "#191F28"], ["--text2", "#4E5968"], ["--text3", "#8B95A1"],
+    ["--surface", "#ffffff"], ["--surface2", "#F2F4F6"], ["--row-border", "#E5E8EB"],
+    ["--border", "#E5E8EB"], ["--divider", "#F2F4F6"], ["--row-bg", "#F9FAFB"], ["--accent", "#DB6B2E"],
+  ].forEach(([k, v]) => wrap.style.setProperty(k, v));
+  const clone = src.cloneNode(true);
+  clone.style.margin = "0"; clone.style.width = "auto"; clone.style.boxShadow = "none";
+  wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+  try {
+    const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: "#ffffff" });
+    const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+    if (!blob) throw new Error("이미지 생성 실패");
+    const base = (title || "").trim() || (client || "").trim() || "견적서";
+    const fname = `견적서_${base.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.png`;
+    return { blob, fname };
+  } finally {
+    try { document.body.removeChild(wrap); } catch {}
+  }
+}
+
+// Blob → base64 (data: 접두사 제거)
+function blobToBase64(blob) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(",")[1] || "");
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  });
+}
+
+// ─── Gmail로 첨부 메일 보내기 ───
+// 메일 탭이 저장해 둔 토큰(frw_gmail_token)을 그대로 쓴다. gmail.send 권한은 이미 받아둔 상태.
+async function sendQuoteMail({ to, cc, subject, bodyText, blob, fname }) {
+  let tk = null;
+  try {
+    const t = JSON.parse(localStorage.getItem("frw_gmail_token") || "null");
+    if (t && t.access_token && Date.now() < t.expires_at - 30000) tk = t.access_token;
+  } catch {}
+  if (!tk) throw new Error("NO_TOKEN");
+
+  const b64 = await blobToBase64(blob);
+  const boundary = "njq_" + Math.random().toString(36).slice(2);
+  const encHeader = (s) => `=?UTF-8?B?${btoa(unescape(encodeURIComponent(s)))}?=`;
+  const bodyHtml = bodyText.split("\n").map(l => l ? l.replace(/&/g, "&amp;").replace(/</g, "&lt;") : "<br>").join("<br>");
+
+  const parts = [
+    `To: ${to}`,
+    cc ? `Cc: ${cc}` : null,
+    `Subject: ${encHeader(subject)}`,
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    btoa(unescape(encodeURIComponent(`<div style="font-family:'Apple SD Gothic Neo',sans-serif;font-size:14px;line-height:1.7;color:#191F28">${bodyHtml}</div>`))),
+    "",
+    `--${boundary}`,
+    `Content-Type: image/png; name="${encHeader(fname)}"`,
+    "Content-Transfer-Encoding: base64",
+    `Content-Disposition: attachment; filename="${encHeader(fname)}"`,
+    "",
+    b64.replace(/(.{76})/g, "$1\r\n"),
+    "",
+    `--${boundary}--`,
+  ].filter(x => x !== null);
+
+  const raw = parts.join("\r\n");
+  // btoa는 유니코드를 못 다루므로 이미 각 파트를 base64로 넣어 두었다 (헤더는 ASCII)
+  const b64url = btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${tk}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ raw: b64url }),
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    throw new Error(r.status === 401 ? "NO_TOKEN" : `Gmail ${r.status} ${t.slice(0, 120)}`);
+  }
+  return true;
+}
+
 async function shareQuoteImage(nodeId, title, client) {
   const src = document.getElementById(nodeId);
   if (!src) { showToast("견적서 영역을 찾을 수 없습니다"); return; }
@@ -14360,6 +14455,9 @@ function App() {
   const [savedQuotes, setSavedQuotes] = useState(() => load("frw_quote_history", []));
   const [wizardOpen, setWizardOpen] = useState(false); // 견적서 작성 위저드 (토스 단계별 플로우)
   const [viewingQuote, setViewingQuote] = useState(null);
+  // 견적서 공유 — 메뉴(선택지)와 메일 작성 창
+  const [shareMenu, setShareMenu] = useState(false);
+  const [mailDraft, setMailDraft] = useState(null);   // { to, cc, subject, body, blob, fname, sending }
   // 견적 이력 검색 + hover 액션 표시용
   const [historySearch, setHistorySearch] = useState("");
   const [hoveredQuoteId, setHoveredQuoteId] = useState(null);
@@ -18640,12 +18738,147 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button onClick={() => { setQuote(viewingQuote.quote); setQuoteStamp(stampFromSaved(viewingQuote)); setQuoteTitle(viewingQuote.title); setTab("quote"); setQuoteSubTab("current"); setViewingQuote(null); }} style={{ padding: "10px 18px", border: `1.5px solid ${T.ghostBorder}`, borderRadius: 12, background: T.ghostBg, color: T.ghostColor, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="edit" size={13}/>현재 견적서로 불러오기</span></button>
-                    <button onClick={() => shareQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient)}
-                      title="견적서를 이미지로 만들어 카톡·문자·메일로 바로 공유"
+                    <button onClick={() => setShareMenu(true)}
+                      title="메일로 바로 보내거나, 이미지로 저장·공유합니다"
                       style={{ padding: "10px 18px", border: "none", borderRadius: 12, background: "#00B493", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="share" size={13}/>공유하기</span></button>
                     <button className="btn-primary" onClick={() => window.print()}><span style={{display:"inline-flex",alignItems:"center",gap:5}}><Icon name="printer" size={14}/>PDF 출력</span></button>
                   </div>
                 </div>
+              {/* ── 견적서 공유 메뉴 ── */}
+              {shareMenu && (
+                <div onClick={() => setShareMenu(false)} style={{
+                  position: "fixed", inset: 0, background: "var(--overlay-scrim)", zIndex: 3000,
+                  display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+                }}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: "var(--surface)", borderRadius: 18, padding: 22, width: "min(420px, 100%)",
+                    boxShadow: "var(--elev-4)", border: "1px solid var(--border)",
+                  }}>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", marginBottom: 3 }}>견적서 공유</div>
+                    <div style={{ fontSize: 12.5, color: "var(--text3)", marginBottom: 16 }}>{viewingQuote.quoteClient || viewingQuote.title || "견적서"}</div>
+                    {[
+                      { key: "mail", icon: "mail", label: "메일로 보내기", sub: "견적서 이미지를 첨부해 거래처로 바로 발송합니다" },
+                      { key: "save", icon: "download", label: "이미지 저장", sub: "PNG로 내려받아 카톡·메일에 직접 첨부합니다" },
+                      { key: "os", icon: "share", label: "기기 공유 시트", sub: "폰에서는 카톡·문자가 뜹니다. PC는 메시지·AirDrop만 나옵니다" },
+                    ].map(o => (
+                      <button key={o.key} onClick={async () => {
+                        setShareMenu(false);
+                        try {
+                          if (o.key === "mail") {
+                            showToast("견적서 이미지를 만드는 중...");
+                            const { blob, fname } = await buildQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
+                            const cl = (clients || []).find(c => (c.name || "").trim() === (viewingQuote.quoteClient || "").trim());
+                            setMailDraft({
+                              to: (cl && cl.email) || "",
+                              cc: "",
+                              subject: `[NJ SAFETY] ${viewingQuote.quoteClient ? viewingQuote.quoteClient + " " : ""}견적서 送付의 건`,
+                              body: `${viewingQuote.quoteClient ? viewingQuote.quoteClient + " 담당자님," : "안녕하세요,"}\n\n요청하신 견적서를 첨부드립니다.\n검토하시고 문의사항 있으시면 회신 부탁드립니다.\n\n감사합니다.\nNJ SAFETY`,
+                              blob, fname, sending: false,
+                            });
+                          } else if (o.key === "save") {
+                            const { blob, fname } = await buildQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement("a");
+                            a.href = url; a.download = fname;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                            setTimeout(() => URL.revokeObjectURL(url), 5000);
+                            showToast("견적서 이미지를 저장했습니다");
+                          } else {
+                            await shareQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
+                          }
+                        } catch (e) { showToast("실패: " + (e.message || e)); }
+                      }} style={{
+                        display: "flex", alignItems: "center", gap: 13, width: "100%", textAlign: "left",
+                        padding: "13px 15px", marginBottom: 8, borderRadius: 12,
+                        border: "1px solid var(--divider)", background: "var(--row-bg)",
+                        cursor: "pointer", fontFamily: "inherit",
+                      }}>
+                        <span style={{ width: 36, height: 36, borderRadius: 10, background: "var(--accent-tonal)", color: "var(--accent-strong)", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Icon name={o.icon} size={17} />
+                        </span>
+                        <span style={{ minWidth: 0 }}>
+                          <span style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: "var(--text1)" }}>{o.label}</span>
+                          <span style={{ display: "block", fontSize: 11.5, color: "var(--text3)", marginTop: 2, lineHeight: 1.45 }}>{o.sub}</span>
+                        </span>
+                      </button>
+                    ))}
+                    <button onClick={() => setShareMenu(false)} style={{
+                      width: "100%", padding: "11px 0", marginTop: 4, borderRadius: 12, border: "none",
+                      background: "var(--surface2)", color: "var(--text2)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                    }}>닫기</button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── 메일 작성 ── */}
+              {mailDraft && (
+                <div onClick={() => { if (!mailDraft.sending) setMailDraft(null); }} style={{
+                  position: "fixed", inset: 0, background: "var(--overlay-scrim)", zIndex: 3000,
+                  display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+                }}>
+                  <div onClick={e => e.stopPropagation()} style={{
+                    background: "var(--surface)", borderRadius: 18, padding: 22, width: "min(560px, 100%)", maxHeight: "88vh", overflowY: "auto",
+                    boxShadow: "var(--elev-4)", border: "1px solid var(--border)",
+                  }}>
+                    <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", marginBottom: 14 }}>메일로 보내기</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.5, marginBottom: 4 }}>받는 사람</div>
+                        <input list="frw-client-emails" autoFocus value={mailDraft.to} placeholder="example@company.co.kr"
+                          onChange={e => setMailDraft(d => ({ ...d, to: e.target.value }))} />
+                        <datalist id="frw-client-emails">
+                          {(clients || []).filter(c => c.email).map((c, i) => <option key={i} value={c.email}>{c.name}</option>)}
+                        </datalist>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.5, marginBottom: 4 }}>참조 (선택)</div>
+                        <input value={mailDraft.cc} placeholder="cc@company.co.kr"
+                          onChange={e => setMailDraft(d => ({ ...d, cc: e.target.value }))} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.5, marginBottom: 4 }}>제목</div>
+                        <input value={mailDraft.subject} onChange={e => setMailDraft(d => ({ ...d, subject: e.target.value }))} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.5, marginBottom: 4 }}>내용</div>
+                        <textarea value={mailDraft.body} rows={7} style={{ minHeight: 150, fontSize: 13, lineHeight: 1.65 }}
+                          onChange={e => setMailDraft(d => ({ ...d, body: e.target.value }))} />
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "10px 13px", borderRadius: 11, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
+                        <Icon name="paperclip" size={15} style={{ color: "var(--text3)", flexShrink: 0 }} />
+                        <span style={{ fontSize: 12, color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{mailDraft.fname}</span>
+                        <span style={{ fontSize: 11, color: "var(--text3)", flexShrink: 0 }}>{Math.round(mailDraft.blob.size / 1024).toLocaleString()} KB</span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                      <button className="btn-primary" disabled={mailDraft.sending} style={{ flex: 1, opacity: mailDraft.sending ? 0.6 : 1 }}
+                        onClick={async () => {
+                          if (!mailDraft.to.trim()) { showToast("받는 사람을 입력해 주세요"); return; }
+                          setMailDraft(d => ({ ...d, sending: true }));
+                          try {
+                            await sendQuoteMail({
+                              to: mailDraft.to.trim(), cc: mailDraft.cc.trim(),
+                              subject: mailDraft.subject, bodyText: mailDraft.body,
+                              blob: mailDraft.blob, fname: mailDraft.fname,
+                            });
+                            showToast("메일을 보냈습니다", "success");
+                            setMailDraft(null);
+                          } catch (e) {
+                            setMailDraft(d => ({ ...d, sending: false }));
+                            showToast(e.message === "NO_TOKEN"
+                              ? "메일 탭에서 Google 로그인을 먼저 해주세요 (토큰이 만료됐을 수 있습니다)"
+                              : "전송 실패: " + (e.message || e));
+                          }
+                        }}>{mailDraft.sending ? "보내는 중..." : "보내기"}</button>
+                      <button disabled={mailDraft.sending} onClick={() => setMailDraft(null)} style={{
+                        padding: "12px 20px", borderRadius: 12, border: "1px solid var(--divider)",
+                        background: "var(--surface)", color: "var(--text2)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                      }}>취소</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
                 <div id="quote-doc-view" className={
                   (viewingQuote.quoteStyle === "bold") ? "bold-doc" :
                   (viewingQuote.quoteStyle === "card") ? "card-doc" :
