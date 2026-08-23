@@ -1932,12 +1932,23 @@ const INIT_YEARLY_REVENUE = [
   { year: 2025, monthly: [346952100, 168321340, 343631090, 634143070, 441271710, 345691170, 245655630, 70355450, 126580300, 442357300, 808941461, 676452600] },
 ];
 
+// 원단 한 줄 → { name, price, unit }.
+// 단가표에서 고른 원단이면 그 값을, 「직접 입력」이면 그 줄에 적은 값을 쓴다.
+// 원가 계산·원가 상세·발주서·인상 시뮬레이터가 모두 이 함수를 거쳐야 직접 입력분이 빠지지 않는다.
+function fabricInfo(f, materials) {
+  const m = (f.matId !== "" && f.matId != null) ? (materials || []).find(x => x.id == f.matId) : null;
+  if (m) return { m, name: m.name, price: m.price || 0, unit: m.unit || "yard", custom: false };
+  const price = parseFloat(f.price || 0);
+  if (!(price > 0)) return null;   // 단가가 없으면 원가에 넣을 수 없다
+  return { m: null, name: (f.customName || "").trim() || "직접 입력 원단", price, unit: f.unit || "yard", custom: true };
+}
+
 // 모든 제품의 비용을 계산하는 helper
 function computeProduct(p, materials, laborItems) {
   const spec = getActiveSpec(p) || p;
   const fCost = (spec.fabrics || []).reduce((s, f) => {
-    const m = f.matId !== "" && f.matId != null ? materials.find(x => x.id == f.matId) : null;
-    return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
+    const info = fabricInfo(f, materials);
+    return s + (info ? info.price * parseFloat(f.qty || 0) : 0);
   }, 0);
   const eCost = (spec.extras || []).reduce((s, e) => {
     const u = e.laborId !== "" && e.laborId != null ? (laborItems.find(l => l.id == e.laborId)?.price || 0) : parseFloat(e.price || 0);
@@ -4255,11 +4266,12 @@ function PriceIncreaseSimulator({ products, materials, laborItems, darkMode, set
     const adminRate = spec.adminRate || 0;
     const lines = [];
     (spec.fabrics || []).forEach(f => {
-      if (f.matId === "" || f.matId == null) return;
-      const m = materials.find(x => x.id == f.matId); if (!m) return;
+      const info = fabricInfo(f, materials);
+      if (!info) return;
       const qty = parseFloat(f.qty || 0);
-      const curU = m.price || 0, simU = applyTo(m.price, effSc("m:" + m.id));
-      lines.push({ kind: "원단", name: m.name, qty, curU, simU, cur: curU * qty, sim: simU * qty });
+      // 직접 입력 원단은 단가표에 없어 인상 대상이 아니다 — 현재가 그대로 두되 원가에는 포함한다
+      const curU = info.price, simU = info.m ? applyTo(info.m.price, effSc("m:" + info.m.id)) : info.price;
+      lines.push({ kind: "원단", name: info.name, qty, curU, simU, cur: curU * qty, sim: simU * qty });
     });
     (spec.extras || []).forEach(e => {
       const qty = parseFloat(e.qty || 1);
@@ -16039,9 +16051,9 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   };
 
   const buildFabricLines = () => activeProd.fabrics.map(f => {
-    const m = materials.find(x => x.id == f.matId);
-    if (!m || !f.qty) return null;
-    return { name: m.name, qty: f.qty, unit: m.unit, unitPrice: m.price, total: m.price * parseFloat(f.qty) };
+    const info = fabricInfo(f, materials);
+    if (!info || !f.qty) return null;
+    return { name: info.name, qty: f.qty, unit: info.unit, unitPrice: info.price, total: info.price * parseFloat(f.qty) };
   }).filter(Boolean);
 
   const buildExtraLines = () => activeProd.extras.map(e => {
@@ -17748,7 +17760,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </div>
                 {activeProd.fabrics.map((f, idx) => {
                   const m = materials.find(x => x.id == f.matId);
-                  const cost = m ? m.price * parseFloat(f.qty || 0) : 0;
+                  const fInfo = fabricInfo(f, materials);
+                  const cost = fInfo ? fInfo.price * parseFloat(f.qty || 0) : 0;
                   const matIdx = f.matId !== "" && f.matId != null ? materials.findIndex(x => x.id == f.matId) : -1;
                   const isDropTop = fabricDropInfo?.id === f.id && fabricDropInfo?.side === "top";
                   const isDropBot = fabricDropInfo?.id === f.id && fabricDropInfo?.side === "bottom";
@@ -17825,16 +17838,38 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           <span style={{ fontSize: 11, lineHeight: 1 }}>▼</span>
                         </div>
                         <span style={{ fontSize: 11, color: T.empty, fontWeight: 700, minWidth: 38, whiteSpace: "nowrap" }}>원단{idx + 1}</span>
+                        {/* 소재 선택 — 단가표에 없는 원단은 「직접 입력」으로 이 줄에서 바로 쓴다.
+                            공임·부자재 항목과 같은 방식이라 두 줄의 조작이 어긋나지 않는다. */}
                         <select style={{ flex: 2, height: 38 }} value={matIdx >= 0 ? matIdx : ""} onChange={e => {
                           const i = e.target.value === "" ? -1 : parseInt(e.target.value, 10);
                           updFabric(f.id, "matId", i >= 0 && materials[i] ? materials[i].id : "");
                         }}>
-                          <option value="">소재 선택</option>
-                          {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
+                          <option value="">직접 입력</option>
+                          <optgroup label="── 원단 단가표 ──">
+                            {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
+                          </optgroup>
                         </select>
+                        {!m && (
+                          <>
+                            <input placeholder="원단명" value={f.customName || ""} style={{ width: 116, textAlign: "left" }}
+                              title="단가표에 없는 원단 이름 — 견적·요척서에 이 이름으로 표시됩니다"
+                              onChange={e => updFabric(f.id, "customName", e.target.value)} />
+                            <input type="number" placeholder="단가" value={f.price || ""} style={{ width: 92, textAlign: "right" }}
+                              title="이 원단의 단가 (원/단위)"
+                              onChange={e => updFabric(f.id, "price", e.target.value)} />
+                            <span style={{ fontSize: 12, color: T.text2, minWidth: 16 }}>원</span>
+                          </>
+                        )}
                         <input type="number" placeholder="요척" value={f.qty} style={{ width: 76, textAlign: "right" }}
                           onChange={e => updFabric(f.id, "qty", e.target.value)} />
-                        <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>{m?.unit || "yard"}</span>
+                        {!m ? (
+                          <select value={f.unit || "yard"} style={{ width: 76, height: 38 }}
+                            title="단위" onChange={e => updFabric(f.id, "unit", e.target.value)}>
+                            <option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option>
+                          </select>
+                        ) : (
+                          <span style={{ fontSize: 12, color: T.text2, minWidth: 28 }}>{m.unit || "yard"}</span>
+                        )}
                         {cost > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: NAVY, minWidth: 90, textAlign: "right", whiteSpace: "nowrap" }}>{cost.toLocaleString()}원</span>}
                         <button onClick={() => removeFabric(f.id)} style={{ background: "none", border: "none", color: "#CDD2D7", cursor: "pointer", fontSize: 18, padding: "0 2px", lineHeight: 1 }}>×</button>
                       </div>
@@ -18175,9 +18210,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.divider}` }}>
                     <div className="section-label">① 원단 재료비</div>
                     {activeProd.fabrics.map((f, i) => {
-                      const m = materials.find(x => x.id == f.matId);
-                      const c = m ? m.price * parseFloat(f.qty || 0) : 0;
-                      if (!m || c === 0) return null;
+                      const info = fabricInfo(f, materials);
+                      const c = info ? info.price * parseFloat(f.qty || 0) : 0;
+                      if (!info || c === 0) return null;
+                      const m = info.m || { name: info.name, unit: info.unit, price: info.price };
                       return (
                         <div key={f.id} className="row-item" style={{ padding: "3px 0" }}>
                           <span className="row-label" style={{ maxWidth: 145, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 }}>{m.name}</span>
