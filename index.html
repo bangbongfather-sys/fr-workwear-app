@@ -348,6 +348,20 @@
       .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
     }
 
+    /* ─── 단가표 상세의 값 타일 — 폰에서 숫자가 "2…"로 잘리던 문제 ───
+       4칸(원단)·3칸(공임)을 좁은 화면에서 2열로 접고, 그래도 모자라면
+       글자와 여백을 단계적으로 줄여 값 전체가 보이게 한다. */
+    @media (max-width: 620px) {
+      .matkpi { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+      .matkpi-tile { padding: 10px 12px !important; }
+      .matkpi-val { font-size: 17px !important; }
+    }
+    @media (max-width: 400px) {
+      .matkpi-val { font-size: 15px !important; }
+      .matkpi-unit { font-size: 10px !important; }
+      .matkpi-tile { padding: 9px 10px !important; }
+    }
+
     /* 접미사("원"/"일"/"%") — inline fontSize 그대로 두되 좁은 화면에서는 살짝 줄임.
        inline style이 className을 override하므로 !important로 강제. */
     @media (max-width: 900px) {
@@ -3280,11 +3294,14 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
       </div>
     </div>
   );
+  // 상세 패널의 값 타일. 좁은 화면에서 숫자가 "2…"처럼 잘리지 않도록
+  // 값은 한 줄 유지하되 단위는 아래 줄로 내려가게 두고, 폭은 CSS(.matkpi)가 2열로 접는다.
   const field = (label, value, unit, opt = {}) => (
-    <div style={{ padding: "11px 14px", borderRadius: 11, background: "var(--row-bg)", border: "1px solid var(--divider)", minWidth: 0 }}>
+    <div className="matkpi-tile" style={{ padding: "11px 14px", borderRadius: 11, background: "var(--row-bg)", border: "1px solid var(--divider)", minWidth: 0 }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>{label}</div>
-      <div style={{ fontSize: opt.big ? 19 : 16, fontWeight: opt.big ? 800 : 700, color: opt.tone || "var(--text1)", marginTop: 3, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {value}<span style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)" }}> {unit}</span>
+      <div className="matkpi-val" style={{ fontSize: opt.big ? 19 : 16, fontWeight: opt.big ? 800 : 700, color: opt.tone || "var(--text1)", marginTop: 3, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums", minWidth: 0 }}>
+        <span style={{ whiteSpace: "nowrap" }}>{value}</span>
+        {unit ? <span className="matkpi-unit" style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)", whiteSpace: "nowrap" }}> {unit}</span> : null}
       </div>
     </div>
   );
@@ -3707,7 +3724,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
                   {/* 값 4칸 */}
                   {editing ? (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+                    <div className="matkpi" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
                       <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단가 (원)</div>
                         <input type="number" value={editMat.price} style={{ ...inp, textAlign: "right" }} onChange={e => setEditMat({ ...editMat, price: e.target.value })} /></div>
                       <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>현재재고</div>
@@ -3722,7 +3739,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                         </select></div>
                     </div>
                   ) : (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+                    <div className="matkpi" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
                       {field("단가", Number(selMat.price || 0).toLocaleString(), `원/${selMat.unit}`, { big: true })}
                       {field("현재재고", st.cur == null ? "—" : st.cur.toLocaleString(), st.cur == null ? "" : st.unit, { tone: st.level === "low" ? "var(--negative-text)" : undefined })}
                       {field("안전재고", st.safe ? st.safe.toLocaleString() : "—", st.safe ? st.unit : "")}
@@ -3852,7 +3869,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                         </select></div>
                     </div>
                   ) : (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                    <div className="matkpi matkpi-3" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
                       {field("단가", Number(selLab.price || 0).toLocaleString(), `원/${selLab.unit}`, { big: true })}
                       {field("단위", selLab.unit, "")}
                       {field("쓰는 제품", users.length.toLocaleString(), "개")}
