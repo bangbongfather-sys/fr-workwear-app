@@ -2894,17 +2894,22 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const addMaterial = () => {
     if (!newMat.name.trim() || !newMat.price) return;
     const id = uid();
-    setMaterials(ms => [...ms, { id, name: newMat.name.trim(), price: parseFloat(newMat.price), unit: newMat.unit, safeStock: newMat.safeStock !== "" ? parseFloat(newMat.safeStock) : "", currentStock: newMat.currentStock !== "" ? parseFloat(newMat.currentStock) : "", memo: newMat.memo.trim() }]);
+    // 사용자 탭에서 추가하면 그 탭에 들어간다 (기본 탭이면 sheet는 비워 둔다)
+    const sheet = isCustomTab(pdbTab) ? pdbTab : "";
+    setMaterials(ms => [...ms, { id, name: newMat.name.trim(), price: parseFloat(newMat.price), unit: newMat.unit, safeStock: newMat.safeStock !== "" ? parseFloat(newMat.safeStock) : "", currentStock: newMat.currentStock !== "" ? parseFloat(newMat.currentStock) : "", memo: newMat.memo.trim(), sheet }]);
     setNewMat({ name: "", price: "", unit: "yard", safeStock: "", currentStock: "", memo: "" });
     setShowAddMat(false);
+    setSelKind("mat");
     setSelMatId(id);
   };
   const addLabor = () => {
     if (!newLab.name.trim() || !newLab.price) return;
     const id = uid();
-    setLaborItems(ls => [...ls, { id, name: newLab.name.trim(), price: parseFloat(newLab.price), unit: newLab.unit, memo: newLab.memo.trim() }]);
+    const sheet = isCustomTab(pdbTab) ? pdbTab : "";
+    setLaborItems(ls => [...ls, { id, name: newLab.name.trim(), price: parseFloat(newLab.price), unit: newLab.unit, memo: newLab.memo.trim(), sheet }]);
     setNewLab({ name: "", price: "", unit: "벌", memo: "" });
     setShowAddLab(false);
+    setSelKind("lab");
     setSelLabId(id);
   };
   const saveMat = () => { if (!editMat) return; setMaterials(ms => ms.map(m => m.id === editMat.id ? { ...editMat, price: parseFloat(editMat.price) || 0 } : m)); setEditMat(null); showToast("저장했습니다"); };
@@ -3076,7 +3081,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
         // 오른쪽에 무엇을 띄울지 — 마지막으로 고른 종류를 따르되, 그 종류가 이 탭에 없으면 반대쪽
         const kind = !showLabs ? "mat" : !showMats ? "lab"
           : (selKind === "lab" ? (visLabs.length ? "lab" : "mat") : (visMats.length ? "mat" : "lab"));
-        const tabLabel = pdbTab === TAB_MAT ? "원단" : pdbTab === TAB_LAB ? "공임" : pdbTab;
+        const tabLabel = pdbTab === TAB_MAT ? "원단" : pdbTab === TAB_LAB ? "공임" : pdbTab.replace(/\s*단가표\s*$/, "");
         const totalHere = visMats.length + visLabs.length;
         const kindDivider = (text) => (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 2px 4px" }}>
@@ -3091,7 +3096,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
           <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tabLabel} {totalHere}종</div>
-              {showMats && (
+              {showMats && visMats.length > 0 && (
                 <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                   <button onClick={() => setOnlyLow(false)} style={{
                     padding: "3px 10px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700,
@@ -3109,7 +3114,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                 오른쪽 상세 패널이 늘 같은 자리에 보인다. */}
             <div className="pdb-list" style={{ display: "flex", flexDirection: "column", gap: 3, overflowY: "auto", overflowX: "hidden", maxHeight: "calc(100vh - 340px)", minHeight: 220, paddingRight: 4 }}>
               {showMats && <>
-                {bothKinds && kindDivider("원단")}
+                {bothKinds && kindDivider("재고 관리 자재")}
                 {visMats.map(({ m, st }) => {
                   const on = selMat && selMat.id === m.id;
                   const meta = STOCK_META[st.level];
@@ -3152,7 +3157,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                 })}
               </>}
               {showLabs && <>
-                {bothKinds && kindDivider("공임")}
+                {bothKinds && kindDivider("벌당 비용")}
                 {visLabs.map(l => {
                   const on = selLab && selLab.id === l.id;
                   const dropTop = labDropInfo?.id === l.id && labDropInfo?.side === "top";
@@ -3189,8 +3194,37 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               )}
             </div>
 
-            {/* 추가 — 사용자 탭에서는 원단·공임 중 무엇으로 만들지 골라 추가한다 */}
-            {showMats && (
+            {/* 추가 —
+                기본 탭에서는 그 탭의 종류로 바로 추가한다.
+                사용자 탭에서는 「+ 항목 추가」 하나만 두고, 폼 안에서 재고 관리 여부만 고르게 한다.
+                종류(원단/공임) 자체는 계산기 계산 방식이 달라 없앨 수 없지만, 사용자에게는
+                "재고를 관리하느냐"라는 실제 차이로만 물어본다. */}
+            {custom && !showAddMat && !showAddLab && (
+              <button onClick={() => setShowAddLab(true)} style={{
+                marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)",
+                background: "transparent", color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              }}>+ 항목 추가</button>
+            )}
+            {custom && (showAddMat || showAddLab) && (
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                {[["lab", "벌당 비용", "재고를 관리하지 않는 항목 — 부자재·가공비처럼 완성품 1벌당 얼마로 붙는 비용"],
+                  ["mat", "재고 관리 자재", "요척(yard·m·pc)으로 계산하고 안전재고·현재재고를 관리하는 항목"]].map(([k, label, tip]) => {
+                  const on = k === "mat" ? showAddMat : showAddLab;
+                  return (
+                    <button key={k} title={tip}
+                      onClick={() => { setShowAddMat(k === "mat"); setShowAddLab(k === "lab"); }}
+                      style={{
+                        flex: 1, padding: "9px 10px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit",
+                        fontSize: 12, fontWeight: 700, lineHeight: 1.35,
+                        border: on ? "1px solid var(--accent)" : "1px solid var(--divider)",
+                        background: on ? "var(--accent-tonal)" : "var(--surface)",
+                        color: on ? "var(--accent-strong)" : "var(--text2)",
+                      }}>{label}</button>
+                  );
+                })}
+              </div>
+            )}
+            {(custom ? showAddMat : showMats) && (
               showAddMat ? (
                 <div className="card" style={{ marginTop: 8, padding: 14 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 8 }}>새 원단 추가</div>
@@ -3227,7 +3261,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                 }}>+ 원단 추가</button>
               )
             )}
-            {showLabs && (
+            {(custom ? showAddLab : showLabs) && (
               showAddLab ? (
                 <div className="card" style={{ marginTop: 8, padding: 14 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 8 }}>새 공임비 추가</div>
@@ -3273,7 +3307,10 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                   {/* 헤더 */}
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3 }}>원단 상세</div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                        {custom ? `${pdbTab} 상세` : "원단 상세"}
+                        {custom && <span title="요척(yard·m·pc)으로 계산하고 재고를 관리하는 항목입니다" style={{ padding: "1px 7px", borderRadius: 5, background: "var(--surface2)", color: "var(--text3)", fontSize: 10, fontWeight: 700 }}>재고 관리 자재</span>}
+                      </div>
                       {editing ? (
                         <input value={editMat.name} onChange={e => setEditMat({ ...editMat, name: e.target.value })}
                           style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
@@ -3370,9 +3407,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
                   {/* 이 원단을 쓰는 제품 */}
                   <div style={{ minWidth: 0 }}>
-                    {sectionLabel("이 원단을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
+                    {sectionLabel(custom ? "이 항목을 쓰는 제품" : "이 원단을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
                     {users.length === 0 ? (
-                      <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>아직 이 원단을 쓰는 요척서가 없습니다</div>
+                      <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>{custom ? "아직 이 항목을 쓰는 요척서가 없습니다" : "아직 이 원단을 쓰는 요척서가 없습니다"}</div>
                     ) : users.slice(0, 6).map((u, i) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < Math.min(users.length, 6) - 1 ? "1px solid var(--divider)" : "none" }}>
                         <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
@@ -3396,7 +3433,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               );
             })() : (
               <div style={{ border: "1px dashed var(--border)", borderRadius: 16, padding: 60, textAlign: "center", color: "var(--empty-color)", fontSize: 13 }}>
-                왼쪽에서 원단을 선택하세요
+                {custom ? "왼쪽에서 항목을 선택하세요" : "왼쪽에서 원단을 선택하세요"}
               </div>
             )
           ) : (
@@ -3415,7 +3452,10 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                 <div style={{ border: "1px solid var(--divider)", borderRadius: 16, padding: "20px 24px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3 }}>공임 상세</div>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                        {custom ? `${pdbTab} 상세` : "공임 상세"}
+                        {custom && <span title="완성품 1벌당 붙는 비용입니다 — 재고는 관리하지 않습니다" style={{ padding: "1px 7px", borderRadius: 5, background: "var(--surface2)", color: "var(--text3)", fontSize: 10, fontWeight: 700 }}>벌당 비용</span>}
+                      </div>
                       {editing ? (
                         <input value={editLab.name} onChange={e => setEditLab({ ...editLab, name: e.target.value })}
                           style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
@@ -3461,9 +3501,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                   </div>
 
                   <div style={{ minWidth: 0 }}>
-                    {sectionLabel("이 공임을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
+                    {sectionLabel(custom ? "이 항목을 쓰는 제품" : "이 공임을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
                     {users.length === 0 ? (
-                      <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>아직 이 공임을 쓰는 요척서가 없습니다</div>
+                      <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>{custom ? "아직 이 항목을 쓰는 요척서가 없습니다" : "아직 이 공임을 쓰는 요척서가 없습니다"}</div>
                     ) : users.slice(0, 8).map((u, i) => (
                       <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < Math.min(users.length, 8) - 1 ? "1px solid var(--divider)" : "none" }}>
                         <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
@@ -3477,7 +3517,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               );
             })() : (
               <div style={{ border: "1px dashed var(--border)", borderRadius: 16, padding: 60, textAlign: "center", color: "var(--empty-color)", fontSize: 13 }}>
-                왼쪽에서 공임 항목을 선택하세요
+                {custom ? "왼쪽에서 항목을 선택하세요" : "왼쪽에서 공임 항목을 선택하세요"}
               </div>
             )
           )}
