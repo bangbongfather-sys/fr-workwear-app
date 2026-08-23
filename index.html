@@ -2039,6 +2039,33 @@ async function shareClientStatement(client, ym, ledgers, clientAR) {
 // ─── 견적서 이미지 만들기 ───
 // shareQuoteImage와 같은 방식으로 PNG를 만들지만, 공유 수단을 고르기 전에
 // 이미지만 먼저 만들어 두려고 분리했다. (메일 첨부·저장·기기 공유가 같은 이미지를 쓴다)
+// 견적서 DOM을 흰 배경·인쇄용 색으로 복제해 캔버스로 굽는다.
+// PNG·PDF가 같은 캔버스를 쓰므로 두 결과물의 모양이 어긋나지 않는다.
+async function buildQuoteCanvas(nodeId) {
+  const src = document.getElementById(nodeId);
+  if (!src) throw new Error("견적서 영역을 찾을 수 없습니다");
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "position:fixed;left:-10000px;top:0;width:840px;background:#ffffff;";
+  [
+    ["--doc-bg", "#fff"], ["--doc-text", "#17181A"], ["--doc-text2", "#404652"], ["--doc-text3", "#5A6270"],
+    ["--doc-border", "#D7DBE2"], ["--doc-row-border", "#E5E8ED"], ["--doc-hover", "#F7F8FA"],
+    ["--doc-last", "#17181A"], ["--doc-footer", "#828A98"],
+    ["--text1", "#191F28"], ["--text2", "#4E5968"], ["--text3", "#8B95A1"],
+    ["--surface", "#ffffff"], ["--surface2", "#F2F4F6"], ["--row-border", "#E5E8EB"],
+    ["--border", "#E5E8EB"], ["--divider", "#F2F4F6"], ["--row-bg", "#F9FAFB"], ["--accent", "#DB6B2E"],
+  ].forEach(([k, v]) => wrap.style.setProperty(k, v));
+  const clone = src.cloneNode(true);
+  clone.style.margin = "0"; clone.style.width = "auto"; clone.style.boxShadow = "none";
+  wrap.appendChild(clone);
+  document.body.appendChild(wrap);
+  try {
+    const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: "#ffffff" });
+    return { canvas };
+  } finally {
+    try { document.body.removeChild(wrap); } catch {}
+  }
+}
+
 async function buildQuoteImage(nodeId, title, client) {
   const src = document.getElementById(nodeId);
   if (!src) throw new Error("견적서 영역을 찾을 수 없습니다");
@@ -2068,6 +2095,38 @@ async function buildQuoteImage(nodeId, title, client) {
   }
 }
 
+// ─── 견적서 이미지 → A4 PDF ───
+// 발주서(makePODocPdf)와 같은 규칙: 한 장에 들어가면 여백 맞춰 한 장, 넘치면 여러 장으로 자른다.
+// 이미지 기반 PDF라 글자 선택은 안 되지만, 화면에 보이는 견적서와 100% 같은 모양이 보장된다.
+async function buildQuotePdf(nodeId, title, client) {
+  if (!window.jspdf) throw new Error("PDF 라이브러리 로딩 중입니다. 잠시 후 다시 눌러 주세요");
+  const { canvas } = await buildQuoteCanvas(nodeId);
+  const imgData = canvas.toDataURL("image/jpeg", 0.92);
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = 210, pageH = 297, margin = 10;
+  const usableW = pageW - margin * 2, usableH = pageH - margin * 2;
+  const fullH = (canvas.height * usableW) / canvas.width;
+  if (fullH <= usableH * 1.35) {
+    const fit = Math.min(1, usableH / fullH);
+    const w = usableW * fit, h = fullH * fit;
+    pdf.addImage(imgData, "JPEG", (pageW - w) / 2, margin, w, h);
+  } else {
+    let heightLeft = fullH, position = margin;
+    pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
+    heightLeft -= usableH;
+    while (heightLeft > 0) {
+      position = margin - (fullH - heightLeft);
+      pdf.addPage();
+      pdf.addImage(imgData, "JPEG", margin, position, usableW, fullH);
+      heightLeft -= usableH;
+    }
+  }
+  const base = (title || "").trim() || (client || "").trim() || "견적서";
+  const fname = `견적서_${base.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  return { blob: pdf.output("blob"), fname };
+}
+
 // Blob → base64 (data: 접두사 제거)
 function blobToBase64(blob) {
   return new Promise((res, rej) => {
@@ -2088,6 +2147,10 @@ async function sendQuoteMail({ to, cc, subject, bodyText, blob, fname }) {
   } catch {}
   if (!tk) throw new Error("NO_TOKEN");
 
+  // Gmail은 이 방식(raw 본문)으로 5MB까지 받는다. 넘으면 실패 대신 미리 안내한다.
+  if (blob.size > 4.5 * 1024 * 1024) {
+    throw new Error("첨부가 너무 큽니다 (" + Math.round(blob.size / 1024 / 1024 * 10) / 10 + "MB). 「PDF 저장」으로 내려받아 메일에 직접 첨부해 주세요.");
+  }
   const b64 = await blobToBase64(blob);
   const boundary = "njq_" + Math.random().toString(36).slice(2);
   const encHeader = (s) => `=?UTF-8?B?${btoa(unescape(encodeURIComponent(s)))}?=`;
@@ -2107,7 +2170,7 @@ async function sendQuoteMail({ to, cc, subject, bodyText, blob, fname }) {
     btoa(unescape(encodeURIComponent(`<div style="font-family:'Apple SD Gothic Neo',sans-serif;font-size:14px;line-height:1.7;color:#191F28">${bodyHtml}</div>`))),
     "",
     `--${boundary}`,
-    `Content-Type: image/png; name="${encHeader(fname)}"`,
+    `Content-Type: ${/\.pdf$/i.test(fname) ? "application/pdf" : "image/png"}; name="${encHeader(fname)}"`,
     "Content-Transfer-Encoding: base64",
     `Content-Disposition: attachment; filename="${encHeader(fname)}"`,
     "",
@@ -18757,16 +18820,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", marginBottom: 3 }}>견적서 공유</div>
                     <div style={{ fontSize: 12.5, color: "var(--text3)", marginBottom: 16 }}>{viewingQuote.quoteClient || viewingQuote.title || "견적서"}</div>
                     {[
-                      { key: "mail", icon: "mail", label: "메일로 보내기", sub: "견적서 이미지를 첨부해 거래처로 바로 발송합니다" },
-                      { key: "save", icon: "download", label: "이미지 저장", sub: "PNG로 내려받아 카톡·메일에 직접 첨부합니다" },
+                      { key: "mail", icon: "mail", label: "메일로 보내기", sub: "견적서 PDF를 첨부해 거래처로 바로 발송합니다" },
+                      { key: "pdf", icon: "filePdf", label: "PDF 저장", sub: "A4 규격 PDF로 내려받습니다" },
+                      { key: "save", icon: "download", label: "이미지 저장", sub: "PNG로 내려받아 카톡에 붙여 넣을 때 씁니다" },
                       { key: "os", icon: "share", label: "기기 공유 시트", sub: "폰에서는 카톡·문자가 뜹니다. PC는 메시지·AirDrop만 나옵니다" },
                     ].map(o => (
                       <button key={o.key} onClick={async () => {
                         setShareMenu(false);
                         try {
                           if (o.key === "mail") {
-                            showToast("견적서 이미지를 만드는 중...");
-                            const { blob, fname } = await buildQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
+                            showToast("견적서 PDF를 만드는 중...");
+                            const { blob, fname } = await buildQuotePdf("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
                             const cl = (clients || []).find(c => (c.name || "").trim() === (viewingQuote.quoteClient || "").trim());
                             setMailDraft({
                               to: (cl && cl.email) || "",
@@ -18775,14 +18839,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               body: `${viewingQuote.quoteClient ? viewingQuote.quoteClient + " 담당자님," : "안녕하세요,"}\n\n요청하신 견적서를 첨부드립니다.\n검토하시고 문의사항 있으시면 회신 부탁드립니다.\n\n감사합니다.\nNJ SAFETY`,
                               blob, fname, sending: false,
                             });
-                          } else if (o.key === "save") {
-                            const { blob, fname } = await buildQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
+                          } else if (o.key === "pdf" || o.key === "save") {
+                            showToast(o.key === "pdf" ? "견적서 PDF를 만드는 중..." : "견적서 이미지를 만드는 중...");
+                            const { blob, fname } = o.key === "pdf"
+                              ? await buildQuotePdf("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient)
+                              : await buildQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement("a");
                             a.href = url; a.download = fname;
                             document.body.appendChild(a); a.click(); document.body.removeChild(a);
                             setTimeout(() => URL.revokeObjectURL(url), 5000);
-                            showToast("견적서 이미지를 저장했습니다");
+                            showToast(o.key === "pdf" ? "견적서 PDF를 저장했습니다" : "견적서 이미지를 저장했습니다");
                           } else {
                             await shareQuoteImage("quote-doc-view", viewingQuote.title, viewingQuote.quoteClient);
                           }
