@@ -1932,6 +1932,34 @@ const INIT_YEARLY_REVENUE = [
   { year: 2025, monthly: [346952100, 168321340, 343631090, 634143070, 441271710, 345691170, 245655630, 70355450, 126580300, 442357300, 808941461, 676452600] },
 ];
 
+// 단가표에서 지정한 카테고리(하계/동계/춘추…)로 묶은 드롭다운 옵션을 만든다.
+// 계산기와 단가표가 같은 category 값을 쓰므로, 단가표에서 분류를 바꾸면 여기도 따라 바뀐다.
+// label(x) 로 각 항목의 표시 문구를 정하고, value 는 원본 배열의 인덱스(기존 규약 유지).
+function groupedOptions(list, label) {
+  const cat = (x) => (x.category || "").trim();
+  const names = Array.from(new Set(list.map(cat).filter(Boolean)));
+  const withIdx = list.map((x, i) => ({ x, i }));
+  const groups = names.map(n => ({ name: n, items: withIdx.filter(e => cat(e.x) === n) }))
+    .filter(g => g.items.length > 0);
+  const rest = withIdx.filter(e => !cat(e.x));
+  // 분류가 하나도 없으면 그룹 없이 평평하게 — 굳이 "미분류" 한 덩어리로 감쌀 이유가 없다
+  if (groups.length === 0) {
+    return rest.map(({ x, i }) => <option key={x.id} value={i}>{label(x)}</option>);
+  }
+  return (<>
+    {groups.map(g => (
+      <optgroup key={g.name} label={`── ${g.name} ──`}>
+        {g.items.map(({ x, i }) => <option key={x.id} value={i}>{label(x)}</option>)}
+      </optgroup>
+    ))}
+    {rest.length > 0 && (
+      <optgroup label="── 미분류 ──">
+        {rest.map(({ x, i }) => <option key={x.id} value={i}>{label(x)}</option>)}
+      </optgroup>
+    )}
+  </>);
+}
+
 // 원단 한 줄 → { name, price, unit }.
 // 단가표에서 고른 원단이면 그 값을, 「직접 입력」이면 그 줄에 적은 값을 쓴다.
 // 원가 계산·원가 상세·발주서·인상 시뮬레이터가 모두 이 함수를 거쳐야 직접 입력분이 빠지지 않는다.
@@ -3040,6 +3068,55 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const TAB_MAT = "mat", TAB_LAB = "lab";
   const isCustomTab = (t) => t !== TAB_MAT && t !== TAB_LAB;
   const inTab = (x, tab, home) => isCustomTab(tab) ? sheetOf(x) === tab : (tab === home && !sheetOf(x));
+
+  // ── 하위 카테고리 (하계/동계/춘추 등) ──
+  // 단가표 탭이 "어느 표에 있느냐"라면, 카테고리는 그 표 안에서의 분류다.
+  // 항목의 category 값으로만 구분하므로 탭을 옮겨도 분류는 따라간다.
+  const catOf = (x) => (x.category || "").trim();
+  const [pdbCats, setPdbCats] = useState(() => load("frw_pdb_categories", []));
+  useEffect(() => { save("frw_pdb_categories", pdbCats); }, [pdbCats]);
+  const [catFilter, setCatFilter] = useState("all");   // all | __none | 카테고리명
+  // 지금 탭에 실제로 담긴 항목들
+  const tabItems = [...materials.filter(m => inTab(m, pdbTab, TAB_MAT)), ...laborItems.filter(l => inTab(l, pdbTab, TAB_LAB))];
+  // 칩 목록 = 사용자가 만든 이름 + 이 탭에서 실제로 쓰이는 이름
+  const catList = Array.from(new Set([...pdbCats, ...tabItems.map(catOf).filter(Boolean)]));
+  const catCount = (c) => tabItems.filter(x => catOf(x) === c).length;
+  const noneCount = tabItems.filter(x => !catOf(x)).length;
+  const inCat = (x) => catFilter === "all" || (catFilter === "__none" ? !catOf(x) : catOf(x) === catFilter);
+
+  const addCategory = () => {
+    const name = (window.prompt("새 카테고리 이름 (예: 하계, 동계, 춘추)") || "").trim();
+    if (!name) return;
+    if (name === "전체" || name === "미분류" || catList.includes(name)) { showToast("이미 있는 이름입니다"); return; }
+    setPdbCats(cs => [...cs, name]);
+    setCatFilter(name);
+    showToast(`'${name}' 카테고리를 만들었습니다 — 항목 상세에서 지정하세요`, "success");
+  };
+  const renameCategory = (cat) => {
+    const name = (window.prompt(`'${cat}' 카테고리의 새 이름`, cat) || "").trim();
+    if (!name || name === cat) return;
+    if (name === "전체" || name === "미분류" || catList.includes(name)) { showToast("이미 있는 이름입니다"); return; }
+    setMaterials(ms => ms.map(m => catOf(m) === cat ? { ...m, category: name } : m));
+    setLaborItems(ls => ls.map(l => catOf(l) === cat ? { ...l, category: name } : l));
+    setPdbCats(cs => cs.map(c => c === cat ? name : c));
+    setCatFilter(f => f === cat ? name : f);
+    showToast("이름을 바꿨습니다", "success");
+  };
+  const removeCategory = (cat) => {
+    const n = catCount(cat);
+    if (!window.confirm(`'${cat}' 카테고리를 삭제할까요?${n ? `\n${n}개 항목은 미분류로 돌아갑니다. 항목 자체는 지워지지 않습니다.` : ""}`)) return;
+    if (n) {
+      setMaterials(ms => ms.map(m => catOf(m) === cat ? { ...m, category: "" } : m));
+      setLaborItems(ls => ls.map(l => catOf(l) === cat ? { ...l, category: "" } : l));
+    }
+    setPdbCats(cs => cs.filter(c => c !== cat));
+    if (catFilter === cat) setCatFilter("all");
+  };
+  const moveToCategory = (kind, id, cat) => {
+    const setter = kind === "mat" ? setMaterials : setLaborItems;
+    setter(list => list.map(x => x.id === id ? { ...x, category: cat } : x));
+    showToast(cat ? `'${cat}'(으)로 옮겼습니다` : "미분류로 옮겼습니다", "success");
+  };
   const tabCount = (tab) =>
     materials.filter(m => inTab(m, tab, TAB_MAT)).length + laborItems.filter(l => inTab(l, tab, TAB_LAB)).length;
 
@@ -3083,8 +3160,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
   const q = search.trim().toLowerCase();
   const matchQ = (name) => !q || (name || "").toLowerCase().includes(q) || (typeof searchScore === "function" && searchScore(search.trim(), [name]) > 0);
-  const visMats = matStates.filter(({ m, st }) => matchQ(m.name) && inTab(m, pdbTab, TAB_MAT) && (!onlyLow || st.level === "low"));
-  const visLabs = laborItems.filter(l => matchQ(l.name) && inTab(l, pdbTab, TAB_LAB));
+  const visMats = matStates.filter(({ m, st }) => matchQ(m.name) && inTab(m, pdbTab, TAB_MAT) && inCat(m) && (!onlyLow || st.level === "low"));
+  const visLabs = laborItems.filter(l => matchQ(l.name) && inTab(l, pdbTab, TAB_LAB) && inCat(l));
 
   // 선택 보정 — 삭제·필터로 선택이 사라지면 목록 첫 항목으로
   // 선택은 지금 탭에 보이는 항목으로 제한 — 다른 탭 항목이 상세에 남아 있으면 혼란스럽다
@@ -3206,6 +3283,47 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   );
   const inp = { height: 40, fontSize: 13 };
   // ── 상세 패널: 이 항목을 어느 단가표 탭에 둘지 ──
+  // ── 카테고리 칩 줄 ──
+  // 선택된 칩의 ×로 삭제, 더블클릭으로 이름 변경 — 제품 카테고리와 같은 조작 규칙.
+  const categoryRow = () => {
+    if (tabItems.length === 0) return null;
+    const chip = (key, label, count, deletable) => {
+      const on = catFilter === key;
+      return (
+        <button key={key} onClick={() => setCatFilter(key)}
+          onDoubleClick={() => { if (deletable) renameCategory(key); }}
+          title={deletable ? "더블클릭하면 이름을 바꿉니다" : ""}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "7px 14px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit",
+            fontSize: 12.5, fontWeight: on ? 700 : 600, whiteSpace: "nowrap", flexShrink: 0,
+            background: on ? "var(--accent)" : "var(--chip-bg)",
+            color: on ? "#fff" : "var(--chip-color)",
+            transition: "background 0.15s, color 0.15s",
+          }}>
+          {label}
+          <span style={{ fontSize: 11, fontWeight: 700, opacity: on ? 0.85 : 0.6 }}>{count}</span>
+          {on && deletable && (
+            <span onClick={e => { e.stopPropagation(); removeCategory(key); }}
+              title="이 카테고리 삭제 (항목은 미분류로)"
+              style={{ width: 16, height: 16, borderRadius: 100, background: "rgba(255,255,255,0.25)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800 }}>×</span>
+          )}
+        </button>
+      );
+    };
+    return (
+      <div className="scroll-x" style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto", paddingBottom: 2 }}>
+        {chip("all", "전체", tabItems.length, false)}
+        {catList.map(c => chip(c, c, catCount(c), true))}
+        {noneCount > 0 && chip("__none", "미분류", noneCount, false)}
+        <button onClick={addCategory} style={{
+          padding: "7px 14px", borderRadius: 100, border: "1px dashed var(--border)", background: "transparent",
+          color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+        }}>+ 카테고리</button>
+      </div>
+    );
+  };
+
   const sheetPicker = (kind, item) => {
     const home = kind === "mat" ? "원단 단가표" : "공임비 단가표";
     return (
@@ -3220,6 +3338,17 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
           padding: "8px 14px", borderRadius: 9, border: "1px dashed var(--border)", background: "transparent",
           color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
         }}>+ 새 단가표</button>
+        <div style={{ width: "100%", height: 1, background: "var(--divider)" }} />
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, flexShrink: 0 }}>카테고리</div>
+        <select value={catOf(item)} onChange={e => moveToCategory(kind, item.id, e.target.value)}
+          style={{ height: 38, fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>
+          <option value="">미분류</option>
+          {catList.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button onClick={addCategory} style={{
+          padding: "8px 14px", borderRadius: 9, border: "1px dashed var(--border)", background: "transparent",
+          color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+        }}>+ 새 카테고리</button>
       </div>
     );
   };
@@ -3298,6 +3427,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
       {showNotionImport && <NotionSafeStockModal materials={materials} setMaterials={setMaterials} onClose={() => setShowNotionImport(false)} />}
 
       {/* ══════════ 원단 ══════════ */}
+      {categoryRow()}
+
       {/* ── 본문: 왼쪽 목록 / 오른쪽 상세 ──
           기본 탭은 한 종류만 담기지만, 사용자가 만든 탭에는 원단과 공임이 섞일 수 있다.
           섞여도 각 항목의 종류(원단/공임)는 그대로라 요척서 참조는 안 깨진다. */}
@@ -17845,9 +17976,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           updFabric(f.id, "matId", i >= 0 && materials[i] ? materials[i].id : "");
                         }}>
                           <option value="">직접 입력</option>
-                          <optgroup label="── 원단 단가표 ──">
-                            {materials.map((x, i) => <option key={x.id} value={i}>{x.name} ({x.price.toLocaleString()}원/{x.unit})</option>)}
-                          </optgroup>
+                          {groupedOptions(materials, x => `${x.name} (${x.price.toLocaleString()}원/${x.unit})`)}
                         </select>
                         {!m && (
                           <>
@@ -17894,9 +18023,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   const labSelectVal = labIdx >= 0 ? labIdx : "";
                   const labOptions = <>
                     <option value="">직접 입력</option>
-                    <optgroup label="── 공임비 DB ──">
-                      {laborItems.map((l, li) => <option key={l.id} value={li}>{l.name} ({l.price.toLocaleString()}원)</option>)}
-                    </optgroup>
+                    {groupedOptions(laborItems, l => `${l.name} (${l.price.toLocaleString()}원)`)}
                   </>;
                   return (
                     <div key={e.id} className="fabric-row">
