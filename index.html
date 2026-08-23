@@ -14627,6 +14627,156 @@ function App() {
     showToast(status === "won" ? `수주로 옮겼습니다 — 장부에 매출을 직접 등록해 주세요` : `'${label}'(으)로 옮겼습니다`, "success");
   };
   const [showProfit, setShowProfit] = useState(() => load("frw_quote_show_profit", true));
+  // 저장된 견적서 → 손익 패널이 쓰는 [{p, c}] 형태로 되돌린다.
+  // 제품이 지워졌거나 요척서가 바뀌었을 수 있어, 지금 계산 가능한 것만 추린다.
+  const itemsFromSavedQuote = (entry) => {
+    if (!entry || !Array.isArray(entry.products)) return [];
+    return entry.products.map(sp => {
+      const p = products.find(x => x.id === sp.productId);
+      if (!p) return null;
+      const c = computeProduct(p, materials, laborItems);
+      if (!c || c.base <= 0) return null;
+      // 저장 당시의 단가·수량을 우선한다 — 그 견적서가 실제로 나간 값이기 때문
+      return { p, c: { ...c, finalPrice: sp.price || c.finalPrice, selectedGrade: sp.grade || c.selectedGrade }, savedQty: sp.qty || 1 };
+    }).filter(Boolean);
+  };
+
+  // ── 내부 손익 패널 (시안 D) ──
+  //   440px 폭 세로 스택: 다크 요약 → 협상 슬라이더 → 제품별 표.
+  //   견적서 본문에는 아무것도 찍히지 않는다 (no-print).
+  // 내부 손익 패널 — 「견적서 작성」과 「견적 이력 보기」가 같은 화면을 쓰도록 공용 함수로 둔다.
+  // items: [{ p, c }] — c는 computeProduct 결과.
+  const profitPanel = (items) => {
+    if (!items || items.length === 0) return null;
+                    const d = quoteDiscount / 100;
+                    const rows = items.map((it) => {
+      const { p, c } = it;
+                      const price = c.finalPrice * (1 - d);
+                      const cost = c.beforeMargin;
+                      const m = price > 0 ? (price - cost) / price * 100 : 0;
+                      // savedQty가 있으면 저장 당시 수량 (이력 보기), 없으면 지금 작업 중인 수량
+      return { id: p.id, name: p.name, grade: c.selectedGrade, price, cost, m, qty: it.savedQty || qtyOf(p.id) };
+                    });
+                    const sumPrice = rows.reduce((s, r) => s + r.price * r.qty, 0);
+                    const sumCost = rows.reduce((s, r) => s + r.cost * r.qty, 0);
+                    const profit = sumPrice - sumCost;
+                    const avgM = sumPrice > 0 ? profit / sumPrice * 100 : 0;
+                    const risky = rows.filter(r => r.m < quoteFloor).length;
+                    const room = (() => {
+                      let lo = quoteDiscount, hi = 60;
+                      for (let i = 0; i < 24; i++) {
+                        const mid = (lo + hi) / 2;
+                        const worst = Math.min(...items.map(({ c }) => {
+                          const pr = c.finalPrice * (1 - mid / 100);
+                          return pr > 0 ? (pr - c.beforeMargin) / pr * 100 : -100;
+                        }));
+                        if (worst >= quoteFloor) lo = mid; else hi = mid;
+                      }
+                      return Math.max(0, lo - quoteDiscount);
+                    })();
+                    const limit = quoteDiscount + room;   // 하한선에 닿는 절대 할인율
+                    const tone = (m) => m < quoteFloor ? ["var(--negative-text)", "var(--negative-bg)", "위험"]
+                      : m < quoteFloor + 7 ? ["var(--warning-text)", "var(--warning-bg)", "주의"]
+                      : ["var(--positive-text)", "var(--positive-bg)", "양호"];
+                    return (
+                      <div className="no-print" style={{ order: 2, minWidth: 0, display: "flex", flexDirection: "column", gap: 12, position: "sticky", top: 12 }}>
+
+                        {/* 다크 요약 카드 */}
+                        <div style={{ background: "#17181A", borderRadius: 16, padding: "18px 20px", color: "#fff" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 15 }}>
+                            <Icon name="lock" size={14} style={{ color: "#F0B48E", flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#F0B48E", letterSpacing: 0.4, whiteSpace: "nowrap" }}>내부 손익 — 나만 봅니다</span>
+                            <span style={{ flex: 1 }} />
+                            <span style={{ fontSize: 10.5, color: "#8B909B", whiteSpace: "nowrap" }}>견적서에는 안 찍힙니다</span>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#8B909B" }}>예상 매출</div>
+                              <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: "-0.015em", marginTop: 2, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{Math.round(sumPrice).toLocaleString()}<span style={{ fontSize: 11, color: "#8B909B", fontWeight: 500 }}> 원</span></div>
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#8B909B" }}>예상 원가</div>
+                              <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: "-0.015em", marginTop: 2, color: "#D2D3D6", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{Math.round(sumCost).toLocaleString()}<span style={{ fontSize: 11, color: "#8B909B", fontWeight: 500 }}> 원</span></div>
+                            </div>
+                          </div>
+                          <div style={{ height: 1, background: "rgba(255,255,255,0.1)", margin: "15px 0" }} />
+                          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#F0B48E" }}>이 건을 따면 남는 돈</div>
+                              <div style={{ fontSize: 28, fontWeight: 800, color: "#F0B48E", letterSpacing: "-0.02em", marginTop: 2, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{Math.round(profit).toLocaleString()}<span style={{ fontSize: 13 }}> 원</span></div>
+                            </div>
+                            <div style={{ textAlign: "right", flexShrink: 0 }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#8B909B" }}>평균 마진</div>
+                              <div style={{ fontSize: 19, fontWeight: 800, color: avgM >= quoteFloor ? "#2FD6A2" : "#FF7A7A", letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{avgM.toFixed(1)}%</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 협상 슬라이더 */}
+                        <div style={{ padding: "15px 17px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--divider)" }}>
+                          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, whiteSpace: "nowrap" }}>협상 — 얼마까지 깎아줄 수 있나</span>
+                            <span style={{ fontSize: 19, fontWeight: 800, color: "var(--accent-strong)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>-{quoteDiscount.toFixed(1)}%</span>
+                          </div>
+                          <div style={{ position: "relative", padding: "2px 0" }}>
+                            <input type="range" className="nego-range" min={0} max={40} step={0.5} value={quoteDiscount}
+                              onChange={e => setQuoteDiscount(parseFloat(e.target.value))}
+                              style={{ width: "100%", display: "block" }} />
+                            {limit < 39.5 && (
+                              <div title={`여기(-${limit.toFixed(1)}%)를 넘으면 하한선 아래로 내려갑니다`}
+                                style={{ position: "absolute", left: `${Math.min(100, limit / 40 * 100)}%`, top: -3, bottom: -3, width: 2, background: "var(--text1)", borderRadius: 2, pointerEvents: "none" }} />
+                            )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 7, gap: 8 }}>
+                            <span style={{ fontSize: 10.5, color: "var(--text3)" }}>0%</span>
+                            <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text2)", display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+                              ↑ 마진 하한선
+                              <input type="number" value={quoteFloor} min={0} max={90}
+                                onChange={e => setQuoteFloor(Math.max(0, Math.min(90, parseFloat(e.target.value) || 0)))}
+                                style={{ width: 52, height: 26, textAlign: "center", fontSize: 11.5, fontWeight: 700, padding: "0 4px" }} />
+                              %
+                            </span>
+                            <span style={{ fontSize: 10.5, color: "var(--text3)" }}>40%</span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 9, lineHeight: 1.55 }}>
+                            {risky > 0
+                              ? <>지금 할인율에서 <b style={{ color: "var(--negative-text)" }}>{risky}개 제품</b>이 하한선({quoteFloor}%) 아래입니다.</>
+                              : room > 0.2
+                                ? <>지금보다 <b style={{ color: "var(--accent-strong)" }}>{room.toFixed(1)}%p</b> 더 깎으면 하한선에 닿습니다. 그때 남는 돈은 <b>{Math.round(rows.reduce((s, r) => s + (r.price * (1 - room / 100) - r.cost) * r.qty, 0)).toLocaleString()}원</b>.</>
+                                : <>더 깎으면 하한선 아래로 내려갑니다.</>}
+                          </div>
+                        </div>
+
+                        {/* 제품별 표 — 좁은 폭에 맞춰 게이지 없이 숫자 열만 */}
+                        <div style={{ border: "1px solid var(--divider)", borderRadius: 14, overflow: "hidden", background: "var(--surface)" }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) 38px 66px 74px 52px 44px", gap: 8, padding: "9px 13px", background: "var(--row-bg)", borderBottom: "1px solid var(--divider)" }}>
+                            {["제품", "수량", "원가", quoteDiscount > 0 ? "할인가" : "납품가", "마진", ""].map((h, i) => (
+                              <div key={i} style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.4, textAlign: i >= 1 && i <= 4 ? "right" : "left", whiteSpace: "nowrap" }}>{h}</div>
+                            ))}
+                          </div>
+                          {rows.map((r, i) => {
+                            const [txt, bg, tag] = tone(r.m);
+                            return (
+                              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) 38px 66px 74px 52px 44px", gap: 8, alignItems: "center", padding: "10px 13px", borderBottom: i < rows.length - 1 ? "1px solid var(--divider)" : "none" }}>
+                                <div title={`${r.name} · ${r.grade}급`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+                                <div style={{ fontSize: 12, color: "var(--text2)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.qty.toLocaleString()}</div>
+                                <div style={{ fontSize: 11.5, color: "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(r.cost).toLocaleString()}</div>
+                                <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(r.price).toLocaleString()}</div>
+                                <div style={{ fontSize: 11.5, fontWeight: 700, color: txt, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.m.toFixed(1)}%</div>
+                                <div style={{ textAlign: "right" }}>
+                                  <span style={{ padding: "3px 7px", borderRadius: 6, background: bg, color: txt, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>{tag}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, padding: "0 2px" }}>
+                          수량은 「제품 선택 &amp; 생성」에서 정합니다. 할인 슬라이더는 화면에서만 계산해 보는 값이라 견적서 본문은 바뀌지 않습니다.
+                        </div>
+                      </div>
+                    );
+  };
+
   const [quoteDiscount, setQuoteDiscount] = useState(0);
   const [quoteFloor, setQuoteFloor] = useState(() => load("frw_quote_margin_floor", 20));
   useEffect(() => { save("frw_quote_show_profit", showProfit); }, [showProfit]);
@@ -18206,7 +18356,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           </div>
         )}
         {tab === "quote" && quoteSubTab === "builder" && (
-          <div className="calc-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+          /* 두 열의 아래끝을 맞춘다 — alignItems를 start로 두면 오른쪽이 짧게 끝나 어긋난다.
+             stretch로 같은 높이를 주고, 각 열의 마지막 카드가 남는 높이를 채운다. */
+          <div className="calc-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "stretch" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
               {/* ── 한 줄로 담기 (시안 F) ──
                   앱에는 이미 초성까지 되는 검색(searchScore)이 있다. 그걸 견적 조립기로 쓴다.
@@ -18584,7 +18736,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           <div key={i} style={{ background: hasData ? "var(--accent-tonal)" : "var(--surface2)", padding: "11px 13px", minWidth: 0 }}>
                             <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{cell.label}</div>
                             <div style={{ fontSize: 10, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 1 }}>{cell.note}</div>
-                            <div style={{ fontSize: 20, fontWeight: 800, color: cell.color, lineHeight: 1.15, letterSpacing: "-0.015em", marginTop: 6, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            <div className="kpi-num" style={{ color: cell.color, marginTop: 6 }}>
                               {cell.val}<span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 1 }}>{cell.unit}</span>
                             </div>
                           </div>
@@ -18809,16 +18961,16 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 if (items.length === 0) return null;
                 const total = items.reduce((s, { p, c }) => s + c.finalPrice * qtyOf(p.id), 0);
                 return (
-                  <div className="card">
+                  <div className="card" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
                     <div className="section-header" style={{ marginBottom: 10 }}>
                       <span className="section-header-title">선택한 제품 {items.length}</span>
                       <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>수량 반영</span>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column" }}>
+                    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflowY: "auto" }}>
                       {items.map(({ p, c }, i) => {
                         const q = qtyOf(p.id);
                         return (
-                          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--divider)" }}>
+                          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid var(--divider)", flexShrink: 0 }}>
                             <div title={p.name} style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
                             <div style={{ fontSize: 11.5, color: "var(--text3)", flexShrink: 0, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
                               {Math.round(c.finalPrice).toLocaleString()} × {q.toLocaleString()}
@@ -19033,138 +19185,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     </div>
                   </div>
                     </div>
-                  {/* ── 내부 손익 패널 (시안 D) — 오른쪽 열 ──
-                      440px 폭에 맞춘 세로 스택: 다크 요약 카드 → 협상 슬라이더 → 제품별 표.
-                      견적서 본문에는 아무것도 찍히지 않는다 — 화면 전용(no-print). */}
-                  {(() => {
-                    const items = getQuotedProducts();
-                    if (items.length === 0) return null;
-                    const d = quoteDiscount / 100;
-                    const rows = items.map(({ p, c }) => {
-                      const price = c.finalPrice * (1 - d);
-                      const cost = c.beforeMargin;
-                      const m = price > 0 ? (price - cost) / price * 100 : 0;
-                      return { id: p.id, name: p.name, grade: c.selectedGrade, price, cost, m, qty: qtyOf(p.id) };
-                    });
-                    const sumPrice = rows.reduce((s, r) => s + r.price * r.qty, 0);
-                    const sumCost = rows.reduce((s, r) => s + r.cost * r.qty, 0);
-                    const profit = sumPrice - sumCost;
-                    const avgM = sumPrice > 0 ? profit / sumPrice * 100 : 0;
-                    const risky = rows.filter(r => r.m < quoteFloor).length;
-                    const room = (() => {
-                      let lo = quoteDiscount, hi = 60;
-                      for (let i = 0; i < 24; i++) {
-                        const mid = (lo + hi) / 2;
-                        const worst = Math.min(...items.map(({ c }) => {
-                          const pr = c.finalPrice * (1 - mid / 100);
-                          return pr > 0 ? (pr - c.beforeMargin) / pr * 100 : -100;
-                        }));
-                        if (worst >= quoteFloor) lo = mid; else hi = mid;
-                      }
-                      return Math.max(0, lo - quoteDiscount);
-                    })();
-                    const limit = quoteDiscount + room;   // 하한선에 닿는 절대 할인율
-                    const tone = (m) => m < quoteFloor ? ["var(--negative-text)", "var(--negative-bg)", "위험"]
-                      : m < quoteFloor + 7 ? ["var(--warning-text)", "var(--warning-bg)", "주의"]
-                      : ["var(--positive-text)", "var(--positive-bg)", "양호"];
-                    return (
-                      <div className="no-print" style={{ order: 2, minWidth: 0, display: "flex", flexDirection: "column", gap: 12, position: "sticky", top: 12 }}>
-
-                        {/* 다크 요약 카드 */}
-                        <div style={{ background: "#17181A", borderRadius: 16, padding: "18px 20px", color: "#fff" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 15 }}>
-                            <Icon name="lock" size={14} style={{ color: "#F0B48E", flexShrink: 0 }} />
-                            <span style={{ fontSize: 12, fontWeight: 700, color: "#F0B48E", letterSpacing: 0.4, whiteSpace: "nowrap" }}>내부 손익 — 나만 봅니다</span>
-                            <span style={{ flex: 1 }} />
-                            <span style={{ fontSize: 10.5, color: "#8B909B", whiteSpace: "nowrap" }}>견적서에는 안 찍힙니다</span>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#8B909B" }}>예상 매출</div>
-                              <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: "-0.015em", marginTop: 2, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{Math.round(sumPrice).toLocaleString()}<span style={{ fontSize: 11, color: "#8B909B", fontWeight: 500 }}> 원</span></div>
-                            </div>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#8B909B" }}>예상 원가</div>
-                              <div style={{ fontSize: 21, fontWeight: 800, letterSpacing: "-0.015em", marginTop: 2, color: "#D2D3D6", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{Math.round(sumCost).toLocaleString()}<span style={{ fontSize: 11, color: "#8B909B", fontWeight: 500 }}> 원</span></div>
-                            </div>
-                          </div>
-                          <div style={{ height: 1, background: "rgba(255,255,255,0.1)", margin: "15px 0" }} />
-                          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#F0B48E" }}>이 건을 따면 남는 돈</div>
-                              <div style={{ fontSize: 28, fontWeight: 800, color: "#F0B48E", letterSpacing: "-0.02em", marginTop: 2, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{Math.round(profit).toLocaleString()}<span style={{ fontSize: 13 }}> 원</span></div>
-                            </div>
-                            <div style={{ textAlign: "right", flexShrink: 0 }}>
-                              <div style={{ fontSize: 10.5, fontWeight: 600, color: "#8B909B" }}>평균 마진</div>
-                              <div style={{ fontSize: 19, fontWeight: 800, color: avgM >= quoteFloor ? "#2FD6A2" : "#FF7A7A", letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{avgM.toFixed(1)}%</div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 협상 슬라이더 */}
-                        <div style={{ padding: "15px 17px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--divider)" }}>
-                          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)", letterSpacing: 0.3, whiteSpace: "nowrap" }}>협상 — 얼마까지 깎아줄 수 있나</span>
-                            <span style={{ fontSize: 19, fontWeight: 800, color: "var(--accent-strong)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>-{quoteDiscount.toFixed(1)}%</span>
-                          </div>
-                          <div style={{ position: "relative", padding: "2px 0" }}>
-                            <input type="range" className="nego-range" min={0} max={40} step={0.5} value={quoteDiscount}
-                              onChange={e => setQuoteDiscount(parseFloat(e.target.value))}
-                              style={{ width: "100%", display: "block" }} />
-                            {limit < 39.5 && (
-                              <div title={`여기(-${limit.toFixed(1)}%)를 넘으면 하한선 아래로 내려갑니다`}
-                                style={{ position: "absolute", left: `${Math.min(100, limit / 40 * 100)}%`, top: -3, bottom: -3, width: 2, background: "var(--text1)", borderRadius: 2, pointerEvents: "none" }} />
-                            )}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 7, gap: 8 }}>
-                            <span style={{ fontSize: 10.5, color: "var(--text3)" }}>0%</span>
-                            <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text2)", display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
-                              ↑ 마진 하한선
-                              <input type="number" value={quoteFloor} min={0} max={90}
-                                onChange={e => setQuoteFloor(Math.max(0, Math.min(90, parseFloat(e.target.value) || 0)))}
-                                style={{ width: 52, height: 26, textAlign: "center", fontSize: 11.5, fontWeight: 700, padding: "0 4px" }} />
-                              %
-                            </span>
-                            <span style={{ fontSize: 10.5, color: "var(--text3)" }}>40%</span>
-                          </div>
-                          <div style={{ fontSize: 11.5, color: "var(--text2)", marginTop: 9, lineHeight: 1.55 }}>
-                            {risky > 0
-                              ? <>지금 할인율에서 <b style={{ color: "var(--negative-text)" }}>{risky}개 제품</b>이 하한선({quoteFloor}%) 아래입니다.</>
-                              : room > 0.2
-                                ? <>지금보다 <b style={{ color: "var(--accent-strong)" }}>{room.toFixed(1)}%p</b> 더 깎으면 하한선에 닿습니다. 그때 남는 돈은 <b>{Math.round(rows.reduce((s, r) => s + (r.price * (1 - room / 100) - r.cost) * r.qty, 0)).toLocaleString()}원</b>.</>
-                                : <>더 깎으면 하한선 아래로 내려갑니다.</>}
-                          </div>
-                        </div>
-
-                        {/* 제품별 표 — 좁은 폭에 맞춰 게이지 없이 숫자 열만 */}
-                        <div style={{ border: "1px solid var(--divider)", borderRadius: 14, overflow: "hidden", background: "var(--surface)" }}>
-                          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) 38px 66px 74px 52px 44px", gap: 8, padding: "9px 13px", background: "var(--row-bg)", borderBottom: "1px solid var(--divider)" }}>
-                            {["제품", "수량", "원가", quoteDiscount > 0 ? "할인가" : "납품가", "마진", ""].map((h, i) => (
-                              <div key={i} style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.4, textAlign: i >= 1 && i <= 4 ? "right" : "left", whiteSpace: "nowrap" }}>{h}</div>
-                            ))}
-                          </div>
-                          {rows.map((r, i) => {
-                            const [txt, bg, tag] = tone(r.m);
-                            return (
-                              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.3fr) 38px 66px 74px 52px 44px", gap: 8, alignItems: "center", padding: "10px 13px", borderBottom: i < rows.length - 1 ? "1px solid var(--divider)" : "none" }}>
-                                <div title={`${r.name} · ${r.grade}급`} style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
-                                <div style={{ fontSize: 12, color: "var(--text2)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.qty.toLocaleString()}</div>
-                                <div style={{ fontSize: 11.5, color: "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(r.cost).toLocaleString()}</div>
-                                <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.round(r.price).toLocaleString()}</div>
-                                <div style={{ fontSize: 11.5, fontWeight: 700, color: txt, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{r.m.toFixed(1)}%</div>
-                                <div style={{ textAlign: "right" }}>
-                                  <span style={{ padding: "3px 7px", borderRadius: 6, background: bg, color: txt, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>{tag}</span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: "var(--text3)", lineHeight: 1.5, padding: "0 2px" }}>
-                          수량은 「제품 선택 &amp; 생성」에서 정합니다. 할인 슬라이더는 화면에서만 계산해 보는 값이라 견적서 본문은 바뀌지 않습니다.
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {profitPanel(getQuotedProducts())}
                   </div>
                   </>
                 )}
@@ -19340,6 +19361,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </div>
               )}
 
+                {/* 시안 D 배치 — 이력에서 열어도 작성 화면과 같게: 왼쪽 견적서 / 오른쪽 손익 */}
+                <div className="quote-work" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 440px", gap: 16, alignItems: "start" }}>
+                  <div style={{ minWidth: 0, order: 1 }}>
                 <div id="quote-doc-view" className={
                   (viewingQuote.quoteStyle === "bold") ? "bold-doc" :
                   (viewingQuote.quoteStyle === "card") ? "card-doc" :
@@ -19369,6 +19393,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       NJ ENTERPRISE (나정엔터프라이즈) · FR 워크웨어 전문
                     </div>
                   </div>
+                </div>
+                  </div>
+                  {profitPanel(itemsFromSavedQuote(viewingQuote))}
                 </div>
               </>
             ) : (
