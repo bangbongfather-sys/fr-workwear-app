@@ -2746,7 +2746,18 @@ function NotionSafeStockModal({ materials, setMaterials, onClose }) {
 // 단가가 바뀌는 사고를 구조적으로 막는다 (단가 계산기 잠금 프레임과 같은 철학).
 // 목록의 각 행에는 재고 게이지가 붙고, 회색 세로선이 안전재고 지점이다.
 function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {}, products = [] }) {
-  const [pdbTab, setPdbTab] = useState("mat");   // mat | lab
+  const [pdbTab, setPdbTab] = useState(() => load("frw_pdb_tab", "mat"));   // mat | lab
+  useEffect(() => { save("frw_pdb_tab", pdbTab); }, [pdbTab]);
+  // 카테고리 — 원단·공임 각각 따로 관리한다. 둘은 계산기에서 쓰이는 방식이
+  // 달라(요척서의 fabrics ↔ extras) 서로 옮길 수 없기 때문.
+  const [matCats, setMatCats] = useState(() => load("frw_mat_categories", []));
+  const [labCats, setLabCats] = useState(() => load("frw_lab_categories", []));
+  const [matCatFilter, setMatCatFilter] = useState(() => load("frw_mat_cat_filter", "all"));
+  const [labCatFilter, setLabCatFilter] = useState(() => load("frw_lab_cat_filter", "all"));
+  useEffect(() => { save("frw_mat_categories", matCats); }, [matCats]);
+  useEffect(() => { save("frw_lab_categories", labCats); }, [labCats]);
+  useEffect(() => { save("frw_mat_cat_filter", matCatFilter); }, [matCatFilter]);
+  useEffect(() => { save("frw_lab_cat_filter", labCatFilter); }, [labCatFilter]);
   const [selMatId, setSelMatId] = useState(null);
   const [selLabId, setSelLabId] = useState(null);
   const [search, setSearch] = useState("");
@@ -2789,10 +2800,70 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const lowCount = matStates.filter(x => x.st.level === "low").length;
   const warnCount = matStates.filter(x => x.st.level === "warn").length;
 
+  // ── 카테고리 ──
+  // 목록에 실제로 쓰이는 이름 + 사용자가 만든 이름을 합쳐 칩을 만든다.
+  const catsOf = (list, custom) => Array.from(new Set([
+    ...custom,
+    ...list.map(x => (x.category || "").trim()).filter(Boolean),
+  ]));
+  const matCatList = catsOf(materials, matCats);
+  const labCatList = catsOf(laborItems, labCats);
+  const inCat = (x, filter) => filter === "all"
+    || (filter === "__none" ? !(x.category || "").trim() : (x.category || "").trim() === filter);
+  const catCount = (list, cat) => list.filter(x => (x.category || "").trim() === cat).length;
+
+  const addCategory = (kind) => {
+    const isMat = kind === "mat";
+    const list = isMat ? matCatList : labCatList;
+    const name = (window.prompt(isMat ? "새 원단 카테고리 이름 (예: 동복지, 하복지, 부자재)" : "새 공임 카테고리 이름 (예: 봉제, 후가공, 검품)") || "").trim();
+    if (!name) return;
+    if (name === "전체" || name === "미분류" || list.includes(name)) { showToast("이미 있는 이름입니다"); return; }
+    if (isMat) { setMatCats(cs => [...cs, name]); setMatCatFilter(name); }
+    else { setLabCats(cs => [...cs, name]); setLabCatFilter(name); }
+    showToast(`'${name}' 카테고리를 만들었습니다 — 항목 상세에서 지정하세요`, "success");
+  };
+  const renameCategory = (kind, cat) => {
+    const isMat = kind === "mat";
+    const list = isMat ? matCatList : labCatList;
+    const name = (window.prompt(`'${cat}' 카테고리의 새 이름`, cat) || "").trim();
+    if (!name || name === cat) return;
+    if (name === "전체" || name === "미분류" || list.includes(name)) { showToast("이미 있는 이름입니다"); return; }
+    if (isMat) {
+      setMaterials(ms => ms.map(m => (m.category || "").trim() === cat ? { ...m, category: name } : m));
+      setMatCats(cs => cs.map(c => c === cat ? name : c));
+      if (matCatFilter === cat) setMatCatFilter(name);
+    } else {
+      setLaborItems(ls => ls.map(l => (l.category || "").trim() === cat ? { ...l, category: name } : l));
+      setLabCats(cs => cs.map(c => c === cat ? name : c));
+      if (labCatFilter === cat) setLabCatFilter(name);
+    }
+    showToast("이름을 바꿨습니다", "success");
+  };
+  const removeCategory = (kind, cat) => {
+    const isMat = kind === "mat";
+    const n = catCount(isMat ? materials : laborItems, cat);
+    if (!window.confirm(`'${cat}' 카테고리를 삭제할까요?${n ? `\n${n}개 항목은 미분류로 돌아갑니다. (항목 자체는 지워지지 않습니다)` : ""}`)) return;
+    if (isMat) {
+      if (n) setMaterials(ms => ms.map(m => (m.category || "").trim() === cat ? { ...m, category: "" } : m));
+      setMatCats(cs => cs.filter(c => c !== cat));
+      if (matCatFilter === cat) setMatCatFilter("all");
+    } else {
+      if (n) setLaborItems(ls => ls.map(l => (l.category || "").trim() === cat ? { ...l, category: "" } : l));
+      setLabCats(cs => cs.filter(c => c !== cat));
+      if (labCatFilter === cat) setLabCatFilter("all");
+    }
+  };
+  // 항목을 다른 카테고리로 이동
+  const moveToCategory = (kind, id, cat) => {
+    if (kind === "mat") setMaterials(ms => ms.map(m => m.id === id ? { ...m, category: cat } : m));
+    else setLaborItems(ls => ls.map(l => l.id === id ? { ...l, category: cat } : l));
+    showToast(cat ? `'${cat}'(으)로 옮겼습니다` : "미분류로 옮겼습니다", "success");
+  };
+
   const q = search.trim().toLowerCase();
   const matchQ = (name) => !q || (name || "").toLowerCase().includes(q) || (typeof searchScore === "function" && searchScore(search.trim(), [name]) > 0);
-  const visMats = matStates.filter(({ m, st }) => matchQ(m.name) && (!onlyLow || st.level === "low"));
-  const visLabs = laborItems.filter(l => matchQ(l.name));
+  const visMats = matStates.filter(({ m, st }) => matchQ(m.name) && inCat(m, matCatFilter) && (!onlyLow || st.level === "low"));
+  const visLabs = laborItems.filter(l => matchQ(l.name) && inCat(l, labCatFilter));
 
   // 선택 보정 — 삭제·필터로 선택이 사라지면 목록 첫 항목으로
   const selMat = materials.find(m => m.id === selMatId) || (visMats[0] ? visMats[0].m : null);
@@ -2829,7 +2900,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const addMaterial = () => {
     if (!newMat.name.trim() || !newMat.price) return;
     const id = uid();
-    setMaterials(ms => [...ms, { id, name: newMat.name.trim(), price: parseFloat(newMat.price), unit: newMat.unit, safeStock: newMat.safeStock !== "" ? parseFloat(newMat.safeStock) : "", currentStock: newMat.currentStock !== "" ? parseFloat(newMat.currentStock) : "", memo: newMat.memo.trim() }]);
+    // 지금 특정 카테고리를 보고 있으면 새 항목도 그 카테고리로 들어간다
+    const cat = (matCatFilter === "all" || matCatFilter === "__none") ? "" : matCatFilter;
+    setMaterials(ms => [...ms, { id, name: newMat.name.trim(), price: parseFloat(newMat.price), unit: newMat.unit, safeStock: newMat.safeStock !== "" ? parseFloat(newMat.safeStock) : "", currentStock: newMat.currentStock !== "" ? parseFloat(newMat.currentStock) : "", memo: newMat.memo.trim(), category: cat }]);
     setNewMat({ name: "", price: "", unit: "yard", safeStock: "", currentStock: "", memo: "" });
     setShowAddMat(false);
     setSelMatId(id);
@@ -2837,7 +2910,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const addLabor = () => {
     if (!newLab.name.trim() || !newLab.price) return;
     const id = uid();
-    setLaborItems(ls => [...ls, { id, name: newLab.name.trim(), price: parseFloat(newLab.price), unit: newLab.unit, memo: newLab.memo.trim() }]);
+    const cat = (labCatFilter === "all" || labCatFilter === "__none") ? "" : labCatFilter;
+    setLaborItems(ls => [...ls, { id, name: newLab.name.trim(), price: parseFloat(newLab.price), unit: newLab.unit, memo: newLab.memo.trim(), category: cat }]);
     setNewLab({ name: "", price: "", unit: "벌", memo: "" });
     setShowAddLab(false);
     setSelLabId(id);
@@ -2916,6 +2990,71 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
     }}>{label}</button>
   );
 
+  // ── 카테고리 칩 줄 ──
+  // 선택된 칩은 × 로 삭제, 더블클릭으로 이름 변경. 제품 카테고리와 같은 조작 규칙.
+  const categoryRow = (kind) => {
+    const isMat = kind === "mat";
+    const list = isMat ? materials : laborItems;
+    const cats = isMat ? matCatList : labCatList;
+    const filter = isMat ? matCatFilter : labCatFilter;
+    const setFilter = isMat ? setMatCatFilter : setLabCatFilter;
+    const noneCount = list.filter(x => !(x.category || "").trim()).length;
+    const chip = (key, label, count, deletable) => {
+      const on = filter === key;
+      return (
+        <button key={key} onClick={() => setFilter(key)}
+          onDoubleClick={() => { if (deletable) renameCategory(kind, key); }}
+          title={deletable ? "더블클릭하면 이름을 바꿉니다" : ""}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "8px 15px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit",
+            fontSize: 13, fontWeight: on ? 700 : 600, whiteSpace: "nowrap",
+            background: on ? "var(--accent)" : "var(--chip-bg)",
+            color: on ? "#fff" : "var(--chip-color)",
+            transition: "background 0.15s, color 0.15s",
+          }}>
+          {label}
+          <span style={{ fontSize: 11.5, fontWeight: 700, opacity: on ? 0.85 : 0.65 }}>{count}</span>
+          {on && deletable && (
+            <span onClick={e => { e.stopPropagation(); removeCategory(kind, key); }}
+              title="이 카테고리 삭제 (항목은 미분류로)"
+              style={{ marginLeft: 1, width: 17, height: 17, borderRadius: 100, background: "rgba(255,255,255,0.25)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800 }}>×</span>
+          )}
+        </button>
+      );
+    };
+    return (
+      <div className="scroll-x" style={{ display: "flex", gap: 7, alignItems: "center", overflowX: "auto", paddingBottom: 2 }}>
+        {chip("all", "전체", list.length, false)}
+        {cats.map(c => chip(c, c, catCount(list, c), true))}
+        {noneCount > 0 && chip("__none", "미분류", noneCount, false)}
+        <button onClick={() => addCategory(kind)} style={{
+          padding: "8px 15px", borderRadius: 100, border: "1px dashed var(--border)", background: "transparent",
+          color: "var(--text3)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+        }}>+ 카테고리</button>
+      </div>
+    );
+  };
+
+  // ── 상세 패널의 카테고리 이동 셀렉트 ──
+  const categoryPicker = (kind, item) => {
+    const cats = kind === "mat" ? matCatList : labCatList;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 15px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, flexShrink: 0 }}>카테고리</div>
+        <select value={(item.category || "").trim()} onChange={e => moveToCategory(kind, item.id, e.target.value)}
+          style={{ height: 38, fontSize: 13, fontWeight: 600, flex: 1, minWidth: 0 }}>
+          <option value="">미분류</option>
+          {cats.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button onClick={() => addCategory(kind)} style={{
+          padding: "8px 14px", borderRadius: 9, border: "1px dashed var(--border)", background: "transparent",
+          color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+        }}>+ 새 카테고리</button>
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
@@ -2928,14 +3067,24 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
       </div>
 
       {/* ── 탭 + 검색 ── */}
-      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--divider)", alignItems: "center", flexWrap: "wrap" }}>
-        {[["mat", "원단 단가표"], ["lab", "공임비 단가표"]].map(([id, label]) => (
+      {/* 탭 글자는 화면에서 "지금 무엇을 보고 있는지"를 알려주는 유일한 표시라
+          본문 제목 다음으로 크게 둔다 (13.5 → 17px). */}
+      <div style={{ display: "flex", gap: 26, borderBottom: "1px solid var(--divider)", alignItems: "center", flexWrap: "wrap" }}>
+        {[["mat", "원단 단가표", materials.length], ["lab", "공임비 단가표", laborItems.length]].map(([id, label, n]) => (
           <button key={id} onClick={() => setPdbTab(id)} style={{
-            padding: "9px 2px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
-            fontSize: 13.5, fontWeight: pdbTab === id ? 700 : 500,
+            padding: "10px 2px 11px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
+            fontSize: 17, fontWeight: pdbTab === id ? 800 : 600, letterSpacing: "-0.01em",
             color: pdbTab === id ? "var(--text1)" : "var(--text3)",
-            borderBottom: pdbTab === id ? "2px solid var(--accent)" : "2px solid transparent",
-          }}>{label}</button>
+            borderBottom: pdbTab === id ? "2.5px solid var(--accent)" : "2.5px solid transparent",
+            display: "inline-flex", alignItems: "center", gap: 7,
+          }}>
+            {label}
+            <span style={{
+              fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 100,
+              background: pdbTab === id ? "var(--accent-tonal)" : "var(--surface2)",
+              color: pdbTab === id ? "var(--accent-strong)" : "var(--text3)",
+            }}>{n}</span>
+          </button>
         ))}
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 6 }}>
@@ -2956,7 +3105,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
       {showNotionImport && <NotionSafeStockModal materials={materials} setMaterials={setMaterials} onClose={() => setShowNotionImport(false)} />}
 
       {/* ══════════ 원단 ══════════ */}
-      {pdbTab === "mat" && (
+      {pdbTab === "mat" && <>
+        {categoryRow("mat")}
         <div className="pdb-grid" style={{ display: "grid", gridTemplateColumns: "356px minmax(0, 1fr)", gap: 18, alignItems: "start" }}>
 
           {/* 좌: 목록 */}
@@ -3149,6 +3299,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                   )}
                 </div>
 
+                {/* 카테고리 이동 */}
+                {categoryPicker("mat", selMat)}
+
                 {/* 메모 */}
                 <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
                   {sectionLabel("메모")}
@@ -3195,10 +3348,11 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
             </div>
           )}
         </div>
-      )}
+      </>}
 
       {/* ══════════ 공임 ══════════ */}
-      {pdbTab === "lab" && (
+      {pdbTab === "lab" && <>
+        {categoryRow("lab")}
         <div className="pdb-grid" style={{ display: "grid", gridTemplateColumns: "356px minmax(0, 1fr)", gap: 18, alignItems: "start" }}>
 
           <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -3310,6 +3464,8 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                   </div>
                 )}
 
+                {categoryPicker("lab", selLab)}
+
                 <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
                   {sectionLabel("메모")}
                   {editing ? (
@@ -3343,7 +3499,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
             </div>
           )}
         </div>
-      )}
+      </>}
     </div>
   );
 }
