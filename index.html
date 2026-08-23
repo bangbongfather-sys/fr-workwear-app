@@ -278,7 +278,11 @@
     /* ─── 단가표 2열 워크벤치 — 좁은 화면에서는 목록 위 / 상세 아래로 ─── */
     @media (max-width: 1100px) {
       .pdb-grid { grid-template-columns: minmax(0, 1fr) !important; }
+      /* 1열이 되면 목록이 화면을 다 먹지 않도록 더 낮게 — 상세가 바로 아래 보여야 한다 */
+      .pdb-list { max-height: 46vh !important; }
     }
+    /* 목록 스크롤바는 얇게 (전역 규칙과 동일 톤) */
+    .pdb-list::-webkit-scrollbar { width: 6px; }
 
     /* ─── KPI 스트립 (시안 D) — 좁은 화면에서 4칸 → 2×2 ─── */
     @media (max-width: 900px) {
@@ -2746,7 +2750,14 @@ function NotionSafeStockModal({ materials, setMaterials, onClose }) {
 // 단가가 바뀌는 사고를 구조적으로 막는다 (단가 계산기 잠금 프레임과 같은 철학).
 // 목록의 각 행에는 재고 게이지가 붙고, 회색 세로선이 안전재고 지점이다.
 function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {}, products = [] }) {
-  const [pdbTab, setPdbTab] = useState("mat");   // mat | lab
+  // 단가표 탭 — "원단 단가표"·"공임비 단가표"는 기본 탭이고, 사용자가 탭을 더 만들 수 있다.
+  // 새 탭은 별도 데이터 저장소가 아니라 항목의 sheet 값으로 구분한다. 원단은 끝까지 원단,
+  // 공임은 끝까지 공임으로 남아야 요척서의 참조(fabrics.matId / extras.laborId)가 안 깨지기 때문.
+  const [sheets, setSheets] = useState(() => load("frw_pdb_sheets", []));   // 사용자가 만든 탭 이름들
+  useEffect(() => { save("frw_pdb_sheets", sheets); }, [sheets]);
+  const [pdbTab, setPdbTab] = useState(() => load("frw_pdb_tab", "mat"));   // mat | lab | 탭이름
+  useEffect(() => { save("frw_pdb_tab", pdbTab); }, [pdbTab]);
+  const [selKind, setSelKind] = useState("mat");   // 사용자 탭에서 마지막으로 고른 종류
   const [selMatId, setSelMatId] = useState(null);
   const [selLabId, setSelLabId] = useState(null);
   const [search, setSearch] = useState("");
@@ -2786,17 +2797,71 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   };
 
   const matStates = materials.map(m => ({ m, st: stockState(m) }));
-  const lowCount = matStates.filter(x => x.st.level === "low").length;
+  const lowCountAll = matStates.filter(x => x.st.level === "low").length;
   const warnCount = matStates.filter(x => x.st.level === "warn").length;
+
+  // ── 탭 소속 판정 ──
+  // sheet가 비어 있으면 원래 자리(원단 → mat 탭 / 공임 → lab 탭)에 남는다.
+  const sheetOf = (x) => (x.sheet || "").trim();
+  // 실제로 쓰이는 탭 이름까지 합쳐야, 다른 기기에서 만든 탭도 항목을 따라 나타난다
+  const sheetList = Array.from(new Set([
+    ...sheets,
+    ...materials.map(sheetOf).filter(Boolean),
+    ...laborItems.map(sheetOf).filter(Boolean),
+  ]));
+  const TAB_MAT = "mat", TAB_LAB = "lab";
+  const isCustomTab = (t) => t !== TAB_MAT && t !== TAB_LAB;
+  const inTab = (x, tab, home) => isCustomTab(tab) ? sheetOf(x) === tab : (tab === home && !sheetOf(x));
+  const tabCount = (tab) =>
+    materials.filter(m => inTab(m, tab, TAB_MAT)).length + laborItems.filter(l => inTab(l, tab, TAB_LAB)).length;
+
+  const addSheet = () => {
+    const name = (window.prompt("새 단가표 탭 이름 (예: 부자재 단가표, 외주비 단가표)") || "").trim();
+    if (!name) return;
+    if (name === "원단 단가표" || name === "공임비 단가표" || sheetList.includes(name)) { showToast("이미 있는 이름입니다"); return; }
+    setSheets(ss => [...ss, name]);
+    setPdbTab(name);
+    showToast(`'${name}' 탭을 만들었습니다 — 항목 상세에서 이 탭으로 옮기세요`, "success");
+  };
+  const renameSheet = (tab) => {
+    const name = (window.prompt(`'${tab}' 탭의 새 이름`, tab) || "").trim();
+    if (!name || name === tab) return;
+    if (name === "원단 단가표" || name === "공임비 단가표" || sheetList.includes(name)) { showToast("이미 있는 이름입니다"); return; }
+    setMaterials(ms => ms.map(m => sheetOf(m) === tab ? { ...m, sheet: name } : m));
+    setLaborItems(ls => ls.map(l => sheetOf(l) === tab ? { ...l, sheet: name } : l));
+    setSheets(ss => ss.map(x => x === tab ? name : x));
+    setPdbTab(t => t === tab ? name : t);
+    showToast("이름을 바꿨습니다", "success");
+  };
+  const removeSheet = (tab) => {
+    const n = tabCount(tab);
+    if (!window.confirm(`'${tab}' 탭을 삭제할까요?${n ? `\n${n}개 항목은 원래 탭(원단·공임)으로 돌아갑니다. 항목 자체는 지워지지 않습니다.` : ""}`)) return;
+    if (n) {
+      setMaterials(ms => ms.map(m => sheetOf(m) === tab ? { ...m, sheet: "" } : m));
+      setLaborItems(ls => ls.map(l => sheetOf(l) === tab ? { ...l, sheet: "" } : l));
+    }
+    setSheets(ss => ss.filter(x => x !== tab));
+    if (pdbTab === tab) setPdbTab(TAB_MAT);
+  };
+  // 항목을 다른 탭으로 이동 — 종류(원단/공임)는 그대로 두고 소속 탭만 바꾼다
+  const moveToSheet = (kind, id, sheet) => {
+    const setter = kind === "mat" ? setMaterials : setLaborItems;
+    setter(list => list.map(x => x.id === id ? { ...x, sheet } : x));
+    showToast(sheet ? `'${sheet}' 탭으로 옮겼습니다` : `${kind === "mat" ? "원단" : "공임비"} 단가표로 되돌렸습니다`, "success");
+  };
+
+  // 「미달 N」 칩은 지금 보는 탭 안에서 세야 한다 (KPI 카드는 전체 기준)
+  const lowCount = matStates.filter(x => x.st.level === "low" && inTab(x.m, pdbTab, TAB_MAT)).length;
 
   const q = search.trim().toLowerCase();
   const matchQ = (name) => !q || (name || "").toLowerCase().includes(q) || (typeof searchScore === "function" && searchScore(search.trim(), [name]) > 0);
-  const visMats = matStates.filter(({ m, st }) => matchQ(m.name) && (!onlyLow || st.level === "low"));
-  const visLabs = laborItems.filter(l => matchQ(l.name));
+  const visMats = matStates.filter(({ m, st }) => matchQ(m.name) && inTab(m, pdbTab, TAB_MAT) && (!onlyLow || st.level === "low"));
+  const visLabs = laborItems.filter(l => matchQ(l.name) && inTab(l, pdbTab, TAB_LAB));
 
   // 선택 보정 — 삭제·필터로 선택이 사라지면 목록 첫 항목으로
-  const selMat = materials.find(m => m.id === selMatId) || (visMats[0] ? visMats[0].m : null);
-  const selLab = laborItems.find(l => l.id === selLabId) || visLabs[0] || null;
+  // 선택은 지금 탭에 보이는 항목으로 제한 — 다른 탭 항목이 상세에 남아 있으면 혼란스럽다
+  const selMat = (visMats.find(x => x.m.id === selMatId) || visMats[0] || {}).m || null;
+  const selLab = visLabs.find(l => l.id === selLabId) || visLabs[0] || null;
 
   // ── 이 원단을 쓰는 제품 ── (요척서의 fabrics에서 matId로 참조)
   const usedBy = (matId) => {
@@ -2907,6 +2972,25 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
     </div>
   );
   const inp = { height: 40, fontSize: 13 };
+  // ── 상세 패널: 이 항목을 어느 단가표 탭에 둘지 ──
+  const sheetPicker = (kind, item) => {
+    const home = kind === "mat" ? "원단 단가표" : "공임비 단가표";
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 15px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)", flexWrap: "wrap" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, flexShrink: 0 }}>단가표</div>
+        <select value={sheetOf(item)} onChange={e => moveToSheet(kind, item.id, e.target.value)}
+          style={{ height: 38, fontSize: 13, fontWeight: 600, flex: 1, minWidth: 140 }}>
+          <option value="">{home} (기본)</option>
+          {sheetList.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <button onClick={addSheet} style={{
+          padding: "8px 14px", borderRadius: 9, border: "1px dashed var(--border)", background: "transparent",
+          color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+        }}>+ 새 단가표</button>
+      </div>
+    );
+  };
+
   const pillBtn = (label, onClick, kind) => (
     <button onClick={onClick} style={{
       padding: "7px 17px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit",
@@ -2923,23 +3007,48 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
       <div className="kpi-strip" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
         {kpiCell("등록 원단", materials.length.toLocaleString(), "종")}
         {kpiCell("등록 공임", laborItems.length.toLocaleString(), "종")}
-        {kpiCell("안전재고 미달", lowCount.toLocaleString(), "종", { tone: lowCount > 0 ? "var(--negative-text)" : undefined })}
+        {kpiCell("안전재고 미달", lowCountAll.toLocaleString(), "종", { tone: lowCountAll > 0 ? "var(--negative-text)" : undefined })}
         {kpiCell("주의 (안전재고 1.5배 미만)", warnCount.toLocaleString(), "종", { accent: true })}
       </div>
 
-      {/* ── 탭 + 검색 ── */}
-      <div style={{ display: "flex", gap: 22, borderBottom: "1px solid var(--divider)", alignItems: "center", flexWrap: "wrap" }}>
-        {[["mat", "원단 단가표"], ["lab", "공임비 단가표"]].map(([id, label]) => (
-          <button key={id} onClick={() => setPdbTab(id)} style={{
-            padding: "9px 2px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
-            fontSize: 13.5, fontWeight: pdbTab === id ? 700 : 500,
-            color: pdbTab === id ? "var(--text1)" : "var(--text3)",
-            borderBottom: pdbTab === id ? "2px solid var(--accent)" : "2px solid transparent",
-          }}>{label}</button>
-        ))}
+      {/* ── 단가표 탭 + 검색 ── */}
+      {/* 탭 이름은 "지금 어느 단가표를 보는지"를 알려주는 유일한 표시라 크게 둔다 (13.5 → 17px).
+          기본 탭 2개는 지울 수 없고, 사용자가 만든 탭은 더블클릭 이름변경 / × 삭제. */}
+      <div className="scroll-x" style={{ display: "flex", gap: 24, borderBottom: "1px solid var(--divider)", alignItems: "center", overflowX: "auto" }}>
+        {[[TAB_MAT, "원단 단가표", false], [TAB_LAB, "공임비 단가표", false], ...sheetList.map(n => [n, n, true])].map(([id, label, custom]) => {
+          const on = pdbTab === id;
+          return (
+            <button key={id} onClick={() => setPdbTab(id)}
+              onDoubleClick={() => { if (custom) renameSheet(id); }}
+              title={custom ? "더블클릭하면 이름을 바꿉니다" : ""}
+              style={{
+                padding: "10px 2px 11px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 17, fontWeight: on ? 800 : 600, letterSpacing: "-0.01em", whiteSpace: "nowrap", flexShrink: 0,
+                color: on ? "var(--text1)" : "var(--text3)",
+                borderBottom: on ? "2.5px solid var(--accent)" : "2.5px solid transparent",
+                display: "inline-flex", alignItems: "center", gap: 7,
+              }}>
+              {label}
+              <span style={{
+                fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 100,
+                background: on ? "var(--accent-tonal)" : "var(--surface2)",
+                color: on ? "var(--accent-strong)" : "var(--text3)",
+              }}>{tabCount(id)}</span>
+              {on && custom && (
+                <span onClick={e => { e.stopPropagation(); removeSheet(id); }}
+                  title="이 탭 삭제 (항목은 원래 탭으로)"
+                  style={{ width: 18, height: 18, borderRadius: 100, background: "var(--surface2)", color: "var(--text3)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800 }}>×</span>
+              )}
+            </button>
+          );
+        })}
+        <button onClick={addSheet} title="새 단가표 탭 만들기" style={{
+          padding: "6px 14px", marginBottom: 4, borderRadius: 100, border: "1px dashed var(--border)", background: "transparent",
+          color: "var(--text3)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+        }}>+ 단가표 추가</button>
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 8, paddingBottom: 6 }}>
-          {pdbTab === "mat" && (
+          {pdbTab === TAB_MAT && (
             <button onClick={() => setShowNotionImport(true)} title="노션 '2026 원단 단가 정리'의 안전재고량을 불러와 반영"
               style={{ padding: "6px 12px", borderRadius: 9, border: "1px solid var(--divider)", background: "var(--surface2)", color: "var(--text2)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
               ↓ 노션 안전재고
@@ -2948,7 +3057,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
           <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 9, background: "var(--input-bg)", minWidth: 190 }}>
             <Icon name="search" size={13} style={{ color: "var(--text3)", flexShrink: 0 }} />
             <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder={pdbTab === "mat" ? "원단명 검색" : "항목명 검색"}
+              placeholder={pdbTab === TAB_MAT ? "원단명 검색" : "항목명 검색"}
               style={{ height: 20, padding: 0, background: "none", border: "none", fontSize: 12, width: "100%" }} />
           </div>
         </div>
@@ -2956,394 +3065,425 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
       {showNotionImport && <NotionSafeStockModal materials={materials} setMaterials={setMaterials} onClose={() => setShowNotionImport(false)} />}
 
       {/* ══════════ 원단 ══════════ */}
-      {pdbTab === "mat" && (
+      {/* ── 본문: 왼쪽 목록 / 오른쪽 상세 ──
+          기본 탭은 한 종류만 담기지만, 사용자가 만든 탭에는 원단과 공임이 섞일 수 있다.
+          섞여도 각 항목의 종류(원단/공임)는 그대로라 요척서 참조는 안 깨진다. */}
+      {(() => {
+        const custom = isCustomTab(pdbTab);
+        const showMats = custom || pdbTab === TAB_MAT;
+        const showLabs = custom || pdbTab === TAB_LAB;
+        const bothKinds = custom && visMats.length > 0 && visLabs.length > 0;
+        // 오른쪽에 무엇을 띄울지 — 마지막으로 고른 종류를 따르되, 그 종류가 이 탭에 없으면 반대쪽
+        const kind = !showLabs ? "mat" : !showMats ? "lab"
+          : (selKind === "lab" ? (visLabs.length ? "lab" : "mat") : (visMats.length ? "mat" : "lab"));
+        const tabLabel = pdbTab === TAB_MAT ? "원단" : pdbTab === TAB_LAB ? "공임" : pdbTab;
+        const totalHere = visMats.length + visLabs.length;
+        const kindDivider = (text) => (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 2px 4px" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.8, whiteSpace: "nowrap" }}>{text}</span>
+            <span style={{ flex: 1, height: 1, background: "var(--divider)" }} />
+          </div>
+        );
+        return (
         <div className="pdb-grid" style={{ display: "grid", gridTemplateColumns: "356px minmax(0, 1fr)", gap: 18, alignItems: "start" }}>
 
           {/* 좌: 목록 */}
           <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1 }}>원단 {materials.length}종</div>
-              <div style={{ display: "flex", gap: 4 }}>
-                <button onClick={() => setOnlyLow(false)} style={{
-                  padding: "3px 10px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700,
-                  background: onlyLow ? "var(--surface2)" : "var(--text1)", color: onlyLow ? "var(--text2)" : "var(--surface)",
-                }}>전체</button>
-                <button onClick={() => setOnlyLow(v => !v)} title="안전재고 미달만 보기" style={{
-                  padding: "3px 10px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700,
-                  background: onlyLow ? "var(--negative-text)" : "var(--negative-bg)", color: onlyLow ? "#fff" : "var(--negative-text)",
-                }}>미달 {lowCount}</button>
-              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tabLabel} {totalHere}종</div>
+              {showMats && (
+                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                  <button onClick={() => setOnlyLow(false)} style={{
+                    padding: "3px 10px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700,
+                    background: onlyLow ? "var(--surface2)" : "var(--text1)", color: onlyLow ? "var(--text2)" : "var(--surface)",
+                  }}>전체</button>
+                  <button onClick={() => setOnlyLow(v => !v)} title="안전재고 미달만 보기" style={{
+                    padding: "3px 10px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700,
+                    background: onlyLow ? "var(--negative-text)" : "var(--negative-bg)", color: onlyLow ? "#fff" : "var(--negative-text)",
+                  }}>미달 {lowCount}</button>
+                </div>
+              )}
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {visMats.map(({ m, st }) => {
-                const on = selMat && selMat.id === m.id;
-                const meta = STOCK_META[st.level];
-                const dropTop = matDropInfo?.id === m.id && matDropInfo?.side === "top";
-                const dropBot = matDropInfo?.id === m.id && matDropInfo?.side === "bottom";
-                return (
-                  <React.Fragment key={m.id}>
-                    {dropTop && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
-                    <div onClick={() => { setSelMatId(m.id); setEditMat(null); }}
-                      {...listDragProps(m.id, dragMat, matDropInfo, setMatDropInfo, setMaterials)}
-                      style={{
-                        padding: "10px 12px", borderRadius: 11, cursor: "pointer",
-                        background: on ? "var(--accent-tonal)" : "transparent",
-                        border: on ? "1px solid rgba(219,107,46,0.22)" : "1px solid transparent",
-                        transition: "background 0.12s",
-                      }}
-                      onMouseEnter={e => { if (!on) e.currentTarget.style.background = "var(--surface2)"; }}
-                      onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: on ? 700 : 600, color: on ? "var(--accent-strong)" : "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: on ? "var(--accent-strong)" : "var(--text1)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{Number(m.price || 0).toLocaleString()}</div>
-                      </div>
-                      {/* 재고 게이지 — 회색 세로선이 안전재고 지점(항상 50%) */}
-                      <div style={{ position: "relative", marginTop: 5 }}>
-                        <div style={{ height: 4, borderRadius: 100, background: "var(--divider)", overflow: "hidden" }}>
-                          <div style={{ width: `${gaugePct(st)}%`, height: 4, background: meta.bar, borderRadius: 100 }} />
+            {/* 목록은 화면 높이에 맞춰 자체 스크롤 — 항목이 많아도 페이지가 끝없이 길어지지 않고
+                오른쪽 상세 패널이 늘 같은 자리에 보인다. */}
+            <div className="pdb-list" style={{ display: "flex", flexDirection: "column", gap: 3, overflowY: "auto", overflowX: "hidden", maxHeight: "calc(100vh - 340px)", minHeight: 220, paddingRight: 4 }}>
+              {showMats && <>
+                {bothKinds && kindDivider("원단")}
+                {visMats.map(({ m, st }) => {
+                  const on = selMat && selMat.id === m.id;
+                  const meta = STOCK_META[st.level];
+                  const dropTop = matDropInfo?.id === m.id && matDropInfo?.side === "top";
+                  const dropBot = matDropInfo?.id === m.id && matDropInfo?.side === "bottom";
+                  return (
+                    <React.Fragment key={m.id}>
+                      {dropTop && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
+                      <div onClick={() => { setSelMatId(m.id); setSelKind("mat"); setEditMat(null); }}
+                        {...listDragProps(m.id, dragMat, matDropInfo, setMatDropInfo, setMaterials)}
+                        style={{
+                          padding: "10px 12px", borderRadius: 11, cursor: "pointer",
+                          background: on ? "var(--accent-tonal)" : "transparent",
+                          border: on ? "1px solid rgba(219,107,46,0.22)" : "1px solid transparent",
+                          transition: "background 0.12s",
+                        }}
+                        onMouseEnter={e => { if (!on) e.currentTarget.style.background = "var(--surface2)"; }}
+                        onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: on ? 700 : 600, color: on ? "var(--accent-strong)" : "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: on ? "var(--accent-strong)" : "var(--text1)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{Number(m.price || 0).toLocaleString()}</div>
                         </div>
-                        {st.level !== "none" && <div style={{ position: "absolute", left: "50%", top: -2, bottom: -2, width: 1.5, background: "var(--text3)" }} />}
+                        {/* 재고 게이지 — 회색 세로선이 안전재고 지점(항상 50%) */}
+                        <div style={{ position: "relative", marginTop: 5 }}>
+                          <div style={{ height: 4, borderRadius: 100, background: "var(--divider)", overflow: "hidden" }}>
+                            <div style={{ width: `${gaugePct(st)}%`, height: 4, background: meta.bar, borderRadius: 100 }} />
+                          </div>
+                          {st.level !== "none" && <div style={{ position: "absolute", left: "50%", top: -2, bottom: -2, width: 1.5, background: "var(--text3)" }} />}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4, gap: 6 }}>
+                          <span style={{ fontSize: 10.5, color: on ? "rgba(171,79,31,0.75)" : "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {st.cur == null ? "재고 미입력" : <>재고 <b style={{ color: meta.text, fontWeight: 700 }}>{st.cur.toLocaleString()}</b>{st.safe ? ` / 안전 ${st.safe.toLocaleString()}` : ""} {st.unit}</>}
+                          </span>
+                          <span style={{ padding: "3px 9px", borderRadius: 6, background: meta.bg, color: meta.text, fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>{meta.label}</span>
+                        </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4, gap: 6 }}>
-                        <span style={{ fontSize: 10.5, color: on ? "rgba(171,79,31,0.75)" : "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {st.cur == null ? "재고 미입력" : <>재고 <b style={{ color: meta.text, fontWeight: 700 }}>{st.cur.toLocaleString()}</b>{st.safe ? ` / 안전 ${st.safe.toLocaleString()}` : ""} {st.unit}</>}
-                        </span>
-                        <span style={{ padding: "3px 9px", borderRadius: 6, background: meta.bg, color: meta.text, fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>{meta.label}</span>
+                      {dropBot && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
+                    </React.Fragment>
+                  );
+                })}
+              </>}
+              {showLabs && <>
+                {bothKinds && kindDivider("공임")}
+                {visLabs.map(l => {
+                  const on = selLab && selLab.id === l.id;
+                  const dropTop = labDropInfo?.id === l.id && labDropInfo?.side === "top";
+                  const dropBot = labDropInfo?.id === l.id && labDropInfo?.side === "bottom";
+                  return (
+                    <React.Fragment key={l.id}>
+                      {dropTop && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
+                      <div onClick={() => { setSelLabId(l.id); setSelKind("lab"); setEditLab(null); }}
+                        {...listDragProps(l.id, dragLab, labDropInfo, setLabDropInfo, setLaborItems)}
+                        style={{
+                          padding: "11px 12px", borderRadius: 11, cursor: "pointer",
+                          background: on ? "var(--accent-tonal)" : "transparent",
+                          border: on ? "1px solid rgba(219,107,46,0.22)" : "1px solid transparent",
+                        }}
+                        onMouseEnter={e => { if (!on) e.currentTarget.style.background = "var(--surface2)"; }}
+                        onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: on ? 700 : 600, color: on ? "var(--accent-strong)" : "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: on ? "var(--accent-strong)" : "var(--text1)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{Number(l.price || 0).toLocaleString()}</div>
+                        </div>
+                        <div style={{ fontSize: 10.5, color: on ? "rgba(171,79,31,0.75)" : "var(--text3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          원 / {l.unit}{l.memo ? ` · ${l.memo}` : ""}
+                        </div>
                       </div>
-                    </div>
-                    {dropBot && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
-                  </React.Fragment>
-                );
-              })}
-              {visMats.length === 0 && <div style={{ textAlign: "center", padding: 30, color: "var(--empty-color)", fontSize: 13 }}>{materials.length === 0 ? "등록된 원단이 없습니다" : "조건에 맞는 원단이 없습니다"}</div>}
+                      {dropBot && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
+                    </React.Fragment>
+                  );
+                })}
+              </>}
+              {totalHere === 0 && (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--empty-color)", fontSize: 13 }}>
+                  {custom ? "이 단가표에 담긴 항목이 없습니다 — 원단·공임 탭에서 항목을 골라 이 탭으로 옮기세요" : (showMats ? "조건에 맞는 원단이 없습니다" : "조건에 맞는 항목이 없습니다")}
+                </div>
+              )}
             </div>
 
-            {/* 추가 — 평소엔 버튼, 누르면 펼쳐진다 */}
-            {showAddMat ? (
-              <div className="card" style={{ marginTop: 8, padding: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 8 }}>새 원단 추가</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                  <input autoFocus placeholder="원단명 (예: 아라미드 동복용)" value={newMat.name} style={inp}
-                    onChange={e => setNewMat({ ...newMat, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 84px", gap: 7 }}>
-                    <input type="number" placeholder="단가" value={newMat.price} style={{ ...inp, textAlign: "right" }}
-                      onChange={e => setNewMat({ ...newMat, price: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
-                    <select value={newMat.unit} onChange={e => setNewMat({ ...newMat, unit: e.target.value })} style={inp}>
-                      <option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option>
-                    </select>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
-                    <input type="number" placeholder="안전재고" value={newMat.safeStock} style={{ ...inp, textAlign: "right" }}
-                      title="이 수량 아래로 떨어지면 '미달'로 표시됩니다"
-                      onChange={e => setNewMat({ ...newMat, safeStock: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
-                    <input type="number" placeholder="현재재고" value={newMat.currentStock} style={{ ...inp, textAlign: "right" }}
-                      title="비워두면 재고 현황 탭의 수량을 자동 참조합니다"
-                      onChange={e => setNewMat({ ...newMat, currentStock: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
-                  </div>
-                  <input placeholder="메모 (거래처·납기·협상 내용 등)" value={newMat.memo} style={inp}
-                    onChange={e => setNewMat({ ...newMat, memo: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
-                  <div style={{ display: "flex", gap: 7 }}>
-                    <button className="btn-primary" onClick={addMaterial} style={{ flex: 1, padding: "10px 0", fontSize: 13 }}>추가</button>
-                    <button onClick={() => setShowAddMat(false)} style={{ padding: "10px 16px", borderRadius: 10, border: "1px solid var(--divider)", background: "var(--surface)", color: "var(--text2)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+            {/* 추가 — 사용자 탭에서는 원단·공임 중 무엇으로 만들지 골라 추가한다 */}
+            {showMats && (
+              showAddMat ? (
+                <div className="card" style={{ marginTop: 8, padding: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 8 }}>새 원단 추가</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    <input autoFocus placeholder="원단명 (예: 아라미드 동복용)" value={newMat.name} style={inp}
+                      onChange={e => setNewMat({ ...newMat, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 84px", gap: 7 }}>
+                      <input type="number" placeholder="단가" value={newMat.price} style={{ ...inp, textAlign: "right" }}
+                        onChange={e => setNewMat({ ...newMat, price: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
+                      <select value={newMat.unit} onChange={e => setNewMat({ ...newMat, unit: e.target.value })} style={inp}>
+                        <option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option>
+                      </select>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7 }}>
+                      <input type="number" placeholder="안전재고" value={newMat.safeStock} style={{ ...inp, textAlign: "right" }}
+                        title="이 수량 아래로 떨어지면 '미달'로 표시됩니다"
+                        onChange={e => setNewMat({ ...newMat, safeStock: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
+                      <input type="number" placeholder="현재재고" value={newMat.currentStock} style={{ ...inp, textAlign: "right" }}
+                        title="비워두면 재고 현황 탭의 수량을 자동 참조합니다"
+                        onChange={e => setNewMat({ ...newMat, currentStock: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
+                    </div>
+                    <input placeholder="메모 (거래처·납기·협상 내용 등)" value={newMat.memo} style={inp}
+                      onChange={e => setNewMat({ ...newMat, memo: e.target.value })} onKeyDown={e => e.key === "Enter" && addMaterial()} />
+                    <div style={{ display: "flex", gap: 7 }}>
+                      <button className="btn-primary" onClick={addMaterial} style={{ flex: 1, padding: "10px 0", fontSize: 13 }}>추가</button>
+                      <button onClick={() => setShowAddMat(false)} style={{ padding: "10px 16px", borderRadius: 10, border: "1px solid var(--divider)", background: "var(--surface)", color: "var(--text2)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <button onClick={() => setShowAddMat(true)} style={{
-                marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)",
-                background: "transparent", color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-              }}>+ 원단 추가</button>
+              ) : (
+                <button onClick={() => setShowAddMat(true)} style={{
+                  marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)",
+                  background: "transparent", color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                }}>+ 원단 추가</button>
+              )
+            )}
+            {showLabs && (
+              showAddLab ? (
+                <div className="card" style={{ marginTop: 8, padding: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 8 }}>새 공임비 추가</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    <input autoFocus placeholder="항목명 (예: 재봉비, 재단비)" value={newLab.name} style={inp}
+                      onChange={e => setNewLab({ ...newLab, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addLabor()} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 7 }}>
+                      <input type="number" placeholder="단가" value={newLab.price} style={{ ...inp, textAlign: "right" }}
+                        onChange={e => setNewLab({ ...newLab, price: e.target.value })} onKeyDown={e => e.key === "Enter" && addLabor()} />
+                      <select value={newLab.unit} onChange={e => setNewLab({ ...newLab, unit: e.target.value })} style={inp}>
+                        {LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                    <input placeholder="메모 (업체, 적용 조건 등)" value={newLab.memo} style={inp}
+                      onChange={e => setNewLab({ ...newLab, memo: e.target.value })} onKeyDown={e => e.key === "Enter" && addLabor()} />
+                    <div style={{ display: "flex", gap: 7 }}>
+                      <button className="btn-primary" onClick={addLabor} style={{ flex: 1, padding: "10px 0", fontSize: 13 }}>추가</button>
+                      <button onClick={() => setShowAddLab(false)} style={{ padding: "10px 16px", borderRadius: 10, border: "1px solid var(--divider)", background: "var(--surface)", color: "var(--text2)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setShowAddLab(true)} style={{
+                  marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)",
+                  background: "transparent", color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                }}>+ 공임 추가</button>
+              )
             )}
           </div>
 
           {/* 우: 상세 */}
-          {selMat ? (() => {
-            const st = stockState(selMat);
-            const meta = STOCK_META[st.level];
-            const users = usedBy(selMat.id);
-            const imp = impactPct(selMat);
-            const editing = editMat && editMat.id === selMat.id;
-            const stockValue = st.cur != null ? Math.round(st.cur * (Number(selMat.price) || 0)) : null;
-            return (
-              <div style={{ border: "1px solid var(--divider)", borderRadius: 16, padding: "20px 24px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+          {kind === "mat" ? (
+            selMat ? (() => {
+              const st = stockState(selMat);
+              const meta = STOCK_META[st.level];
+              const users = usedBy(selMat.id);
+              const imp = impactPct(selMat);
+              const editing = editMat && editMat.id === selMat.id;
+              const stockValue = st.cur != null ? Math.round(st.cur * (Number(selMat.price) || 0)) : null;
+              return (
+                <div style={{ border: "1px solid var(--divider)", borderRadius: 16, padding: "20px 24px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
 
-                {/* 헤더 */}
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3 }}>원단 상세</div>
-                    {editing ? (
-                      <input value={editMat.name} onChange={e => setEditMat({ ...editMat, name: e.target.value })}
-                        style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
-                    ) : (
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.015em", wordBreak: "keep-all" }}>{selMat.name}</div>
-                    )}
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                    {editing ? (
-                      <>
-                        {pillBtn("취소", () => setEditMat(null))}
-                        {pillBtn("저장", saveMat, "accent")}
-                      </>
-                    ) : (
-                      <>
-                        {pillBtn("삭제", () => delMat(selMat), "danger")}
-                        {pillBtn("수정", () => setEditMat({ ...selMat }), "accent")}
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* 값 4칸 */}
-                {editing ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-                    <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단가 (원)</div>
-                      <input type="number" value={editMat.price} style={{ ...inp, textAlign: "right" }} onChange={e => setEditMat({ ...editMat, price: e.target.value })} /></div>
-                    <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>현재재고</div>
-                      <input type="number" value={editMat.currentStock ?? ""} placeholder="자동" title="비워두면 재고 현황 탭의 수량을 자동 참조합니다" style={{ ...inp, textAlign: "right" }}
-                        onChange={e => setEditMat({ ...editMat, currentStock: e.target.value === "" ? "" : parseFloat(e.target.value) })} /></div>
-                    <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>안전재고</div>
-                      <input type="number" value={editMat.safeStock ?? ""} placeholder="—" style={{ ...inp, textAlign: "right" }}
-                        onChange={e => setEditMat({ ...editMat, safeStock: e.target.value === "" ? "" : parseFloat(e.target.value) })} /></div>
-                    <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단위</div>
-                      <select value={editMat.unit} onChange={e => setEditMat({ ...editMat, unit: e.target.value })} style={inp}>
-                        <option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option>
-                      </select></div>
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-                    {field("단가", Number(selMat.price || 0).toLocaleString(), `원/${selMat.unit}`, { big: true })}
-                    {field("현재재고", st.cur == null ? "—" : st.cur.toLocaleString(), st.cur == null ? "" : st.unit, { tone: st.level === "low" ? "var(--negative-text)" : undefined })}
-                    {field("안전재고", st.safe ? st.safe.toLocaleString() : "—", st.safe ? st.unit : "")}
-                    {field("재고 금액", stockValue == null ? "—" : stockValue.toLocaleString(), stockValue == null ? "" : "원")}
-                  </div>
-                )}
-
-                {/* 재고 대비 안전선 */}
-                <div style={{ padding: "15px 17px", borderRadius: 13, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 11, gap: 10, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>재고 대비 안전선</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: meta.text }}>
-                      {st.level === "none"
-                        ? (st.safe ? "현재재고 미입력 — 재고 현황 탭에도 없습니다" : "안전재고 미입력 — 수정에서 넣으면 경보가 켜집니다")
-                        : (st.cur < st.safe
-                            ? `안전재고보다 ${(st.safe - st.cur).toLocaleString()} ${st.unit} 부족`
-                            : `안전재고보다 ${(st.cur - st.safe).toLocaleString()} ${st.unit} 여유`)}
+                  {/* 헤더 */}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3 }}>원단 상세</div>
+                      {editing ? (
+                        <input value={editMat.name} onChange={e => setEditMat({ ...editMat, name: e.target.value })}
+                          style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
+                      ) : (
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.015em", wordBreak: "keep-all" }}>{selMat.name}</div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                      {editing ? (
+                        <>
+                          {pillBtn("취소", () => setEditMat(null))}
+                          {pillBtn("저장", saveMat, "accent")}
+                        </>
+                      ) : (
+                        <>
+                          {pillBtn("삭제", () => delMat(selMat), "danger")}
+                          {pillBtn("수정", () => setEditMat({ ...selMat }), "accent")}
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div style={{ position: "relative" }}>
-                    <div style={{ height: 10, borderRadius: 100, background: "var(--divider)", overflow: "hidden" }}>
-                      <div style={{ width: `${gaugePct(st)}%`, height: 10, background: meta.bar, borderRadius: 100, transition: "width 0.25s" }} />
-                    </div>
-                    {st.level !== "none" && <div style={{ position: "absolute", left: "50%", top: -4, bottom: -4, width: 2, background: "var(--text2)", borderRadius: 2 }} />}
-                  </div>
-                  {st.level !== "none" && (
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 7, gap: 8 }}>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>0</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)" }}>↑ 안전재고 {st.safe.toLocaleString()}</span>
-                      <span style={{ fontSize: 11, color: "var(--text3)" }}>{(st.safe * 2).toLocaleString()}</span>
-                    </div>
-                  )}
-                  {st.level !== "none" && !st.manual && (
-                    <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 6 }}>현재재고는 재고 현황 탭에서 자동 참조한 값입니다</div>
-                  )}
-                </div>
 
-                {/* 메모 */}
-                <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
-                  {sectionLabel("메모")}
+                  {/* 값 4칸 */}
                   {editing ? (
-                    <textarea value={editMat.memo ?? ""} placeholder="거래처, 대체 원단, 납기, 협상 메모 등 자유롭게"
-                      onChange={e => setEditMat({ ...editMat, memo: e.target.value })}
-                      style={{ minHeight: 64, fontSize: 12.5 }} />
-                  ) : selMat.memo ? (
-                    <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{selMat.memo}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+                      <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단가 (원)</div>
+                        <input type="number" value={editMat.price} style={{ ...inp, textAlign: "right" }} onChange={e => setEditMat({ ...editMat, price: e.target.value })} /></div>
+                      <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>현재재고</div>
+                        <input type="number" value={editMat.currentStock ?? ""} placeholder="자동" title="비워두면 재고 현황 탭의 수량을 자동 참조합니다" style={{ ...inp, textAlign: "right" }}
+                          onChange={e => setEditMat({ ...editMat, currentStock: e.target.value === "" ? "" : parseFloat(e.target.value) })} /></div>
+                      <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>안전재고</div>
+                        <input type="number" value={editMat.safeStock ?? ""} placeholder="—" style={{ ...inp, textAlign: "right" }}
+                          onChange={e => setEditMat({ ...editMat, safeStock: e.target.value === "" ? "" : parseFloat(e.target.value) })} /></div>
+                      <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단위</div>
+                        <select value={editMat.unit} onChange={e => setEditMat({ ...editMat, unit: e.target.value })} style={inp}>
+                          <option value="yard">yard</option><option value="m">m</option><option value="pc">pc</option>
+                        </select></div>
+                    </div>
                   ) : (
-                    <div style={{ fontSize: 12.5, color: "var(--text3)" }}>메모가 없습니다 — 수정에서 추가할 수 있습니다</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+                      {field("단가", Number(selMat.price || 0).toLocaleString(), `원/${selMat.unit}`, { big: true })}
+                      {field("현재재고", st.cur == null ? "—" : st.cur.toLocaleString(), st.cur == null ? "" : st.unit, { tone: st.level === "low" ? "var(--negative-text)" : undefined })}
+                      {field("안전재고", st.safe ? st.safe.toLocaleString() : "—", st.safe ? st.unit : "")}
+                      {field("재고 금액", stockValue == null ? "—" : stockValue.toLocaleString(), stockValue == null ? "" : "원")}
+                    </div>
+                  )}
+
+                  {/* 재고 대비 안전선 */}
+                  <div style={{ padding: "15px 17px", borderRadius: 13, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
+                    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 11, gap: 10, flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>재고 대비 안전선</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: meta.text }}>
+                        {st.level === "none"
+                          ? (st.safe ? "현재재고 미입력 — 재고 현황 탭에도 없습니다" : "안전재고 미입력 — 수정에서 넣으면 경보가 켜집니다")
+                          : (st.cur < st.safe
+                              ? `안전재고보다 ${(st.safe - st.cur).toLocaleString()} ${st.unit} 부족`
+                              : `안전재고보다 ${(st.cur - st.safe).toLocaleString()} ${st.unit} 여유`)}
+                      </div>
+                    </div>
+                    <div style={{ position: "relative" }}>
+                      <div style={{ height: 10, borderRadius: 100, background: "var(--divider)", overflow: "hidden" }}>
+                        <div style={{ width: `${gaugePct(st)}%`, height: 10, background: meta.bar, borderRadius: 100, transition: "width 0.25s" }} />
+                      </div>
+                      {st.level !== "none" && <div style={{ position: "absolute", left: "50%", top: -4, bottom: -4, width: 2, background: "var(--text2)", borderRadius: 2 }} />}
+                    </div>
+                    {st.level !== "none" && (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 7, gap: 8 }}>
+                        <span style={{ fontSize: 11, color: "var(--text3)" }}>0</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text2)" }}>↑ 안전재고 {st.safe.toLocaleString()}</span>
+                        <span style={{ fontSize: 11, color: "var(--text3)" }}>{(st.safe * 2).toLocaleString()}</span>
+                      </div>
+                    )}
+                    {st.level !== "none" && !st.manual && (
+                      <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 6 }}>현재재고는 재고 현황 탭에서 자동 참조한 값입니다</div>
+                    )}
+                  </div>
+
+                  {/* 어느 단가표 탭에 둘지 */}
+                  {sheetPicker("mat", selMat)}
+
+                  {/* 메모 */}
+                  <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
+                    {sectionLabel("메모")}
+                    {editing ? (
+                      <textarea value={editMat.memo ?? ""} placeholder="거래처, 대체 원단, 납기, 협상 메모 등 자유롭게"
+                        onChange={e => setEditMat({ ...editMat, memo: e.target.value })}
+                        style={{ minHeight: 64, fontSize: 12.5 }} />
+                    ) : selMat.memo ? (
+                      <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{selMat.memo}</div>
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: "var(--text3)" }}>메모가 없습니다 — 수정에서 추가할 수 있습니다</div>
+                    )}
+                  </div>
+
+                  {/* 이 원단을 쓰는 제품 */}
+                  <div style={{ minWidth: 0 }}>
+                    {sectionLabel("이 원단을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
+                    {users.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>아직 이 원단을 쓰는 요척서가 없습니다</div>
+                    ) : users.slice(0, 6).map((u, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < Math.min(users.length, 6) - 1 ? "1px solid var(--divider)" : "none" }}>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--text3)", flexShrink: 0 }}>{u.qty} {selMat.unit}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", width: 84, textAlign: "right", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{Math.round(u.qty * (Number(selMat.price) || 0)).toLocaleString()}원</div>
+                      </div>
+                    ))}
+                    {users.length > 6 && <div style={{ fontSize: 11.5, color: "var(--text3)", paddingTop: 8 }}>외 {users.length - 6}개 제품</div>}
+                  </div>
+
+                  {/* 인상 영향 */}
+                  {imp != null && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 15px", borderRadius: 12, background: "var(--accent-tonal)", border: "1px solid rgba(219,107,46,0.18)" }}>
+                      <Icon name="lightbulb" size={15} style={{ color: "var(--accent-strong)", flexShrink: 0 }} />
+                      <div style={{ fontSize: 12, color: "var(--accent-strong)", lineHeight: 1.5 }}>
+                        이 단가를 1% 올리면 위 {users.length}개 제품의 총원가가 평균 <b>{imp.toFixed(2)}%</b> 오릅니다
+                      </div>
+                    </div>
                   )}
                 </div>
-
-                {/* 이 원단을 쓰는 제품 */}
-                <div style={{ minWidth: 0 }}>
-                  {sectionLabel("이 원단을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
-                  {users.length === 0 ? (
-                    <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>아직 이 원단을 쓰는 요척서가 없습니다</div>
-                  ) : users.slice(0, 6).map((u, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < Math.min(users.length, 6) - 1 ? "1px solid var(--divider)" : "none" }}>
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--text3)", flexShrink: 0 }}>{u.qty} {selMat.unit}</div>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", width: 84, textAlign: "right", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{Math.round(u.qty * (Number(selMat.price) || 0)).toLocaleString()}원</div>
-                    </div>
-                  ))}
-                  {users.length > 6 && <div style={{ fontSize: 11.5, color: "var(--text3)", paddingTop: 8 }}>외 {users.length - 6}개 제품</div>}
-                </div>
-
-                {/* 인상 영향 */}
-                {imp != null && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 15px", borderRadius: 12, background: "var(--accent-tonal)", border: "1px solid rgba(219,107,46,0.18)" }}>
-                    <Icon name="lightbulb" size={15} style={{ color: "var(--accent-strong)", flexShrink: 0 }} />
-                    <div style={{ fontSize: 12, color: "var(--accent-strong)", lineHeight: 1.5 }}>
-                      이 단가를 1% 올리면 위 {users.length}개 제품의 총원가가 평균 <b>{imp.toFixed(2)}%</b> 오릅니다
-                    </div>
-                  </div>
-                )}
+              );
+            })() : (
+              <div style={{ border: "1px dashed var(--border)", borderRadius: 16, padding: 60, textAlign: "center", color: "var(--empty-color)", fontSize: 13 }}>
+                왼쪽에서 원단을 선택하세요
               </div>
-            );
-          })() : (
-            <div style={{ border: "1px dashed var(--border)", borderRadius: 16, padding: 60, textAlign: "center", color: "var(--empty-color)", fontSize: 13 }}>
-              왼쪽에서 원단을 선택하세요
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ══════════ 공임 ══════════ */}
-      {pdbTab === "lab" && (
-        <div className="pdb-grid" style={{ display: "grid", gridTemplateColumns: "356px minmax(0, 1fr)", gap: 18, alignItems: "start" }}>
-
-          <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1, marginBottom: 8 }}>공임 {laborItems.length}종</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {visLabs.map(l => {
-                const on = selLab && selLab.id === l.id;
-                const dropTop = labDropInfo?.id === l.id && labDropInfo?.side === "top";
-                const dropBot = labDropInfo?.id === l.id && labDropInfo?.side === "bottom";
-                return (
-                  <React.Fragment key={l.id}>
-                    {dropTop && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
-                    <div onClick={() => { setSelLabId(l.id); setEditLab(null); }}
-                      {...listDragProps(l.id, dragLab, labDropInfo, setLabDropInfo, setLaborItems)}
-                      style={{
-                        padding: "11px 12px", borderRadius: 11, cursor: "pointer",
-                        background: on ? "var(--accent-tonal)" : "transparent",
-                        border: on ? "1px solid rgba(219,107,46,0.22)" : "1px solid transparent",
-                      }}
-                      onMouseEnter={e => { if (!on) e.currentTarget.style.background = "var(--surface2)"; }}
-                      onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: on ? 700 : 600, color: on ? "var(--accent-strong)" : "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: on ? "var(--accent-strong)" : "var(--text1)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{Number(l.price || 0).toLocaleString()}</div>
-                      </div>
-                      <div style={{ fontSize: 10.5, color: on ? "rgba(171,79,31,0.75)" : "var(--text3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        원 / {l.unit}{l.memo ? ` · ${l.memo}` : ""}
-                      </div>
-                    </div>
-                    {dropBot && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
-                  </React.Fragment>
-                );
-              })}
-              {visLabs.length === 0 && <div style={{ textAlign: "center", padding: 30, color: "var(--empty-color)", fontSize: 13 }}>{laborItems.length === 0 ? "등록된 공임비가 없습니다" : "조건에 맞는 항목이 없습니다"}</div>}
-            </div>
-
-            {showAddLab ? (
-              <div className="card" style={{ marginTop: 8, padding: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 8 }}>새 공임비 추가</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                  <input autoFocus placeholder="항목명 (예: 재봉비, 재단비)" value={newLab.name} style={inp}
-                    onChange={e => setNewLab({ ...newLab, name: e.target.value })} onKeyDown={e => e.key === "Enter" && addLabor()} />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 7 }}>
-                    <input type="number" placeholder="단가" value={newLab.price} style={{ ...inp, textAlign: "right" }}
-                      onChange={e => setNewLab({ ...newLab, price: e.target.value })} onKeyDown={e => e.key === "Enter" && addLabor()} />
-                    <select value={newLab.unit} onChange={e => setNewLab({ ...newLab, unit: e.target.value })} style={inp}>
-                      {LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
-                  </div>
-                  <input placeholder="메모 (업체, 적용 조건 등)" value={newLab.memo} style={inp}
-                    onChange={e => setNewLab({ ...newLab, memo: e.target.value })} onKeyDown={e => e.key === "Enter" && addLabor()} />
-                  <div style={{ display: "flex", gap: 7 }}>
-                    <button className="btn-primary" onClick={addLabor} style={{ flex: 1, padding: "10px 0", fontSize: 13 }}>추가</button>
-                    <button onClick={() => setShowAddLab(false)} style={{ padding: "10px 16px", borderRadius: 10, border: "1px solid var(--divider)", background: "var(--surface)", color: "var(--text2)", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <button onClick={() => setShowAddLab(true)} style={{
-                marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px dashed var(--border)",
-                background: "transparent", color: "var(--text3)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-              }}>+ 공임 추가</button>
-            )}
-          </div>
-
-          {selLab ? (() => {
-            const editing = editLab && editLab.id === selLab.id;
-            const users = [];
-            (products || []).forEach(p => {
-              const spec = getActiveSpec(p) || p;
-              (spec.extras || []).forEach(e => {
-                if (e.laborId === "" || e.laborId == null) return;
-                if (String(e.laborId) !== String(selLab.id)) return;
-                users.push({ name: p.name, qty: parseFloat(e.qty || 1) });
+            )
+          ) : (
+            selLab ? (() => {
+              const editing = editLab && editLab.id === selLab.id;
+              const users = [];
+              (products || []).forEach(p => {
+                const spec = getActiveSpec(p) || p;
+                (spec.extras || []).forEach(e => {
+                  if (e.laborId === "" || e.laborId == null) return;
+                  if (String(e.laborId) !== String(selLab.id)) return;
+                  users.push({ name: p.name, qty: parseFloat(e.qty || 1) });
+                });
               });
-            });
-            return (
-              <div style={{ border: "1px solid var(--divider)", borderRadius: 16, padding: "20px 24px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3 }}>공임 상세</div>
+              return (
+                <div style={{ border: "1px solid var(--divider)", borderRadius: 16, padding: "20px 24px", background: "var(--surface)", display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3 }}>공임 상세</div>
+                      {editing ? (
+                        <input value={editLab.name} onChange={e => setEditLab({ ...editLab, name: e.target.value })}
+                          style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
+                      ) : (
+                        <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.015em", wordBreak: "keep-all" }}>{selLab.name}</div>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                      {editing ? (<>{pillBtn("취소", () => setEditLab(null))}{pillBtn("저장", saveLab, "accent")}</>)
+                               : (<>{pillBtn("삭제", () => delLab(selLab), "danger")}{pillBtn("수정", () => setEditLab({ ...selLab }), "accent")}</>)}
+                    </div>
+                  </div>
+
+                  {editing ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
+                      <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단가 (원)</div>
+                        <input type="number" value={editLab.price} style={{ ...inp, textAlign: "right" }} onChange={e => setEditLab({ ...editLab, price: e.target.value })} /></div>
+                      <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단위</div>
+                        <select value={editLab.unit} onChange={e => setEditLab({ ...editLab, unit: e.target.value })} style={inp}>
+                          {LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                        </select></div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                      {field("단가", Number(selLab.price || 0).toLocaleString(), `원/${selLab.unit}`, { big: true })}
+                      {field("단위", selLab.unit, "")}
+                      {field("쓰는 제품", users.length.toLocaleString(), "개")}
+                    </div>
+                  )}
+
+                  {sheetPicker("lab", selLab)}
+
+                  <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
+                    {sectionLabel("메모")}
                     {editing ? (
-                      <input value={editLab.name} onChange={e => setEditLab({ ...editLab, name: e.target.value })}
-                        style={{ height: 40, fontSize: 19, fontWeight: 800, padding: "0 10px" }} />
+                      <textarea value={editLab.memo ?? ""} placeholder="업체, 적용 조건, 인상 이력 등 자유롭게"
+                        onChange={e => setEditLab({ ...editLab, memo: e.target.value })} style={{ minHeight: 64, fontSize: 12.5 }} />
+                    ) : selLab.memo ? (
+                      <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{selLab.memo}</div>
                     ) : (
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.015em", wordBreak: "keep-all" }}>{selLab.name}</div>
+                      <div style={{ fontSize: 12.5, color: "var(--text3)" }}>메모가 없습니다 — 수정에서 추가할 수 있습니다</div>
                     )}
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                    {editing ? (<>{pillBtn("취소", () => setEditLab(null))}{pillBtn("저장", saveLab, "accent")}</>)
-                             : (<>{pillBtn("삭제", () => delLab(selLab), "danger")}{pillBtn("수정", () => setEditLab({ ...selLab }), "accent")}</>)}
+
+                  <div style={{ minWidth: 0 }}>
+                    {sectionLabel("이 공임을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
+                    {users.length === 0 ? (
+                      <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>아직 이 공임을 쓰는 요척서가 없습니다</div>
+                    ) : users.slice(0, 8).map((u, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < Math.min(users.length, 8) - 1 ? "1px solid var(--divider)" : "none" }}>
+                        <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--text3)", flexShrink: 0 }}>{u.qty} {selLab.unit}</div>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", width: 84, textAlign: "right", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{Math.round(u.qty * (Number(selLab.price) || 0)).toLocaleString()}원</div>
+                      </div>
+                    ))}
+                    {users.length > 8 && <div style={{ fontSize: 11.5, color: "var(--text3)", paddingTop: 8 }}>외 {users.length - 8}개 제품</div>}
                   </div>
                 </div>
-
-                {editing ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
-                    <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단가 (원)</div>
-                      <input type="number" value={editLab.price} style={{ ...inp, textAlign: "right" }} onChange={e => setEditLab({ ...editLab, price: e.target.value })} /></div>
-                    <div><div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 4 }}>단위</div>
-                      <select value={editLab.unit} onChange={e => setEditLab({ ...editLab, unit: e.target.value })} style={inp}>
-                        {LABOR_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-                      </select></div>
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-                    {field("단가", Number(selLab.price || 0).toLocaleString(), `원/${selLab.unit}`, { big: true })}
-                    {field("단위", selLab.unit, "")}
-                    {field("쓰는 제품", users.length.toLocaleString(), "개")}
-                  </div>
-                )}
-
-                <div style={{ padding: "13px 16px", borderRadius: 12, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
-                  {sectionLabel("메모")}
-                  {editing ? (
-                    <textarea value={editLab.memo ?? ""} placeholder="업체, 적용 조건, 인상 이력 등 자유롭게"
-                      onChange={e => setEditLab({ ...editLab, memo: e.target.value })} style={{ minHeight: 64, fontSize: 12.5 }} />
-                  ) : selLab.memo ? (
-                    <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{selLab.memo}</div>
-                  ) : (
-                    <div style={{ fontSize: 12.5, color: "var(--text3)" }}>메모가 없습니다 — 수정에서 추가할 수 있습니다</div>
-                  )}
-                </div>
-
-                <div style={{ minWidth: 0 }}>
-                  {sectionLabel("이 공임을 쓰는 제품", "단가 변경 시 함께 바뀝니다")}
-                  {users.length === 0 ? (
-                    <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>아직 이 공임을 쓰는 요척서가 없습니다</div>
-                  ) : users.slice(0, 8).map((u, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 0", borderBottom: i < Math.min(users.length, 8) - 1 ? "1px solid var(--divider)" : "none" }}>
-                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.name}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--text3)", flexShrink: 0 }}>{u.qty} {selLab.unit}</div>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text1)", width: 84, textAlign: "right", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{Math.round(u.qty * (Number(selLab.price) || 0)).toLocaleString()}원</div>
-                    </div>
-                  ))}
-                  {users.length > 8 && <div style={{ fontSize: 11.5, color: "var(--text3)", paddingTop: 8 }}>외 {users.length - 8}개 제품</div>}
-                </div>
+              );
+            })() : (
+              <div style={{ border: "1px dashed var(--border)", borderRadius: 16, padding: 60, textAlign: "center", color: "var(--empty-color)", fontSize: 13 }}>
+                왼쪽에서 공임 항목을 선택하세요
               </div>
-            );
-          })() : (
-            <div style={{ border: "1px dashed var(--border)", borderRadius: 16, padding: 60, textAlign: "center", color: "var(--empty-color)", fontSize: 13 }}>
-              왼쪽에서 공임 항목을 선택하세요
-            </div>
+            )
           )}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
