@@ -528,6 +528,26 @@
     /* ─── 견적서 ─── */
     .quote-content { line-height: 2; font-size: 14px; color: var(--doc-text2); white-space: pre-wrap; }
 
+    /* ─── 견적서·발주서 문서는 "인쇄물" — 다크모드에서도 항상 종이(라이트)로 ───
+       bold/card/korean 양식은 배경이 #fff 로 하드코딩돼 있는데, 다크모드에선
+       --doc-* 만 밝은 글자색(#fafafa)으로 바뀌어 "흰 배경 + 흰 글씨"가 되면서
+       표 내용이 통째로 안 보였다(2026-08-24 수정).
+       문서 컨테이너 안에서만 --doc-* 를 라이트 값으로 되돌려 4개 양식을 통일하고,
+       PDF·인쇄 결과(항상 흰 종이)와 화면이 일치하게 한다. */
+    body.dark :is(.apple-doc, .bold-doc, .card-doc, .korean-doc) {
+      --doc-bg: #fff; --doc-text: #17181A; --doc-text2: #404652; --doc-text3: #5A6270;
+      --doc-border: #D7DBE2; --doc-row-border: #E5E8ED; --doc-hover: #F7F8FA;
+      --doc-last: #17181A; --doc-footer: #828A98;
+    }
+
+    /* 견적 작업 화면(작성·이력): 문서를 열 왼쪽에 붙여 오른쪽 손익 패널 폭을 확보.
+       모바일(1열)에서는 기존처럼 가운데 정렬을 유지한다. */
+    @media (min-width: 769px) {
+      .quote-work > :first-child :is(.apple-doc, .bold-doc, .card-doc, .korean-doc) {
+        margin-left: 0; margin-right: auto;
+      }
+    }
+
     /* ─── 애플 내부 보고서 스타일 견적서 ─── */
     .apple-doc {
       background: var(--doc-bg);
