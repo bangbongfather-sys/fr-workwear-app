@@ -1170,8 +1170,17 @@
       .apple-doc hr, .bold-doc hr, .card-doc hr, .korean-doc hr { margin: 10px 0 !important; }
     }
     /* ── 발주 관리 워크벤치 (시안 C) ── */
-    .po-workbench { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: start; }
-    @media (max-width: 980px) { .po-workbench { grid-template-columns: 1fr; } }
+    /* 왼쪽 목록이 화면 높이만큼 서 있는데 오른쪽 상세는 내용만큼만 커서 아래가 비어 보였다.
+       stretch로 두 열의 높이를 맞추고, 상세 안쪽이 길면 그 안에서 스크롤한다. */
+    .po-workbench { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: stretch; }
+    .po-detail-pane { display: flex; flex-direction: column; min-height: calc(100vh - 300px); }
+    .po-detail-pane > .card { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+    .po-detail-pane > .card > * { flex-shrink: 0; }
+    @media (max-width: 980px) {
+      .po-workbench { grid-template-columns: 1fr; align-items: start; }
+      .po-detail-pane { min-height: 0; }
+      .po-detail-pane > .card { flex: none; }
+    }
     /* 목록은 화면 높이에 맞춰 자체 스크롤 — 오른쪽 상세가 늘 같은 자리에 보이게 한다.
        vh만 쓰면 위쪽 KPI·검색·칩 높이만큼 화면 밖으로 밀리므로 그만큼 빼준다. */
     .po-list-scroll {
@@ -20872,6 +20881,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${(po.items || []).length - 2}` : "");
                                 // 카드 높이를 맞추기 위해 모든 줄을 항상 그린다 (값이 없으면 — 로 자리만 지킨다).
                                 // 줄을 조건부로 빼면 카드마다 높이가 달라져 아래 진행바·금액이 들쭉날쭉해진다.
+                                // 발주일 — 발주서마다 날짜가 중요해서 카드 왼쪽에 따로 세운다.
+                                // orderDate가 비어 있으면 목록 정렬 기준과 같은 값(제목에 박힌 날짜)이라도 쓴다.
+                                const od = (po.orderDate || "").slice(0, 10);
+                                const odM = od ? od.slice(5, 7) : "";
+                                const odD = od ? od.slice(8, 10) : "";
+                                const odY = od ? od.slice(0, 4) : "";
                                 const dueColor = !due ? "var(--text3)"
                                   : due.kind === "late" ? "var(--negative-text)"
                                   : due.kind === "soon" ? "var(--warning-text)" : "var(--text3)";
@@ -20886,14 +20901,34 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       // 어긋나 카드 하단이 나란해지지 않는다. box-sizing이 border-box라
                                       // 선택 카드의 두꺼운 테두리도 높이를 바꾸지 않는다.
                                       height: 124, boxSizing: "border-box",
-                                      display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                                      display: "flex", flexDirection: "row", alignItems: "stretch", gap: 12 }}>
+                                    {/* 왼쪽 — 발주일 */}
+                                    <div style={{
+                                      width: 50, flexShrink: 0, display: "flex", flexDirection: "column",
+                                      alignItems: "center", justifyContent: "center", gap: 1,
+                                      borderRight: "1px solid var(--divider)", paddingRight: 11,
+                                    }}>
+                                      {od ? (<>
+                                        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", lineHeight: 1 }}>{odY}</div>
+                                        <div style={{ fontSize: 17, fontWeight: 800, color: isSel ? "var(--accent-strong)" : "var(--text1)", lineHeight: 1.15, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{odM}.{odD}</div>
+                                        <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--text3)", lineHeight: 1 }}>발주</div>
+                                      </>) : (
+                                        <div style={{ fontSize: 10.5, color: "var(--empty-color)", textAlign: "center", lineHeight: 1.35 }}>날짜<br/>없음</div>
+                                      )}
+                                    </div>
+                                    {/* 오른쪽 — 내용 */}
+                                    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                                     {/* 1행 — 거래처 + 상태 (한 줄 고정) */}
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 20 }}>
                                       <span style={{ fontSize: 13, fontWeight: isSel ? 800 : 700, color: T.text, flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.supplier?.name || "(미지정)"}</span>
                                       <span style={{ flexShrink: 0, padding: "3px 9px", borderRadius: 100, fontSize: 10, fontWeight: 800, color: st.color, background: st.bg, whiteSpace: "nowrap" }}>{st.label}</span>
                                     </div>
                                     {/* 2행 — 제목·품목 (한 줄 고정) */}
-                                    <div style={{ fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minHeight: 16 }}>{po.title || itemsPreview || "—"}</div>
+                                    <div style={{ fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minHeight: 16 }}
+                                      title={po.title || itemsPreview || ""}>
+                                      {/* 날짜는 왼쪽 블록에 있으므로 제목 꼬리의 "· 2026-07-24"는 뗀다 */}
+                                      {(po.title || itemsPreview || "—").replace(/\s*[·-]\s*\d{4}-\d{2}-\d{2}\s*$/, "")}
+                                    </div>
                                     {/* 3행 — 잔여 · 납기 (한 줄 고정) */}
                                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 18 }}>
                                       <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -20914,6 +20949,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       </div>
                                       <span style={{ fontSize: 12.5, fontWeight: 800, color: NAVY, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{(Number(po.totalAmount) || 0).toLocaleString()}원</span>
                                     </div>
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -20927,6 +20963,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           </div>
 
                           {/* ── 오른쪽: 상세 ── */}
+                          <div className="po-detail-pane">
                           {(() => {
                             if (!selected) return (
                               <div className="card" style={{ padding: 48, textAlign: "center", color: T.text3, fontSize: 14 }}>왼쪽 목록에서 발주를 선택하세요</div>
@@ -20973,8 +21010,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       <span style={{ fontSize: 16, fontWeight: 800, color: T.text }}>{po.supplier?.name || "(미지정)"}</span>
                                       <span style={{ padding: "3px 10px", borderRadius: 100, fontSize: 10.5, fontWeight: 800, color: st.color, background: st.bg }}>{st.label}</span>
                                     </div>
+                                    {/* 발주일·납기는 이 화면에서 가장 자주 확인하는 값이라 제목과 분리해 굵게 세운다 */}
+                                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "5px 0 3px" }}>
+                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 8, background: "var(--surface2)" }}>
+                                        <Icon name="calendar" size={12} style={{ color: "var(--text3)" }} />
+                                        <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>발주</span>
+                                        <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{po.orderDate || po.dateStr || "—"}</span>
+                                      </span>
+                                      {po.deliveryDate && (
+                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 8,
+                                          background: (dday !== null && dday < 0) ? "var(--negative-bg)" : (dday !== null && dday <= 7) ? "var(--warning-bg)" : "var(--surface2)" }}>
+                                          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>납기</span>
+                                          <span style={{ fontSize: 12.5, fontWeight: 800, color: (dday !== null && dday < 0) ? "var(--negative-text)" : (dday !== null && dday <= 7) ? "var(--warning-text)" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{po.deliveryDate}</span>
+                                        </span>
+                                      )}
+                                    </div>
                                     <div style={{ fontSize: 11.5, color: T.text3, marginTop: 3 }}>
-                                      {po.title || "—"} · 발주 {po.orderDate || po.dateStr || "—"}
+                                      {po.title || "—"}
                                       {po.deliveryDate ? <> · 납기 {po.deliveryDate}{dday !== null && <b style={{ color: dday < 0 ? "#F04452" : dday <= 7 ? "#FE9800" : T.text2, marginLeft: 4 }}>{dday < 0 ? `D+${-dday}` : dday === 0 ? "D-Day" : `D-${dday}`}</b>}</> : null}
                                       {po.supplier?.contact ? <> · 담당 {po.supplier.contact}</> : null}
                                     </div>
@@ -21230,6 +21282,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               </div>
                             );
                           })()}
+                          </div>
                         </div>
                       </>
                       )}
