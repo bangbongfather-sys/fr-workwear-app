@@ -20715,10 +20715,32 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     const done = ord > 0 && rcvd >= ord;
                     return { ord, rcvd, pct, done, remainAmt: Math.round(remainAmt * 1.1) };
                   };
-                  const withProg = sorted.map(po => ({ po, prog: poProgress(po) }));
+                  // 납기 상태 — deliveryDate가 있고 아직 다 안 들어온 건만 따진다.
+                  // 발주서에 이미 납기일을 적고 있는데 목록에서는 쓰이지 않고 있었다.
+                  const todayYMD = new Date().toISOString().slice(0, 10);
+                  const dueInfo = (po, prog) => {
+                    const d = (po.deliveryDate || "").slice(0, 10);
+                    if (!d || prog.done) return null;
+                    const days = Math.round((new Date(todayYMD) - new Date(d)) / 86400000);
+                    if (isNaN(days)) return null;
+                    if (days > 0) return { kind: "late", days, label: `납기 ${days}일 초과` };
+                    if (days >= -7) return { kind: "soon", days: -days, label: days === 0 ? "오늘 납기" : `납기 ${-days}일 남음` };
+                    return { kind: "ok", days: -days, label: `납기 ${d.slice(5).replace("-", ".")}` };
+                  };
+                  const withProg = sorted.map(po => { const prog = poProgress(po); return { po, prog, due: dueInfo(po, prog) }; });
+                  const lateList = withProg.filter(x => x.due && x.due.kind === "late");
+                  const soonList = withProg.filter(x => x.due && x.due.kind === "soon");
+                  const openRemain = withProg.filter(x => !x.prog.done).reduce((a, x) => a + (x.prog.remainAmt || 0), 0);
                   const activeCnt = withProg.filter(x => !x.prog.done).length;
                   const doneCnt = withProg.length - activeCnt;
-                  const listed = withProg.filter(x => poStatusFilter === "active" ? !x.prog.done : poStatusFilter === "done" ? x.prog.done : true);
+                  let listed = withProg.filter(x => poStatusFilter === "active" ? !x.prog.done : poStatusFilter === "done" ? x.prog.done : true);
+                  // 납기 임박순 — 지난 것이 맨 위, 그다음 임박한 것. 납기 없는 건은 뒤로.
+                  if (poHistorySort === "due") {
+                    listed = [...listed].sort((a, b) => {
+                      const av = (a.po.deliveryDate || "9999-12-31"), bv = (b.po.deliveryDate || "9999-12-31");
+                      return av.localeCompare(bv);
+                    });
+                  }
                   const supplierTotals = {};
                   purchaseOrders.forEach(po => {
                     const name = po.supplier?.name || "(미지정)";
@@ -20731,9 +20753,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   const listedTotal = listed.reduce((s, x) => s + (Number(x.po.totalAmount) || 0), 0);
                   const selected = listed.find(x => x.po.id === selectedPOId) || listed[0] || null;
                   const stBadge = (prog) => prog.done
-                    ? { label: "입고완료", color: "#00B493", bg: "rgba(0,180,147,0.12)" }
-                    : prog.rcvd > 0 ? { label: `부분입고 ${prog.pct}%`, color: "#FE9800", bg: "rgba(255,149,0,0.12)" }
-                    : { label: "발주완료", color: "#DB6B2E", bg: "rgba(219,107,46,0.12)" };
+                    ? { label: "입고완료", color: "var(--positive-text)", bg: "var(--positive-bg)" }
+                    : prog.rcvd > 0 ? { label: `부분입고 ${prog.pct}%`, color: "var(--warning-text)", bg: "var(--warning-bg)" }
+                    : { label: "발주완료", color: "var(--accent-strong)", bg: "var(--accent-tonal)" };
                   return (
                     <>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
@@ -20750,7 +20772,43 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           <div style={{ fontSize: 17, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>저장된 발주서가 없습니다</div>
                           <div style={{ fontSize: 14, color: T.empty }}>[새 발주]로 발주서를 작성하고 저장하면 이곳에서 진행 상황까지 관리됩니다</div>
                         </div>
-                      ) : (
+                      ) : (<>
+                        {/* KPI 스트립 — 다른 탭과 같은 규격. 목록을 훑지 않아도 지금 상태가 보인다. */}
+                        <div className="kpi-strip no-print" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+                          {[
+                            { label: "진행 중 발주", value: activeCnt.toLocaleString(), unit: "건" },
+                            { label: "미입고 잔액", value: Math.round(openRemain).toLocaleString(), unit: "원", accent: true },
+                            { label: "납기 초과", value: lateList.length.toLocaleString(), unit: "건", tone: lateList.length > 0 ? "var(--negative-text)" : undefined },
+                            { label: "납기 7일 이내", value: soonList.length.toLocaleString(), unit: "건", tone: soonList.length > 0 ? "var(--warning-text)" : undefined },
+                          ].map((c, i) => (
+                            <div key={i} style={{
+                              background: c.accent ? "var(--accent-tonal)" : "var(--row-bg)",
+                              border: c.accent ? "1px solid rgba(219,107,46,0.2)" : "1px solid var(--divider)",
+                              borderRadius: 12, padding: "13px 16px", minWidth: 0,
+                            }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6, color: c.accent ? "var(--accent-strong)" : "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.label}</div>
+                              <div className="kpi-num" style={{ marginTop: 3, color: c.accent ? "var(--accent-strong)" : (c.tone || "var(--text1)") }}>
+                                {c.value}<span style={{ fontSize: 11, fontWeight: 500, color: c.accent ? "rgba(171,79,31,0.65)" : "var(--text3)" }}> {c.unit}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* 납기 지났는데 안 들어온 건 — 목록을 훑어야 알던 것을 위로 끌어올린다 */}
+                        {lateList.length > 0 && (
+                          <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 15px", borderRadius: 12, background: "var(--negative-bg)", border: "1px solid rgba(240,68,82,0.22)", marginBottom: 12, flexWrap: "wrap" }}>
+                            <Icon name="alert" size={15} style={{ color: "var(--negative-text)", flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 200, fontSize: 12.5, color: "var(--negative-text)", lineHeight: 1.5 }}>
+                              <b>{lateList[0].po.supplier?.name || "(미지정)"}</b> {lateList[0].due.label} — 입고 기록이 아직 없습니다.
+                              {lateList.length > 1 && <span style={{ opacity: 0.85 }}> (외 {lateList.length - 1}건)</span>}
+                            </div>
+                            <button onClick={() => { setSelectedPOId(lateList[0].po.id); setPoStatusFilter("active"); }}
+                              style={{ padding: "7px 15px", borderRadius: 9, border: "none", background: "var(--negative-text)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                              열어서 확인
+                            </button>
+                          </div>
+                        )}
+
                         <div className="po-workbench">
                           {/* ── 왼쪽: 목록 ── */}
                           <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
@@ -20775,6 +20833,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   ))}
                                 </div>
                                 <select value={poHistorySort} onChange={e => setPoHistorySort(e.target.value)} style={{ height: 36, width: 110, fontSize: 12 }}>
+                                  <option value="due">납기 임박순</option>
                                   <option value="date_desc">최신순</option>
                                   <option value="date_asc">오래된순</option>
                                   <option value="amount_desc">금액 높은순</option>
@@ -20798,7 +20857,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             <div className="po-list-scroll">
                               {listed.length === 0 ? (
                                 <div className="card" style={{ padding: 28, textAlign: "center", color: T.text3, fontSize: 13 }}>조건에 맞는 발주가 없습니다</div>
-                              ) : listed.map(({ po, prog }) => {
+                              ) : listed.map(({ po, prog, due }) => {
                                 const isSel = selected && selected.po.id === po.id;
                                 const st = stBadge(prog);
                                 const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${po.items.length - 2}` : "");
@@ -20813,6 +20872,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       <span style={{ flexShrink: 0, padding: "3px 9px", borderRadius: 100, fontSize: 10, fontWeight: 800, color: st.color, background: st.bg }}>{st.label}</span>
                                     </div>
                                     <div style={{ fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"} · {po.orderDate || po.dateStr || "—"}</div>
+                                    {/* 납기 · 미입고 잔량 — 진행률 %만으로는 "얼마나 남았나"를 알 수 없다 */}
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                                      <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap" }}>
+                                        {prog.done ? `${prog.ord.toLocaleString()} 전량 입고` : `잔여 ${Math.max(0, prog.ord - prog.rcvd).toLocaleString()} / ${prog.ord.toLocaleString()}`}
+                                      </span>
+                                      {due && (
+                                        <span style={{
+                                          fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0,
+                                          padding: due.kind === "ok" ? 0 : "2px 7px", borderRadius: 6,
+                                          color: due.kind === "late" ? "var(--negative-text)" : due.kind === "soon" ? "var(--warning-text)" : "var(--text3)",
+                                          background: due.kind === "late" ? "var(--negative-bg)" : due.kind === "soon" ? "var(--warning-bg)" : "transparent",
+                                        }}>{due.label}</span>
+                                      )}
+                                    </div>
                                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                       <div style={{ flexGrow: 1, height: 4, borderRadius: 100, background: "var(--surface2)" }}>
                                         <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "#00B493" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
@@ -21136,6 +21209,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             );
                           })()}
                         </div>
+                      </>
                       )}
                     </>
                   );
