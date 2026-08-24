@@ -20882,7 +20882,11 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                     style={{ padding: "12px 14px", borderRadius: 13, cursor: "pointer", flexShrink: 0,
                                       border: isSel ? "1.5px solid var(--accent)" : "1px solid var(--divider)",
                                       background: isSel ? "rgba(219,107,46,0.07)" : "var(--surface)",
-                                      display: "flex", flexDirection: "column", gap: 7 }}>
+                                      // 카드 높이를 고정한다. 줄마다 최소높이만 주면 글자 크기·배지 유무로 1~2px씩
+                                      // 어긋나 카드 하단이 나란해지지 않는다. box-sizing이 border-box라
+                                      // 선택 카드의 두꺼운 테두리도 높이를 바꾸지 않는다.
+                                      height: 124, boxSizing: "border-box",
+                                      display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
                                     {/* 1행 — 거래처 + 상태 (한 줄 고정) */}
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 20 }}>
                                       <span style={{ fontSize: 13, fontWeight: isSel ? 800 : 700, color: T.text, flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.supplier?.name || "(미지정)"}</span>
