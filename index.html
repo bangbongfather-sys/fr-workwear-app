@@ -7144,6 +7144,56 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
           </table>
         </div>
       </div>
+      {/* ── 해석 카드 (시안 A) ──
+          숫자만 있으면 "그래서 뭘 해야 하나"가 남는다. 아래 문장은 전부 위 데이터에서
+          계산되는 것만 쓴다 — 성수기는 연도별 월 평균에서, 전망은 남은 달을 예년 평균으로
+          채워 낸 값이다. */}
+      {(() => {
+        const withM = data.filter(d => (d._monthly || []).some(v => v > 0));
+        if (withM.length < 2 || !last) return null;
+        const monthAvg = Array.from({ length: 12 }, (_, i) => {
+          const vs = withM.filter(d => !d._isLive).map(d => d._monthly[i]).filter(v => v > 0);
+          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : 0;
+        });
+        const yearAvg = monthAvg.reduce((a, b) => a + b, 0);
+        if (yearAvg <= 0) return null;
+        const order = monthAvg.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
+        const top3 = order.slice(0, 3);
+        const top3Share = top3.reduce((s, x) => s + x.v, 0) / yearAvg * 100;
+        const lowIdx = order[order.length - 1].i;
+        // 올해 진행률 — 실적이 있는 마지막 달까지
+        const liveM = last._monthly || [];
+        const doneIdx = liveM.reduce((m, v, i) => (v > 0 ? i : m), -1);
+        const doneSum = liveM.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
+        const expectedSoFar = monthAvg.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
+        const pace = expectedSoFar > 0 ? (doneSum / expectedSoFar - 1) * 100 : null;
+        const forecast = doneIdx >= 0 ? doneSum + monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) : null;
+        const restShare = doneIdx >= 0 ? monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) / yearAvg * 100 : 0;
+        const card = (label, tone, children) => (
+          <div className="card" style={{ padding: "14px 16px", background: tone ? "var(--accent-tonal)" : undefined, border: tone ? "1px solid rgba(219,107,46,0.18)" : undefined }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: tone ? "var(--accent-strong)" : "var(--text3)", marginBottom: 6 }}>{label}</div>
+            <div style={{ fontSize: 12.5, color: tone ? "var(--accent-strong)" : "var(--text1)", lineHeight: 1.6 }}>{children}</div>
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+            {card("성수기", false, <>
+              {top3.map(x => `${x.i + 1}월`).join("·")}이 예년 매출의 <b>{top3Share.toFixed(0)}%</b>를 차지합니다.
+              가장 낮은 달은 <b>{lowIdx + 1}월</b>입니다.
+            </>)}
+            {card("변동성", false, <>
+              연도별 편차가 <b>{cvPct.toFixed(1)}%</b>입니다.
+              {cvPct >= 25 ? " 해마다 오르내림이 커서, 연 단위보다 분기로 자금을 잡는 편이 안전합니다." : " 비교적 고른 편이라 연 단위 계획이 통합니다."}
+            </>)}
+            {pace !== null && doneIdx >= 0 && card("올해 페이스", true, <>
+              {doneIdx + 1}월까지 <b>{(doneSum / 1e8).toFixed(1)}억</b> — 예년 같은 시점보다 <b>{pace >= 0 ? "+" : ""}{pace.toFixed(1)}%</b>입니다.
+              {forecast !== null && <> 이 흐름이면 <b>{(forecast / 1e8).toFixed(1)}억</b>으로 마감됩니다.</>}
+              {restShare > 0 && <> 남은 달이 예년 매출의 {restShare.toFixed(0)}%라 아직 크게 갈립니다.</>}
+            </>)}
+          </div>
+        );
+      })()}
+
     </>
   );
 
@@ -7630,6 +7680,96 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
     );
   };
 
+  // ── 히트맵: 월 × 연도 ──
+  // 세로로 읽으면 계절, 가로로 읽으면 그 해의 성격. 96개 값이 한 화면에 들어온다.
+  // 색은 브랜드 오렌지의 진하기만 바꾼다 — 새 색을 들이지 않기 위해서.
+  const renderHeatmap = () => {
+    const withM = data.filter(d => (d._monthly || []).some(v => v > 0));
+    if (withM.length === 0) {
+      return <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>월별 데이터가 있는 연도가 없습니다.</div>;
+    }
+    const all = withM.flatMap(d => d._monthly.filter(v => v > 0));
+    const hmx = Math.max(...all);
+    const MONTH_LABELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+    // 월별 평균 (계절성) — 값이 있는 달만 센다
+    const monthAvg = MONTH_LABELS.map((_, i) => {
+      const vs = withM.map(d => d._monthly[i]).filter(v => v > 0);
+      return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : 0;
+    });
+    const peakIdx = monthAvg.indexOf(Math.max(...monthAvg));
+    const lowIdx = monthAvg.reduce((mi, v, i) => (v > 0 && (monthAvg[mi] === 0 || v < monthAvg[mi])) ? i : mi, 0);
+    const cell = (v, isLive, mi) => {
+      if (!(v > 0)) return <div key={mi} style={{ background: "var(--divider)", borderRadius: 6, padding: "9px 4px", textAlign: "center", opacity: 0.5 }}><span style={{ fontSize: 10, color: "var(--text3)" }}>—</span></div>;
+      const t = v / hmx;
+      const fg = t > 0.45 ? "#fff" : "var(--text2)";
+      return (
+        <div key={mi} title={`${MONTH_LABELS[mi]}월 · ${fmtWon(v)}`}
+          style={{ background: `rgba(219,107,46,${(0.07 + t * 0.86).toFixed(2)})`, borderRadius: 6, padding: "9px 4px", textAlign: "center" }}>
+          <span style={{ fontSize: 10.5, fontWeight: t > 0.45 ? 700 : 600, color: fg, fontVariantNumeric: "tabular-nums" }}>{(v / 1e8).toFixed(1)}</span>
+        </div>
+      );
+    };
+    const GRID = { display: "grid", gridTemplateColumns: "46px repeat(12, minmax(0, 1fr)) 62px", gap: 4 };
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="card" style={{ padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1 }}>
+              월 × 연도 <span style={{ fontWeight: 500 }}>· 칸이 진할수록 매출이 큽니다 (단위 억)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontSize: 10.5, color: "var(--text3)" }}>적음</span>
+              <span style={{ width: 90, height: 8, borderRadius: 100, background: "linear-gradient(90deg, rgba(219,107,46,0.07), rgba(219,107,46,0.93))" }} />
+              <span style={{ fontSize: 10.5, color: "var(--text3)" }}>많음</span>
+            </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 720 }}>
+              <div style={GRID}>
+                <div />
+                {MONTH_LABELS.map(m => <div key={m} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "var(--text3)", paddingBottom: 5 }}>{m}</div>)}
+                <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 700, color: "var(--text3)", paddingBottom: 5 }}>합계</div>
+              </div>
+              {withM.map(d => (
+                <div key={d.year} style={{ ...GRID, marginBottom: 4 }}>
+                  <div onClick={() => { setFocusYear(d.year); setView("monthly"); }}
+                    title={`${d.year}년 월별 보기`}
+                    style={{ fontSize: 12, fontWeight: 700, color: "var(--text1)", display: "flex", alignItems: "center", cursor: "pointer" }}>
+                    {d.year}{d._isLive && <span style={{ marginLeft: 3, width: 5, height: 5, borderRadius: 100, background: "var(--accent)" }} />}
+                  </div>
+                  {d._monthly.map((v, mi) => cell(v, d._isLive, mi))}
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text1)", display: "flex", alignItems: "center", justifyContent: "flex-end", fontVariantNumeric: "tabular-nums" }}>{(d._total / 1e8).toFixed(1)}억</div>
+                </div>
+              ))}
+              <div style={GRID}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", display: "flex", alignItems: "center" }}>평균</div>
+                {monthAvg.map((v, i) => (
+                  <div key={i} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: i === peakIdx ? "var(--accent-strong)" : "var(--text3)", paddingTop: 4 }}>{v > 0 ? (v / 1e8).toFixed(1) : "—"}</div>
+                ))}
+                <div />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="kpi-strip" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 6 }}>세로로 읽으면 — 계절</div>
+            <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6 }}>
+              <b>{peakIdx + 1}월</b>이 평균 {(monthAvg[peakIdx] / 1e8).toFixed(1)}억으로 가장 높고, <b>{lowIdx + 1}월</b>이 {(monthAvg[lowIdx] / 1e8).toFixed(1)}억으로 가장 낮습니다.
+              그 차이가 <b>{monthAvg[lowIdx] > 0 ? (monthAvg[peakIdx] / monthAvg[lowIdx]).toFixed(1) : "—"}배</b>입니다.
+            </div>
+          </div>
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 6 }}>가로로 읽으면 — 그 해의 성격</div>
+            <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6 }}>
+              한 줄 안에서 진한 칸이 어디 몰렸는지 보면 그 해가 상반기형이었는지 연말형이었는지 드러납니다. 연도를 누르면 그 해 월별 보기로 갑니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -7638,7 +7778,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "inline-flex", padding: 3, background: "var(--surface2)", borderRadius: 8 }}>
-            {[["annual", "연간"], ["monthly", "월별"], ["sameMonth", "동월 비교"], ["ytd", "누적 비교"], ["range", "기간 비교"]].map(([id, label]) => (
+            {[["annual", "연간"], ["heatmap", "히트맵"], ["monthly", "월별"], ["sameMonth", "동월 비교"], ["ytd", "누적 비교"], ["range", "기간 비교"]].map(([id, label]) => (
               <button key={id} onClick={() => { setView(id); if (id !== "monthly") setFocusYear(null); }}
                 style={{
                   padding: "7px 14px", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
@@ -7655,6 +7795,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
       </div>
 
       {view === "annual" && renderAnnual()}
+      {view === "heatmap" && renderHeatmap()}
       {view === "monthly" && renderMonthly()}
       {view === "sameMonth" && renderSameMonth()}
       {view === "ytd" && renderYTD()}
