@@ -1169,6 +1169,10 @@
       .apple-doc table, .bold-doc table, .card-doc table, .korean-doc table { margin: 6px 0 !important; }
       .apple-doc hr, .bold-doc hr, .card-doc hr, .korean-doc hr { margin: 10px 0 !important; }
     }
+    /* ── 월별 장부 표 — 줄무늬 행 (시안 A). 숫자 행이 많을 때 줄을 따라 읽기 쉽게 ── */
+    .ledger-table tbody tr:nth-child(even) td { background: rgba(23,24,26,0.018); }
+    body.dark .ledger-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
     /* ── 거래처별 미수금 워크벤치 (시안 B) ── */
     .ar-workbench { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
     .ar-list {
@@ -9206,44 +9210,59 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         <span style={{fontSize:11,color:"var(--text3)"}}>전체 누적: <b style={{color:"var(--text1)"}}>{Math.round(totalAcrossMonths).toLocaleString()}원</b></span>
       </div>
 
-      {/* KPI */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))",gap:12}}>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 거래처</div>
-          <div className="kpi-num" style={{color:"var(--text1)"}}>{monthClients.length}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>곳</span></div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 청구액</div>
-          <div className="kpi-num" style={{color:"#475569"}}>{Math.round(totalBilled).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>공급가액 {Math.round(totalSupply).toLocaleString()}원 + 부가세 {Math.round(totalTax).toLocaleString()}원</div>
-        </div>
-        <div className="card"
-          onClick={()=>setStatusFilter(statusFilter==="입금완료"?"":"입금완료")}
-          title={statusFilter==="입금완료"?"클릭하여 필터 해제":"클릭하여 입금완료 거래처만 보기"}
-          style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="입금완료"?"2px solid #00B493":undefined,boxShadow:statusFilter==="입금완료"?"0 4px 14px rgba(0,180,147,0.22)":undefined}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>입금완료</div>
-            {statusFilter==="입금완료" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.18)",color:"#00B493"}}><Icon name="check" size={9} style={{marginRight:2,verticalAlign:"-1px"}}/>필터중</span>}
+      {/* ── 시안 B+A: 회수율 다크 카드 + 입금/미입금 (카드 클릭 = 필터) ──
+          흰 눈금은 지난달 회수율 — 이번 달이 어디쯤인지 비교 기준이 화면 안에 있다. */}
+      {(() => {
+        const [py, pm] = (() => { const [y, m] = selectedYM.split("-").map(Number); const d = new Date(y, m - 2, 1); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0")]; })();
+        const prevClients = ((ledgers || {})[`${py}-${pm}`] || {}).clients || [];
+        const prevBilled = prevClients.reduce((s, c) => s + (parseFloat(c.total) || 0), 0);
+        const prevPaid = prevClients.filter(c => c.status === "입금완료").reduce((s, c) => s + (parseFloat(c.total) || 0), 0);
+        const prevRate = prevBilled > 0 ? Math.round(prevPaid / prevBilled * 100) : null;
+        const rate = totalBilled > 0 ? Math.round(paidAmt / totalBilled * 100) : 0;
+        const diff = prevRate !== null ? rate - prevRate : null;
+        const paidCnt = monthClients.filter(c => c.status === "입금완료").length;
+        const unpaidCnt = monthClients.filter(c => c.status === "미입금").length;
+        return (
+          <div className="kpi-strip" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+            <div style={{ padding: "15px 18px", borderRadius: 14, background: "#17181A", color: "#fff" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 9, gap: 8 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8B909B", letterSpacing: 0.6, whiteSpace: "nowrap" }}>{selectedYM.split("-")[1].replace(/^0/, "")}월 회수율</span>
+                {prevRate !== null && <span style={{ fontSize: 11, color: "#8B909B", whiteSpace: "nowrap" }}>지난달 {prevRate}%</span>}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{rate}<span style={{ fontSize: 14, color: "#8B909B" }}>%</span></span>
+                {diff !== null && diff !== 0 && (
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: diff > 0 ? "#2FD6A2" : "#FF7A7A" }}>{diff > 0 ? "▲" : "▼"} {Math.abs(diff)}%p</span>
+                )}
+              </div>
+              <div style={{ position: "relative", marginTop: 11 }}>
+                <div style={{ height: 7, borderRadius: 100, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
+                  <div style={{ width: `${rate}%`, height: 7, background: "#F0B48E", borderRadius: 100, transition: "width 0.25s" }} />
+                </div>
+                {prevRate !== null && (
+                  <div title={`지난달 ${prevRate}%`} style={{ position: "absolute", left: `${Math.min(99, prevRate)}%`, top: -3, bottom: -3, width: 2, background: "rgba(255,255,255,0.45)", borderRadius: 2 }} />
+                )}
+              </div>
+            </div>
+            <div onClick={() => setStatusFilter(statusFilter === "입금완료" ? "" : "입금완료")}
+              title={statusFilter === "입금완료" ? "필터 해제" : "입금완료만 보기"}
+              style={{ padding: "15px 18px", borderRadius: 14, background: "var(--row-bg)", cursor: "pointer",
+                border: statusFilter === "입금완료" ? "1.5px solid var(--positive)" : "1px solid var(--divider)", transition: "border-color 0.15s" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>입금 완료</div>
+              <div className="kpi-num" style={{ marginTop: 3, color: "var(--positive-text)" }}>{Math.round(paidAmt).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)" }}> 원</span></div>
+              <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 3 }}>{paidCnt}건{statusFilter === "입금완료" ? " · 필터 중" : ""}</div>
+            </div>
+            <div onClick={() => setStatusFilter(statusFilter === "미입금" ? "" : "미입금")}
+              title={statusFilter === "미입금" ? "필터 해제" : "미입금만 보기"}
+              style={{ padding: "15px 18px", borderRadius: 14, background: "var(--accent-tonal)", cursor: "pointer",
+                border: statusFilter === "미입금" ? "1.5px solid var(--accent)" : "1px solid rgba(219,107,46,0.2)", transition: "border-color 0.15s" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--accent-strong)", letterSpacing: 0.6 }}>아직 못 받은 돈</div>
+              <div className="kpi-num" style={{ marginTop: 3, color: "var(--accent-strong)" }}>{Math.round(unpaidAmt).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 500, color: "rgba(171,79,31,0.65)" }}> 원</span></div>
+              <div style={{ fontSize: 10.5, color: "rgba(171,79,31,0.75)", marginTop: 3 }}>{unpaidCnt}건{statusFilter === "미입금" ? " · 필터 중" : ""}</div>
+            </div>
           </div>
-          <div className="kpi-num" style={{color:"#00B493"}}>{paidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(paidAmt).toLocaleString()}원</div>
-        </div>
-        <div className="card"
-          onClick={()=>setStatusFilter(statusFilter==="미입금"?"":"미입금")}
-          title={statusFilter==="미입금"?"클릭하여 필터 해제":"클릭하여 미입금 거래처만 보기"}
-          style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="미입금"?"2px solid #FE9800":undefined,boxShadow:statusFilter==="미입금"?"0 4px 14px rgba(255,149,0,0.22)":undefined}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>미입금</div>
-            {statusFilter==="미입금" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(255,149,0,0.18)",color:"#FE9800"}}><Icon name="check" size={9} style={{marginRight:2,verticalAlign:"-1px"}}/>필터중</span>}
-          </div>
-          <div className="kpi-num" style={{color:unpaidCount>0?"#FE9800":"#00B493"}}>{unpaidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(unpaidAmt).toLocaleString()}원</div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>회수율</div>
-          <div className="kpi-num" style={{color:"var(--text1)"}}>{totalBilled>0?Math.round(paidAmt/totalBilled*100):0}<span style={{fontSize:14,fontWeight:600}}>%</span></div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* 컨트롤 + 입력 + 엑셀 드롭존 */}
       <div className="card">
@@ -9305,20 +9324,19 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
             onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); processExcelFile(e.dataTransfer?.files?.[0]); }}
             onClick={() => document.getElementById("frw-ledger-xlsx")?.click()}
             style={{
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-              gap: 6, padding: "16px 14px", borderRadius: 12,
-              border: dragActive ? "2.5px dashed #DB6B2E" : `2px dashed ${darkMode?"rgba(219,107,46,0.35)":"rgba(219,107,46,0.45)"}`,
-              background: dragActive ? (darkMode?"rgba(219,107,46,0.16)":"rgba(219,107,46,0.08)") : (darkMode?"rgba(219,107,46,0.05)":"rgba(238,242,255,0.6)"),
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 11,
+              border: dragActive ? "2px dashed var(--accent)" : "1px dashed var(--border)",
+              background: dragActive ? "var(--accent-tonal)" : "var(--row-bg)",
               cursor: "pointer", transition: "all 0.18s",
             }}>
-            <div style={{fontSize:24,lineHeight:1,display:"inline-flex"}}><Icon name={dragActive?"download":"folderOpen"} size={24}/></div>
-            <div style={{fontSize:13,fontWeight:700,color:dragActive?"#DB6B2E":(darkMode?"#FBF0E8":"#AB4F1F")}}>
-              {dragActive ? "여기에 놓으세요" : "월간 장부 엑셀 가져오기"}
+            {/* 시안 A의 붙여넣기 안내 띠 — 큰 드롭존이 표를 밀어내던 것을 한 줄로 */}
+            <Icon name={dragActive ? "download" : "fileSheet"} size={15} style={{ color: dragActive ? "var(--accent)" : "var(--text3)", flexShrink: 0 }} />
+            <div style={{ flex: 1, fontSize: 11.5, color: dragActive ? "var(--accent-strong)" : "var(--text2)", minWidth: 200 }}>
+              {dragActive
+                ? "여기에 놓으세요"
+                : <>엑셀 파일(.xlsx)을 <b>끌어다 놓거나 클릭</b>해서 가져옵니다 · 헤더 자동 인식 · 표 맨 아래 줄에서 바로 추가할 수도 있습니다</>}
             </div>
-            <div style={{fontSize:11,color:"var(--text2)",textAlign:"center",lineHeight:1.5}}>
-              .xlsx · .xls 파일을 드래그하거나 클릭해서 선택<br/>
-              거래처명 / 공급가액 / 부가세 / 청구합계 / 입금현황 헤더 자동 인식 · 시트 제목에서 년/월 자동 추출
-            </div>
+            <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap", flexShrink: 0 }}>거래처명 / 공급가액 / 부가세 / 청구합계 / 입금현황</span>
           </div>
         </div>
       </div>
@@ -9333,7 +9351,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           </div>
         ) : (
           <div style={{overflowX:"auto"}}>
-            <table className="table-plain">
+            <table className="table-plain ledger-table">
               <thead><tr>
                 <th style={{width:36,textAlign:"center",padding:"10px 4px"}}>
                   {(() => {
@@ -9653,6 +9671,47 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                     <td colSpan={3}></td>
                   </tr>
                 )}
+                {/* ── 유령 행 (시안 A) — 거래처명을 치면 그 자리에서 행이 추가된다.
+                    기존 addClient·draft 상태를 그대로 쓴다. 공급가를 넣으면 부가세·합계 자동. */}
+                <tr style={{ background: "var(--surface)" }}>
+                  <td></td>
+                  <td style={{ textAlign: "center", fontSize: 12, color: "var(--empty-color)" }}>{filtered.length + 1}</td>
+                  <td><input list="frw-clients" placeholder="+ 거래처명 입력" value={draft.name}
+                    onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+                    onKeyDown={e => e.key === "Enter" && addClient()}
+                    style={{ height: 34, fontSize: 13, border: draft.name ? undefined : "1.5px dashed var(--border)", background: draft.name ? undefined : "transparent" }} /></td>
+                  <td><input type="number" placeholder="공급가액" value={draft.supply}
+                    onChange={e => { const s = e.target.value; setDraft(d => ({ ...d, supply: s, tax: String(Math.round((parseFloat(s) || 0) * 0.1)), total: String(Math.round((parseFloat(s) || 0) * 1.1)) })); }}
+                    onKeyDown={e => e.key === "Enter" && addClient()}
+                    style={{ height: 34, fontSize: 13, textAlign: "right" }} /></td>
+                  <td style={{ textAlign: "right", fontSize: 12.5, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{draft.tax ? Math.round(parseFloat(draft.tax) || 0).toLocaleString() : "자동"}</td>
+                  <td style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{draft.total ? Math.round(parseFloat(draft.total) || 0).toLocaleString() : "—"}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <select value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))} style={{ height: 34, fontSize: 12, width: 100 }}>
+                      <option value="미입금">미입금</option>
+                      <option value="입금완료">입금완료</option>
+                      <option value="법인 거래">법인 거래</option>
+                    </select>
+                  </td>
+                  <td><input placeholder="메모" value={draft.memo} onChange={e => setDraft(d => ({ ...d, memo: e.target.value }))}
+                    onKeyDown={e => e.key === "Enter" && addClient()} style={{ height: 34, fontSize: 12.5 }} /></td>
+                  <td style={{ textAlign: "center" }}>
+                    <button onClick={addClient} disabled={!draft.name.trim()}
+                      style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: draft.name.trim() ? "var(--accent)" : "var(--surface2)", color: draft.name.trim() ? "#fff" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: draft.name.trim() ? "pointer" : "default", fontFamily: "inherit" }}>추가</button>
+                  </td>
+                </tr>
+                {/* ── 합계 줄 (시안 A) — 스크롤이 끝나야 보이던 합계를 표 안에 고정 ── */}
+                {filtered.length > 0 && (
+                  <tr style={{ background: "var(--row-bg)", borderTop: "1.5px solid var(--border)" }}>
+                    <td></td><td></td>
+                    <td style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", padding: "12px 14px" }}>{selectedYM.split("-")[1].replace(/^0/, "")}월 합계 · {filtered.length}건</td>
+                    <td style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{Math.round(totalSupply).toLocaleString()}</td>
+                    <td style={{ textAlign: "right", fontSize: 12.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{Math.round(totalTax).toLocaleString()}</td>
+                    <td style={{ textAlign: "right", fontSize: 14.5, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{Math.round(totalBilled).toLocaleString()}</td>
+                    <td></td><td></td><td></td>
+                  </tr>
+                )}
+
               </tbody>
             </table>
           </div>
