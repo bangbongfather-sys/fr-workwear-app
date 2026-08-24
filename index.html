@@ -7043,6 +7043,59 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
         </div>
       )}
 
+      {/* ── 해석 카드 (시안 A) ──
+          숫자만 있으면 "그래서 뭘 해야 하나"가 남는다. 아래 문장은 전부 위 데이터에서
+          계산되는 것만 쓴다 — 성수기는 연도별 월 평균에서, 전망은 남은 달을 예년 평균으로
+          채워 낸 값이다. */}
+      {(() => {
+        if (!last || data.length < 2) return null;
+        const withM = data.filter(d => (d._monthly || []).some(v => v > 0));
+        const hasMonthly = withM.length >= 2;
+        const monthAvg = Array.from({ length: 12 }, (_, i) => {
+          const vs = withM.filter(d => !d._isLive).map(d => d._monthly[i]).filter(v => v > 0);
+          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : 0;
+        });
+        const yearAvg = monthAvg.reduce((a, b) => a + b, 0);
+        const order = monthAvg.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
+        const top3 = order.slice(0, 3);
+        const top3Share = top3.reduce((s, x) => s + x.v, 0) / yearAvg * 100;
+        const lowIdx = order[order.length - 1].i;
+        // 올해 진행률 — 실적이 있는 마지막 달까지
+        const liveM = last._monthly || [];
+        const doneIdx = liveM.reduce((m, v, i) => (v > 0 ? i : m), -1);
+        const doneSum = liveM.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
+        const expectedSoFar = monthAvg.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
+        const pace = expectedSoFar > 0 ? (doneSum / expectedSoFar - 1) * 100 : null;
+        const forecast = doneIdx >= 0 ? doneSum + monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) : null;
+        const restShare = doneIdx >= 0 ? monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) / yearAvg * 100 : 0;
+        const card = (label, tone, children) => (
+          <div className="card" style={{ padding: "14px 16px", background: tone ? "var(--accent-tonal)" : undefined, border: tone ? "1px solid rgba(219,107,46,0.18)" : undefined }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: tone ? "var(--accent-strong)" : "var(--text3)", marginBottom: 6 }}>{label}</div>
+            <div style={{ fontSize: 12.5, color: tone ? "var(--accent-strong)" : "var(--text1)", lineHeight: 1.6 }}>{children}</div>
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+            {hasMonthly && yearAvg > 0 && card("성수기", false, <>
+              {top3.map(x => `${x.i + 1}월`).join("·")}이 예년 매출의 <b>{top3Share.toFixed(0)}%</b>를 차지합니다.
+              가장 낮은 달은 <b>{lowIdx + 1}월</b>입니다.
+            </>)}
+            {card("변동성", false, <>
+              연도별 편차가 <b>{cvPct.toFixed(1)}%</b>입니다.
+              {cvPct >= 25 ? " 해마다 오르내림이 커서, 연 단위보다 분기로 자금을 잡는 편이 안전합니다." : " 비교적 고른 편이라 연 단위 계획이 통합니다."}
+            </>)}
+            {hasMonthly && yearAvg > 0 && pace !== null && doneIdx >= 0 && card("올해 페이스", true, <>
+              {doneIdx + 1}월까지 <b>{(doneSum / 1e8).toFixed(1)}억</b> — 예년 같은 시점보다 <b>{pace >= 0 ? "+" : ""}{pace.toFixed(1)}%</b>입니다.
+              {forecast !== null && <> 이 흐름이면 <b>{(forecast / 1e8).toFixed(1)}억</b>으로 마감됩니다.</>}
+              {restShare > 0 && <> 남은 달이 예년 매출의 {restShare.toFixed(0)}%라 아직 크게 갈립니다.</>}
+            </>)}
+            {!hasMonthly && card("월별 데이터", false, <>
+              연도별 총액만 있어 계절성·페이스는 계산하지 못합니다. 「월별」 보기에서 각 달 금액을 넣으면 성수기와 올해 페이스가 함께 나옵니다.
+            </>)}
+          </div>
+        );
+      })()}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
         <StatTile label="CAGR" value={cagr === null ? "—" : `${cagr >= 0 ? "+" : ""}${cagr.toFixed(1)}%`} sub={baseYear && last ? `${baseYear.year} → ${last.year} 연복리` : ""} kind={cagr === null ? "neutral" : cagr >= 0 ? "pos" : "neg"}/>
         <StatTile label={baseYear ? `vs FY${String(baseYear.year).slice(2)}` : "누적 성장"} value={totalGrowthPct === null ? "—" : `${totalGrowthPct >= 0 ? "+" : ""}${totalGrowthPct.toFixed(0)}%`} sub="기준 연도 대비" kind={totalGrowthPct === null ? "neutral" : totalGrowthPct >= 0 ? "pos" : "neg"}/>
@@ -7144,55 +7197,6 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
           </table>
         </div>
       </div>
-      {/* ── 해석 카드 (시안 A) ──
-          숫자만 있으면 "그래서 뭘 해야 하나"가 남는다. 아래 문장은 전부 위 데이터에서
-          계산되는 것만 쓴다 — 성수기는 연도별 월 평균에서, 전망은 남은 달을 예년 평균으로
-          채워 낸 값이다. */}
-      {(() => {
-        const withM = data.filter(d => (d._monthly || []).some(v => v > 0));
-        if (withM.length < 2 || !last) return null;
-        const monthAvg = Array.from({ length: 12 }, (_, i) => {
-          const vs = withM.filter(d => !d._isLive).map(d => d._monthly[i]).filter(v => v > 0);
-          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : 0;
-        });
-        const yearAvg = monthAvg.reduce((a, b) => a + b, 0);
-        if (yearAvg <= 0) return null;
-        const order = monthAvg.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
-        const top3 = order.slice(0, 3);
-        const top3Share = top3.reduce((s, x) => s + x.v, 0) / yearAvg * 100;
-        const lowIdx = order[order.length - 1].i;
-        // 올해 진행률 — 실적이 있는 마지막 달까지
-        const liveM = last._monthly || [];
-        const doneIdx = liveM.reduce((m, v, i) => (v > 0 ? i : m), -1);
-        const doneSum = liveM.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
-        const expectedSoFar = monthAvg.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
-        const pace = expectedSoFar > 0 ? (doneSum / expectedSoFar - 1) * 100 : null;
-        const forecast = doneIdx >= 0 ? doneSum + monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) : null;
-        const restShare = doneIdx >= 0 ? monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) / yearAvg * 100 : 0;
-        const card = (label, tone, children) => (
-          <div className="card" style={{ padding: "14px 16px", background: tone ? "var(--accent-tonal)" : undefined, border: tone ? "1px solid rgba(219,107,46,0.18)" : undefined }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: tone ? "var(--accent-strong)" : "var(--text3)", marginBottom: 6 }}>{label}</div>
-            <div style={{ fontSize: 12.5, color: tone ? "var(--accent-strong)" : "var(--text1)", lineHeight: 1.6 }}>{children}</div>
-          </div>
-        );
-        return (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            {card("성수기", false, <>
-              {top3.map(x => `${x.i + 1}월`).join("·")}이 예년 매출의 <b>{top3Share.toFixed(0)}%</b>를 차지합니다.
-              가장 낮은 달은 <b>{lowIdx + 1}월</b>입니다.
-            </>)}
-            {card("변동성", false, <>
-              연도별 편차가 <b>{cvPct.toFixed(1)}%</b>입니다.
-              {cvPct >= 25 ? " 해마다 오르내림이 커서, 연 단위보다 분기로 자금을 잡는 편이 안전합니다." : " 비교적 고른 편이라 연 단위 계획이 통합니다."}
-            </>)}
-            {pace !== null && doneIdx >= 0 && card("올해 페이스", true, <>
-              {doneIdx + 1}월까지 <b>{(doneSum / 1e8).toFixed(1)}억</b> — 예년 같은 시점보다 <b>{pace >= 0 ? "+" : ""}{pace.toFixed(1)}%</b>입니다.
-              {forecast !== null && <> 이 흐름이면 <b>{(forecast / 1e8).toFixed(1)}억</b>으로 마감됩니다.</>}
-              {restShare > 0 && <> 남은 달이 예년 매출의 {restShare.toFixed(0)}%라 아직 크게 갈립니다.</>}
-            </>)}
-          </div>
-        );
-      })()}
 
     </>
   );
@@ -7787,7 +7791,12 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
                   color: view === id ? (darkMode ? "#FBF0E8" : "#AB4F1F") : "var(--text2)",
                   boxShadow: view === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
                   transition: "all 0.15s",
-                }}>{label}</button>
+                }}>
+                  {label}
+                  {id === "heatmap" && view !== "heatmap" && (
+                    <span title="새로 생긴 보기" style={{ display: "inline-block", width: 5, height: 5, borderRadius: 100, background: "var(--accent)", marginLeft: 5, verticalAlign: "middle" }} />
+                  )}
+                </button>
             ))}
           </div>
           <button onClick={() => setAdding(true)} style={{ padding: "7px 14px", borderRadius: 7, border: "none", background: "#DB6B2E", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "var(--elev-1)" }}>+ 연도</button>
