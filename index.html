@@ -7090,7 +7090,14 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
               {restShare > 0 && <> 남은 달이 예년 매출의 {restShare.toFixed(0)}%라 아직 크게 갈립니다.</>}
             </>)}
             {!hasMonthly && card("월별 데이터", false, <>
-              연도별 총액만 있어 계절성·페이스는 계산하지 못합니다. 「월별」 보기에서 각 달 금액을 넣으면 성수기와 올해 페이스가 함께 나옵니다.
+              연도별 총액만 있어 계절성·페이스는 계산하지 못합니다.
+              <button onClick={fillMonthlyFromSeed} style={{
+                display: "block", marginTop: 9, padding: "8px 14px", borderRadius: 9, border: "none",
+                background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+              }}>월별 채우기</button>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text3)", marginTop: 6, lineHeight: 1.5 }}>
+                앱에 있는 검증된 월별 자료의 달별 비율을 넣습니다. 각 연도의 연 총액은 지금 값 그대로 유지됩니다.
+              </span>
             </>)}
           </div>
         );
@@ -7682,6 +7689,40 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
         </div>
       </>
     );
+  };
+
+  // ── 월별 데이터 채우기 ──
+  // 저장된 연도가 총액만 갖고 있으면 계절성·페이스를 계산할 수 없다.
+  // 앱에 들어 있는 검증된 월별 시드(INIT_YEARLY_REVENUE)의 "분포"만 빌려 오되,
+  // 그 해의 총액은 저장된 값 그대로 유지되도록 비례 배분한다 — 총액이 바뀌면 사고다.
+  const fillMonthlyFromSeed = () => {
+    const rowsNeed = (yearlyRevenue || []).filter(d => d.year < CURRENT_YEAR && !yearHasMonthly(d) && yearTotalOf(d) > 0);
+    if (rowsNeed.length === 0) { showToast("월별을 채울 연도가 없습니다"); return; }
+    const seeded = rowsNeed.filter(d => {
+      const s = INIT_YEARLY_REVENUE.find(x => x.year === d.year);
+      return s && Array.isArray(s.monthly) && s.monthly.some(v => Number(v) > 0);
+    });
+    const missing = rowsNeed.filter(d => !seeded.includes(d));
+    if (seeded.length === 0) { showToast("이 연도들에 대한 월별 자료가 앱에 없습니다"); return; }
+    const lines = seeded.map(d => `· ${d.year}년 — 총액 ${fmt억(yearTotalOf(d))} 유지`).join("\n");
+    const warn = missing.length ? `\n\n채우지 못하는 연도: ${missing.map(d => d.year).join(", ")} (앱에 월별 자료 없음)` : "";
+    if (!window.confirm(`${seeded.length}개 연도의 월별을 채웁니다.\n\n${lines}\n\n각 연도의 연 총액은 지금 값 그대로 두고, 달별 비율만 넣습니다.${warn}`)) return;
+    setYearlyRevenue(prev => (prev || []).map(d => {
+      if (!seeded.includes(d)) return d;
+      const seed = INIT_YEARLY_REVENUE.find(x => x.year === d.year);
+      const seedSum = seed.monthly.reduce((a, b) => a + (Number(b) || 0), 0);
+      const target = yearTotalOf(d);
+      if (!(seedSum > 0) || !(target > 0)) return d;
+      // 비례 배분 후 반올림 오차는 가장 큰 달에서 흡수해 합계를 정확히 맞춘다
+      const scaled = seed.monthly.map(v => Math.round((Number(v) || 0) * target / seedSum));
+      const diff = target - scaled.reduce((a, b) => a + b, 0);
+      if (diff !== 0) {
+        const bi = scaled.indexOf(Math.max(...scaled));
+        scaled[bi] += diff;
+      }
+      return { ...d, monthly: scaled, total: undefined };
+    }));
+    showToast(`${seeded.length}개 연도의 월별을 채웠습니다 — 연 총액은 그대로입니다`, "success");
   };
 
   // ── 히트맵: 월 × 연도 ──
