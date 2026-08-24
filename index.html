@@ -1172,8 +1172,17 @@
     /* ── 발주 관리 워크벤치 (시안 C) ── */
     .po-workbench { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: start; }
     @media (max-width: 980px) { .po-workbench { grid-template-columns: 1fr; } }
-    .po-list-scroll { display: flex; flex-direction: column; gap: 8px; max-height: 72vh; overflow-y: auto; padding-right: 2px; }
-    @media (max-width: 980px) { .po-list-scroll { max-height: none; } }
+    /* 목록은 화면 높이에 맞춰 자체 스크롤 — 오른쪽 상세가 늘 같은 자리에 보이게 한다.
+       vh만 쓰면 위쪽 KPI·검색·칩 높이만큼 화면 밖으로 밀리므로 그만큼 빼준다. */
+    .po-list-scroll {
+      display: flex; flex-direction: column; gap: 8px;
+      max-height: calc(100vh - 420px); min-height: 240px;
+      overflow-y: auto; overflow-x: hidden; padding-right: 4px;
+    }
+    /* flex column에 높이 제한을 걸면 자식이 눌려 카드 안쪽이 잘린다 — 카드는 줄이지 않는다 */
+    .po-list-scroll > * { flex-shrink: 0; }
+    .po-list-scroll::-webkit-scrollbar { width: 6px; }
+    @media (max-width: 980px) { .po-list-scroll { max-height: 52vh; } }
   </style>
 </head>
 <body>
@@ -20860,37 +20869,46 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               ) : listed.map(({ po, prog, due }) => {
                                 const isSel = selected && selected.po.id === po.id;
                                 const st = stBadge(prog);
-                                const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${po.items.length - 2}` : "");
+                                const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${(po.items || []).length - 2}` : "");
+                                // 카드 높이를 맞추기 위해 모든 줄을 항상 그린다 (값이 없으면 — 로 자리만 지킨다).
+                                // 줄을 조건부로 빼면 카드마다 높이가 달라져 아래 진행바·금액이 들쭉날쭉해진다.
+                                const dueColor = !due ? "var(--text3)"
+                                  : due.kind === "late" ? "var(--negative-text)"
+                                  : due.kind === "soon" ? "var(--warning-text)" : "var(--text3)";
+                                const dueBg = !due || due.kind === "ok" ? "transparent"
+                                  : due.kind === "late" ? "var(--negative-bg)" : "var(--warning-bg)";
                                 return (
                                   <div key={po.id} onClick={() => setSelectedPOId(po.id)}
-                                    style={{ padding: "12px 14px", borderRadius: 13, cursor: "pointer",
+                                    style={{ padding: "12px 14px", borderRadius: 13, cursor: "pointer", flexShrink: 0,
                                       border: isSel ? "1.5px solid var(--accent)" : "1px solid var(--divider)",
                                       background: isSel ? "rgba(219,107,46,0.07)" : "var(--surface)",
                                       display: "flex", flexDirection: "column", gap: 7 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                      <span style={{ fontSize: 13, fontWeight: isSel ? 800 : 700, color: T.text, flexGrow: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.supplier?.name || "(미지정)"}{po.updatedAt && <span title="수정됨" style={{ marginLeft: 4, fontSize: 10, color: "#DB6B2E", fontWeight: 700 }}>✎</span>}</span>
-                                      <span style={{ flexShrink: 0, padding: "3px 9px", borderRadius: 100, fontSize: 10, fontWeight: 800, color: st.color, background: st.bg }}>{st.label}</span>
+                                    {/* 1행 — 거래처 + 상태 (한 줄 고정) */}
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 20 }}>
+                                      <span style={{ fontSize: 13, fontWeight: isSel ? 800 : 700, color: T.text, flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.supplier?.name || "(미지정)"}</span>
+                                      <span style={{ flexShrink: 0, padding: "3px 9px", borderRadius: 100, fontSize: 10, fontWeight: 800, color: st.color, background: st.bg, whiteSpace: "nowrap" }}>{st.label}</span>
                                     </div>
-                                    <div style={{ fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"} · {po.orderDate || po.dateStr || "—"}</div>
-                                    {/* 납기 · 미입고 잔량 — 진행률 %만으로는 "얼마나 남았나"를 알 수 없다 */}
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                                      <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap" }}>
-                                        {prog.done ? `${prog.ord.toLocaleString()} 전량 입고` : `잔여 ${Math.max(0, prog.ord - prog.rcvd).toLocaleString()} / ${prog.ord.toLocaleString()}`}
+                                    {/* 2행 — 제목·품목 (한 줄 고정) */}
+                                    <div style={{ fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minHeight: 16 }}>{po.title || itemsPreview || "—"}</div>
+                                    {/* 3행 — 잔여 · 납기 (한 줄 고정) */}
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 18 }}>
+                                      <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                        {prog.ord > 0
+                                          ? (prog.done ? `${prog.ord.toLocaleString()} 전량 입고` : `잔여 ${Math.max(0, prog.ord - prog.rcvd).toLocaleString()} / ${prog.ord.toLocaleString()}`)
+                                          : "수량 미입력"}
                                       </span>
-                                      {due && (
-                                        <span style={{
-                                          fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0,
-                                          padding: due.kind === "ok" ? 0 : "2px 7px", borderRadius: 6,
-                                          color: due.kind === "late" ? "var(--negative-text)" : due.kind === "soon" ? "var(--warning-text)" : "var(--text3)",
-                                          background: due.kind === "late" ? "var(--negative-bg)" : due.kind === "soon" ? "var(--warning-bg)" : "transparent",
-                                        }}>{due.label}</span>
-                                      )}
+                                      <span style={{
+                                        fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0,
+                                        padding: (due && due.kind !== "ok") ? "2px 7px" : 0, borderRadius: 6,
+                                        color: dueColor, background: dueBg,
+                                      }}>{due ? due.label : (po.deliveryDate ? "" : "납기 미지정")}</span>
                                     </div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    {/* 4행 — 진행바 + 금액 (모든 카드에서 같은 높이에 온다) */}
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 18 }}>
                                       <div style={{ flexGrow: 1, height: 4, borderRadius: 100, background: "var(--surface2)" }}>
-                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "#00B493" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
+                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "var(--positive)" : prog.rcvd > 0 ? "var(--warning)" : "var(--accent)" }} />
                                       </div>
-                                      <span style={{ fontSize: 12.5, fontWeight: 800, color: NAVY, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{Number(po.totalAmount || 0).toLocaleString()}원</span>
+                                      <span style={{ fontSize: 12.5, fontWeight: 800, color: NAVY, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{(Number(po.totalAmount) || 0).toLocaleString()}원</span>
                                     </div>
                                   </div>
                                 );
