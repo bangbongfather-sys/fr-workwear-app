@@ -15543,6 +15543,38 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (supName) setPurchaseSubTabs(p2 => (p2 || []).some(t => t.name === supName) ? p2 : [...(p2 || []), { id: uid(), name: supName }]);
     showToast(`매입 현황에 자동 등록: ${it.name} ${qty.toLocaleString()}${it.unit ? " " + it.unit : ""} 입고 (${supName || "공급처 미지정"})`, "success");
   };
+  // ── 거래처 이름 변경·합치기 ──
+  // 같은 곳인데 표기가 달라(lg프린트 / LG 프린트) 탭이 갈라지는 일이 있다.
+  // 이름을 이미 있는 거래처로 바꾸면 자연스럽게 합쳐진다.
+  // 거래처명은 발주서·매입 현황·미지급 원장 세 곳에 따로 저장돼 있어 함께 바꿔야 한다.
+  const renameSupplier = (from, to) => {
+    const f = (from || "").trim(), t = (to || "").trim();
+    if (!f || !t || f === t) return;
+    setPurchaseOrders(prev => prev.map(po =>
+      ((po.supplier?.name || "").trim() === f) ? { ...po, supplier: { ...(po.supplier || {}), name: t } } : po));
+    setFabricIntakes(prev => (prev || []).map(r =>
+      ((r.supplier || "").trim() === f) ? { ...r, supplier: t } : r));
+    setPayables(prev => {
+      const cur = prev || {};
+      if (!cur[f]) return cur;
+      const next = { ...cur };
+      const src = next[f];
+      delete next[f];
+      if (next[t]) {
+        // 이미 있는 거래처로 합치는 경우 — 기초잔액은 앞선 것을 두고 지급 내역만 이어 붙인다
+        next[t] = { ...next[t], payments: [ ...((next[t].payments) || []), ...((src.payments) || []) ] };
+      } else {
+        next[t] = src;
+      }
+      return next;
+    });
+    if (setPurchaseSubTabs) setPurchaseSubTabs(prev => {
+      const list = (prev || []).filter(x => (x.name || "").trim() !== f);
+      return list.some(x => (x.name || "").trim() === t) ? list : [...list, { id: uid(), name: t }];
+    });
+    setPoHistorySupFilter(cur => cur === f ? t : cur);
+  };
+
   const [poHistorySearch, setPoHistorySearch] = useState("");
   const [poHistorySupFilter, setPoHistorySupFilter] = useState("");
   const [poHistorySort, setPoHistorySort] = useState("date_desc"); // date_desc | date_asc | amount_desc | supplier
@@ -20705,7 +20737,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   const getDate = po => po.orderDate || po.dateStr?.replaceAll(".", "-") || "";
                   const q = poHistorySearch.trim().toLowerCase();
                   const filtered = purchaseOrders.filter(po => {
-                    if (poHistorySupFilter && (po.supplier?.name || "") !== poHistorySupFilter) return false;
+                    // 표기만 다른 같은 거래처(lg프린트 / LG 프린트)도 한 탭에서 함께 보이게 비교한다
+                    const norm = (n) => (n || "").trim().toLowerCase().replace(/\s+/g, "");
+                    if (poHistorySupFilter && norm(po.supplier?.name) !== norm(poHistorySupFilter)) return false;
                     if (!q) return true;
                     return (po.title || "").toLowerCase().includes(q)
                       || (po.supplier?.name || "").toLowerCase().includes(q)
@@ -20759,14 +20793,22 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       return av.localeCompare(bv);
                     });
                   }
-                  const supplierTotals = {};
+                  // 대소문자·공백만 다른 이름은 같은 거래처로 본다 (lg프린트 / LG 프린트).
+                  // 데이터는 그대로 두고 탭에서만 묶는다 — 표시 이름은 가장 많이 쓰인 표기를 따른다.
+                  const supKey = (n) => (n || "").trim().toLowerCase().replace(/\s+/g, "");
+                  const supBuckets = {};
                   purchaseOrders.forEach(po => {
-                    const name = po.supplier?.name || "(미지정)";
-                    if (!supplierTotals[name]) supplierTotals[name] = { count: 0, amount: 0 };
-                    supplierTotals[name].count += 1;
-                    supplierTotals[name].amount += Number(po.totalAmount) || 0;
+                    const raw = (po.supplier?.name || "").trim() || "(미지정)";
+                    const k = supKey(raw);
+                    if (!supBuckets[k]) supBuckets[k] = { count: 0, amount: 0, names: {} };
+                    supBuckets[k].count += 1;
+                    supBuckets[k].amount += Number(po.totalAmount) || 0;
+                    supBuckets[k].names[raw] = (supBuckets[k].names[raw] || 0) + 1;
                   });
-                  const supList = Object.entries(supplierTotals).sort((a, b) => b[1].amount - a[1].amount);
+                  const supList = Object.values(supBuckets).map(b => {
+                    const label = Object.entries(b.names).sort((x, y) => y[1] - x[1])[0][0];
+                    return [label, { count: b.count, amount: b.amount, variants: Object.keys(b.names) }];
+                  }).sort((a, b) => b[1].amount - a[1].amount);
                   const grandTotal = purchaseOrders.reduce((s, po) => s + (Number(po.totalAmount) || 0), 0);
                   const listedTotal = listed.reduce((s, x) => s + (Number(x.po.totalAmount) || 0), 0);
                   const selected = listed.find(x => x.po.id === selectedPOId) || listed[0] || null;
@@ -20835,7 +20877,21 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             {[["", "전체", purchaseOrders.length], ...supList.map(([n, i]) => [n, n, i.count])].map(([key, label, count]) => {
                               const on = poHistorySupFilter === key;
                               return (
-                                <button key={key || "__all"} onClick={() => setPoHistorySupFilter(key)} style={{
+                                <button key={key || "__all"} onClick={() => setPoHistorySupFilter(key)}
+                                  onDoubleClick={() => {
+                                    if (!key) return;   // 「전체」는 이름이 아니다
+                                    const bucket = supList.find(([n]) => n === key);
+                                    const variants = (bucket && bucket[1].variants) || [key];
+                                    const to = (window.prompt(`'${key}'의 새 이름\n이미 있는 거래처 이름을 넣으면 그쪽으로 합쳐집니다.`, key) || "").trim();
+                                    if (!to) return;
+                                    const exists = supList.some(([n]) => n === to && n !== key);
+                                    if (exists && !window.confirm(`'${key}'를 '${to}'로 합칠까요?\n두 거래처의 발주서·매입 내역·미지급 정산이 '${to}' 하나로 모입니다.`)) return;
+                                    // 표기가 갈려 있던 이름들도 이 기회에 하나로 맞춘다
+                                    variants.forEach(v => renameSupplier(v, to));
+                                    showToast(exists ? `'${to}'로 합쳤습니다` : `'${to}'로 이름을 바꿨습니다`, "success");
+                                  }}
+                                  title={key ? "더블클릭하면 이름 변경 · 다른 거래처 이름을 넣으면 합쳐집니다" : ""}
+                                  style={{
                                   padding: "10px 2px 11px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
                                   fontSize: 16, fontWeight: on ? 800 : 600, letterSpacing: "-0.01em", whiteSpace: "nowrap", flexShrink: 0,
                                   color: on ? "var(--text1)" : "var(--text3)",
