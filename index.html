@@ -546,11 +546,16 @@
        두었으므로(주황/남색 배경 위 흰 글씨) 건드리지 않는다. */
     body.dark :is(.bold-doc, .card-doc, .korean-doc) tbody td { color: var(--doc-text); }
 
-    /* 견적 작업 화면(작성·이력): 문서를 열 왼쪽에 붙여 오른쪽 손익 패널 폭을 확보.
-       모바일(1열)에서는 기존처럼 가운데 정렬을 유지한다. */
+    /* 견적 작업 화면(작성·이력)은 좌우 반반 분할 — 문서가 자기 칸을 꽉 채우게 한다.
+       평소 문서에 걸린 max-width(820~880px)를 여기서만 풀어야 넓은 화면에서
+       왼쪽에 빈 공간이 생기지 않는다.
+       PDF·이미지 출력은 buildQuoteCanvas 가 별도 840px 캔버스에 복제해 렌더하므로
+       화면 폭을 넓혀도 출력물 비율은 그대로다.
+       모바일(1열)에서는 기존 가운데 정렬을 유지한다. */
     @media (min-width: 769px) {
       .quote-work > :first-child :is(.apple-doc, .bold-doc, .card-doc, .korean-doc) {
         margin-left: 0; margin-right: auto;
+        max-width: none; width: 100%;
       }
     }
 
