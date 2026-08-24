@@ -1173,7 +1173,7 @@
     /* 왼쪽 목록이 화면 높이만큼 서 있는데 오른쪽 상세는 내용만큼만 커서 아래가 비어 보였다.
        stretch로 두 열의 높이를 맞추고, 상세 안쪽이 길면 그 안에서 스크롤한다. */
     .po-workbench { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: stretch; }
-    .po-detail-pane { display: flex; flex-direction: column; min-height: calc(100vh - 300px); }
+    .po-detail-pane { display: flex; flex-direction: column; min-height: calc(100vh - 350px); }
     .po-detail-pane > .card { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
     .po-detail-pane > .card > * { flex-shrink: 0; }
     @media (max-width: 980px) {
@@ -1185,7 +1185,7 @@
        vh만 쓰면 위쪽 KPI·검색·칩 높이만큼 화면 밖으로 밀리므로 그만큼 빼준다. */
     .po-list-scroll {
       display: flex; flex-direction: column; gap: 8px;
-      max-height: calc(100vh - 420px); min-height: 240px;
+      max-height: calc(100vh - 470px); min-height: 240px;
       overflow-y: auto; overflow-x: hidden; padding-right: 4px;
     }
     /* flex column에 높이 제한을 걸면 자식이 눌려 카드 안쪽이 잘린다 — 카드는 줄이지 않는다 */
@@ -20827,13 +20827,40 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           </div>
                         )}
 
+                        {/* ── 거래처 탭 ──
+                            검색 카드 안 작은 칩으로 있어 눈에 잘 안 띄었다. 단가표의 「단가표 탭」과
+                            같은 문법으로 큰 탭 줄로 올려, 거래처 전환이 화면의 1차 축이 되게 한다. */}
+                        {supList.length > 0 && (
+                          <div className="scroll-x no-print" style={{ display: "flex", gap: 22, alignItems: "center", borderBottom: "1px solid var(--divider)", overflowX: "auto", marginBottom: 14 }}>
+                            {[["", "전체", purchaseOrders.length], ...supList.map(([n, i]) => [n, n, i.count])].map(([key, label, count]) => {
+                              const on = poHistorySupFilter === key;
+                              return (
+                                <button key={key || "__all"} onClick={() => setPoHistorySupFilter(key)} style={{
+                                  padding: "10px 2px 11px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
+                                  fontSize: 16, fontWeight: on ? 800 : 600, letterSpacing: "-0.01em", whiteSpace: "nowrap", flexShrink: 0,
+                                  color: on ? "var(--text1)" : "var(--text3)",
+                                  borderBottom: on ? "2.5px solid var(--accent)" : "2.5px solid transparent",
+                                  display: "inline-flex", alignItems: "center", gap: 7,
+                                }}>
+                                  {label}
+                                  <span style={{
+                                    fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 100,
+                                    background: on ? "var(--accent-tonal)" : "var(--surface2)",
+                                    color: on ? "var(--accent-strong)" : "var(--text3)",
+                                  }}>{count}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
                         <div className="po-workbench">
                           {/* ── 왼쪽: 목록 ── */}
                           <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
                             <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                               <div style={{ position: "relative" }}>
                                 <input value={poHistorySearch} onChange={e => setPoHistorySearch(e.target.value)}
-                                  placeholder={"거래처·품목·메모 검색" + (poHistorySupFilter ? ` (필터: ${poHistorySupFilter})` : "")}
+                                  placeholder="거래처·품목·메모 검색"
                                   style={{ width: "100%", height: 40, paddingLeft: 12, fontSize: 13 }} />
                                 {poHistorySearch && (
                                   <button onClick={() => setPoHistorySearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", width: 22, height: 22, borderRadius: 11, border: "none", background: "var(--divider)", color: "var(--text2)", cursor: "pointer", fontSize: 12 }}>×</button>
@@ -20857,18 +20884,6 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   <option value="amount_desc">금액 높은순</option>
                                   <option value="supplier">거래처명순</option>
                                 </select>
-                              </div>
-                              <div className="chip-scroll" style={{ gap: 6 }}>
-                                {supList.map(([name, info]) => {
-                                  const active = poHistorySupFilter === name;
-                                  return (
-                                    <button key={name} onClick={() => setPoHistorySupFilter(active ? "" : name)}
-                                      title={`${info.count}건 · ${Number(info.amount).toLocaleString()}원`}
-                                      style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 100, fontFamily: "inherit", fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: "pointer",
-                                        background: active ? "var(--accent)" : "var(--surface2)", color: active ? "#fff" : "var(--text2)",
-                                        border: active ? "none" : "1px solid var(--divider)" }}>{name} {info.count}</button>
-                                  );
-                                })}
                               </div>
                             </div>
 
@@ -21001,7 +21016,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               <button onClick={onClick} title={title} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: color || "var(--text2)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name={icon} size={14}/></button>
                             );
                             return (
-                              <div className="card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+                              <div className="card" style={{ padding: "22px 24px", display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
                                 {/* 헤더 */}
                                 <div style={{ display: "flex", alignItems: "flex-start", gap: 11, flexWrap: "wrap" }}>
                                   <div style={{ width: 40, height: 40, borderRadius: 12, background: st.bg, color: st.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, flexShrink: 0 }}>{(po.supplier?.name || "?").slice(0, 1)}</div>
@@ -21044,36 +21059,36 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
                                 {/* 지표 타일 */}
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
-                                  <div style={{ background: "var(--surface2)", borderRadius: 13, padding: "12px 14px" }}>
-                                    <div style={{ fontSize: 11, fontWeight: 600, color: T.text3 }}>발주 금액 (VAT 포함)</div>
+                                  <div style={{ background: "var(--row-bg)", border: "1px solid var(--divider)", borderRadius: 13, padding: "14px 16px" }}>
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, color: T.text3 }}>발주 금액 (VAT 포함)</div>
                                     <div style={{ fontSize: 17, fontWeight: 800, color: T.text, marginTop: 4, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{Number(po.totalAmount || 0).toLocaleString()}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>원</span></div>
                                   </div>
-                                  <div style={{ background: "var(--surface2)", borderRadius: 13, padding: "12px 14px" }}>
-                                    <div style={{ fontSize: 11, fontWeight: 600, color: T.text3 }}>입고 진행</div>
+                                  <div style={{ background: "var(--row-bg)", border: "1px solid var(--divider)", borderRadius: 13, padding: "14px 16px" }}>
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, color: T.text3 }}>입고 진행</div>
                                     <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 7 }}>
                                       <span style={{ fontSize: 17, fontWeight: 800, color: T.text, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{prog.pct}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>%</span></span>
                                       <div style={{ flexGrow: 1, height: 5, borderRadius: 100, background: "var(--divider)" }}>
-                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "#00B493" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
+                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "var(--positive)" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
                                       </div>
                                     </div>
                                     <div style={{ fontSize: 10.5, color: T.text3, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>입고 {prog.rcvd.toLocaleString()} / 발주 {prog.ord.toLocaleString()}</div>
                                   </div>
-                                  <div style={{ background: "var(--surface2)", borderRadius: 13, padding: "12px 14px" }}>
-                                    <div style={{ fontSize: 11, fontWeight: 600, color: T.text3 }}>미입고 잔액 (추정)</div>
-                                    <div style={{ fontSize: 17, fontWeight: 800, color: prog.done ? "#00B493" : "var(--accent)", marginTop: 4, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{(prog.done ? 0 : prog.remainAmt).toLocaleString()}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>원</span></div>
+                                  <div style={{ background: "var(--accent-tonal)", border: "1px solid rgba(219,107,46,0.2)", borderRadius: 13, padding: "14px 16px" }}>
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, color: "var(--accent-strong)" }}>미입고 잔액 (추정)</div>
+                                    <div style={{ fontSize: 17, fontWeight: 800, color: prog.done ? "var(--positive-text)" : "var(--accent-strong)", marginTop: 4, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{(prog.done ? 0 : prog.remainAmt).toLocaleString()}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>원</span></div>
                                     <div style={{ fontSize: 10.5, color: T.text3, marginTop: 4 }}>잔여 수량 × 단가 (VAT 포함)</div>
                                   </div>
                                 </div>
 
                                 {/* 품목별 입고 현황 (기존 부분입고·빠른수정 로직 그대로) */}
-                                <div>
+                                <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                                     <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>품목별 입고 현황 ({its.length}건)</span>
                                     <span style={{ fontSize: 10.5, color: T.text3, background: "var(--surface2)", padding: "3px 8px", borderRadius: 100 }}>입고수량 입력 시 매입 현황에 자동 기록</span>
                                   </div>
-                                      <div style={{ overflowX: "auto" }}>
+                                      <div style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "auto", border: "1px solid var(--divider)", borderRadius: 12 }}>
                                         <table style={{ width: "100%", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
-                                          <thead><tr style={{ color: T.text3, fontSize: 11 }}>
+                                          <thead style={{ position: "sticky", top: 0, background: "var(--surface)", zIndex: 1 }}><tr style={{ color: T.text3, fontSize: 11 }}>
                                             <th style={{ textAlign: "left", padding: "6px 8px" }}>품목</th>
                                             <th style={{ textAlign: "right", padding: "6px 8px", width: 90 }}>발주수량</th>
                                             <th style={{ textAlign: "right", padding: "6px 8px", width: 110 }}>입고수량</th>
@@ -21250,7 +21265,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 </div>
 
                                 {/* 입고 이력 타임라인 */}
-                                <div>
+                                <div style={{ flexShrink: 0 }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                                     <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>입고 이력</span>
                                     {timeline.length > 0 && <span style={{ padding: "2px 8px", borderRadius: 100, background: "var(--surface2)", color: T.text3, fontSize: 10.5, fontWeight: 700 }}>{timeline.length}회</span>}
