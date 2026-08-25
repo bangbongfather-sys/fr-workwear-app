@@ -20703,17 +20703,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   });
                   // 입고 진행률 (수량 기준) + 미입고 잔액 (잔여수량×단가×1.1)
                   const poProgress = (po) => {
-                    let ord = 0, rcvd = 0, remainAmt = 0;
+                    // 품목별로 발주수량까지만 인정(초과 입고가 다른 품목의 미입고를 가리지 않도록)
+                    let ord = 0, rcvd = 0, capped = 0, remainAmt = 0, pendingItems = 0, anyOrd = false, allDone = true;
                     (po.items || []).forEach(it => {
                       const o = parseFloat(it.qty) || 0;
                       const r = parseFloat(it.receivedQty);
                       const rr = isNaN(r) ? 0 : r;
-                      ord += o; rcvd += rr;
+                      ord += o; rcvd += rr; capped += Math.min(rr, o);
+                      if (o > 0) { anyOrd = true; if (rr < o) { allDone = false; pendingItems += 1; } }
                       remainAmt += Math.max(0, o - rr) * (Number(it.unitPrice) || 0);
                     });
-                    const pct = ord > 0 ? Math.min(100, Math.round(rcvd / ord * 100)) : 0;
-                    const done = ord > 0 && rcvd >= ord;
-                    return { ord, rcvd, pct, done, remainAmt: Math.round(remainAmt * 1.1) };
+                    const done = anyOrd && allDone;
+                    let pct = ord > 0 ? Math.round(capped / ord * 100) : 0;
+                    if (done) pct = 100; else if (pct >= 100) pct = 99; // 미입고 품목이 남아 있으면 100% 표기 금지
+                    return { ord, rcvd, pct, done, pendingItems, remainAmt: Math.round(remainAmt * 1.1) };
                   };
                   const withProg = sorted.map(po => ({ po, prog: poProgress(po) }));
                   const activeCnt = withProg.filter(x => !x.prog.done).length;
@@ -20909,7 +20912,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                         <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "#00B493" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
                                       </div>
                                     </div>
-                                    <div style={{ fontSize: 10.5, color: T.text3, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>입고 {prog.rcvd.toLocaleString()} / 발주 {prog.ord.toLocaleString()}</div>
+                                    <div style={{ fontSize: 10.5, color: T.text3, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>입고 {prog.rcvd.toLocaleString()} / 발주 {prog.ord.toLocaleString()}{prog.pendingItems > 0 && <b style={{ color: "#FE9800", marginLeft: 5 }}>미입고 {prog.pendingItems}품목</b>}</div>
                                   </div>
                                   <div style={{ background: "var(--surface2)", borderRadius: 13, padding: "12px 14px" }}>
                                     <div style={{ fontSize: 11, fontWeight: 600, color: T.text3 }}>미입고 잔액 (추정)</div>
