@@ -21320,8 +21320,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       <span style={{
                                         fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0,
                                         padding: (due && due.kind !== "ok") ? "2px 7px" : 0, borderRadius: 6,
-                                        color: dueColor, background: dueBg,
-                                      }}>{due ? due.label : (po.deliveryDate ? "" : "납기 미지정")}</span>
+                                        color: prog.done ? "var(--positive-text)" : dueColor,
+                                        background: prog.done ? "transparent" : dueBg,
+                                      }}>{(() => {
+                                        // 다 들어온 건은 납기 대신 "언제 다 들어왔는지"가 알고 싶은 정보다
+                                        if (prog.done) {
+                                          const ds = (po.items || []).flatMap(x => (x.rcv || []).map(r => (r.date || "").slice(0, 10))).filter(Boolean).sort();
+                                          if (ds.length) return `${ds[ds.length - 1].slice(5).replace("-", ".")} 입고 완료`;
+                                          return "입고 완료";
+                                        }
+                                        return due ? due.label : (po.deliveryDate ? "" : "납기 미지정");
+                                      })()}</span>
                                     </div>
                                     {/* 4행 — 진행바 + 금액 (모든 카드에서 같은 높이에 온다) */}
                                     <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 18 }}>
@@ -21558,6 +21567,31 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                             background: nRcv > 0 || isRcptOpen ? "rgba(219,107,46,0.14)" : "var(--surface2)", color: nRcv > 0 || isRcptOpen ? "#DB6B2E" : "var(--text3)" }}>
                                                           📅 부분입고{nRcv > 0 ? ` ${nRcv}건` : ""}
                                                         </button>
+                                                        {/* 입고일 — 부분입고든 한 번에 전량이든 언제 들어왔는지는 항상 보여야 한다.
+                                                            여러 건이면 첫 입고~마지막 입고 범위로, 한 건이면 그 날짜로.
+                                                            부분입고 내역이 없는 품목은 연결된 매입 현황 행의 날짜를 쓴다. */}
+                                                        {(() => {
+                                                          const fmt = (d) => (d || "").slice(5).replace("-", ".");
+                                                          let label = "";
+                                                          if (nRcv > 0) {
+                                                            const ds = (it.rcv || []).map(r => (r.date || "").slice(0, 10)).filter(Boolean).sort();
+                                                            if (ds.length === 1) label = `${fmt(ds[0])} 입고`;
+                                                            else if (ds.length > 1) label = `${fmt(ds[0])}~${fmt(ds[ds.length - 1])}`;
+                                                          } else if (parseFloat(it.receivedQty) > 0) {
+                                                            const key = it.id != null ? String(it.id) : po.id + "#" + ii;
+                                                            const xi = findIntakeIdxForItem(fabricIntakes, po, it, key);
+                                                            const row = xi >= 0 ? fabricIntakes[xi] : null;
+                                                            label = row && row.date ? `${fmt(row.date)} 입고` : "입고일 미기록";
+                                                          }
+                                                          if (!label) return null;
+                                                          const unknown = label === "입고일 미기록";
+                                                          return (
+                                                            <div title={unknown ? "부분입고를 열어 입고일을 넣어 두면 이력에 남습니다" : "입고일"}
+                                                              style={{ marginTop: 2, fontSize: 10.5, fontWeight: unknown ? 500 : 600, color: unknown ? "var(--text3)" : "var(--text2)", textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                                                              {label}
+                                                            </div>
+                                                          );
+                                                        })()}
                                                       </>);
                                                     })()}
                                                   </td>
