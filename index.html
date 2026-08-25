@@ -12284,7 +12284,9 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
       const sign = r.status === "반품" ? -1 : 1;
       const qty = sign * (parseFloat(r.qty) || 0);
       const amt = Math.round(qty * (parseFloat(r.unitPrice) || 0) * 1.1);
-      return { kind: "buy", date: r.date || "", label: r.materialName || "(품목명 없음)", amount: amt, qty, isReturn: r.status === "반품", auto: true };
+      // 그때 단가를 함께 싣는다 — 나중에 단가표가 오르내려도 이 값은 그 매입 시점의 값이다
+      const up = parseFloat(r.unitPrice) || 0;
+      return { kind: "buy", date: r.date || "", label: r.materialName || "(품목명 없음)", amount: amt, qty, unitPrice: up, unit: r.unit || "", isReturn: r.status === "반품", auto: true };
     })
     .filter(r => r.amount !== 0);
   const manualBuyRows = manualBuyList.map(b => ({ kind: "buy", date: b.date || "", label: b.memo || "(수동 매입)", amount: parseFloat(b.amount) || 0, isManual: true, id: b.id }));
@@ -12406,7 +12408,7 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ fontSize: 11, color: "var(--text3)" }}>
               <th style={{ padding: "9px 10px", textAlign: "left", width: 96 }}>거래일자</th>
-              <th style={{ padding: "9px 10px", textAlign: "left" }}>품목 / 내용</th>
+              <th style={{ padding: "9px 10px", textAlign: "left" }}>품목 / 내용 <span style={{ fontWeight: 400 }}>· 매입 당시 단가</span></th>
               <th style={{ padding: "9px 10px", textAlign: "right", width: 80 }}>수량</th>
               <th style={{ padding: "9px 10px", textAlign: "right", width: 120 }}>매입액(VAT포함)</th>
               <th style={{ padding: "9px 10px", textAlign: "right", width: 120 }}>지급액</th>
@@ -12445,6 +12447,12 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
                   <td style={td}>{r.label}
                     {r.isReturn ? <span style={{ color: "#F04452", fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>반품</span> : null}
                     {r.isManual ? <span title="여기서 직접 추가한 매입" style={{ fontSize: 9.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", padding: "2px 6px", borderRadius: 100, marginLeft: 6, verticalAlign: "middle" }}>수동</span> : null}</td>
+                    {r.unitPrice > 0 && (
+                      <div title="이 매입이 이뤄진 시점의 단가입니다 — 단가표가 나중에 바뀌어도 그대로 남습니다"
+                        style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+                        당시 단가 {W(r.unitPrice)}원{r.unit ? " / " + r.unit : ""}
+                      </div>
+                    )}
                   <td style={{ ...td, textAlign: "right", color: "var(--text2)" }}>{r.qty ? r.qty.toLocaleString() : ""}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 600, color: r.amount < 0 ? "#F04452" : "var(--text1)" }}>{W(r.amount)}</td>
                   <td style={td}></td>
@@ -14095,10 +14103,19 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                           const nm = e.target.value;
                           // 자재 + 공임 둘 다 탐색 (신규 폼과 동일)
                           const found = materials.find(m=>m.name===nm) || laborItems.find(l=>l.name===nm);
+                          // 이미 적혀 있는 단가는 그 매입 시점의 값이다 — 품목명을 다시 골랐다고
+                          // 오늘 단가로 덮어쓰면 과거 기록이 조용히 바뀐다. 비어 있을 때만 채운다.
+                          const hadPrice = parseFloat(editDraft && editDraft.unitPrice) > 0;
+                          if (found && hadPrice && String(found.price ?? "") !== String(editDraft.unitPrice)) {
+                            showToast(`단가는 그대로 둡니다 — 이 매입 당시 ${Number(editDraft.unitPrice).toLocaleString()}원 (지금 단가표는 ${Number(found.price || 0).toLocaleString()}원). 바꾸려면 단가 칸을 직접 고치세요.`, "info");
+                          }
                           setEditDraft(d=>({
                             ...d,
                             materialName: nm,
-                            ...(found ? { unitPrice: String(found.price ?? ""), unit: found.unit || d.unit } : {}),
+                            ...(found ? {
+                              unitPrice: (parseFloat(d.unitPrice) > 0) ? d.unitPrice : String(found.price ?? ""),
+                              unit: d.unit || found.unit,
+                            } : {}),
                           }));
                         }} style={{height:34,fontSize:12,padding:"0 6px"}}>
                           <option value="">선택...</option>
@@ -14157,7 +14174,24 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                   <td style={{fontWeight:600,fontSize:13}}>{r.materialName}</td>
                   <td style={{fontSize:13}}>{r.supplier}</td>
                   <td style={{textAlign:"right",fontSize:13}}>{parseFloat(r.qty||0).toLocaleString()} {r.unit}</td>
-                  <td style={{textAlign:"right",fontSize:13}}>{parseFloat(r.unitPrice||0).toLocaleString()}원</td>
+                  {/* 이 행의 단가는 매입 당시 스냅샷이다. 단가표가 그 뒤 바뀌었으면 그 사실을 알려
+                      "왜 다르지?"를 없앤다 — 값 자체는 절대 따라 바뀌지 않는다. */}
+                  <td style={{textAlign:"right",fontSize:13}}>
+                    {parseFloat(r.unitPrice||0).toLocaleString()}원
+                    {(() => {
+                      const cur = (materials.find(m => m.name === r.materialName) || laborItems.find(l => l.name === r.materialName));
+                      const now = cur ? Number(cur.price) || 0 : 0;
+                      const was = parseFloat(r.unitPrice) || 0;
+                      if (!now || !was || now === was) return null;
+                      const up = now > was;
+                      return (
+                        <div title={`매입 당시 ${was.toLocaleString()}원 · 지금 단가표 ${now.toLocaleString()}원 — 이 행은 당시 값 그대로입니다`}
+                          style={{ fontSize: 10, fontWeight: 700, marginTop: 1, color: up ? "var(--negative-text)" : "var(--positive-text)", whiteSpace: "nowrap" }}>
+                          지금 {now.toLocaleString()}원 {up ? "▲" : "▼"}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td style={{textAlign:"right",fontWeight:700,fontSize:13,color:"#DB6B2E"}}>{total>0?Math.round(total).toLocaleString()+"원":"—"}</td>
                   <td style={{textAlign:"right",fontWeight:600,fontSize:13,color:"var(--text1)"}}>{total>0?Math.round(total*1.1).toLocaleString()+"원":"—"}</td>
                   <td style={{textAlign:"center"}}><span style={{display:"inline-block",padding:"3px 9px",borderRadius:100,fontSize:11,fontWeight:700,background:sc+"22",color:sc,whiteSpace:"nowrap"}}>{r.status}</span></td>
