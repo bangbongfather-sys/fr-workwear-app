@@ -1169,11 +1169,47 @@
       .apple-doc table, .bold-doc table, .card-doc table, .korean-doc table { margin: 6px 0 !important; }
       .apple-doc hr, .bold-doc hr, .card-doc hr, .korean-doc hr { margin: 10px 0 !important; }
     }
+    /* ── 월별 장부 표 — 줄무늬 행 (시안 A). 숫자 행이 많을 때 줄을 따라 읽기 쉽게 ── */
+    .ledger-table tbody tr:nth-child(even) td { background: rgba(23,24,26,0.018); }
+    body.dark .ledger-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+    /* ── 거래처별 미수금 워크벤치 (시안 B) ── */
+    .ar-workbench { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .ar-list {
+      display: flex; flex-direction: column; gap: 3px;
+      max-height: calc(100vh - 420px); min-height: 240px;
+      overflow-y: auto; overflow-x: hidden; padding-right: 4px;
+    }
+    .ar-list > * { flex-shrink: 0; }
+    .ar-list::-webkit-scrollbar { width: 6px; }
+    @media (max-width: 1000px) {
+      .ar-workbench { grid-template-columns: minmax(0, 1fr); }
+      .ar-list { max-height: 46vh; }
+    }
+
     /* ── 발주 관리 워크벤치 (시안 C) ── */
-    .po-workbench { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: start; }
-    @media (max-width: 980px) { .po-workbench { grid-template-columns: 1fr; } }
-    .po-list-scroll { display: flex; flex-direction: column; gap: 8px; max-height: 72vh; overflow-y: auto; padding-right: 2px; }
-    @media (max-width: 980px) { .po-list-scroll { max-height: none; } }
+    /* 왼쪽 목록이 화면 높이만큼 서 있는데 오른쪽 상세는 내용만큼만 커서 아래가 비어 보였다.
+       stretch로 두 열의 높이를 맞추고, 상세 안쪽이 길면 그 안에서 스크롤한다. */
+    .po-workbench { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: stretch; }
+    .po-detail-pane { display: flex; flex-direction: column; min-height: calc(100vh - 350px); }
+    .po-detail-pane > .card { flex: 1; display: flex; flex-direction: column; overflow-y: auto; }
+    .po-detail-pane > .card > * { flex-shrink: 0; }
+    @media (max-width: 980px) {
+      .po-workbench { grid-template-columns: 1fr; align-items: start; }
+      .po-detail-pane { min-height: 0; }
+      .po-detail-pane > .card { flex: none; }
+    }
+    /* 목록은 화면 높이에 맞춰 자체 스크롤 — 오른쪽 상세가 늘 같은 자리에 보이게 한다.
+       vh만 쓰면 위쪽 KPI·검색·칩 높이만큼 화면 밖으로 밀리므로 그만큼 빼준다. */
+    .po-list-scroll {
+      display: flex; flex-direction: column; gap: 8px;
+      max-height: calc(100vh - 470px); min-height: 240px;
+      overflow-y: auto; overflow-x: hidden; padding-right: 4px;
+    }
+    /* flex column에 높이 제한을 걸면 자식이 눌려 카드 안쪽이 잘린다 — 카드는 줄이지 않는다 */
+    .po-list-scroll > * { flex-shrink: 0; }
+    .po-list-scroll::-webkit-scrollbar { width: 6px; }
+    @media (max-width: 980px) { .po-list-scroll { max-height: 52vh; } }
   </style>
 </head>
 <body>
@@ -7011,6 +7047,66 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
         </div>
       )}
 
+      {/* ── 해석 카드 (시안 A) ──
+          숫자만 있으면 "그래서 뭘 해야 하나"가 남는다. 아래 문장은 전부 위 데이터에서
+          계산되는 것만 쓴다 — 성수기는 연도별 월 평균에서, 전망은 남은 달을 예년 평균으로
+          채워 낸 값이다. */}
+      {(() => {
+        if (!last || data.length < 2) return null;
+        const withM = data.filter(d => (d._monthly || []).some(v => v > 0));
+        const hasMonthly = withM.length >= 2;
+        const monthAvg = Array.from({ length: 12 }, (_, i) => {
+          const vs = withM.filter(d => !d._isLive).map(d => d._monthly[i]).filter(v => v > 0);
+          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : 0;
+        });
+        const yearAvg = monthAvg.reduce((a, b) => a + b, 0);
+        const order = monthAvg.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
+        const top3 = order.slice(0, 3);
+        const top3Share = top3.reduce((s, x) => s + x.v, 0) / yearAvg * 100;
+        const lowIdx = order[order.length - 1].i;
+        // 올해 진행률 — 실적이 있는 마지막 달까지
+        const liveM = last._monthly || [];
+        const doneIdx = liveM.reduce((m, v, i) => (v > 0 ? i : m), -1);
+        const doneSum = liveM.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
+        const expectedSoFar = monthAvg.slice(0, doneIdx + 1).reduce((a, b) => a + b, 0);
+        const pace = expectedSoFar > 0 ? (doneSum / expectedSoFar - 1) * 100 : null;
+        const forecast = doneIdx >= 0 ? doneSum + monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) : null;
+        const restShare = doneIdx >= 0 ? monthAvg.slice(doneIdx + 1).reduce((a, b) => a + b, 0) / yearAvg * 100 : 0;
+        const card = (label, tone, children) => (
+          <div className="card" style={{ padding: "14px 16px", background: tone ? "var(--accent-tonal)" : undefined, border: tone ? "1px solid rgba(219,107,46,0.18)" : undefined }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: tone ? "var(--accent-strong)" : "var(--text3)", marginBottom: 6 }}>{label}</div>
+            <div style={{ fontSize: 12.5, color: tone ? "var(--accent-strong)" : "var(--text1)", lineHeight: 1.6 }}>{children}</div>
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+            {hasMonthly && yearAvg > 0 && card("성수기", false, <>
+              {top3.map(x => `${x.i + 1}월`).join("·")}이 예년 매출의 <b>{top3Share.toFixed(0)}%</b>를 차지합니다.
+              가장 낮은 달은 <b>{lowIdx + 1}월</b>입니다.
+            </>)}
+            {card("변동성", false, <>
+              연도별 편차가 <b>{cvPct.toFixed(1)}%</b>입니다.
+              {cvPct >= 25 ? " 해마다 오르내림이 커서, 연 단위보다 분기로 자금을 잡는 편이 안전합니다." : " 비교적 고른 편이라 연 단위 계획이 통합니다."}
+            </>)}
+            {hasMonthly && yearAvg > 0 && pace !== null && doneIdx >= 0 && card("올해 페이스", true, <>
+              {doneIdx + 1}월까지 <b>{(doneSum / 1e8).toFixed(1)}억</b> — 예년 같은 시점보다 <b>{pace >= 0 ? "+" : ""}{pace.toFixed(1)}%</b>입니다.
+              {forecast !== null && <> 이 흐름이면 <b>{(forecast / 1e8).toFixed(1)}억</b>으로 마감됩니다.</>}
+              {restShare > 0 && <> 남은 달이 예년 매출의 {restShare.toFixed(0)}%라 아직 크게 갈립니다.</>}
+            </>)}
+            {!hasMonthly && card("월별 데이터", false, <>
+              연도별 총액만 있어 계절성·페이스는 계산하지 못합니다.
+              <button onClick={fillMonthlyFromSeed} style={{
+                display: "block", marginTop: 9, padding: "8px 14px", borderRadius: 9, border: "none",
+                background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+              }}>월별 채우기</button>
+              <span style={{ display: "block", fontSize: 11, color: "var(--text3)", marginTop: 6, lineHeight: 1.5 }}>
+                앱에 있는 검증된 월별 자료의 달별 비율을 넣습니다. 각 연도의 연 총액은 지금 값 그대로 유지됩니다.
+              </span>
+            </>)}
+          </div>
+        );
+      })()}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
         <StatTile label="CAGR" value={cagr === null ? "—" : `${cagr >= 0 ? "+" : ""}${cagr.toFixed(1)}%`} sub={baseYear && last ? `${baseYear.year} → ${last.year} 연복리` : ""} kind={cagr === null ? "neutral" : cagr >= 0 ? "pos" : "neg"}/>
         <StatTile label={baseYear ? `vs FY${String(baseYear.year).slice(2)}` : "누적 성장"} value={totalGrowthPct === null ? "—" : `${totalGrowthPct >= 0 ? "+" : ""}${totalGrowthPct.toFixed(0)}%`} sub="기준 연도 대비" kind={totalGrowthPct === null ? "neutral" : totalGrowthPct >= 0 ? "pos" : "neg"}/>
@@ -7112,6 +7208,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
           </table>
         </div>
       </div>
+
     </>
   );
 
@@ -7598,6 +7695,130 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
     );
   };
 
+  // ── 월별 데이터 채우기 ──
+  // 저장된 연도가 총액만 갖고 있으면 계절성·페이스를 계산할 수 없다.
+  // 앱에 들어 있는 검증된 월별 시드(INIT_YEARLY_REVENUE)의 "분포"만 빌려 오되,
+  // 그 해의 총액은 저장된 값 그대로 유지되도록 비례 배분한다 — 총액이 바뀌면 사고다.
+  const fillMonthlyFromSeed = () => {
+    const rowsNeed = (yearlyRevenue || []).filter(d => d.year < CURRENT_YEAR && !yearHasMonthly(d) && yearTotalOf(d) > 0);
+    if (rowsNeed.length === 0) { showToast("월별을 채울 연도가 없습니다"); return; }
+    const seeded = rowsNeed.filter(d => {
+      const s = INIT_YEARLY_REVENUE.find(x => x.year === d.year);
+      return s && Array.isArray(s.monthly) && s.monthly.some(v => Number(v) > 0);
+    });
+    const missing = rowsNeed.filter(d => !seeded.includes(d));
+    if (seeded.length === 0) { showToast("이 연도들에 대한 월별 자료가 앱에 없습니다"); return; }
+    const lines = seeded.map(d => `· ${d.year}년 — 총액 ${fmt억(yearTotalOf(d))} 유지`).join("\n");
+    const warn = missing.length ? `\n\n채우지 못하는 연도: ${missing.map(d => d.year).join(", ")} (앱에 월별 자료 없음)` : "";
+    if (!window.confirm(`${seeded.length}개 연도의 월별을 채웁니다.\n\n${lines}\n\n각 연도의 연 총액은 지금 값 그대로 두고, 달별 비율만 넣습니다.${warn}`)) return;
+    setYearlyRevenue(prev => (prev || []).map(d => {
+      if (!seeded.includes(d)) return d;
+      const seed = INIT_YEARLY_REVENUE.find(x => x.year === d.year);
+      const seedSum = seed.monthly.reduce((a, b) => a + (Number(b) || 0), 0);
+      const target = yearTotalOf(d);
+      if (!(seedSum > 0) || !(target > 0)) return d;
+      // 비례 배분 후 반올림 오차는 가장 큰 달에서 흡수해 합계를 정확히 맞춘다
+      const scaled = seed.monthly.map(v => Math.round((Number(v) || 0) * target / seedSum));
+      const diff = target - scaled.reduce((a, b) => a + b, 0);
+      if (diff !== 0) {
+        const bi = scaled.indexOf(Math.max(...scaled));
+        scaled[bi] += diff;
+      }
+      return { ...d, monthly: scaled, total: undefined };
+    }));
+    showToast(`${seeded.length}개 연도의 월별을 채웠습니다 — 연 총액은 그대로입니다`, "success");
+  };
+
+  // ── 히트맵: 월 × 연도 ──
+  // 세로로 읽으면 계절, 가로로 읽으면 그 해의 성격. 96개 값이 한 화면에 들어온다.
+  // 색은 브랜드 오렌지의 진하기만 바꾼다 — 새 색을 들이지 않기 위해서.
+  const renderHeatmap = () => {
+    const withM = data.filter(d => (d._monthly || []).some(v => v > 0));
+    if (withM.length === 0) {
+      return <div className="card" style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>월별 데이터가 있는 연도가 없습니다.</div>;
+    }
+    const all = withM.flatMap(d => d._monthly.filter(v => v > 0));
+    const hmx = Math.max(...all);
+    const MONTH_LABELS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"];
+    // 월별 평균 (계절성) — 값이 있는 달만 센다
+    const monthAvg = MONTH_LABELS.map((_, i) => {
+      const vs = withM.map(d => d._monthly[i]).filter(v => v > 0);
+      return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : 0;
+    });
+    const peakIdx = monthAvg.indexOf(Math.max(...monthAvg));
+    const lowIdx = monthAvg.reduce((mi, v, i) => (v > 0 && (monthAvg[mi] === 0 || v < monthAvg[mi])) ? i : mi, 0);
+    const cell = (v, isLive, mi) => {
+      if (!(v > 0)) return <div key={mi} style={{ background: "var(--divider)", borderRadius: 6, padding: "9px 4px", textAlign: "center", opacity: 0.5 }}><span style={{ fontSize: 10, color: "var(--text3)" }}>—</span></div>;
+      const t = v / hmx;
+      const fg = t > 0.45 ? "#fff" : "var(--text2)";
+      return (
+        <div key={mi} title={`${MONTH_LABELS[mi]}월 · ${fmtWon(v)}`}
+          style={{ background: `rgba(219,107,46,${(0.07 + t * 0.86).toFixed(2)})`, borderRadius: 6, padding: "9px 4px", textAlign: "center" }}>
+          <span style={{ fontSize: 10.5, fontWeight: t > 0.45 ? 700 : 600, color: fg, fontVariantNumeric: "tabular-nums" }}>{(v / 1e8).toFixed(1)}</span>
+        </div>
+      );
+    };
+    const GRID = { display: "grid", gridTemplateColumns: "46px repeat(12, minmax(0, 1fr)) 62px", gap: 4 };
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="card" style={{ padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1 }}>
+              월 × 연도 <span style={{ fontWeight: 500 }}>· 칸이 진할수록 매출이 큽니다 (단위 억)</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontSize: 10.5, color: "var(--text3)" }}>적음</span>
+              <span style={{ width: 90, height: 8, borderRadius: 100, background: "linear-gradient(90deg, rgba(219,107,46,0.07), rgba(219,107,46,0.93))" }} />
+              <span style={{ fontSize: 10.5, color: "var(--text3)" }}>많음</span>
+            </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 720 }}>
+              <div style={GRID}>
+                <div />
+                {MONTH_LABELS.map(m => <div key={m} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: "var(--text3)", paddingBottom: 5 }}>{m}</div>)}
+                <div style={{ textAlign: "right", fontSize: 10.5, fontWeight: 700, color: "var(--text3)", paddingBottom: 5 }}>합계</div>
+              </div>
+              {withM.map(d => (
+                <div key={d.year} style={{ ...GRID, marginBottom: 4 }}>
+                  <div onClick={() => { setFocusYear(d.year); setView("monthly"); }}
+                    title={`${d.year}년 월별 보기`}
+                    style={{ fontSize: 12, fontWeight: 700, color: "var(--text1)", display: "flex", alignItems: "center", cursor: "pointer" }}>
+                    {d.year}{d._isLive && <span style={{ marginLeft: 3, width: 5, height: 5, borderRadius: 100, background: "var(--accent)" }} />}
+                  </div>
+                  {d._monthly.map((v, mi) => cell(v, d._isLive, mi))}
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text1)", display: "flex", alignItems: "center", justifyContent: "flex-end", fontVariantNumeric: "tabular-nums" }}>{(d._total / 1e8).toFixed(1)}억</div>
+                </div>
+              ))}
+              <div style={GRID}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", display: "flex", alignItems: "center" }}>평균</div>
+                {monthAvg.map((v, i) => (
+                  <div key={i} style={{ textAlign: "center", fontSize: 10.5, fontWeight: 700, color: i === peakIdx ? "var(--accent-strong)" : "var(--text3)", paddingTop: 4 }}>{v > 0 ? (v / 1e8).toFixed(1) : "—"}</div>
+                ))}
+                <div />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="kpi-strip" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 6 }}>세로로 읽으면 — 계절</div>
+            <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6 }}>
+              <b>{peakIdx + 1}월</b>이 평균 {(monthAvg[peakIdx] / 1e8).toFixed(1)}억으로 가장 높고, <b>{lowIdx + 1}월</b>이 {(monthAvg[lowIdx] / 1e8).toFixed(1)}억으로 가장 낮습니다.
+              그 차이가 <b>{monthAvg[lowIdx] > 0 ? (monthAvg[peakIdx] / monthAvg[lowIdx]).toFixed(1) : "—"}배</b>입니다.
+            </div>
+          </div>
+          <div className="card" style={{ padding: "14px 16px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6, marginBottom: 6 }}>가로로 읽으면 — 그 해의 성격</div>
+            <div style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.6 }}>
+              한 줄 안에서 진한 칸이 어디 몰렸는지 보면 그 해가 상반기형이었는지 연말형이었는지 드러납니다. 연도를 누르면 그 해 월별 보기로 갑니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -7606,7 +7827,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <div style={{ display: "inline-flex", padding: 3, background: "var(--surface2)", borderRadius: 8 }}>
-            {[["annual", "연간"], ["monthly", "월별"], ["sameMonth", "동월 비교"], ["ytd", "누적 비교"], ["range", "기간 비교"]].map(([id, label]) => (
+            {[["annual", "연간"], ["heatmap", "히트맵"], ["monthly", "월별"], ["sameMonth", "동월 비교"], ["ytd", "누적 비교"], ["range", "기간 비교"]].map(([id, label]) => (
               <button key={id} onClick={() => { setView(id); if (id !== "monthly") setFocusYear(null); }}
                 style={{
                   padding: "7px 14px", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
@@ -7615,7 +7836,12 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
                   color: view === id ? (darkMode ? "#FBF0E8" : "#AB4F1F") : "var(--text2)",
                   boxShadow: view === id ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
                   transition: "all 0.15s",
-                }}>{label}</button>
+                }}>
+                  {label}
+                  {id === "heatmap" && view !== "heatmap" && (
+                    <span title="새로 생긴 보기" style={{ display: "inline-block", width: 5, height: 5, borderRadius: 100, background: "var(--accent)", marginLeft: 5, verticalAlign: "middle" }} />
+                  )}
+                </button>
             ))}
           </div>
           <button onClick={() => setAdding(true)} style={{ padding: "7px 14px", borderRadius: 7, border: "none", background: "#DB6B2E", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "var(--elev-1)" }}>+ 연도</button>
@@ -7623,6 +7849,7 @@ function YearlyRevenueView({ yearlyRevenue, setYearlyRevenue, monthlySales = {},
       </div>
 
       {view === "annual" && renderAnnual()}
+      {view === "heatmap" && renderHeatmap()}
       {view === "monthly" && renderMonthly()}
       {view === "sameMonth" && renderSameMonth()}
       {view === "ytd" && renderYTD()}
@@ -8983,44 +9210,59 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         <span style={{fontSize:11,color:"var(--text3)"}}>전체 누적: <b style={{color:"var(--text1)"}}>{Math.round(totalAcrossMonths).toLocaleString()}원</b></span>
       </div>
 
-      {/* KPI */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))",gap:12}}>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 거래처</div>
-          <div className="kpi-num" style={{color:"var(--text1)"}}>{monthClients.length}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>곳</span></div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 청구액</div>
-          <div className="kpi-num" style={{color:"#475569"}}>{Math.round(totalBilled).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>공급가액 {Math.round(totalSupply).toLocaleString()}원 + 부가세 {Math.round(totalTax).toLocaleString()}원</div>
-        </div>
-        <div className="card"
-          onClick={()=>setStatusFilter(statusFilter==="입금완료"?"":"입금완료")}
-          title={statusFilter==="입금완료"?"클릭하여 필터 해제":"클릭하여 입금완료 거래처만 보기"}
-          style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="입금완료"?"2px solid #00B493":undefined,boxShadow:statusFilter==="입금완료"?"0 4px 14px rgba(0,180,147,0.22)":undefined}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>입금완료</div>
-            {statusFilter==="입금완료" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.18)",color:"#00B493"}}><Icon name="check" size={9} style={{marginRight:2,verticalAlign:"-1px"}}/>필터중</span>}
+      {/* ── 시안 B+A: 회수율 다크 카드 + 입금/미입금 (카드 클릭 = 필터) ──
+          흰 눈금은 지난달 회수율 — 이번 달이 어디쯤인지 비교 기준이 화면 안에 있다. */}
+      {(() => {
+        const [py, pm] = (() => { const [y, m] = selectedYM.split("-").map(Number); const d = new Date(y, m - 2, 1); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0")]; })();
+        const prevClients = ((ledgers || {})[`${py}-${pm}`] || {}).clients || [];
+        const prevBilled = prevClients.reduce((s, c) => s + (parseFloat(c.total) || 0), 0);
+        const prevPaid = prevClients.filter(c => c.status === "입금완료").reduce((s, c) => s + (parseFloat(c.total) || 0), 0);
+        const prevRate = prevBilled > 0 ? Math.round(prevPaid / prevBilled * 100) : null;
+        const rate = totalBilled > 0 ? Math.round(paidAmt / totalBilled * 100) : 0;
+        const diff = prevRate !== null ? rate - prevRate : null;
+        const paidCnt = monthClients.filter(c => c.status === "입금완료").length;
+        const unpaidCnt = monthClients.filter(c => c.status === "미입금").length;
+        return (
+          <div className="kpi-strip" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+            <div style={{ padding: "15px 18px", borderRadius: 14, background: "#17181A", color: "#fff" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 9, gap: 8 }}>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: "#8B909B", letterSpacing: 0.6, whiteSpace: "nowrap" }}>{selectedYM.split("-")[1].replace(/^0/, "")}월 회수율</span>
+                {prevRate !== null && <span style={{ fontSize: 11, color: "#8B909B", whiteSpace: "nowrap" }}>지난달 {prevRate}%</span>}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{rate}<span style={{ fontSize: 14, color: "#8B909B" }}>%</span></span>
+                {diff !== null && diff !== 0 && (
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: diff > 0 ? "#2FD6A2" : "#FF7A7A" }}>{diff > 0 ? "▲" : "▼"} {Math.abs(diff)}%p</span>
+                )}
+              </div>
+              <div style={{ position: "relative", marginTop: 11 }}>
+                <div style={{ height: 7, borderRadius: 100, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
+                  <div style={{ width: `${rate}%`, height: 7, background: "#F0B48E", borderRadius: 100, transition: "width 0.25s" }} />
+                </div>
+                {prevRate !== null && (
+                  <div title={`지난달 ${prevRate}%`} style={{ position: "absolute", left: `${Math.min(99, prevRate)}%`, top: -3, bottom: -3, width: 2, background: "rgba(255,255,255,0.45)", borderRadius: 2 }} />
+                )}
+              </div>
+            </div>
+            <div onClick={() => setStatusFilter(statusFilter === "입금완료" ? "" : "입금완료")}
+              title={statusFilter === "입금완료" ? "필터 해제" : "입금완료만 보기"}
+              style={{ padding: "15px 18px", borderRadius: 14, background: "var(--row-bg)", cursor: "pointer",
+                border: statusFilter === "입금완료" ? "1.5px solid var(--positive)" : "1px solid var(--divider)", transition: "border-color 0.15s" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>입금 완료</div>
+              <div className="kpi-num" style={{ marginTop: 3, color: "var(--positive-text)" }}>{Math.round(paidAmt).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)" }}> 원</span></div>
+              <div style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 3 }}>{paidCnt}건{statusFilter === "입금완료" ? " · 필터 중" : ""}</div>
+            </div>
+            <div onClick={() => setStatusFilter(statusFilter === "미입금" ? "" : "미입금")}
+              title={statusFilter === "미입금" ? "필터 해제" : "미입금만 보기"}
+              style={{ padding: "15px 18px", borderRadius: 14, background: "var(--accent-tonal)", cursor: "pointer",
+                border: statusFilter === "미입금" ? "1.5px solid var(--accent)" : "1px solid rgba(219,107,46,0.2)", transition: "border-color 0.15s" }}>
+              <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--accent-strong)", letterSpacing: 0.6 }}>아직 못 받은 돈</div>
+              <div className="kpi-num" style={{ marginTop: 3, color: "var(--accent-strong)" }}>{Math.round(unpaidAmt).toLocaleString()}<span style={{ fontSize: 11, fontWeight: 500, color: "rgba(171,79,31,0.65)" }}> 원</span></div>
+              <div style={{ fontSize: 10.5, color: "rgba(171,79,31,0.75)", marginTop: 3 }}>{unpaidCnt}건{statusFilter === "미입금" ? " · 필터 중" : ""}</div>
+            </div>
           </div>
-          <div className="kpi-num" style={{color:"#00B493"}}>{paidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(paidAmt).toLocaleString()}원</div>
-        </div>
-        <div className="card"
-          onClick={()=>setStatusFilter(statusFilter==="미입금"?"":"미입금")}
-          title={statusFilter==="미입금"?"클릭하여 필터 해제":"클릭하여 미입금 거래처만 보기"}
-          style={{cursor:"pointer",transition:"all 0.18s",border:statusFilter==="미입금"?"2px solid #FE9800":undefined,boxShadow:statusFilter==="미입금"?"0 4px 14px rgba(255,149,0,0.22)":undefined}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>미입금</div>
-            {statusFilter==="미입금" && <span style={{fontSize:9,fontWeight:800,padding:"2px 6px",borderRadius:4,background:"rgba(255,149,0,0.18)",color:"#FE9800"}}><Icon name="check" size={9} style={{marginRight:2,verticalAlign:"-1px"}}/>필터중</span>}
-          </div>
-          <div className="kpi-num" style={{color:unpaidCount>0?"#FE9800":"#00B493"}}>{unpaidCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>건</span></div>
-          <div style={{fontSize:11,color:"var(--text3)",marginTop:3}}>{Math.round(unpaidAmt).toLocaleString()}원</div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>회수율</div>
-          <div className="kpi-num" style={{color:"var(--text1)"}}>{totalBilled>0?Math.round(paidAmt/totalBilled*100):0}<span style={{fontSize:14,fontWeight:600}}>%</span></div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* 컨트롤 + 입력 + 엑셀 드롭존 */}
       <div className="card">
@@ -9082,20 +9324,19 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
             onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); processExcelFile(e.dataTransfer?.files?.[0]); }}
             onClick={() => document.getElementById("frw-ledger-xlsx")?.click()}
             style={{
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-              gap: 6, padding: "16px 14px", borderRadius: 12,
-              border: dragActive ? "2.5px dashed #DB6B2E" : `2px dashed ${darkMode?"rgba(219,107,46,0.35)":"rgba(219,107,46,0.45)"}`,
-              background: dragActive ? (darkMode?"rgba(219,107,46,0.16)":"rgba(219,107,46,0.08)") : (darkMode?"rgba(219,107,46,0.05)":"rgba(238,242,255,0.6)"),
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 11,
+              border: dragActive ? "2px dashed var(--accent)" : "1px dashed var(--border)",
+              background: dragActive ? "var(--accent-tonal)" : "var(--row-bg)",
               cursor: "pointer", transition: "all 0.18s",
             }}>
-            <div style={{fontSize:24,lineHeight:1,display:"inline-flex"}}><Icon name={dragActive?"download":"folderOpen"} size={24}/></div>
-            <div style={{fontSize:13,fontWeight:700,color:dragActive?"#DB6B2E":(darkMode?"#FBF0E8":"#AB4F1F")}}>
-              {dragActive ? "여기에 놓으세요" : "월간 장부 엑셀 가져오기"}
+            {/* 시안 A의 붙여넣기 안내 띠 — 큰 드롭존이 표를 밀어내던 것을 한 줄로 */}
+            <Icon name={dragActive ? "download" : "fileSheet"} size={15} style={{ color: dragActive ? "var(--accent)" : "var(--text3)", flexShrink: 0 }} />
+            <div style={{ flex: 1, fontSize: 11.5, color: dragActive ? "var(--accent-strong)" : "var(--text2)", minWidth: 200 }}>
+              {dragActive
+                ? "여기에 놓으세요"
+                : <>엑셀 파일(.xlsx)을 <b>끌어다 놓거나 클릭</b>해서 가져옵니다 · 헤더 자동 인식 · 표 맨 아래 줄에서 바로 추가할 수도 있습니다</>}
             </div>
-            <div style={{fontSize:11,color:"var(--text2)",textAlign:"center",lineHeight:1.5}}>
-              .xlsx · .xls 파일을 드래그하거나 클릭해서 선택<br/>
-              거래처명 / 공급가액 / 부가세 / 청구합계 / 입금현황 헤더 자동 인식 · 시트 제목에서 년/월 자동 추출
-            </div>
+            <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap", flexShrink: 0 }}>거래처명 / 공급가액 / 부가세 / 청구합계 / 입금현황</span>
           </div>
         </div>
       </div>
@@ -9110,7 +9351,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           </div>
         ) : (
           <div style={{overflowX:"auto"}}>
-            <table className="table-plain">
+            <table className="table-plain ledger-table">
               <thead><tr>
                 <th style={{width:36,textAlign:"center",padding:"10px 4px"}}>
                   {(() => {
@@ -9430,6 +9671,47 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                     <td colSpan={3}></td>
                   </tr>
                 )}
+                {/* ── 유령 행 (시안 A) — 거래처명을 치면 그 자리에서 행이 추가된다.
+                    기존 addClient·draft 상태를 그대로 쓴다. 공급가를 넣으면 부가세·합계 자동. */}
+                <tr style={{ background: "var(--surface)" }}>
+                  <td></td>
+                  <td style={{ textAlign: "center", fontSize: 12, color: "var(--empty-color)" }}>{filtered.length + 1}</td>
+                  <td><input list="frw-clients" placeholder="+ 거래처명 입력" value={draft.name}
+                    onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+                    onKeyDown={e => e.key === "Enter" && addClient()}
+                    style={{ height: 34, fontSize: 13, border: draft.name ? undefined : "1.5px dashed var(--border)", background: draft.name ? undefined : "transparent" }} /></td>
+                  <td><input type="number" placeholder="공급가액" value={draft.supply}
+                    onChange={e => { const s = e.target.value; setDraft(d => ({ ...d, supply: s, tax: String(Math.round((parseFloat(s) || 0) * 0.1)), total: String(Math.round((parseFloat(s) || 0) * 1.1)) })); }}
+                    onKeyDown={e => e.key === "Enter" && addClient()}
+                    style={{ height: 34, fontSize: 13, textAlign: "right" }} /></td>
+                  <td style={{ textAlign: "right", fontSize: 12.5, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{draft.tax ? Math.round(parseFloat(draft.tax) || 0).toLocaleString() : "자동"}</td>
+                  <td style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{draft.total ? Math.round(parseFloat(draft.total) || 0).toLocaleString() : "—"}</td>
+                  <td style={{ textAlign: "center" }}>
+                    <select value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))} style={{ height: 34, fontSize: 12, width: 100 }}>
+                      <option value="미입금">미입금</option>
+                      <option value="입금완료">입금완료</option>
+                      <option value="법인 거래">법인 거래</option>
+                    </select>
+                  </td>
+                  <td><input placeholder="메모" value={draft.memo} onChange={e => setDraft(d => ({ ...d, memo: e.target.value }))}
+                    onKeyDown={e => e.key === "Enter" && addClient()} style={{ height: 34, fontSize: 12.5 }} /></td>
+                  <td style={{ textAlign: "center" }}>
+                    <button onClick={addClient} disabled={!draft.name.trim()}
+                      style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: draft.name.trim() ? "var(--accent)" : "var(--surface2)", color: draft.name.trim() ? "#fff" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: draft.name.trim() ? "pointer" : "default", fontFamily: "inherit" }}>추가</button>
+                  </td>
+                </tr>
+                {/* ── 합계 줄 (시안 A) — 스크롤이 끝나야 보이던 합계를 표 안에 고정 ── */}
+                {filtered.length > 0 && (
+                  <tr style={{ background: "var(--row-bg)", borderTop: "1.5px solid var(--border)" }}>
+                    <td></td><td></td>
+                    <td style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", padding: "12px 14px" }}>{selectedYM.split("-")[1].replace(/^0/, "")}월 합계 · {filtered.length}건</td>
+                    <td style={{ textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{Math.round(totalSupply).toLocaleString()}</td>
+                    <td style={{ textAlign: "right", fontSize: 12.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{Math.round(totalTax).toLocaleString()}</td>
+                    <td style={{ textAlign: "right", fontSize: 14.5, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums" }}>{Math.round(totalBilled).toLocaleString()}</td>
+                    <td></td><td></td><td></td>
+                  </tr>
+                )}
+
               </tbody>
             </table>
           </div>
@@ -9761,6 +10043,169 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
     });
   };
 
+  // 시안 B — 한 거래처의 전 기간 원장을 오른쪽 패널에서 통으로 본다.
+  // 기존 펼침 영역의 내용을 그대로 함수로 뺐다 (청구·입금·조정·삭제 로직 전부 유지).
+  const clientDetail = (c) => {
+    const balanceColor = c.balance > 0 ? "var(--negative-text)" : c.balance < 0 ? "var(--positive-text)" : "var(--text2)";
+    return (<>
+          {/* 1. 자동 미수금 (장부 기반) */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="ledger" size={14}/>자동 미수금 (장부 미입금)</span></div>
+            <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(219, 107, 46,0.1)",color:"#DB6B2E",fontWeight:700}}>장부에서 입금완료 처리하면 자동 차감</div>
+          </div>
+          {(c.autoUnpaidList.length === 0 && c.autoPaidList.length === 0) ? (
+            <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0 12px",fontStyle:"italic"}}>장부에 등록된 청구가 없습니다.</div>
+          ) : c.autoUnpaidList.length === 0 ? (
+            <div style={{padding:"8px 0 14px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:8,fontSize:12,color:"#00B493",fontWeight:600,marginBottom:8}}>
+                ✓ 미입금 없음 · 모두 완납 처리됨 ({c.autoPaidList.length}건 · {Math.round(c.autoPaidSum).toLocaleString()}원)
+              </div>
+              <button onClick={() => setShowPaidHistory(prev => { const n = new Set(prev); if (n.has(c.name)) n.delete(c.name); else n.add(c.name); return n; })}
+                style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
+                {showPaidHistory.has(c.name) ? "완납 내역 숨기기 ▲" : `완납 내역 보기 ▼ (${c.autoPaidList.length}건)`}
+              </button>
+            </div>
+          ) : (
+            <table className="table-plain" style={{marginBottom:14}}>
+              <thead><tr>
+                <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
+                <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
+                <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
+                <th style={{fontSize:11}}>메모</th>
+              </tr></thead>
+              <tbody>
+                {c.autoUnpaidList.map((e, ei) => (
+                  <tr key={"u"+ei}>
+                    <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{e.ym}</td>
+                    <td style={{textAlign:"center"}}>
+                      <button onClick={()=>togglePaidStatus(c.name, e.ym)} title="클릭하여 입금완료로 변경 (장부에 자동 반영)" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(255,149,0,0.15)",color:"#FE9800",border:"none",cursor:"pointer",fontFamily:"inherit"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="refresh" size={14}/>미입금</span></button>
+                    </td>
+                    <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#F04452"}}>+{Math.round(e.amount).toLocaleString()}원</td>
+                    <td style={{fontSize:12,color:"var(--text2)"}}>{e.memo}</td>
+                  </tr>
+                ))}
+                <tr style={{borderTop:"1px solid var(--divider)"}}>
+                  <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
+                  <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(c.autoUnpaidSum).toLocaleString()}원</td>
+                  <td/>
+                </tr>
+                {c.autoPaidList.length > 0 && (
+                  <tr>
+                    <td colSpan={4} style={{paddingTop:10}}>
+                      <button onClick={() => setShowPaidHistory(prev => { const n = new Set(prev); if (n.has(c.name)) n.delete(c.name); else n.add(c.name); return n; })}
+                        style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"#00B493",background:"transparent",border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
+                        {showPaidHistory.has(c.name) ? `완납 ${c.autoPaidList.length}건 숨기기 ▲` : `완납 ${c.autoPaidList.length}건 보기 ▼ (${Math.round(c.autoPaidSum).toLocaleString()}원)`}
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {showPaidHistory.has(c.name) && c.autoPaidList.map((e, ei) => (
+                  <tr key={"p"+ei} style={{opacity:0.65}}>
+                    <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{e.ym}</td>
+                    <td style={{textAlign:"center"}}>
+                      <button onClick={()=>togglePaidStatus(c.name, e.ym)} title="클릭하여 미입금으로 되돌리기 (장부에 자동 반영)" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✓ 완납</button>
+                    </td>
+                    <td style={{textAlign:"right",fontSize:12,color:"var(--text3)",textDecoration:"line-through"}}>{Math.round(e.amount).toLocaleString()}원</td>
+                    <td style={{fontSize:11,color:"var(--text3)"}}>장부에서 입금완료 처리됨</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {/* 2. 수동 부분입금/조정 */}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"9px 12px",borderRadius:10,background:darkMode?"rgba(219,107,46,0.16)":"rgba(219,107,46,0.09)",border:`1.5px solid ${darkMode?"rgba(219,107,46,0.4)":"rgba(219,107,46,0.28)"}`}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:26,borderRadius:7,background:"#DB6B2E",color:"#fff",flexShrink:0}}><Icon name="edit" size={14}/></span><div style={{lineHeight:1.35}}><div style={{fontSize:13,fontWeight:800,color:darkMode?"#FFD9B8":"#AB4F1F"}}>부분 입금 · 수동 조정</div><div style={{fontSize:11,color:"var(--text3)"}}>전표에 없는 입금/청구를 직접 등록 (선택)</div></div></div>
+          {c.entries.length === 0 ? (
+            <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0",fontStyle:"italic"}}>수동 등록된 내역이 없습니다. 아래 폼에서 추가하세요.</div>
+          ) : (
+            <table className="table-plain" style={{marginBottom:10}}>
+              <thead><tr>
+                <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
+                <th style={{fontSize:11}}>내역</th>
+                <th style={{textAlign:"right",fontSize:11,width:130}}>금액</th>
+                <th style={{width:120,fontSize:11}}>날짜</th>
+                <th style={{width:90,textAlign:"center",fontSize:11}}>관리</th>
+              </tr></thead>
+              <tbody>
+                {[...c.entries].sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(a => {
+                  const isCharge = a.type === "청구";
+                  if (editArId === a.id && editArDraft) {
+                    return (
+                      <tr key={a.id} style={{background:"var(--surface)"}}>
+                        <td style={{textAlign:"center"}}>
+                          <select value={editArDraft.type} onChange={e=>setEditArDraft(d=>({...d,type:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}>
+                            <option value="청구">청구</option><option value="입금">입금</option>
+                          </select>
+                        </td>
+                        <td><input value={editArDraft.desc||""} onChange={e=>setEditArDraft(d=>({...d,desc:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px"}}/></td>
+                        <td><input type="number" value={editArDraft.amount||""} onChange={e=>setEditArDraft(d=>({...d,amount:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
+                        <td><input type="date" value={editArDraft.date||""} onChange={e=>setEditArDraft(d=>({...d,date:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}/></td>
+                        <td style={{textAlign:"center"}}>
+                          <button onClick={()=>saveEditAR(c.name)} style={{background:"#DB6B2E",border:"none",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 8px",marginRight:4,fontFamily:"inherit"}}>저장</button>
+                          <button onClick={cancelEditAR} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:11,fontWeight:600,borderRadius:6,padding:"3px 7px",fontFamily:"inherit"}}>취소</button>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return (
+                    <tr key={a.id}>
+                      <td style={{textAlign:"center"}}>
+                        <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FE9800":"#00B493"}}>{a.type}</span>
+                      </td>
+                      <td style={{fontSize:13}}>{a.desc}</td>
+                      <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
+                      <td style={{fontSize:12,color:"var(--text2)"}}>{a.date||"—"}</td>
+                      <td style={{textAlign:"center"}}>
+                        <button onClick={()=>startEditAR(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#DB6B2E",fontSize:13,marginRight:4}}><Icon name="edit" size={14}/></button>
+                        <button onClick={()=>deleteAR(c.name, a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {(() => {
+                  const sumCharge = c.entries.filter(a => a.type === "청구").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
+                  const sumPay = c.entries.filter(a => a.type === "입금").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
+                  const sumNet = sumCharge - sumPay;
+                  return (
+                    <tr style={{borderTop:"2px solid var(--divider)",background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}}>
+                      <td colSpan={2} style={{fontSize:12,fontWeight:800,padding:"8px 8px",color:"var(--text2)"}}>합계 ({c.entries.length}건)</td>
+                      <td style={{textAlign:"right",fontSize:13,fontWeight:800,padding:"8px 8px"}}>
+                        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}>
+                          <span style={{color:"#FE9800",fontSize:11,fontWeight:700}}>청구 +{Math.round(sumCharge).toLocaleString()}</span>
+                          <span style={{color:"#00B493",fontSize:11,fontWeight:700}}>입금 -{Math.round(sumPay).toLocaleString()}</span>
+                          <span style={{color:sumNet>0?"#F04452":sumNet<0?"#00B493":"var(--text2)",fontSize:13,fontWeight:900,marginTop:1,paddingTop:2,borderTop:"1px dashed var(--divider)"}}>순 {sumNet>0?"+":""}{Math.round(sumNet).toLocaleString()}원</span>
+                        </div>
+                      </td>
+                      <td colSpan={2}/>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          )}
+          {/* 새 내역 추가 폼 */}
+          <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
+            <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:36,fontSize:12,padding:"0 6px",border:"1px solid var(--border)",background:"var(--surface)"}}>
+              <option value="입금">입금</option><option value="청구">청구</option>
+            </select>
+            <input placeholder="내역 (예: 부분 입금 / 분기 조정)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)"}}/>
+            <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",textAlign:"right",border:"1px solid var(--border)",background:"var(--surface)"}}/>
+            <div style={{position:"relative",display:"inline-flex",alignItems:"center"}}>
+              {!arDraft.date && <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"var(--text3)",pointerEvents:"none",zIndex:1}}>날짜</span>}
+              <input type="date" title="날짜 선택" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)",color:arDraft.date?"var(--text1)":"transparent",WebkitTextFillColor:arDraft.date?"var(--text1)":"transparent",width:"100%"}}/>
+            </div>
+            <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:36,fontSize:12}}>+ 추가</button>
+          </div>
+          {/* 최종 잔액 카드 */}
+          <div style={{marginTop:14,padding:"10px 14px",background:darkMode?"rgba(240,68,82,0.08)":"rgba(240,68,82,0.04)",borderRadius:10,border:`1.5px solid ${darkMode?"rgba(240,68,82,0.3)":"rgba(240,68,82,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>최종 미수금 잔액</div>
+              <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>= 자동 미수금({Math.round(c.autoUnpaidSum).toLocaleString()}) + 수동 청구({Math.round(c.manualCharge).toLocaleString()}) - 수동 입금({Math.round(c.manualPaid).toLocaleString()})</div>
+            </div>
+            <div style={{fontSize:22,fontWeight:900,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</div>
+          </div>
+    </>);
+  };
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       <div style={{fontSize:18,fontWeight:800,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>거래처별 미수금</span></div>
@@ -9833,233 +10278,96 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
         </div>
       )}
 
-      {/* 거래처 목록 */}
-      <div className="card" style={{padding:0,overflow:"hidden"}}>
-        {sorted.length === 0 ? (
-          <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>
-            {Object.keys(clientAR).length === 0 ? <>등록된 미수금 내역이 없습니다.<br/>월별 장부에서 거래처 ▶를 펼쳐 미수금 내역을 추가하세요.</> : "조건에 맞는 거래처가 없습니다."}
+      {/* ── 시안 B — 왼쪽 거래처 목록 / 오른쪽 그 거래처의 전 기간 원장 ── */}
+      <div className="ar-workbench">
+        {/* 왼쪽: 거래처 */}
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1 }}>거래처 {sorted.length}곳</div>
+            {selectedNames.size > 0 && (
+              <button onClick={clearSelection} style={{ fontSize: 11, fontWeight: 700, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}>선택 해제 {selectedNames.size}</button>
+            )}
           </div>
-        ) : (
-          <div style={{overflowX:"auto"}}>
-            <table className="table-plain">
-              <thead><tr>
-                <th style={{width:36,textAlign:"center",padding:"10px 4px"}}>
-                  {(() => {
-                    const visNames = sorted.map(c => c.name);
-                    const allSel = visNames.length > 0 && visNames.every(n => selectedNames.has(n));
-                    const someSel = visNames.some(n => selectedNames.has(n));
-                    return (
-                      <input type="checkbox" checked={allSel}
-                        ref={el => { if (el) el.indeterminate = !allSel && someSel; }}
-                        onChange={e => {
-                          if (e.target.checked) setSelectedNames(prev => { const n = new Set(prev); visNames.forEach(name => n.add(name)); return n; });
-                          else setSelectedNames(prev => { const n = new Set(prev); visNames.forEach(name => n.delete(name)); return n; });
-                        }}
-                        style={{width:18,height:18,accentColor:"#475569",cursor:"pointer"}}/>
-                    );
-                  })()}
-                </th>
-                <th style={{width:38,textAlign:"center"}}>No.</th>
-                <th>거래처명</th>
-                <th style={{textAlign:"center",width:90}}>등장 월</th>
-                <th style={{textAlign:"right"}}>총 청구</th>
-                <th style={{textAlign:"right"}}>총 입금</th>
-                <th style={{textAlign:"right"}}>잔액 (미수금)</th>
-                <th style={{textAlign:"center",width:80}}>관리</th>
-              </tr></thead>
-              <tbody>
-                {sorted.map((c, idx) => {
-                  const isExpanded = expandedName === c.name;
-                  const balanceColor = c.balance > 0 ? "#F04452" : c.balance < 0 ? "#00B493" : "var(--text2)";
-                  return (
-                    <React.Fragment key={c.name}>
-                      <tr data-ar-client={c.name} style={{cursor:"pointer",borderLeft: isExpanded ? "4px solid #DB6B2E" : "4px solid transparent",background: isExpanded ? (darkMode?"rgba(219,107,46,0.20)":"rgba(219,107,46,0.12)") : (selectedNames.has(c.name) ? (darkMode?"rgba(99,102,241,0.10)":"rgba(99,102,241,0.06)") : "transparent"), transition:"background 0.15s"}} onClick={()=>setExpandedName(isExpanded?null:c.name)}>
-                        <td style={{textAlign:"center"}} onClick={e => e.stopPropagation()}>
-                          <input type="checkbox" checked={selectedNames.has(c.name)} onChange={() => toggleSelectName(c.name)} style={{width:18,height:18,accentColor:"#475569",cursor:"pointer"}}/>
-                        </td>
-                        <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
-                        <td style={{fontWeight: isExpanded?800:600,fontSize:13,color: isExpanded?"#DB6B2E":undefined}}>
-                          {isExpanded?"▼ ":"▶ "}{c.name}
-                          {isExpanded && <span style={{marginLeft:8,fontSize:10,fontWeight:700,color:"#fff",background:"#DB6B2E",padding:"2px 8px",borderRadius:100,verticalAlign:"middle"}}>선택됨</span>}
-                        </td>
-                        <td style={{textAlign:"center",fontSize:11,color:"var(--text2)"}}>
-                          {c.months.length === 0 ? "—" : c.months.length === 1 ? c.months[0] : `${c.months.length}개월`}
-                        </td>
-                        <td style={{textAlign:"right",fontSize:13}}>{c.charge>0?Math.round(c.charge).toLocaleString()+"원":"—"}</td>
-                        <td style={{textAlign:"right",fontSize:13,color:c.paid>0?"#00B493":"var(--text3)"}}>{c.paid>0?Math.round(c.paid).toLocaleString()+"원":"—"}</td>
-                        <td style={{textAlign:"right",fontWeight:800,fontSize:14,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</td>
-                        <td style={{textAlign:"center"}}>
-                          <button onClick={(e)=>{ e.stopPropagation(); deleteAllForClient(c.name); }} title="이 거래처의 모든 내역 삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}><Icon name="trash" size={14}/></button>
-                        </td>
-                      </tr>
-                      {isExpanded && (
-                        <tr>
-                          <td colSpan={8} style={{padding:"14px 22px",background:"var(--surface2)",borderLeft:"4px solid #DB6B2E"}}>
-                            {/* 1. 자동 미수금 (장부 기반) */}
-                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-                              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="ledger" size={14}/>자동 미수금 (장부 미입금)</span></div>
-                              <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(219, 107, 46,0.1)",color:"#DB6B2E",fontWeight:700}}>장부에서 입금완료 처리하면 자동 차감</div>
-                            </div>
-                            {(c.autoUnpaidList.length === 0 && c.autoPaidList.length === 0) ? (
-                              <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0 12px",fontStyle:"italic"}}>장부에 등록된 청구가 없습니다.</div>
-                            ) : c.autoUnpaidList.length === 0 ? (
-                              <div style={{padding:"8px 0 14px"}}>
-                                <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:8,fontSize:12,color:"#00B493",fontWeight:600,marginBottom:8}}>
-                                  ✓ 미입금 없음 · 모두 완납 처리됨 ({c.autoPaidList.length}건 · {Math.round(c.autoPaidSum).toLocaleString()}원)
-                                </div>
-                                <button onClick={() => setShowPaidHistory(prev => { const n = new Set(prev); if (n.has(c.name)) n.delete(c.name); else n.add(c.name); return n; })}
-                                  style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"var(--text2)",background:"transparent",border:"1px solid var(--border)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
-                                  {showPaidHistory.has(c.name) ? "완납 내역 숨기기 ▲" : `완납 내역 보기 ▼ (${c.autoPaidList.length}건)`}
-                                </button>
-                              </div>
-                            ) : (
-                              <table className="table-plain" style={{marginBottom:14}}>
-                                <thead><tr>
-                                  <th style={{width:80,textAlign:"center",fontSize:11}}>월</th>
-                                  <th style={{textAlign:"center",fontSize:11,width:80}}>상태</th>
-                                  <th style={{textAlign:"right",fontSize:11,width:130}}>청구금액</th>
-                                  <th style={{fontSize:11}}>메모</th>
-                                </tr></thead>
-                                <tbody>
-                                  {c.autoUnpaidList.map((e, ei) => (
-                                    <tr key={"u"+ei}>
-                                      <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{e.ym}</td>
-                                      <td style={{textAlign:"center"}}>
-                                        <button onClick={()=>togglePaidStatus(c.name, e.ym)} title="클릭하여 입금완료로 변경 (장부에 자동 반영)" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(255,149,0,0.15)",color:"#FE9800",border:"none",cursor:"pointer",fontFamily:"inherit"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="refresh" size={14}/>미입금</span></button>
-                                      </td>
-                                      <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:"#F04452"}}>+{Math.round(e.amount).toLocaleString()}원</td>
-                                      <td style={{fontSize:12,color:"var(--text2)"}}>{e.memo}</td>
-                                    </tr>
-                                  ))}
-                                  <tr style={{borderTop:"1px solid var(--divider)"}}>
-                                    <td colSpan={2} style={{fontWeight:700,fontSize:12,paddingTop:6}}>미입금 합계 (자동)</td>
-                                    <td style={{textAlign:"right",fontWeight:700,fontSize:13,paddingTop:6,color:"#F04452"}}>{Math.round(c.autoUnpaidSum).toLocaleString()}원</td>
-                                    <td/>
-                                  </tr>
-                                  {c.autoPaidList.length > 0 && (
-                                    <tr>
-                                      <td colSpan={4} style={{paddingTop:10}}>
-                                        <button onClick={() => setShowPaidHistory(prev => { const n = new Set(prev); if (n.has(c.name)) n.delete(c.name); else n.add(c.name); return n; })}
-                                          style={{padding:"4px 10px",fontSize:11,fontWeight:600,color:"#00B493",background:"transparent",border:"1px solid rgba(16,185,129,0.3)",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>
-                                          {showPaidHistory.has(c.name) ? `완납 ${c.autoPaidList.length}건 숨기기 ▲` : `완납 ${c.autoPaidList.length}건 보기 ▼ (${Math.round(c.autoPaidSum).toLocaleString()}원)`}
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  )}
-                                  {showPaidHistory.has(c.name) && c.autoPaidList.map((e, ei) => (
-                                    <tr key={"p"+ei} style={{opacity:0.65}}>
-                                      <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{e.ym}</td>
-                                      <td style={{textAlign:"center"}}>
-                                        <button onClick={()=>togglePaidStatus(c.name, e.ym)} title="클릭하여 미입금으로 되돌리기 (장부에 자동 반영)" style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✓ 완납</button>
-                                      </td>
-                                      <td style={{textAlign:"right",fontSize:12,color:"var(--text3)",textDecoration:"line-through"}}>{Math.round(e.amount).toLocaleString()}원</td>
-                                      <td style={{fontSize:11,color:"var(--text3)"}}>장부에서 입금완료 처리됨</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            )}
-                            {/* 2. 수동 부분입금/조정 */}
-                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"9px 12px",borderRadius:10,background:darkMode?"rgba(219,107,46,0.16)":"rgba(219,107,46,0.09)",border:`1.5px solid ${darkMode?"rgba(219,107,46,0.4)":"rgba(219,107,46,0.28)"}`}}><span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:26,borderRadius:7,background:"#DB6B2E",color:"#fff",flexShrink:0}}><Icon name="edit" size={14}/></span><div style={{lineHeight:1.35}}><div style={{fontSize:13,fontWeight:800,color:darkMode?"#FFD9B8":"#AB4F1F"}}>부분 입금 · 수동 조정</div><div style={{fontSize:11,color:"var(--text3)"}}>전표에 없는 입금/청구를 직접 등록 (선택)</div></div></div>
-                            {c.entries.length === 0 ? (
-                              <div style={{fontSize:12,color:"var(--text3)",padding:"4px 0",fontStyle:"italic"}}>수동 등록된 내역이 없습니다. 아래 폼에서 추가하세요.</div>
-                            ) : (
-                              <table className="table-plain" style={{marginBottom:10}}>
-                                <thead><tr>
-                                  <th style={{width:60,textAlign:"center",fontSize:11}}>구분</th>
-                                  <th style={{fontSize:11}}>내역</th>
-                                  <th style={{textAlign:"right",fontSize:11,width:130}}>금액</th>
-                                  <th style={{width:120,fontSize:11}}>날짜</th>
-                                  <th style={{width:90,textAlign:"center",fontSize:11}}>관리</th>
-                                </tr></thead>
-                                <tbody>
-                                  {[...c.entries].sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(a => {
-                                    const isCharge = a.type === "청구";
-                                    if (editArId === a.id && editArDraft) {
-                                      return (
-                                        <tr key={a.id} style={{background:"var(--surface)"}}>
-                                          <td style={{textAlign:"center"}}>
-                                            <select value={editArDraft.type} onChange={e=>setEditArDraft(d=>({...d,type:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}>
-                                              <option value="청구">청구</option><option value="입금">입금</option>
-                                            </select>
-                                          </td>
-                                          <td><input value={editArDraft.desc||""} onChange={e=>setEditArDraft(d=>({...d,desc:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px"}}/></td>
-                                          <td><input type="number" value={editArDraft.amount||""} onChange={e=>setEditArDraft(d=>({...d,amount:e.target.value}))} style={{height:30,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
-                                          <td><input type="date" value={editArDraft.date||""} onChange={e=>setEditArDraft(d=>({...d,date:e.target.value}))} style={{height:30,fontSize:11,padding:"0 6px"}}/></td>
-                                          <td style={{textAlign:"center"}}>
-                                            <button onClick={()=>saveEditAR(c.name)} style={{background:"#DB6B2E",border:"none",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 8px",marginRight:4,fontFamily:"inherit"}}>저장</button>
-                                            <button onClick={cancelEditAR} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:11,fontWeight:600,borderRadius:6,padding:"3px 7px",fontFamily:"inherit"}}>취소</button>
-                                          </td>
-                                        </tr>
-                                      );
-                                    }
-                                    return (
-                                      <tr key={a.id}>
-                                        <td style={{textAlign:"center"}}>
-                                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FE9800":"#00B493"}}>{a.type}</span>
-                                        </td>
-                                        <td style={{fontSize:13}}>{a.desc}</td>
-                                        <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
-                                        <td style={{fontSize:12,color:"var(--text2)"}}>{a.date||"—"}</td>
-                                        <td style={{textAlign:"center"}}>
-                                          <button onClick={()=>startEditAR(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#DB6B2E",fontSize:13,marginRight:4}}><Icon name="edit" size={14}/></button>
-                                          <button onClick={()=>deleteAR(c.name, a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                  {(() => {
-                                    const sumCharge = c.entries.filter(a => a.type === "청구").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
-                                    const sumPay = c.entries.filter(a => a.type === "입금").reduce((s,a) => s + (Math.abs(parseFloat(a.amount))||0), 0);
-                                    const sumNet = sumCharge - sumPay;
-                                    return (
-                                      <tr style={{borderTop:"2px solid var(--divider)",background:darkMode?"rgba(255,255,255,0.04)":"rgba(0,0,0,0.02)"}}>
-                                        <td colSpan={2} style={{fontSize:12,fontWeight:800,padding:"8px 8px",color:"var(--text2)"}}>합계 ({c.entries.length}건)</td>
-                                        <td style={{textAlign:"right",fontSize:13,fontWeight:800,padding:"8px 8px"}}>
-                                          <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:1}}>
-                                            <span style={{color:"#FE9800",fontSize:11,fontWeight:700}}>청구 +{Math.round(sumCharge).toLocaleString()}</span>
-                                            <span style={{color:"#00B493",fontSize:11,fontWeight:700}}>입금 -{Math.round(sumPay).toLocaleString()}</span>
-                                            <span style={{color:sumNet>0?"#F04452":sumNet<0?"#00B493":"var(--text2)",fontSize:13,fontWeight:900,marginTop:1,paddingTop:2,borderTop:"1px dashed var(--divider)"}}>순 {sumNet>0?"+":""}{Math.round(sumNet).toLocaleString()}원</span>
-                                          </div>
-                                        </td>
-                                        <td colSpan={2}/>
-                                      </tr>
-                                    );
-                                  })()}
-                                </tbody>
-                              </table>
-                            )}
-                            {/* 새 내역 추가 폼 */}
-                            <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
-                              <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:36,fontSize:12,padding:"0 6px",border:"1px solid var(--border)",background:"var(--surface)"}}>
-                                <option value="입금">입금</option><option value="청구">청구</option>
-                              </select>
-                              <input placeholder="내역 (예: 부분 입금 / 분기 조정)" value={arDraft.desc} onChange={e=>setArDraft(d=>({...d,desc:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)"}}/>
-                              <input type="number" placeholder="금액" value={arDraft.amount} onChange={e=>setArDraft(d=>({...d,amount:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",textAlign:"right",border:"1px solid var(--border)",background:"var(--surface)"}}/>
-                              <div style={{position:"relative",display:"inline-flex",alignItems:"center"}}>
-                                {!arDraft.date && <span style={{position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:"var(--text3)",pointerEvents:"none",zIndex:1}}>날짜</span>}
-                                <input type="date" title="날짜 선택" value={arDraft.date} onChange={e=>setArDraft(d=>({...d,date:e.target.value}))} style={{height:36,fontSize:12,padding:"0 10px",border:"1px solid var(--border)",background:"var(--surface)",color:arDraft.date?"var(--text1)":"transparent",WebkitTextFillColor:arDraft.date?"var(--text1)":"transparent",width:"100%"}}/>
-                              </div>
-                              <button onClick={()=>addAR(c.name)} className="btn-primary" style={{padding:"0 14px",height:36,fontSize:12}}>+ 추가</button>
-                            </div>
-                            {/* 최종 잔액 카드 */}
-                            <div style={{marginTop:14,padding:"10px 14px",background:darkMode?"rgba(240,68,82,0.08)":"rgba(240,68,82,0.04)",borderRadius:10,border:`1.5px solid ${darkMode?"rgba(240,68,82,0.3)":"rgba(240,68,82,0.2)"}`,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
-                              <div>
-                                <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}>최종 미수금 잔액</div>
-                                <div style={{fontSize:10,color:"var(--text3)",marginTop:2}}>= 자동 미수금({Math.round(c.autoUnpaidSum).toLocaleString()}) + 수동 청구({Math.round(c.manualCharge).toLocaleString()}) - 수동 입금({Math.round(c.manualPaid).toLocaleString()})</div>
-                              </div>
-                              <div style={{fontSize:22,fontWeight:900,color:balanceColor}}>{Math.round(c.balance).toLocaleString()}원</div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+          {sorted.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "36px 20px", color: "var(--text3)", fontSize: 13, lineHeight: 1.7, border: "1px dashed var(--border)", borderRadius: 13 }}>
+              {Object.keys(clientAR).length === 0 ? <>등록된 미수금 내역이 없습니다.<br/>월별 장부에서 거래처를 골라 내역을 추가하세요.</> : "조건에 맞는 거래처가 없습니다."}
+            </div>
+          ) : (
+            <div className="ar-list">
+              {sorted.map((c) => {
+                const on = expandedName === c.name;
+                const col = c.balance > 0 ? "var(--negative-text)" : c.balance < 0 ? "var(--positive-text)" : "var(--text2)";
+                return (
+                  <div key={c.name} data-ar-client={c.name} onClick={() => setExpandedName(c.name)}
+                    style={{
+                      padding: "11px 13px", borderRadius: 11, cursor: "pointer", flexShrink: 0,
+                      background: on ? "var(--accent-tonal)" : "transparent",
+                      border: on ? "1px solid rgba(219,107,46,0.22)" : "1px solid transparent",
+                    }}
+                    onMouseEnter={e => { if (!on) e.currentTarget.style.background = "var(--surface2)"; }}
+                    onMouseLeave={e => { if (!on) e.currentTarget.style.background = "transparent"; }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <input type="checkbox" checked={selectedNames.has(c.name)} onClick={e => e.stopPropagation()}
+                        onChange={() => toggleSelectName(c.name)}
+                        style={{ width: 15, height: 15, accentColor: "var(--accent)", cursor: "pointer", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: on ? 700 : 600, color: on ? "var(--accent-strong)" : "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: col, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{Math.round(c.balance).toLocaleString()}</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4, paddingLeft: 24 }}>
+                      <span style={{ fontSize: 10.5, color: on ? "rgba(171,79,31,0.75)" : "var(--text3)", whiteSpace: "nowrap" }}>
+                        청구 {Math.round(c.charge).toLocaleString()} · 입금 {Math.round(c.paid).toLocaleString()}
+                      </span>
+                      <span style={{ fontSize: 10.5, color: "var(--text3)", flexShrink: 0 }}>
+                        {c.months.length === 0 ? "—" : c.months.length === 1 ? c.months[0] : `${c.months.length}개월`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 오른쪽: 선택한 거래처의 전 기간 원장 */}
+        {(() => {
+          const sel = sorted.find(c => c.name === expandedName) || sorted[0] || null;
+          if (!sel) return (
+            <div style={{ border: "1px dashed var(--border)", borderRadius: 16, padding: 56, textAlign: "center", color: "var(--empty-color)", fontSize: 13 }}>
+              왼쪽에서 거래처를 선택하세요
+            </div>
+          );
+          const col = sel.balance > 0 ? "var(--negative-text)" : sel.balance < 0 ? "var(--positive-text)" : "var(--text2)";
+          return (
+            <div className="ar-detail card" style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, paddingBottom: 14, borderBottom: "1px solid var(--divider)", flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginBottom: 3 }}>거래처 원장 · 전 기간</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.015em", wordBreak: "keep-all" }}>{sel.name}</div>
+                </div>
+                <button onClick={() => deleteAllForClient(sel.name)}
+                  style={{ padding: "7px 15px", borderRadius: 100, border: "none", background: "var(--negative-bg)", color: "var(--negative-text)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                  이 거래처 내역 삭제
+                </button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+                {[
+                  ["총 청구", Math.round(sel.charge).toLocaleString(), "원", null],
+                  ["총 입금", Math.round(sel.paid).toLocaleString(), "원", "var(--positive-text)"],
+                  ["미수금", Math.round(sel.balance).toLocaleString(), "원", col],
+                  ["거래 개월", String(sel.months.length), "개월", null],
+                ].map(([label, val, unit, color], i) => (
+                  <div key={i} style={{ background: i === 2 ? "var(--accent-tonal)" : "var(--row-bg)", border: i === 2 ? "1px solid rgba(219,107,46,0.2)" : "1px solid var(--divider)", borderRadius: 12, padding: "12px 14px", minWidth: 0 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: i === 2 ? "var(--accent-strong)" : "var(--text3)" }}>{label}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: color || "var(--text1)", marginTop: 3, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {val}<span style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)" }}> {unit}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ flex: 1, minHeight: 0 }}>{clientDetail(sel)}</div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -15525,6 +15833,38 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (supName) setPurchaseSubTabs(p2 => (p2 || []).some(t => t.name === supName) ? p2 : [...(p2 || []), { id: uid(), name: supName }]);
     showToast(`매입 현황에 자동 등록: ${it.name} ${qty.toLocaleString()}${it.unit ? " " + it.unit : ""} 입고 (${supName || "공급처 미지정"})`, "success");
   };
+  // ── 거래처 이름 변경·합치기 ──
+  // 같은 곳인데 표기가 달라(lg프린트 / LG 프린트) 탭이 갈라지는 일이 있다.
+  // 이름을 이미 있는 거래처로 바꾸면 자연스럽게 합쳐진다.
+  // 거래처명은 발주서·매입 현황·미지급 원장 세 곳에 따로 저장돼 있어 함께 바꿔야 한다.
+  const renameSupplier = (from, to) => {
+    const f = (from || "").trim(), t = (to || "").trim();
+    if (!f || !t || f === t) return;
+    setPurchaseOrders(prev => prev.map(po =>
+      ((po.supplier?.name || "").trim() === f) ? { ...po, supplier: { ...(po.supplier || {}), name: t } } : po));
+    setFabricIntakes(prev => (prev || []).map(r =>
+      ((r.supplier || "").trim() === f) ? { ...r, supplier: t } : r));
+    setPayables(prev => {
+      const cur = prev || {};
+      if (!cur[f]) return cur;
+      const next = { ...cur };
+      const src = next[f];
+      delete next[f];
+      if (next[t]) {
+        // 이미 있는 거래처로 합치는 경우 — 기초잔액은 앞선 것을 두고 지급 내역만 이어 붙인다
+        next[t] = { ...next[t], payments: [ ...((next[t].payments) || []), ...((src.payments) || []) ] };
+      } else {
+        next[t] = src;
+      }
+      return next;
+    });
+    if (setPurchaseSubTabs) setPurchaseSubTabs(prev => {
+      const list = (prev || []).filter(x => (x.name || "").trim() !== f);
+      return list.some(x => (x.name || "").trim() === t) ? list : [...list, { id: uid(), name: t }];
+    });
+    setPoHistorySupFilter(cur => cur === f ? t : cur);
+  };
+
   const [poHistorySearch, setPoHistorySearch] = useState("");
   const [poHistorySupFilter, setPoHistorySupFilter] = useState("");
   const [poHistorySort, setPoHistorySort] = useState("date_desc"); // date_desc | date_asc | amount_desc | supplier
@@ -20687,7 +21027,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   const getDate = po => po.orderDate || po.dateStr?.replaceAll(".", "-") || "";
                   const q = poHistorySearch.trim().toLowerCase();
                   const filtered = purchaseOrders.filter(po => {
-                    if (poHistorySupFilter && (po.supplier?.name || "") !== poHistorySupFilter) return false;
+                    // 표기만 다른 같은 거래처(lg프린트 / LG 프린트)도 한 탭에서 함께 보이게 비교한다
+                    const norm = (n) => (n || "").trim().toLowerCase().replace(/\s+/g, "");
+                    if (poHistorySupFilter && norm(po.supplier?.name) !== norm(poHistorySupFilter)) return false;
                     if (!q) return true;
                     return (po.title || "").toLowerCase().includes(q)
                       || (po.supplier?.name || "").toLowerCase().includes(q)
@@ -20718,25 +21060,55 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     if (done) pct = 100; else if (pct >= 100) pct = 99; // 미입고 품목이 남아 있으면 100% 표기 금지
                     return { ord, rcvd, pct, done, pendingItems, remainAmt: Math.round(remainAmt * 1.1) };
                   };
-                  const withProg = sorted.map(po => ({ po, prog: poProgress(po) }));
+                  // 납기 상태 — deliveryDate가 있고 아직 다 안 들어온 건만 따진다.
+                  // 발주서에 이미 납기일을 적고 있는데 목록에서는 쓰이지 않고 있었다.
+                  const todayYMD = new Date().toISOString().slice(0, 10);
+                  const dueInfo = (po, prog) => {
+                    const d = (po.deliveryDate || "").slice(0, 10);
+                    if (!d || prog.done) return null;
+                    const days = Math.round((new Date(todayYMD) - new Date(d)) / 86400000);
+                    if (isNaN(days)) return null;
+                    if (days > 0) return { kind: "late", days, label: `납기 ${days}일 초과` };
+                    if (days >= -7) return { kind: "soon", days: -days, label: days === 0 ? "오늘 납기" : `납기 ${-days}일 남음` };
+                    return { kind: "ok", days: -days, label: `납기 ${d.slice(5).replace("-", ".")}` };
+                  };
+                  const withProg = sorted.map(po => { const prog = poProgress(po); return { po, prog, due: dueInfo(po, prog) }; });
+                  const lateList = withProg.filter(x => x.due && x.due.kind === "late");
+                  const soonList = withProg.filter(x => x.due && x.due.kind === "soon");
+                  const openRemain = withProg.filter(x => !x.prog.done).reduce((a, x) => a + (x.prog.remainAmt || 0), 0);
                   const activeCnt = withProg.filter(x => !x.prog.done).length;
                   const doneCnt = withProg.length - activeCnt;
-                  const listed = withProg.filter(x => poStatusFilter === "active" ? !x.prog.done : poStatusFilter === "done" ? x.prog.done : true);
-                  const supplierTotals = {};
+                  let listed = withProg.filter(x => poStatusFilter === "active" ? !x.prog.done : poStatusFilter === "done" ? x.prog.done : true);
+                  // 납기 임박순 — 지난 것이 맨 위, 그다음 임박한 것. 납기 없는 건은 뒤로.
+                  if (poHistorySort === "due") {
+                    listed = [...listed].sort((a, b) => {
+                      const av = (a.po.deliveryDate || "9999-12-31"), bv = (b.po.deliveryDate || "9999-12-31");
+                      return av.localeCompare(bv);
+                    });
+                  }
+                  // 대소문자·공백만 다른 이름은 같은 거래처로 본다 (lg프린트 / LG 프린트).
+                  // 데이터는 그대로 두고 탭에서만 묶는다 — 표시 이름은 가장 많이 쓰인 표기를 따른다.
+                  const supKey = (n) => (n || "").trim().toLowerCase().replace(/\s+/g, "");
+                  const supBuckets = {};
                   purchaseOrders.forEach(po => {
-                    const name = po.supplier?.name || "(미지정)";
-                    if (!supplierTotals[name]) supplierTotals[name] = { count: 0, amount: 0 };
-                    supplierTotals[name].count += 1;
-                    supplierTotals[name].amount += Number(po.totalAmount) || 0;
+                    const raw = (po.supplier?.name || "").trim() || "(미지정)";
+                    const k = supKey(raw);
+                    if (!supBuckets[k]) supBuckets[k] = { count: 0, amount: 0, names: {} };
+                    supBuckets[k].count += 1;
+                    supBuckets[k].amount += Number(po.totalAmount) || 0;
+                    supBuckets[k].names[raw] = (supBuckets[k].names[raw] || 0) + 1;
                   });
-                  const supList = Object.entries(supplierTotals).sort((a, b) => b[1].amount - a[1].amount);
+                  const supList = Object.values(supBuckets).map(b => {
+                    const label = Object.entries(b.names).sort((x, y) => y[1] - x[1])[0][0];
+                    return [label, { count: b.count, amount: b.amount, variants: Object.keys(b.names) }];
+                  }).sort((a, b) => b[1].amount - a[1].amount);
                   const grandTotal = purchaseOrders.reduce((s, po) => s + (Number(po.totalAmount) || 0), 0);
                   const listedTotal = listed.reduce((s, x) => s + (Number(x.po.totalAmount) || 0), 0);
                   const selected = listed.find(x => x.po.id === selectedPOId) || listed[0] || null;
                   const stBadge = (prog) => prog.done
-                    ? { label: "입고완료", color: "#00B493", bg: "rgba(0,180,147,0.12)" }
-                    : prog.rcvd > 0 ? { label: `부분입고 ${prog.pct}%`, color: "#FE9800", bg: "rgba(255,149,0,0.12)" }
-                    : { label: "발주완료", color: "#DB6B2E", bg: "rgba(219,107,46,0.12)" };
+                    ? { label: "입고완료", color: "var(--positive-text)", bg: "var(--positive-bg)" }
+                    : prog.rcvd > 0 ? { label: `부분입고 ${prog.pct}%`, color: "var(--warning-text)", bg: "var(--warning-bg)" }
+                    : { label: "발주완료", color: "var(--accent-strong)", bg: "var(--accent-tonal)" };
                   return (
                     <>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
@@ -20753,14 +21125,91 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           <div style={{ fontSize: 17, fontWeight: 700, color: T.ghostColor, marginBottom: 8 }}>저장된 발주서가 없습니다</div>
                           <div style={{ fontSize: 14, color: T.empty }}>[새 발주]로 발주서를 작성하고 저장하면 이곳에서 진행 상황까지 관리됩니다</div>
                         </div>
-                      ) : (
+                      ) : (<>
+                        {/* KPI 스트립 — 다른 탭과 같은 규격. 목록을 훑지 않아도 지금 상태가 보인다. */}
+                        <div className="kpi-strip no-print" style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 12 }}>
+                          {[
+                            { label: "진행 중 발주", value: activeCnt.toLocaleString(), unit: "건" },
+                            { label: "미입고 잔액", value: Math.round(openRemain).toLocaleString(), unit: "원", accent: true },
+                            { label: "납기 초과", value: lateList.length.toLocaleString(), unit: "건", tone: lateList.length > 0 ? "var(--negative-text)" : undefined },
+                            { label: "납기 7일 이내", value: soonList.length.toLocaleString(), unit: "건", tone: soonList.length > 0 ? "var(--warning-text)" : undefined },
+                          ].map((c, i) => (
+                            <div key={i} style={{
+                              background: c.accent ? "var(--accent-tonal)" : "var(--row-bg)",
+                              border: c.accent ? "1px solid rgba(219,107,46,0.2)" : "1px solid var(--divider)",
+                              borderRadius: 12, padding: "13px 16px", minWidth: 0,
+                            }}>
+                              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.6, color: c.accent ? "var(--accent-strong)" : "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.label}</div>
+                              <div className="kpi-num" style={{ marginTop: 3, color: c.accent ? "var(--accent-strong)" : (c.tone || "var(--text1)") }}>
+                                {c.value}<span style={{ fontSize: 11, fontWeight: 500, color: c.accent ? "rgba(171,79,31,0.65)" : "var(--text3)" }}> {c.unit}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* 납기 지났는데 안 들어온 건 — 목록을 훑어야 알던 것을 위로 끌어올린다 */}
+                        {lateList.length > 0 && (
+                          <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 15px", borderRadius: 12, background: "var(--negative-bg)", border: "1px solid rgba(240,68,82,0.22)", marginBottom: 12, flexWrap: "wrap" }}>
+                            <Icon name="alert" size={15} style={{ color: "var(--negative-text)", flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 200, fontSize: 12.5, color: "var(--negative-text)", lineHeight: 1.5 }}>
+                              <b>{lateList[0].po.supplier?.name || "(미지정)"}</b> {lateList[0].due.label} — 입고 기록이 아직 없습니다.
+                              {lateList.length > 1 && <span style={{ opacity: 0.85 }}> (외 {lateList.length - 1}건)</span>}
+                            </div>
+                            <button onClick={() => { setSelectedPOId(lateList[0].po.id); setPoStatusFilter("active"); }}
+                              style={{ padding: "7px 15px", borderRadius: 9, border: "none", background: "var(--negative-text)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                              열어서 확인
+                            </button>
+                          </div>
+                        )}
+
+                        {/* ── 거래처 탭 ──
+                            검색 카드 안 작은 칩으로 있어 눈에 잘 안 띄었다. 단가표의 「단가표 탭」과
+                            같은 문법으로 큰 탭 줄로 올려, 거래처 전환이 화면의 1차 축이 되게 한다. */}
+                        {supList.length > 0 && (
+                          <div className="scroll-x no-print" style={{ display: "flex", gap: 22, alignItems: "center", borderBottom: "1px solid var(--divider)", overflowX: "auto", marginBottom: 14 }}>
+                            {[["", "전체", purchaseOrders.length], ...supList.map(([n, i]) => [n, n, i.count])].map(([key, label, count]) => {
+                              const on = poHistorySupFilter === key;
+                              return (
+                                <button key={key || "__all"} onClick={() => setPoHistorySupFilter(key)}
+                                  onDoubleClick={() => {
+                                    if (!key) return;   // 「전체」는 이름이 아니다
+                                    const bucket = supList.find(([n]) => n === key);
+                                    const variants = (bucket && bucket[1].variants) || [key];
+                                    const to = (window.prompt(`'${key}'의 새 이름\n이미 있는 거래처 이름을 넣으면 그쪽으로 합쳐집니다.`, key) || "").trim();
+                                    if (!to) return;
+                                    const exists = supList.some(([n]) => n === to && n !== key);
+                                    if (exists && !window.confirm(`'${key}'를 '${to}'로 합칠까요?\n두 거래처의 발주서·매입 내역·미지급 정산이 '${to}' 하나로 모입니다.`)) return;
+                                    // 표기가 갈려 있던 이름들도 이 기회에 하나로 맞춘다
+                                    variants.forEach(v => renameSupplier(v, to));
+                                    showToast(exists ? `'${to}'로 합쳤습니다` : `'${to}'로 이름을 바꿨습니다`, "success");
+                                  }}
+                                  title={key ? "더블클릭하면 이름 변경 · 다른 거래처 이름을 넣으면 합쳐집니다" : ""}
+                                  style={{
+                                  padding: "10px 2px 11px", border: "none", background: "none", cursor: "pointer", fontFamily: "inherit",
+                                  fontSize: 16, fontWeight: on ? 800 : 600, letterSpacing: "-0.01em", whiteSpace: "nowrap", flexShrink: 0,
+                                  color: on ? "var(--text1)" : "var(--text3)",
+                                  borderBottom: on ? "2.5px solid var(--accent)" : "2.5px solid transparent",
+                                  display: "inline-flex", alignItems: "center", gap: 7,
+                                }}>
+                                  {label}
+                                  <span style={{
+                                    fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 100,
+                                    background: on ? "var(--accent-tonal)" : "var(--surface2)",
+                                    color: on ? "var(--accent-strong)" : "var(--text3)",
+                                  }}>{count}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
                         <div className="po-workbench">
                           {/* ── 왼쪽: 목록 ── */}
                           <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
                             <div className="card" style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
                               <div style={{ position: "relative" }}>
                                 <input value={poHistorySearch} onChange={e => setPoHistorySearch(e.target.value)}
-                                  placeholder={"거래처·품목·메모 검색" + (poHistorySupFilter ? ` (필터: ${poHistorySupFilter})` : "")}
+                                  placeholder="거래처·품목·메모 검색"
                                   style={{ width: "100%", height: 40, paddingLeft: 12, fontSize: 13 }} />
                                 {poHistorySearch && (
                                   <button onClick={() => setPoHistorySearch("")} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", width: 22, height: 22, borderRadius: 11, border: "none", background: "var(--divider)", color: "var(--text2)", cursor: "pointer", fontSize: 12 }}>×</button>
@@ -20778,49 +21227,92 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   ))}
                                 </div>
                                 <select value={poHistorySort} onChange={e => setPoHistorySort(e.target.value)} style={{ height: 36, width: 110, fontSize: 12 }}>
+                                  <option value="due">납기 임박순</option>
                                   <option value="date_desc">최신순</option>
                                   <option value="date_asc">오래된순</option>
                                   <option value="amount_desc">금액 높은순</option>
                                   <option value="supplier">거래처명순</option>
                                 </select>
                               </div>
-                              <div className="chip-scroll" style={{ gap: 6 }}>
-                                {supList.map(([name, info]) => {
-                                  const active = poHistorySupFilter === name;
-                                  return (
-                                    <button key={name} onClick={() => setPoHistorySupFilter(active ? "" : name)}
-                                      title={`${info.count}건 · ${Number(info.amount).toLocaleString()}원`}
-                                      style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 100, fontFamily: "inherit", fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: "pointer",
-                                        background: active ? "var(--accent)" : "var(--surface2)", color: active ? "#fff" : "var(--text2)",
-                                        border: active ? "none" : "1px solid var(--divider)" }}>{name} {info.count}</button>
-                                  );
-                                })}
-                              </div>
                             </div>
 
                             <div className="po-list-scroll">
                               {listed.length === 0 ? (
                                 <div className="card" style={{ padding: 28, textAlign: "center", color: T.text3, fontSize: 13 }}>조건에 맞는 발주가 없습니다</div>
-                              ) : listed.map(({ po, prog }) => {
+                              ) : listed.map(({ po, prog, due }) => {
                                 const isSel = selected && selected.po.id === po.id;
                                 const st = stBadge(prog);
-                                const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${po.items.length - 2}` : "");
+                                const itemsPreview = (po.items || []).map(i => i.name).filter(Boolean).slice(0, 2).join(", ") + ((po.items || []).length > 2 ? ` 외 ${(po.items || []).length - 2}` : "");
+                                // 카드 높이를 맞추기 위해 모든 줄을 항상 그린다 (값이 없으면 — 로 자리만 지킨다).
+                                // 줄을 조건부로 빼면 카드마다 높이가 달라져 아래 진행바·금액이 들쭉날쭉해진다.
+                                // 발주일 — 발주서마다 날짜가 중요해서 카드 왼쪽에 따로 세운다.
+                                // orderDate가 비어 있으면 목록 정렬 기준과 같은 값(제목에 박힌 날짜)이라도 쓴다.
+                                const od = (po.orderDate || "").slice(0, 10);
+                                const odM = od ? od.slice(5, 7) : "";
+                                const odD = od ? od.slice(8, 10) : "";
+                                const odY = od ? od.slice(0, 4) : "";
+                                const dueColor = !due ? "var(--text3)"
+                                  : due.kind === "late" ? "var(--negative-text)"
+                                  : due.kind === "soon" ? "var(--warning-text)" : "var(--text3)";
+                                const dueBg = !due || due.kind === "ok" ? "transparent"
+                                  : due.kind === "late" ? "var(--negative-bg)" : "var(--warning-bg)";
                                 return (
                                   <div key={po.id} onClick={() => setSelectedPOId(po.id)}
-                                    style={{ padding: "12px 14px", borderRadius: 13, cursor: "pointer",
+                                    style={{ padding: "12px 14px", borderRadius: 13, cursor: "pointer", flexShrink: 0,
                                       border: isSel ? "1.5px solid var(--accent)" : "1px solid var(--divider)",
                                       background: isSel ? "rgba(219,107,46,0.07)" : "var(--surface)",
-                                      display: "flex", flexDirection: "column", gap: 7 }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                      <span style={{ fontSize: 13, fontWeight: isSel ? 800 : 700, color: T.text, flexGrow: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.supplier?.name || "(미지정)"}{po.updatedAt && <span title="수정됨" style={{ marginLeft: 4, fontSize: 10, color: "#DB6B2E", fontWeight: 700 }}>✎</span>}</span>
-                                      <span style={{ flexShrink: 0, padding: "3px 9px", borderRadius: 100, fontSize: 10, fontWeight: 800, color: st.color, background: st.bg }}>{st.label}</span>
+                                      // 카드 높이를 고정한다. 줄마다 최소높이만 주면 글자 크기·배지 유무로 1~2px씩
+                                      // 어긋나 카드 하단이 나란해지지 않는다. box-sizing이 border-box라
+                                      // 선택 카드의 두꺼운 테두리도 높이를 바꾸지 않는다.
+                                      height: 124, boxSizing: "border-box",
+                                      display: "flex", flexDirection: "row", alignItems: "stretch", gap: 12 }}>
+                                    {/* 왼쪽 — 발주일 */}
+                                    <div style={{
+                                      width: 50, flexShrink: 0, display: "flex", flexDirection: "column",
+                                      alignItems: "center", justifyContent: "center", gap: 1,
+                                      borderRight: "1px solid var(--divider)", paddingRight: 11,
+                                    }}>
+                                      {od ? (<>
+                                        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--text3)", lineHeight: 1 }}>{odY}</div>
+                                        <div style={{ fontSize: 17, fontWeight: 800, color: isSel ? "var(--accent-strong)" : "var(--text1)", lineHeight: 1.15, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{odM}.{odD}</div>
+                                        <div style={{ fontSize: 9.5, fontWeight: 600, color: "var(--text3)", lineHeight: 1 }}>발주</div>
+                                      </>) : (
+                                        <div style={{ fontSize: 10.5, color: "var(--empty-color)", textAlign: "center", lineHeight: 1.35 }}>날짜<br/>없음</div>
+                                      )}
                                     </div>
-                                    <div style={{ fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.title || itemsPreview || "—"} · {po.orderDate || po.dateStr || "—"}</div>
-                                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    {/* 오른쪽 — 내용 */}
+                                    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                                    {/* 1행 — 거래처 + 상태 (한 줄 고정) */}
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 20 }}>
+                                      <span style={{ fontSize: 13, fontWeight: isSel ? 800 : 700, color: T.text, flexGrow: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{po.supplier?.name || "(미지정)"}</span>
+                                      <span style={{ flexShrink: 0, padding: "3px 9px", borderRadius: 100, fontSize: 10, fontWeight: 800, color: st.color, background: st.bg, whiteSpace: "nowrap" }}>{st.label}</span>
+                                    </div>
+                                    {/* 2행 — 제목·품목 (한 줄 고정) */}
+                                    <div style={{ fontSize: 11.5, color: T.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minHeight: 16 }}
+                                      title={po.title || itemsPreview || ""}>
+                                      {/* 날짜는 왼쪽 블록에 있으므로 제목 꼬리의 "· 2026-07-24"는 뗀다 */}
+                                      {(po.title || itemsPreview || "—").replace(/\s*[·-]\s*\d{4}-\d{2}-\d{2}\s*$/, "")}
+                                    </div>
+                                    {/* 3행 — 잔여 · 납기 (한 줄 고정) */}
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 18 }}>
+                                      <span style={{ fontSize: 10.5, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                        {prog.ord > 0
+                                          ? (prog.done ? `${prog.ord.toLocaleString()} 전량 입고` : `잔여 ${Math.max(0, prog.ord - prog.rcvd).toLocaleString()} / ${prog.ord.toLocaleString()}`)
+                                          : "수량 미입력"}
+                                      </span>
+                                      <span style={{
+                                        fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0,
+                                        padding: (due && due.kind !== "ok") ? "2px 7px" : 0, borderRadius: 6,
+                                        color: dueColor, background: dueBg,
+                                      }}>{due ? due.label : (po.deliveryDate ? "" : "납기 미지정")}</span>
+                                    </div>
+                                    {/* 4행 — 진행바 + 금액 (모든 카드에서 같은 높이에 온다) */}
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 18 }}>
                                       <div style={{ flexGrow: 1, height: 4, borderRadius: 100, background: "var(--surface2)" }}>
-                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "#00B493" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
+                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "var(--positive)" : prog.rcvd > 0 ? "var(--warning)" : "var(--accent)" }} />
                                       </div>
-                                      <span style={{ fontSize: 12.5, fontWeight: 800, color: NAVY, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{Number(po.totalAmount || 0).toLocaleString()}원</span>
+                                      <span style={{ fontSize: 12.5, fontWeight: 800, color: NAVY, fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{(Number(po.totalAmount) || 0).toLocaleString()}원</span>
+                                    </div>
                                     </div>
                                   </div>
                                 );
@@ -20835,6 +21327,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                           </div>
 
                           {/* ── 오른쪽: 상세 ── */}
+                          <div className="po-detail-pane">
                           {(() => {
                             if (!selected) return (
                               <div className="card" style={{ padding: 48, textAlign: "center", color: T.text3, fontSize: 14 }}>왼쪽 목록에서 발주를 선택하세요</div>
@@ -20872,7 +21365,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               <button onClick={onClick} title={title} style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: color || "var(--text2)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name={icon} size={14}/></button>
                             );
                             return (
-                              <div className="card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
+                              <div className="card" style={{ padding: "22px 24px", display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
                                 {/* 헤더 */}
                                 <div style={{ display: "flex", alignItems: "flex-start", gap: 11, flexWrap: "wrap" }}>
                                   <div style={{ width: 40, height: 40, borderRadius: 12, background: st.bg, color: st.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, flexShrink: 0 }}>{(po.supplier?.name || "?").slice(0, 1)}</div>
@@ -20881,8 +21374,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                       <span style={{ fontSize: 16, fontWeight: 800, color: T.text }}>{po.supplier?.name || "(미지정)"}</span>
                                       <span style={{ padding: "3px 10px", borderRadius: 100, fontSize: 10.5, fontWeight: 800, color: st.color, background: st.bg }}>{st.label}</span>
                                     </div>
+                                    {/* 발주일·납기는 이 화면에서 가장 자주 확인하는 값이라 제목과 분리해 굵게 세운다 */}
+                                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "5px 0 3px" }}>
+                                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 8, background: "var(--surface2)" }}>
+                                        <Icon name="calendar" size={12} style={{ color: "var(--text3)" }} />
+                                        <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>발주</span>
+                                        <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{po.orderDate || po.dateStr || "—"}</span>
+                                      </span>
+                                      {po.deliveryDate && (
+                                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 10px", borderRadius: 8,
+                                          background: (dday !== null && dday < 0) ? "var(--negative-bg)" : (dday !== null && dday <= 7) ? "var(--warning-bg)" : "var(--surface2)" }}>
+                                          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>납기</span>
+                                          <span style={{ fontSize: 12.5, fontWeight: 800, color: (dday !== null && dday < 0) ? "var(--negative-text)" : (dday !== null && dday <= 7) ? "var(--warning-text)" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{po.deliveryDate}</span>
+                                        </span>
+                                      )}
+                                    </div>
                                     <div style={{ fontSize: 11.5, color: T.text3, marginTop: 3 }}>
-                                      {po.title || "—"} · 발주 {po.orderDate || po.dateStr || "—"}
+                                      {po.title || "—"}
                                       {po.deliveryDate ? <> · 납기 {po.deliveryDate}{dday !== null && <b style={{ color: dday < 0 ? "#F04452" : dday <= 7 ? "#FE9800" : T.text2, marginLeft: 4 }}>{dday < 0 ? `D+${-dday}` : dday === 0 ? "D-Day" : `D-${dday}`}</b>}</> : null}
                                       {po.supplier?.contact ? <> · 담당 {po.supplier.contact}</> : null}
                                     </div>
@@ -20900,36 +21408,36 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
                                 {/* 지표 타일 */}
                                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
-                                  <div style={{ background: "var(--surface2)", borderRadius: 13, padding: "12px 14px" }}>
-                                    <div style={{ fontSize: 11, fontWeight: 600, color: T.text3 }}>발주 금액 (VAT 포함)</div>
+                                  <div style={{ background: "var(--row-bg)", border: "1px solid var(--divider)", borderRadius: 13, padding: "14px 16px" }}>
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, color: T.text3 }}>발주 금액 (VAT 포함)</div>
                                     <div style={{ fontSize: 17, fontWeight: 800, color: T.text, marginTop: 4, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{Number(po.totalAmount || 0).toLocaleString()}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>원</span></div>
                                   </div>
-                                  <div style={{ background: "var(--surface2)", borderRadius: 13, padding: "12px 14px" }}>
-                                    <div style={{ fontSize: 11, fontWeight: 600, color: T.text3 }}>입고 진행</div>
+                                  <div style={{ background: "var(--row-bg)", border: "1px solid var(--divider)", borderRadius: 13, padding: "14px 16px" }}>
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, color: T.text3 }}>입고 진행</div>
                                     <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 7 }}>
                                       <span style={{ fontSize: 17, fontWeight: 800, color: T.text, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{prog.pct}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>%</span></span>
                                       <div style={{ flexGrow: 1, height: 5, borderRadius: 100, background: "var(--divider)" }}>
-                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "#00B493" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
+                                        <div style={{ width: `${prog.pct}%`, height: "100%", borderRadius: 100, background: prog.done ? "var(--positive)" : prog.rcvd > 0 ? "#FE9800" : "var(--accent)" }} />
                                       </div>
                                     </div>
                                     <div style={{ fontSize: 10.5, color: T.text3, marginTop: 4, fontVariantNumeric: "tabular-nums" }}>입고 {prog.rcvd.toLocaleString()} / 발주 {prog.ord.toLocaleString()}{prog.pendingItems > 0 && <b style={{ color: "#FE9800", marginLeft: 5 }}>미입고 {prog.pendingItems}품목</b>}</div>
                                   </div>
-                                  <div style={{ background: "var(--surface2)", borderRadius: 13, padding: "12px 14px" }}>
-                                    <div style={{ fontSize: 11, fontWeight: 600, color: T.text3 }}>미입고 잔액 (추정)</div>
-                                    <div style={{ fontSize: 17, fontWeight: 800, color: prog.done ? "#00B493" : "var(--accent)", marginTop: 4, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{(prog.done ? 0 : prog.remainAmt).toLocaleString()}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>원</span></div>
+                                  <div style={{ background: "var(--accent-tonal)", border: "1px solid rgba(219,107,46,0.2)", borderRadius: 13, padding: "14px 16px" }}>
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, color: "var(--accent-strong)" }}>미입고 잔액 (추정)</div>
+                                    <div style={{ fontSize: 17, fontWeight: 800, color: prog.done ? "var(--positive-text)" : "var(--accent-strong)", marginTop: 4, letterSpacing: -0.4, fontVariantNumeric: "tabular-nums" }}>{(prog.done ? 0 : prog.remainAmt).toLocaleString()}<span style={{ fontSize: 12, fontWeight: 600, color: T.text3 }}>원</span></div>
                                     <div style={{ fontSize: 10.5, color: T.text3, marginTop: 4 }}>잔여 수량 × 단가 (VAT 포함)</div>
                                   </div>
                                 </div>
 
                                 {/* 품목별 입고 현황 (기존 부분입고·빠른수정 로직 그대로) */}
-                                <div>
+                                <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                                     <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>품목별 입고 현황 ({its.length}건)</span>
                                     <span style={{ fontSize: 10.5, color: T.text3, background: "var(--surface2)", padding: "3px 8px", borderRadius: 100 }}>입고수량 입력 시 매입 현황에 자동 기록</span>
                                   </div>
-                                      <div style={{ overflowX: "auto" }}>
+                                      <div style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "auto", border: "1px solid var(--divider)", borderRadius: 12 }}>
                                         <table style={{ width: "100%", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
-                                          <thead><tr style={{ color: T.text3, fontSize: 11 }}>
+                                          <thead style={{ position: "sticky", top: 0, background: "var(--surface)", zIndex: 1 }}><tr style={{ color: T.text3, fontSize: 11 }}>
                                             <th style={{ textAlign: "left", padding: "6px 8px" }}>품목</th>
                                             <th style={{ textAlign: "right", padding: "6px 8px", width: 90 }}>발주수량</th>
                                             <th style={{ textAlign: "right", padding: "6px 8px", width: 110 }}>입고수량</th>
@@ -21106,7 +21614,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 </div>
 
                                 {/* 입고 이력 타임라인 */}
-                                <div>
+                                <div style={{ flexShrink: 0 }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                                     <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>입고 이력</span>
                                     {timeline.length > 0 && <span style={{ padding: "2px 8px", borderRadius: 100, background: "var(--surface2)", color: T.text3, fontSize: 10.5, fontWeight: 700 }}>{timeline.length}회</span>}
@@ -21138,7 +21646,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               </div>
                             );
                           })()}
+                          </div>
                         </div>
+                      </>
                       )}
                     </>
                   );
