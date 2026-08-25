@@ -15736,6 +15736,22 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     clearTimeout(poRcvTimers.current[tkey]);
     poRcvTimers.current[tkey] = setTimeout(() => syncReceiptsToIntake(poId, itemIdx), 600);
   };
+  // 발주 품목에 대응하는 기존 매입 행 찾기 (인덱스 반환, 없으면 -1).
+  // 링크가 정확한 행 → '매입 전송'으로 만든 행(품목 링크 없음) → 수기 입력 행 순서로 넓혀 가며 찾는다.
+  // 이 폴백이 없으면 이미 적어둔 매입(예: 6월)을 못 찾아 날짜가 오늘로 바뀌고 행이 중복 생성된다.
+  const findIntakeIdxForItem = (arr, po, it, itemKey) => {
+    const rows = arr || [];
+    const nm = (it.name || "").trim();
+    const sup = (po.supplier?.name || "").trim();
+    let i = rows.findIndex(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && !r.sourceRcptId);
+    if (i >= 0) return i;
+    i = rows.findIndex(r => r.sourcePoId === po.id && !r.sourcePoItemId && !r.sourceRcptId && (r.materialName || "").trim() === nm);
+    if (i >= 0) return i;
+    if (!nm) return -1;
+    i = rows.findIndex(r => !r.sourcePoId && !r.sourceRcptId && (r.materialName || "").trim() === nm && (r.supplier || "").trim() === sup);
+    return i;
+  };
+
   // 부분입고 → 매입 현황: 입고 건마다 해당 날짜의 매입 행 1개를 유지(sourceRcptId 링크)
   const syncReceiptsToIntake = (poId, itemIdx) => {
     const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
@@ -15748,10 +15764,11 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     const arr = [...(fabricIntakesRef.current || [])];
     let changed = false;
     // 기존 단일 누계 행 처리 (부분입고 전환 시 중복 방지): 자동행은 제거, 수기/전송행은 첫 입고 건에 연결
-    const cumIdx = arr.findIndex(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && !r.sourceRcptId);
+    const cumIdx = findIntakeIdxForItem(arr, po, it, itemKey);
     if (cumIdx >= 0 && rcv.length) {
       if (arr[cumIdx].autoFromPO) { arr.splice(cumIdx, 1); changed = true; }
-      else { arr[cumIdx] = { ...arr[cumIdx], sourceRcptId: rcv[0].id }; changed = true; }
+      // 수기·매입 전송 행은 지우지 않고 첫 입고 건에 연결해 이어 쓴다 (날짜·메모 보존, 중복 방지)
+      else { arr[cumIdx] = { ...arr[cumIdx], sourcePoId: po.id, sourcePoItemId: itemKey, sourceRcptId: rcv[0].id }; changed = true; }
     }
     // 삭제된 입고 건의 자동 행 제거
     for (let i = arr.length - 1; i >= 0; i--) {
@@ -21349,8 +21366,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               const it = its[idx];
                               if (!(it.rcv || []).length && parseFloat(it.receivedQty) > 0) {
                                 const itemKey = it.id != null ? String(it.id) : po.id + "#" + idx;
-                                const exist = fabricIntakes.find(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && !r.sourceRcptId);
+                                const exIdx = findIntakeIdxForItem(fabricIntakes, po, it, itemKey);
+                                const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
                                 setPOReceipts(po.id, idx, [{ id: uid(), date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: String(parseFloat(it.receivedQty)) }]);
+                                if (!exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못해 1차 입고일을 오늘로 넣었습니다 — 실제 입고일로 고쳐주세요`, "info");
                               }
                               setRcptDraft({ date: new Date().toISOString().slice(0, 10), qty: "" });
                               setPoRcptOpen({ poId: po.id, idx });
@@ -21518,8 +21537,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                         // 기존 누계 입력분이 있으면 첫 입고 건으로 이관 (매입 현황의 기존 날짜 유지)
                                                         if (!nRcv && parseFloat(it.receivedQty) > 0) {
                                                           const itemKey = it.id != null ? String(it.id) : po.id + "#" + ii;
-                                                          const exist = fabricIntakes.find(r => r.sourcePoId === po.id && String(r.sourcePoItemId || "") === itemKey && !r.sourceRcptId);
+                                                          const exIdx = findIntakeIdxForItem(fabricIntakes, po, it, itemKey);
+                                                          const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
                                                           setPOReceipts(po.id, ii, [{ id: uid(), date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: String(parseFloat(it.receivedQty)) }]);
+                                                          if (!exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못해 1차 입고일을 오늘로 넣었습니다 — 실제 입고일로 고쳐주세요`, "info");
                                                         }
                                                         setRcptDraft({ date: new Date().toISOString().slice(0, 10), qty: "" });
                                                         setPoRcptOpen({ poId: po.id, idx: ii });
