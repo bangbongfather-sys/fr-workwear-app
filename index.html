@@ -12449,8 +12449,10 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
                     {r.isManual ? <span title="여기서 직접 추가한 매입" style={{ fontSize: 9.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", padding: "2px 6px", borderRadius: 100, marginLeft: 6, verticalAlign: "middle" }}>수동</span> : null}</td>
                     {r.unitPrice > 0 && (
                       <div title="이 매입이 이뤄진 시점의 단가입니다 — 단가표가 나중에 바뀌어도 그대로 남습니다"
-                        style={{ fontSize: 10.5, color: "var(--text3)", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-                        당시 단가 {W(r.unitPrice)}원{r.unit ? " / " + r.unit : ""}
+                        style={{ display: "inline-flex", alignItems: "baseline", gap: 5, marginTop: 5, padding: "3px 9px", borderRadius: 7, background: "var(--surface2)" }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.3 }}>당시 단가</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{W(r.unitPrice)}</span>
+                        <span style={{ fontSize: 10.5, color: "var(--text3)" }}>원{r.unit ? " / " + r.unit : ""}</span>
                       </div>
                     )}
                   <td style={{ ...td, textAlign: "right", color: "var(--text2)" }}>{r.qty ? r.qty.toLocaleString() : ""}</td>
@@ -14000,7 +14002,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                 })()}
               </th>
               <th>매입일</th><th>품목명</th><th>공급업체</th>
-              <th style={{textAlign:"right"}}>수량</th><th style={{textAlign:"right"}}>단가</th>
+              <th style={{textAlign:"right"}}>수량</th><th style={{textAlign:"right", minWidth: 118}}>매입 당시 단가</th>
               <th style={{textAlign:"right"}}>공급가</th><th style={{textAlign:"right"}}>VAT 포함</th><th style={{textAlign:"center"}}>상태</th>
               <th>담당자</th><th>비고</th><th style={{textAlign:"center", minWidth: 110}}>관리</th>
             </tr></thead>
@@ -14177,7 +14179,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                   {/* 이 행의 단가는 매입 당시 스냅샷이다. 단가표가 그 뒤 바뀌었으면 그 사실을 알려
                       "왜 다르지?"를 없앤다 — 값 자체는 절대 따라 바뀌지 않는다. */}
                   <td style={{textAlign:"right",fontSize:13}}>
-                    {parseFloat(r.unitPrice||0).toLocaleString()}원
+                    <span style={{ fontSize: 14.5, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.01em" }}>{parseFloat(r.unitPrice||0).toLocaleString()}</span><span style={{ fontSize: 11, color: "var(--text3)" }}>원</span>
                     {(() => {
                       const cur = (materials.find(m => m.name === r.materialName) || laborItems.find(l => l.name === r.materialName));
                       const now = cur ? Number(cur.price) || 0 : 0;
@@ -14186,7 +14188,9 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                       const up = now > was;
                       return (
                         <div title={`매입 당시 ${was.toLocaleString()}원 · 지금 단가표 ${now.toLocaleString()}원 — 이 행은 당시 값 그대로입니다`}
-                          style={{ fontSize: 10, fontWeight: 700, marginTop: 1, color: up ? "var(--negative-text)" : "var(--positive-text)", whiteSpace: "nowrap" }}>
+                          style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, marginTop: 3, padding: "2px 8px", borderRadius: 6,
+                            color: up ? "var(--negative-text)" : "var(--positive-text)",
+                            background: up ? "var(--negative-bg)" : "var(--positive-bg)", whiteSpace: "nowrap" }}>
                           지금 {now.toLocaleString()}원 {up ? "▲" : "▼"}
                         </div>
                       );
