@@ -12408,7 +12408,7 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr style={{ fontSize: 11, color: "var(--text3)" }}>
               <th style={{ padding: "9px 10px", textAlign: "left", width: 96 }}>거래일자</th>
-              <th style={{ padding: "9px 10px", textAlign: "left" }}>품목 / 내용 <span style={{ fontWeight: 400 }}>· 매입 당시 단가</span></th>
+              <th style={{ padding: "9px 10px", textAlign: "left", minWidth: 260 }}>품목 / 내용</th>
               <th style={{ padding: "9px 10px", textAlign: "right", width: 80 }}>수량</th>
               <th style={{ padding: "9px 10px", textAlign: "right", width: 120 }}>매입액(VAT포함)</th>
               <th style={{ padding: "9px 10px", textAlign: "right", width: 120 }}>지급액</th>
@@ -12448,11 +12448,10 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
                     {r.isReturn ? <span style={{ color: "#F04452", fontSize: 10.5, fontWeight: 700, marginLeft: 5 }}>반품</span> : null}
                     {r.isManual ? <span title="여기서 직접 추가한 매입" style={{ fontSize: 9.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", padding: "2px 6px", borderRadius: 100, marginLeft: 6, verticalAlign: "middle" }}>수동</span> : null}</td>
                     {r.unitPrice > 0 && (
+                      /* 칩으로 감싸면 셀이 좁을 때 라벨이 세로로 쪼개진다 — 배경 없이 한 줄로 둔다 */
                       <div title="이 매입이 이뤄진 시점의 단가입니다 — 단가표가 나중에 바뀌어도 그대로 남습니다"
-                        style={{ display: "inline-flex", alignItems: "baseline", gap: 5, marginTop: 5, padding: "3px 9px", borderRadius: 7, background: "var(--surface2)" }}>
-                        <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.3 }}>당시 단가</span>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{W(r.unitPrice)}</span>
-                        <span style={{ fontSize: 10.5, color: "var(--text3)" }}>원{r.unit ? " / " + r.unit : ""}</span>
+                        style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 2, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                        당시 단가 <b style={{ fontWeight: 700, color: "var(--text2)" }}>{W(r.unitPrice)}</b>원{r.unit ? "/" + r.unit : ""}
                       </div>
                     )}
                   <td style={{ ...td, textAlign: "right", color: "var(--text2)" }}>{r.qty ? r.qty.toLocaleString() : ""}</td>
@@ -14188,9 +14187,8 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                       const up = now > was;
                       return (
                         <div title={`매입 당시 ${was.toLocaleString()}원 · 지금 단가표 ${now.toLocaleString()}원 — 이 행은 당시 값 그대로입니다`}
-                          style={{ display: "inline-block", fontSize: 11.5, fontWeight: 700, marginTop: 3, padding: "2px 8px", borderRadius: 6,
-                            color: up ? "var(--negative-text)" : "var(--positive-text)",
-                            background: up ? "var(--negative-bg)" : "var(--positive-bg)", whiteSpace: "nowrap" }}>
+                          style={{ display: "block", fontSize: 11, fontWeight: 700, marginTop: 2,
+                            color: up ? "var(--negative-text)" : "var(--positive-text)", whiteSpace: "nowrap" }}>
                           지금 {now.toLocaleString()}원 {up ? "▲" : "▼"}
                         </div>
                       );
