@@ -21364,14 +21364,15 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               let idx = its.findIndex(it => { const o = parseFloat(it.qty) || 0; const r = parseFloat(it.receivedQty) || 0; return o > 0 && r < o; });
                               if (idx < 0) idx = 0;
                               const it = its[idx];
-                              if (!(it.rcv || []).length && parseFloat(it.receivedQty) > 0) {
-                                const itemKey = it.id != null ? String(it.id) : po.id + "#" + idx;
-                                const exIdx = findIntakeIdxForItem(fabricIntakes, po, it, itemKey);
-                                const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
-                                setPOReceipts(po.id, idx, [{ id: uid(), date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: String(parseFloat(it.receivedQty)) }]);
-                                if (!exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못해 1차 입고일을 오늘로 넣었습니다 — 실제 입고일로 고쳐주세요`, "info");
-                              }
-                              setRcptDraft({ date: new Date().toISOString().slice(0, 10), qty: "" });
+                              // 패널을 여는 것만으로 입고가 기록되면 안 된다 — 기존 누계가 있으면
+                              // 입력칸에 채워만 두고, 실제 기록은 「입고 저장」을 눌러야 일어난다.
+                              // 날짜는 회사 맥에서 고친 findIntakeIdxForItem로 기존 매입 행을 찾아 그 날짜를 쓴다.
+                              const pre = (!(it.rcv || []).length && parseFloat(it.receivedQty) > 0) ? String(parseFloat(it.receivedQty)) : "";
+                              const itemKey = it.id != null ? String(it.id) : po.id + "#" + idx;
+                              const exIdx = pre ? findIntakeIdxForItem(fabricIntakes, po, it, itemKey) : -1;
+                              const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
+                              if (pre && !exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못했습니다 — 입고일을 확인하고 저장하세요`);
+                              setRcptDraft({ date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: pre });
                               setPoRcptOpen({ poId: po.id, idx });
                             };
                             // 입고 이력 타임라인 (전 품목 rcv 통합, 시간순 누적 %)
@@ -21534,15 +21535,15 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                       const openRcpt = (e) => {
                                                         e.stopPropagation();
                                                         if (isRcptOpen) { setPoRcptOpen(null); return; }
-                                                        // 기존 누계 입력분이 있으면 첫 입고 건으로 이관 (매입 현황의 기존 날짜 유지)
-                                                        if (!nRcv && parseFloat(it.receivedQty) > 0) {
-                                                          const itemKey = it.id != null ? String(it.id) : po.id + "#" + ii;
-                                                          const exIdx = findIntakeIdxForItem(fabricIntakes, po, it, itemKey);
-                                                          const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
-                                                          setPOReceipts(po.id, ii, [{ id: uid(), date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: String(parseFloat(it.receivedQty)) }]);
-                                                          if (!exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못해 1차 입고일을 오늘로 넣었습니다 — 실제 입고일로 고쳐주세요`, "info");
-                                                        }
-                                                        setRcptDraft({ date: new Date().toISOString().slice(0, 10), qty: "" });
+                                                        // 여는 것만으로는 아무것도 기록하지 않는다. 기존 누계가 있으면 입력칸에
+                                                        // 채워 두고, 「입고 저장」을 눌러야 비로소 입고 건이 된다.
+                                                        // 날짜는 findIntakeIdxForItem로 찾은 기존 매입 행의 날짜를 쓴다.
+                                                        const pre = (!nRcv && parseFloat(it.receivedQty) > 0) ? String(parseFloat(it.receivedQty)) : "";
+                                                        const itemKey = it.id != null ? String(it.id) : po.id + "#" + ii;
+                                                        const exIdx = pre ? findIntakeIdxForItem(fabricIntakes, po, it, itemKey) : -1;
+                                                        const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
+                                                        if (pre && !exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못했습니다 — 입고일을 확인하고 저장하세요`, "info");
+                                                        setRcptDraft({ date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: pre });
                                                         setPoRcptOpen({ poId: po.id, idx: ii });
                                                       };
                                                       return (<>
@@ -21612,6 +21613,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                               ))}
                                                             </div>
                                                           )}
+                                                          {/* 아직 기록되지 않았음을 분명히 — 여는 것만으로는 입고가 되지 않는다 */}
+                                                          {rcv.length === 0 && (
+                                                            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderRadius: 9, background: "var(--warning-bg)", border: "1px solid rgba(254,152,0,0.25)" }}>
+                                                              <Icon name="alert" size={13} style={{ color: "var(--warning-text)", flexShrink: 0 }} />
+                                                              <span style={{ fontSize: 11.5, color: "var(--warning-text)", lineHeight: 1.5 }}>
+                                                                {parseFloat(rcptDraft.qty) > 0
+                                                                  ? <>아직 저장 전입니다 — 날짜와 수량을 확인하고 <b>「입고 저장」</b>을 눌러야 입고 이력·매입 현황에 기록됩니다.</>
+                                                                  : <>입고 수량을 넣고 <b>「입고 저장」</b>을 눌러야 기록됩니다. 창을 닫으면 아무것도 저장되지 않습니다.</>}
+                                                              </span>
+                                                            </div>
+                                                          )}
                                                           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                                             <span style={{ fontSize: 11, fontWeight: 700, color: T.text3, width: 34 }}>추가</span>
                                                             <input type="date" value={rcptDraft.date} onChange={(e) => setRcptDraft({ ...rcptDraft, date: e.target.value })}
@@ -21619,7 +21631,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                             <input type="number" value={rcptDraft.qty} onChange={(e) => setRcptDraft({ ...rcptDraft, qty: e.target.value })} placeholder="입고 수량"
                                                               onKeyDown={(e) => { if (e.key === "Enter") addRc(); }}
                                                               style={{ width: 100, height: 30, padding: "0 8px", fontSize: 12, textAlign: "right", borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-                                                            <button onClick={addRc} className="btn-orange" style={{ height: 30, padding: "0 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>+ 입고 추가</button>
+                                                            <button onClick={addRc} className="btn-primary" style={{ height: 30, padding: "0 16px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>입고 저장</button>
                                                           </div>
                                                         </div>
                                                       </td>
