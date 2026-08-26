@@ -1475,7 +1475,7 @@ const ORANGE = "#F59E0B";
 
 // 클라우드 동기화 섹션 목록 (top-level key 단위). 섹션별 자동 병합·충돌 판정의 기준.
 // 여기 순서/이름이 Firebase /frw 의 top-level key 및 _revs 키와 1:1 대응한다.
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -15514,6 +15514,8 @@ function App() {
   const [bids, setBids] = useState(() => load("frw_bids", []));
   const [todos, setTodos] = useState(() => load("frw_todos", []));
   const [notes, setNotes] = useState(() => load("frw_notes", []));
+  // 하루 기록(일별 메모·일기) — { "2026-08-26": { text, star, updatedAt } }
+  const [dailyNotes, setDailyNotes] = useState(() => load("frw_daily_notes", {}));
   const [taxes, setTaxes] = useState(() => load("frw_taxes", [])); // 세무 관리 — 사업장별 세금 납부 기록
   // 2026년 7월 1차 건강보험료 고지 등록 (1회) — 국민건강보험공단 고지 내역서 기준.
   // 고지금액 35,766,480 = 건강 31,658,730 + 요양 4,107,750 (5인 개인별 합계와 일치 검산 완료).
@@ -16088,6 +16090,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.bids !== undefined) setBids(d.bids);
     if (d.todos !== undefined) setTodos(d.todos);
     if (d.notes !== undefined) setNotes(d.notes);
+    if (d.dailyNotes !== undefined && d.dailyNotes && typeof d.dailyNotes === "object") setDailyNotes(d.dailyNotes);
     if (d.taxes !== undefined) setTaxes(d.taxes);
     if (d.meetings !== undefined && Array.isArray(d.meetings)) setMeetings(d.meetings);
     if (d.recurringSchedules !== undefined) setRecurringSchedules(d.recurringSchedules);
@@ -16342,7 +16345,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR); save("frw_todos", todos);
-    save("frw_notes", notes); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
+    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
@@ -16352,7 +16355,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_prod_trash", prodTrash);
     save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes };
     // 저장 페이로드는 항상 이 최신 스냅샷으로 만든다 (타이머가 걸린 시점의 옛 값이 아니라).
     latestSnapshot.current = cur;
     if (!initialized.current) { prevSnapshot.current = cur; return; }
@@ -16372,7 +16375,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     markDirtyPersist();
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => { syncTimer.current = null; runSave(0); }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
@@ -17863,6 +17866,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     { type:"일정", icon:"calendar", title:t.text, sub:`${t.date||""}${t.endDate?` → ${t.endDate}`:""}${t.done?" · ✓ 완료":""}`, action:()=>{save("frw_schedule_subtab","calendar"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"calendar",date:t.date}})),80);} }));
                   (notes||[]).forEach(n => push(searchScore(q, [n.title, n.body, (n.tags||[]).join(" ")]),
                     { type:"메모", icon:"clipboard", title:n.title||"(제목 없음)", sub:`${n.pinned?"★ ":""}${n.category||""}${n.body?` · ${n.body.slice(0,40)}`:""}`, action:()=>{save("frw_schedule_subtab","notes"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"notes"}})),80);} }));
+                  Object.keys(dailyNotes||{}).forEach(k => { const e = (dailyNotes||{})[k] || {}; const body = (e.text||"").trim(); if (!body && !e.star) return;
+                    push(searchScore(q, [body, k]),
+                      { type:"하루 기록", icon:"edit", title:`${k.replace(/-/g,".")} 기록`, sub:`${e.star?"★ ":""}${body.split("\n").find(l=>l.trim())||""}`.slice(0,60), action:()=>{save("frw_schedule_subtab","daily"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"daily",date:k}})),80);} }); });
                   (taxes||[]).forEach(t => push(searchScore(q, [t.taxType, t.biz, t.period, t.memo]),
                     { type:"세무", icon:"coins", title:`${t.taxType} — ${t.biz}`, sub:`기한 ${t.dueDate||""} · ${Number(t.amount||0).toLocaleString()}원${t.paidDate?" · ✓ 완납":""}`, action:()=>{setTab("tax"); setGlobalSearch("");} }));
                   (meetings||[]).forEach(mt => push(searchScore(q, [mt.title, mt.summary, (mt.items||[]).join(" "), (mt.attendees||[]).join(" "), mt.memo]),
@@ -20453,7 +20459,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "schedule" && (
           <>
           <KakaoAlertCard/>
-          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} />
+          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} />
           </>
         )}
         {tab === "news" && (
@@ -22772,6 +22778,7 @@ function NewsTab({ darkMode }) {
 // ─── 일정 / To-do List ───
 const SCHEDULE_SUBTABS = {
   calendar:  { label: "캘린더",   icon: "calendar" },
+  daily:     { label: "하루 기록", icon: "edit" },
   notes:     { label: "중요 메모", icon: "clipboard" },
   recurring: { label: "정기 일정", icon: "refresh" },
 };
@@ -22912,8 +22919,8 @@ function AttachmentField({ value = [], onChange }) {
   );
 }
 
-function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode }) {
-  const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","notes","recurring"], "data-schedule-sub");
+function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode }) {
+  const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","daily","notes","recurring"], "data-schedule-sub");
   const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
   const today = new Date();
@@ -23872,6 +23879,9 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
                               alignSelf: "flex-end",
                               fontVariantNumeric: "tabular-nums",
                             }}>{d.getDate() === 1 && !isToday ? `${d.getMonth() + 1}월 1일` : d.getDate()}</span>
+                            {/* 하루 기록이 있는 날 표시 — '하루 기록' 탭에서 볼 수 있다 */}
+                            {(() => { const dn = (dailyNotes || {})[k]; if (!dn || (!(dn.text || "").trim() && !dn.star)) return null;
+                              return <span title="하루 기록이 있는 날" style={{ position: "absolute", left: 7, top: 9, fontSize: 10, lineHeight: 1, color: dn.star ? "#DB6B2E" : "var(--text3)", pointerEvents: "none" }}>{dn.star ? "★" : "✎"}</span>; })()}
                             <span className="sched-addbtn" title="일정 추가" onClick={(e) => { e.stopPropagation(); openAdd(k); }}>+</span>
                           </div>
                         );
@@ -24569,6 +24579,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
       `}</style>
       </>)}
 
+      {scheduleSub === "daily" && (
+        <DailyNotesPanel dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} todos={todos} darkMode={darkMode} startDate={selectedDate} />
+      )}
+
       {scheduleSub === "notes" && (
         <NotesPanel notes={notes} setNotes={setNotes} clients={clients} darkMode={darkMode} />
       )}
@@ -24581,6 +24595,175 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
 }
 
 // ─── 중요 메모 패널 ───
+// ─── 하루 기록 (일별 메모·일기·중요 노트) ───
+// 하루에 한 장. dailyNotes = { "2026-08-26": { text, star, updatedAt } } 형태로
+// 날짜를 키로 저장해 같은 날을 다시 열면 이어서 쓴다. 내용이 비고 별표도 없으면
+// 그 날짜 키를 지워서 빈 기록이 쌓이지 않게 한다. 저장은 앱 공용 동기화에 위임(자동).
+function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], darkMode, startDate }) {
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const WD = ["일", "월", "화", "수", "목", "금", "토"];
+  const todayKey = ymd(new Date());
+  const [sel, setSel] = React.useState(() => startDate || todayKey);
+  const [search, setSearch] = React.useState("");
+  // 캘린더에서 고른 날짜(또는 통합 검색으로 들어온 날짜)를 따라간다
+  React.useEffect(() => { if (startDate) setSel(startDate); }, [startDate]);
+  const taRef = React.useRef(null);
+
+  const entryOf = (k) => dailyNotes[k] || { text: "", star: false };
+  const cur = entryOf(sel);
+  const patchEntry = (patch) => {
+    if (!setDailyNotes) return;
+    setDailyNotes(prev => {
+      const next = { ...(prev || {}) };
+      const merged = { ...(next[sel] || { text: "", star: false }), ...patch, updatedAt: Date.now() };
+      if (!String(merged.text || "").trim() && !merged.star) delete next[sel];
+      else next[sel] = merged;
+      return next;
+    });
+  };
+  const shift = (days) => {
+    const [y, m, d] = sel.split("-").map(Number);
+    setSel(ymd(new Date(y, m - 1, d + days)));
+  };
+  const fmtLong = (k) => { const [y, m, d] = k.split("-").map(Number); return `${y}년 ${m}월 ${d}일 (${WD[new Date(y, m - 1, d).getDay()]})`; };
+  const fmtShort = (k) => { const [y, m, d] = k.split("-").map(Number); return `${m}/${d}(${WD[new Date(y, m - 1, d).getDay()]})`; };
+
+  // 기록이 있는 날 (내용 또는 별표)
+  const written = Object.keys(dailyNotes || {})
+    .filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && ((dailyNotes[k].text || "").trim() || dailyNotes[k].star))
+    .sort((a, b) => b.localeCompare(a));
+  const q = search.trim().toLowerCase();
+  const shown = q ? written.filter(k => (dailyNotes[k].text || "").toLowerCase().includes(q) || k.includes(q)) : written;
+  const monthPrefix = todayKey.slice(0, 7);
+  const monthCount = written.filter(k => k.startsWith(monthPrefix)).length;
+  // 연속 기록 — 오늘(없으면 어제)부터 거슬러 올라가며 끊기지 않은 날 수
+  const streak = (() => {
+    const set = new Set(written);
+    let n = 0;
+    const d = new Date();
+    if (!set.has(ymd(d))) d.setDate(d.getDate() - 1);
+    while (set.has(ymd(d))) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+  })();
+  // 그 날의 일정 — 기록을 쓸 때 참고용
+  const dayTodos = (todos || []).filter(t => t.date === sel || (t.endDate && t.date <= sel && t.endDate >= sel));
+
+  const box = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14 };
+  const navBtn = { width: 32, height: 32, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* 헤더 */}
+      <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.2, display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <Icon name="edit" size={17}/> 하루 기록
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>날짜별 메모·일기·중요 노트 — 하루에 한 장씩 쌓입니다 · 쓰는 즉시 자동 저장</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span title="기록한 날" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "0 12px", height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", fontSize: 12, fontWeight: 700, color: "var(--text2)" }}>
+            총 {written.length}일 <span style={{ color: "var(--text3)", fontWeight: 500 }}>· 이번 달 {monthCount}일</span>
+          </span>
+          {streak > 0 && (
+            <span title="오늘까지 이어 쓴 날" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "0 12px", height: 36, borderRadius: 8, border: "1px solid rgba(219,107,46,0.35)", background: "rgba(219,107,46,0.10)", fontSize: 12, fontWeight: 800, color: "#DB6B2E" }}>
+              🔥 연속 {streak}일
+            </span>
+          )}
+          <button className="btn-orange" onClick={() => { setSel(todayKey); setTimeout(() => taRef.current && taRef.current.focus(), 60); }}
+            style={{ height: 36, padding: "0 14px", fontSize: 13, whiteSpace: "nowrap" }}>오늘 기록하기</button>
+        </div>
+      </div>
+
+      <div className="daily-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 16, alignItems: "start" }}>
+        {/* 왼쪽: 그날의 기록 */}
+        <div className="card" style={{ padding: "16px 18px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <button style={navBtn} onClick={() => shift(-1)} title="하루 전" aria-label="하루 전">‹</button>
+            <input type="date" value={sel} onChange={e => e.target.value && setSel(e.target.value)}
+              style={{ height: 36, minHeight: 36, padding: "0 10px", fontSize: 13, borderRadius: 9, width: 158 }} />
+            <button style={navBtn} onClick={() => shift(1)} title="하루 뒤" aria-label="하루 뒤">›</button>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", marginLeft: 2 }}>
+              {fmtLong(sel)}
+              {sel === todayKey && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 800, color: "#DB6B2E", background: "rgba(219,107,46,0.12)", padding: "2px 8px", borderRadius: 100 }}>오늘</span>}
+            </div>
+            <button onClick={() => patchEntry({ star: !cur.star })} title={cur.star ? "중요 표시 해제" : "중요한 날로 표시"}
+              style={{ marginLeft: "auto", height: 34, padding: "0 12px", borderRadius: 9, border: cur.star ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)", background: cur.star ? "rgba(219,107,46,0.12)" : "var(--surface2)", color: cur.star ? "#DB6B2E" : "var(--text2)", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              {cur.star ? "★ 중요" : "☆ 중요"}
+            </button>
+          </div>
+
+          {dayTodos.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "8px 11px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>이 날 일정 {dayTodos.length}건</span>
+              {dayTodos.slice(0, 4).map(t => (
+                <span key={t.id} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 100, background: "var(--surface)", border: "1px solid var(--border)", color: t.done ? "var(--text3)" : "var(--text1)", textDecoration: t.done ? "line-through" : "none", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</span>
+              ))}
+              {dayTodos.length > 4 && <span style={{ fontSize: 11, color: "var(--text3)" }}>외 {dayTodos.length - 4}건</span>}
+            </div>
+          )}
+
+          <textarea ref={taRef} value={cur.text || ""} onChange={e => patchEntry({ text: e.target.value })}
+            placeholder={"오늘 있었던 일, 결정한 것, 기억할 것을 적어두세요.\n\n예) 한울기획 반사전사 단가 200원으로 확정 — 다음 발주부터 적용\n    성목실업 어음 5,000,000원 8/15 입금 예정"}
+            style={{ width: "100%", minHeight: 340, fontSize: 14, lineHeight: 1.75, borderRadius: 12, padding: "14px 16px", resize: "vertical", background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text1)", fontFamily: "inherit" }} />
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 11, color: "var(--text3)" }}>
+            <span>{(cur.text || "").length.toLocaleString()}자</span>
+            {cur.updatedAt && <span>· 마지막 저장 {new Date(cur.updatedAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+            <span style={{ color: "#10B981", fontWeight: 700 }}>✓ 자동 저장</span>
+            {((cur.text || "").trim() || cur.star) && (
+              <button onClick={() => { if (window.confirm(`${fmtLong(sel)} 기록을 지울까요?`)) patchEntry({ text: "", star: false }); }}
+                style={{ marginLeft: "auto", border: "none", background: "transparent", color: "#EF4444", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>이 날 기록 삭제</button>
+            )}
+          </div>
+        </div>
+
+        {/* 오른쪽: 기록한 날 목록 */}
+        <div className="card" style={{ padding: 0, overflow: "hidden", ...box }}>
+          <div style={{ padding: "13px 14px 10px" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 8 }}>
+              기록한 날 <span style={{ color: "var(--accent)" }}>{written.length}</span>
+            </div>
+            <div style={{ position: "relative" }}>
+              <Icon name="search" size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", pointerEvents: "none" }}/>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="내용·날짜 검색"
+                style={{ width: "100%", height: 34, paddingLeft: 30, fontSize: 12.5, borderRadius: 9 }} />
+            </div>
+          </div>
+          <div style={{ maxHeight: 520, overflowY: "auto", borderTop: "1px solid var(--divider)" }}>
+            {shown.length === 0 ? (
+              <div style={{ padding: "28px 16px", textAlign: "center", fontSize: 12.5, color: "var(--text3)", lineHeight: 1.7 }}>
+                {written.length === 0 ? <>아직 기록이 없습니다.<br/>왼쪽에 오늘 하루를 적어보세요.</> : "검색 결과가 없습니다"}
+              </div>
+            ) : shown.map(k => {
+              const e = dailyNotes[k];
+              const on = k === sel;
+              const preview = (e.text || "").trim().split("\n").find(l => l.trim()) || "(내용 없음)";
+              return (
+                <button key={k} onClick={() => setSel(k)}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", borderBottom: "1px solid var(--divider)",
+                    background: on ? "rgba(219,107,46,0.10)" : "transparent", cursor: "pointer", fontFamily: "inherit" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: on ? "#DB6B2E" : "var(--text2)" }}>{fmtShort(k)}</span>
+                    {e.star && <span style={{ fontSize: 11, color: "#DB6B2E" }}>★</span>}
+                    {k === todayKey && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#DB6B2E" }}>오늘</span>}
+                    <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text3)" }}>{(e.text || "").length}자</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @media (max-width: 900px) { .daily-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+      `}</style>
+    </div>
+  );
+}
+
 function NotesPanel({ notes, setNotes, clients, darkMode }) {
   const [search, setSearch] = React.useState("");
   const [debouncedSearch, setDebouncedSearch] = React.useState("");
