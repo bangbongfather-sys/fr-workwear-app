@@ -15697,9 +15697,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
   const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
   const [poQuickEdit, setPoQuickEdit] = useState(null); // 발주 이력에서 품목 바로 편집 — {poId, idx, name, unit, qty, unitPrice, memo}
-  const [poRcptOpen, setPoRcptOpen] = useState(null);   // 부분입고 내역 패널이 열린 품목 — {poId, idx}
+  const [poRcptOpen, setPoRcptOpen] = useState(null);   // 입고 내역 패널이 열린 품목 — {poId, idx}
   const [poBodyEditing, setPoBodyEditing] = useState(false); // 발주서 미리보기에서 본문(문구) 직접 수정 모드
-  const [rcptDraft, setRcptDraft] = useState({ date: "", qty: "" }); // 부분입고 추가 입력
   const [viewingPO, setViewingPO] = useState(null);
   useEffect(() => { setPoBodyEditing(false); }, [viewingPO && viewingPO.id, poSubTab]); // 다른 발주서/탭으로 이동 시 문구 수정 모드 해제
   const [expandedPOIds, setExpandedPOIds] = useState(() => new Set()); // 발주 이력에서 펼친 행
@@ -15723,7 +15722,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   // 최신 상태 미러 — fabricIntakes는 아래에서 선언되므로(TDZ) null로 시작, 선언 직후 useEffect로 채움
   const purchaseOrdersRef = useRef(null);
   const fabricIntakesRef = useRef(null);
-  // ── 부분입고: 품목당 rcv:[{id,date,qty}] 배열로 날짜별 분할 입고 관리 ──
+  // ── 입고 내역: 품목당 rcv:[{id,date,qty}] 배열로 날짜별 입고 관리 ──
   // receivedQty는 rcv 합계로 자동 유지되어 기존 표시(누계·미입고·상태)와 호환된다.
   const setPOReceipts = (poId, itemIdx, receipts) => {
     const total = (receipts || []).reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
@@ -15732,9 +15731,11 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       const items = (p.items || []).map((it, i) => i === itemIdx ? { ...it, rcv: receipts || [], receivedQty: (receipts || []).length ? String(total) : "" } : it);
       return { ...p, items };
     }));
+    // [저장]을 누른 시점에만 호출되므로 지연 없이 바로 매입 현황에 반영한다.
+    // (상태 반영 뒤 ref가 갱신되도록 한 틱 뒤 실행)
     const tkey = poId + ":" + itemIdx;
     clearTimeout(poRcvTimers.current[tkey]);
-    poRcvTimers.current[tkey] = setTimeout(() => syncReceiptsToIntake(poId, itemIdx), 600);
+    poRcvTimers.current[tkey] = setTimeout(() => syncReceiptsToIntake(poId, itemIdx), 0);
   };
   // 발주 품목에 대응하는 기존 매입 행 찾기 (인덱스 반환, 없으면 -1).
   // 링크가 정확한 행 → '매입 전송'으로 만든 행(품목 링크 없음) → 수기 입력 행 순서로 넓혀 가며 찾는다.
@@ -15752,7 +15753,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     return i;
   };
 
-  // 부분입고 → 매입 현황: 입고 건마다 해당 날짜의 매입 행 1개를 유지(sourceRcptId 링크)
+  // 입고 내역 → 매입 현황: 입고 건마다 해당 날짜의 매입 행 1개를 유지(sourceRcptId 링크)
   const syncReceiptsToIntake = (poId, itemIdx) => {
     const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
     if (!po) return;
@@ -15763,7 +15764,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     const supName = (po.supplier?.name || "").trim();
     const arr = [...(fabricIntakesRef.current || [])];
     let changed = false;
-    // 기존 단일 누계 행 처리 (부분입고 전환 시 중복 방지): 자동행은 제거, 수기/전송행은 첫 입고 건에 연결
+    // 기존 단일 누계 행 처리 (입고 내역 전환 시 중복 방지): 자동행은 제거, 수기/전송행은 첫 입고 건에 연결
     const cumIdx = findIntakeIdxForItem(arr, po, it, itemKey);
     if (cumIdx >= 0 && rcv.length) {
       if (arr[cumIdx].autoFromPO) { arr.splice(cumIdx, 1); changed = true; }
@@ -15792,7 +15793,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
           id: uid(), date: rc.date || new Date().toISOString().slice(0, 10), supplier: supName, inspector: "",
           materialName: (it.name || "").trim(), qty: String(q), unit: it.unit || "",
           unitPrice: it.unitPrice || "", status: "입고완료",
-          note: po.title ? `발주 부분입고: ${po.title}` : "발주 부분입고",
+          note: po.title ? `발주 입고: ${po.title}` : "발주 입고",
           sourcePoId: po.id, sourcePoItemId: itemKey, sourceRcptId: rc.id, autoFromPO: true,
         });
         changed = true;
@@ -15802,7 +15803,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       setFabricIntakes(arr);
       if (supName) setPurchaseSubTabs(p2 => (p2 || []).some(t => t.name === supName) ? p2 : [...(p2 || []), { id: uid(), name: supName }]);
       const total = rcv.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
-      showToast(`매입 현황 반영: ${it.name} 부분입고 ${rcv.length}건 · 누계 ${total.toLocaleString()}${it.unit ? " " + it.unit : ""}`, "success");
+      showToast(`매입 현황 반영: ${it.name} 입고 ${rcv.length}건 · 누계 ${total.toLocaleString()}${it.unit ? " " + it.unit : ""}`, "success");
     }
   };
   const syncReceivedToIntake = (poId, itemIdx) => {
@@ -15810,7 +15811,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (!po) return;
     const it = (po.items || [])[itemIdx];
     if (!it || !(it.name || "").trim()) return;
-    if ((it.rcv || []).length) { syncReceiptsToIntake(poId, itemIdx); return; } // 부분입고 관리 품목은 건별 동기화
+    if ((it.rcv || []).length) { syncReceiptsToIntake(poId, itemIdx); return; } // 입고 내역 관리 품목은 건별 동기화
     const itemKey = it.id != null ? String(it.id) : poId + "#" + itemIdx;
     const qty = parseFloat(it.receivedQty);
     const has = !isNaN(qty) && qty > 0;
@@ -21358,7 +21359,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                               const d = Math.ceil((new Date(po.deliveryDate) - new Date(new Date().toDateString())) / 86400000);
                               return isNaN(d) ? null : d;
                             })();
-                            // 입고 등록: 미완료 첫 품목의 부분입고 편집기 열기
+                            // 입고 등록: 미완료 첫 품목의 입고 내역 편집기 열기
                             const openFirstRcpt = () => {
                               if (!its.length) { showToast("품목이 없는 발주입니다"); return; }
                               let idx = its.findIndex(it => { const o = parseFloat(it.qty) || 0; const r = parseFloat(it.receivedQty) || 0; return o > 0 && r < o; });
@@ -21368,7 +21369,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                 const itemKey = it.id != null ? String(it.id) : po.id + "#" + idx;
                                 const exIdx = findIntakeIdxForItem(fabricIntakes, po, it, itemKey);
                                 const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
-                                setPOReceipts(po.id, idx, [{ id: uid(), date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: String(parseFloat(it.receivedQty)) }]);
+                                setPOReceipts(po.id, idx, [{ id: uid(), date: (exist && exist.date) || todayStr(), qty: String(parseFloat(it.receivedQty)) }]);
                                 if (!exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못해 1차 입고일을 오늘로 넣었습니다 — 실제 입고일로 고쳐주세요`, "info");
                               }
                               setRcptDraft({ date: new Date().toISOString().slice(0, 10), qty: "" });
@@ -21448,11 +21449,11 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   </div>
                                 </div>
 
-                                {/* 품목별 입고 현황 (기존 부분입고·빠른수정 로직 그대로) */}
+                                {/* 품목별 입고 현황 */}
                                 <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                                     <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>품목별 입고 현황 ({its.length}건)</span>
-                                    <span style={{ fontSize: 10.5, color: T.text3, background: "var(--surface2)", padding: "3px 8px", borderRadius: 100 }}>입고수량 입력 시 매입 현황에 자동 기록</span>
+                                    <span style={{ fontSize: 10.5, color: T.text3, background: "var(--surface2)", padding: "3px 8px", borderRadius: 100 }}>날짜·수량을 적고 저장하면 매입 현황에 기록됩니다</span>
                                   </div>
                                       <div style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "auto", border: "1px solid var(--divider)", borderRadius: 12 }}>
                                         <table style={{ width: "100%", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
@@ -21529,35 +21530,41 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                   <td style={{ padding: "7px 8px", textAlign: "right", color: T.text2 }}>{ord.toLocaleString()}{it.unit ? " " + it.unit : ""}</td>
                                                   <td style={{ padding: "5px 8px", textAlign: "right" }}>
                                                     {(() => {
-                                                      const nRcv = (it.rcv || []).length;
+                                                      const rcvArr = it.rcv || [];
+                                                      const nRcv = rcvArr.length;
                                                       const isRcptOpen = poRcptOpen && poRcptOpen.poId === po.id && poRcptOpen.idx === ii;
-                                                      const openRcpt = (e) => {
-                                                        e.stopPropagation();
+                                                      const itemKey = it.id != null ? String(it.id) : po.id + "#" + ii;
+                                                      // 저장된 값: 입고 건이 1건이면 그 건, 아직 없으면 예전 누계 + 매입 현황의 날짜
+                                                      let savedQty = "", savedDate = "";
+                                                      if (nRcv === 1) { savedQty = String(rcvArr[0].qty ?? ""); savedDate = rcvArr[0].date || ""; }
+                                                      else if (nRcv === 0) {
+                                                        savedQty = it.receivedQty != null && it.receivedQty !== "" ? String(it.receivedQty) : "";
+                                                        if (parseFloat(savedQty) > 0) {
+                                                          const exIdx = findIntakeIdxForItem(fabricIntakes, po, it, itemKey);
+                                                          savedDate = exIdx >= 0 ? (fabricIntakes[exIdx].date || "") : "";
+                                                        }
+                                                      } else { savedQty = String(rcvArr.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0)); }
+                                                      const openRcpt = () => {
                                                         if (isRcptOpen) { setPoRcptOpen(null); return; }
-                                                        // 기존 누계 입력분이 있으면 첫 입고 건으로 이관 (매입 현황의 기존 날짜 유지)
+                                                        // 예전 누계만 있는 품목은 첫 입고 건으로 옮겨 담는다 (기존 매입 날짜 유지)
                                                         if (!nRcv && parseFloat(it.receivedQty) > 0) {
-                                                          const itemKey = it.id != null ? String(it.id) : po.id + "#" + ii;
                                                           const exIdx = findIntakeIdxForItem(fabricIntakes, po, it, itemKey);
                                                           const exist = exIdx >= 0 ? fabricIntakes[exIdx] : null;
-                                                          setPOReceipts(po.id, ii, [{ id: uid(), date: (exist && exist.date) || new Date().toISOString().slice(0, 10), qty: String(parseFloat(it.receivedQty)) }]);
+                                                          setPOReceipts(po.id, ii, [{ id: uid(), date: (exist && exist.date) || todayStr(), qty: String(parseFloat(it.receivedQty)) }]);
                                                           if (!exist) showToast(`${it.name}: 기존 매입 기록을 찾지 못해 1차 입고일을 오늘로 넣었습니다 — 실제 입고일로 고쳐주세요`, "info");
                                                         }
-                                                        setRcptDraft({ date: new Date().toISOString().slice(0, 10), qty: "" });
                                                         setPoRcptOpen({ poId: po.id, idx: ii });
                                                       };
-                                                      return (<>
-                                                        <input type="number" value={it.receivedQty ?? ""} placeholder="0"
-                                                          readOnly={nRcv > 0}
-                                                          title={nRcv > 0 ? "부분입고 내역으로 관리 중 — 아래 버튼으로 수정" : ""}
-                                                          onClick={(e) => { e.stopPropagation(); if (nRcv > 0) openRcpt(e); }}
-                                                          onChange={(e) => { if (nRcv === 0) setPOReceived(po.id, ii, e.target.value); }}
-                                                          style={{ width: 84, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", border: `1px solid ${done ? "rgba(0,180,147,0.5)" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit", cursor: nRcv > 0 ? "pointer" : "text" }} />
-                                                        <button onClick={openRcpt}
-                                                          style={{ display: "block", marginLeft: "auto", marginTop: 3, padding: "2px 8px", borderRadius: 100, border: "none", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                                                            background: nRcv > 0 || isRcptOpen ? "rgba(219,107,46,0.14)" : "var(--surface2)", color: nRcv > 0 || isRcptOpen ? "#DB6B2E" : "var(--text3)" }}>
-                                                          📅 부분입고{nRcv > 0 ? ` ${nRcv}건` : ""}
-                                                        </button>
-                                                      </>);
+                                                      return (
+                                                        <PORcvCell savedQty={savedQty} savedDate={savedDate} unit={it.unit} count={nRcv} done={done}
+                                                          isPanelOpen={isRcptOpen} onOpenPanel={openRcpt}
+                                                          onSave={(qty, date) => {
+                                                            const q = parseFloat(qty);
+                                                            if (isNaN(q) || q <= 0) { setPOReceipts(po.id, ii, []); return; }
+                                                            const keepId = nRcv === 1 ? rcvArr[0].id : uid();
+                                                            setPOReceipts(po.id, ii, [{ id: keepId, date: date || todayStr(), qty: String(q) }]);
+                                                          }} />
+                                                      );
                                                     })()}
                                                   </td>
                                                   <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: !hasRcv ? T.text3 : remain > 0 ? "#FE9800" : "#00B493" }}>{hasRcv ? remain.toLocaleString() : "—"}</td>
@@ -21575,57 +21582,15 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                                     </button>
                                                   </td>
                                                 </tr>
-                                                {poRcptOpen && poRcptOpen.poId === po.id && poRcptOpen.idx === ii && (() => {
-                                                  const rcv = it.rcv || [];
-                                                  const totalRc = rcv.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
-                                                  const updRc = (rid, k, v) => setPOReceipts(po.id, ii, rcv.map(r => r.id === rid ? { ...r, [k]: v } : r));
-                                                  const delRc = (rid) => setPOReceipts(po.id, ii, rcv.filter(r => r.id !== rid));
-                                                  const addRc = () => {
-                                                    const q = parseFloat(rcptDraft.qty);
-                                                    if (isNaN(q) || q <= 0) { showToast("입고 수량을 입력하세요"); return; }
-                                                    setPOReceipts(po.id, ii, [...rcv, { id: uid(), date: rcptDraft.date || new Date().toISOString().slice(0, 10), qty: String(q) }]);
-                                                    setRcptDraft({ date: rcptDraft.date, qty: "" });
-                                                  };
-                                                  return (
-                                                    <tr key={(it.id || ii) + "-rcpt"} style={{ background: "rgba(219,107,46,0.05)" }}>
-                                                      <td colSpan={6} style={{ padding: "10px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
-                                                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
-                                                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                                                            <span style={{ fontSize: 12, fontWeight: 800, color: T.text }}>📅 부분입고 내역 — {it.name}</span>
-                                                            <span style={{ fontSize: 11, color: T.text3 }}>누계 <b style={{ color: totalRc >= ord && ord > 0 ? "#00B493" : "#FE9800" }}>{totalRc.toLocaleString()}</b> / 발주 {ord.toLocaleString()}{it.unit ? " " + it.unit : ""} · 미입고 {Math.max(0, ord - totalRc).toLocaleString()}</span>
-                                                            <span style={{ fontSize: 10.5, color: T.text3, background: "var(--surface2)", padding: "2px 8px", borderRadius: 100 }}>입고 건마다 해당 날짜로 매입 현황에 자동 기록</span>
-                                                            <button onClick={() => setPoRcptOpen(null)} style={{ marginLeft: "auto", padding: "3px 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>닫기</button>
-                                                          </div>
-                                                          {rcv.length > 0 && (
-                                                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                                              {rcv.map((rc, ri) => (
-                                                                <div key={rc.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                                                  <span style={{ fontSize: 11, color: T.text3, width: 34 }}>{ri + 1}차</span>
-                                                                  <input type="date" value={rc.date || ""} onChange={(e) => updRc(rc.id, "date", e.target.value)}
-                                                                    style={{ width: 140, height: 30, padding: "0 8px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-                                                                  <input type="number" value={rc.qty} onChange={(e) => updRc(rc.id, "qty", e.target.value)} placeholder="수량"
-                                                                    style={{ width: 100, height: 30, padding: "0 8px", fontSize: 12, textAlign: "right", borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-                                                                  <span style={{ fontSize: 11, color: T.text3 }}>{it.unit || ""}</span>
-                                                                  <button onClick={() => delRc(rc.id)} title="이 입고 건 삭제 (매입 현황 자동 행도 함께 삭제)"
-                                                                    style={{ width: 24, height: 24, border: "none", borderRadius: 6, background: "transparent", color: "#F04452", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>×</button>
-                                                                </div>
-                                                              ))}
-                                                            </div>
-                                                          )}
-                                                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                                            <span style={{ fontSize: 11, fontWeight: 700, color: T.text3, width: 34 }}>추가</span>
-                                                            <input type="date" value={rcptDraft.date} onChange={(e) => setRcptDraft({ ...rcptDraft, date: e.target.value })}
-                                                              style={{ width: 140, height: 30, padding: "0 8px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-                                                            <input type="number" value={rcptDraft.qty} onChange={(e) => setRcptDraft({ ...rcptDraft, qty: e.target.value })} placeholder="입고 수량"
-                                                              onKeyDown={(e) => { if (e.key === "Enter") addRc(); }}
-                                                              style={{ width: 100, height: 30, padding: "0 8px", fontSize: 12, textAlign: "right", borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
-                                                            <button onClick={addRc} className="btn-orange" style={{ height: 30, padding: "0 14px", borderRadius: 8, fontSize: 12, fontWeight: 700 }}>+ 입고 추가</button>
-                                                          </div>
-                                                        </div>
-                                                      </td>
-                                                    </tr>
-                                                  );
-                                                })()}
+                                                {poRcptOpen && poRcptOpen.poId === po.id && poRcptOpen.idx === ii && (
+                                                  <tr key={(it.id || ii) + "-rcpt"} style={{ background: "rgba(219,107,46,0.05)" }}>
+                                                    <td colSpan={6} style={{ padding: "10px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
+                                                      <PORcvPanel item={it} ord={ord} unit={it.unit} T={T}
+                                                        onClose={() => setPoRcptOpen(null)}
+                                                        onSave={(rows) => setPOReceipts(po.id, ii, rows)} />
+                                                    </td>
+                                                  </tr>
+                                                )}
                                                 </React.Fragment>
                                               );
                                             })}
@@ -21687,6 +21652,121 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 // ─── 키워드 관리 패널 (Phase 3 키워드 CRUD UI) ───
 // 카테고리별 그룹화 + 인라인 편집 (활성/카테고리/가중치) + 추가/삭제.
 // 시드 키워드(seed_*)는 [seed] 배지 + 삭제 불가. 사용자 추가(user_*)는 전체 작업 가능.
+// ─── 입고 내역 (발주 품목) ───
+// 입고는 항상 "날짜 + 수량" 한 건으로 기록한다(rcv 배열). 예전의 누계만 적는 방식과
+// 부분입고를 하나로 합쳤다. 편집은 화면 안에서만 하고, [저장]을 눌러야 발주서·매입 현황에 반영된다.
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+// 표 안의 입고수량 칸 — 입고 건이 1건 이하일 때 날짜·수량을 바로 고칠 수 있다.
+function PORcvCell({ savedQty, savedDate, unit, count, done, isPanelOpen, onSave, onOpenPanel }) {
+  const multi = count > 1;
+  const [draft, setDraft] = React.useState({ qty: savedQty, date: savedDate });
+  React.useEffect(() => { setDraft({ qty: savedQty, date: savedDate }); }, [savedQty, savedDate]);
+  const dirty = !multi && (draft.qty !== savedQty || draft.date !== savedDate);
+  const qtyNum = parseFloat(draft.qty);
+  const save = () => {
+    if (draft.qty !== "" && (isNaN(qtyNum) || qtyNum < 0)) { showToast("입고 수량을 숫자로 입력하세요"); return; }
+    if (draft.qty !== "" && qtyNum > 0 && !draft.date) { showToast("입고 날짜를 선택하세요"); return; }
+    onSave(draft.qty, draft.date);
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-end" }} onClick={(e) => e.stopPropagation()}>
+      {multi ? (
+        <button onClick={onOpenPanel} title="입고 건이 여러 번이라 아래 입고 내역에서 관리합니다"
+          style={{ width: 84, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", borderRadius: 8, border: `1px solid ${done ? "rgba(0,180,147,0.5)" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit", cursor: "pointer", fontWeight: 700 }}>
+          {savedQty === "" ? "0" : Number(savedQty).toLocaleString()}
+        </button>
+      ) : (<>
+        <input type="number" value={draft.qty} placeholder="0"
+          onChange={(e) => setDraft(d => ({ ...d, qty: e.target.value, date: d.date || todayStr() }))}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
+          style={{ width: 84, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", border: `1px solid ${dirty ? "#DB6B2E" : done ? "rgba(0,180,147,0.5)" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+        <input type="date" value={draft.date || ""} title="입고 날짜"
+          onChange={(e) => setDraft(d => ({ ...d, date: e.target.value }))}
+          style={{ width: 84, height: 26, fontSize: 10.5, padding: "0 5px", borderRadius: 7, border: `1px solid ${dirty ? "#DB6B2E" : "var(--border)"}`, background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" }} />
+      </>)}
+      {dirty ? (
+        <div style={{ display: "flex", gap: 3 }}>
+          <button onClick={() => setDraft({ qty: savedQty, date: savedDate })}
+            style={{ padding: "2px 7px", borderRadius: 100, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+          <button onClick={save} className="btn-orange" style={{ padding: "2px 10px", borderRadius: 100, fontSize: 10, fontWeight: 800 }}>저장</button>
+        </div>
+      ) : (
+        <button onClick={onOpenPanel}
+          style={{ padding: "2px 8px", borderRadius: 100, border: "none", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+            background: count > 0 || isPanelOpen ? "rgba(219,107,46,0.14)" : "var(--surface2)", color: count > 0 || isPanelOpen ? "#DB6B2E" : "var(--text3)" }}>
+          입고 내역{count > 0 ? ` ${count}건` : ""}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// 품목 아래로 펼쳐지는 입고 내역 편집 패널 — 편집은 임시, [저장]으로 확정
+function PORcvPanel({ item, ord, unit, onSave, onClose, T }) {
+  const saved = item.rcv || [];
+  const [rows, setRows] = React.useState(() => saved.map(r => ({ ...r })));
+  React.useEffect(() => { setRows((item.rcv || []).map(r => ({ ...r }))); }, [item.rcv]);
+  const [draft, setDraft] = React.useState({ date: todayStr(), qty: "" });
+  const sameAsSaved = rows.length === saved.length && rows.every((r, i) => saved[i] && r.id === saved[i].id && String(r.qty) === String(saved[i].qty) && (r.date || "") === (saved[i].date || ""));
+  const dirty = !sameAsSaved;
+  const total = rows.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+  const upd = (rid, k, v) => setRows(rs => rs.map(r => r.id === rid ? { ...r, [k]: v } : r));
+  const del = (rid) => setRows(rs => rs.filter(r => r.id !== rid));
+  const add = () => {
+    const q = parseFloat(draft.qty);
+    if (isNaN(q) || q <= 0) { showToast("입고 수량을 입력하세요"); return; }
+    if (!draft.date) { showToast("입고 날짜를 선택하세요"); return; }
+    setRows(rs => [...rs, { id: uid(), date: draft.date, qty: String(q) }]);
+    setDraft({ date: draft.date, qty: "" });
+  };
+  const commit = () => {
+    if (rows.some(r => !r.date)) { showToast("날짜가 비어 있는 입고 건이 있습니다"); return; }
+    if (rows.some(r => isNaN(parseFloat(r.qty)) || parseFloat(r.qty) <= 0)) { showToast("수량이 잘못된 입고 건이 있습니다"); return; }
+    onSave(rows.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")));
+  };
+  const inp = { height: 30, padding: "0 8px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--input-bg)", color: "var(--input-color)", fontFamily: "inherit" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={(e) => e.stopPropagation()}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: T.text, display: "inline-flex", alignItems: "center", gap: 5 }}><Icon name="calendar" size={13}/>입고 내역 — {item.name}</span>
+        <span style={{ fontSize: 11, color: T.text3 }}>누계 <b style={{ color: total >= ord && ord > 0 ? "#00B493" : "#FE9800" }}>{total.toLocaleString()}</b> / 발주 {ord.toLocaleString()}{unit ? " " + unit : ""} · 미입고 {Math.max(0, ord - total).toLocaleString()}</span>
+        {dirty && <span style={{ fontSize: 10.5, fontWeight: 800, color: "#DB6B2E", background: "rgba(219,107,46,0.12)", padding: "2px 9px", borderRadius: 100 }}>저장하지 않은 변경</span>}
+        <button onClick={onClose} style={{ marginLeft: "auto", padding: "3px 12px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: T.text2, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>닫기</button>
+      </div>
+      {rows.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {rows.map((rc, ri) => (
+            <div key={rc.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: T.text3, width: 34 }}>{ri + 1}차</span>
+              <input type="date" value={rc.date || ""} onChange={(e) => upd(rc.id, "date", e.target.value)} style={{ ...inp, width: 140 }} />
+              <input type="number" value={rc.qty} onChange={(e) => upd(rc.id, "qty", e.target.value)} placeholder="수량" style={{ ...inp, width: 100, textAlign: "right" }} />
+              <span style={{ fontSize: 11, color: T.text3 }}>{unit || ""}</span>
+              <button onClick={() => del(rc.id)} title="이 입고 건 삭제"
+                style={{ width: 24, height: 24, border: "none", borderRadius: 6, background: "transparent", color: "#F04452", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: T.text3, width: 34 }}>추가</span>
+        <input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} style={{ ...inp, width: 140 }} />
+        <input type="number" value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} placeholder="입고 수량"
+          onKeyDown={(e) => { if (e.key === "Enter") add(); }} style={{ ...inp, width: 100, textAlign: "right" }} />
+        <button onClick={add} style={{ height: 30, padding: "0 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ 줄 추가</button>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, borderTop: `1px solid ${T.divider}`, paddingTop: 8 }}>
+        <span style={{ fontSize: 10.5, color: T.text3 }}>저장을 눌러야 발주서와 매입 현황에 반영됩니다</span>
+        <span style={{ flexGrow: 1 }} />
+        <button onClick={() => setRows(saved.map(r => ({ ...r })))} disabled={!dirty}
+          style={{ height: 32, padding: "0 14px", borderRadius: 8, border: `1px solid ${T.divider}`, background: "transparent", color: dirty ? T.text2 : T.text3, fontSize: 12, fontWeight: 600, cursor: dirty ? "pointer" : "default", opacity: dirty ? 1 : 0.5, fontFamily: "inherit" }}>되돌리기</button>
+        <button onClick={commit} disabled={!dirty} className="btn-orange"
+          style={{ height: 32, padding: "0 18px", borderRadius: 8, fontSize: 12.5, fontWeight: 800, opacity: dirty ? 1 : 0.45, cursor: dirty ? "pointer" : "default" }}>저장</button>
+      </div>
+    </div>
+  );
+}
+
 function KeywordManagerPanel({ darkMode, onClose }) {
   const [keywords, setKeywords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24275,6 +24355,9 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, recurringSchedules
 
       <style>{`
         .schedule-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+        /* 페이지를 내려도 타임테이블이 따라오도록 고정 (화면보다 길면 자체 스크롤) */
+        .sched-timetable { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+        @media (max-width: 1100px) { .sched-timetable { position: static; max-height: none; overflow-y: visible; } }
         @media (max-width: 1100px) { .schedule-grid { grid-template-columns: 1fr !important; } }
         @media (max-width: 768px) { .schedule-grid { grid-template-columns: 1fr !important; } }
         /* ── 우클릭 컨텍스트 메뉴 ── */
