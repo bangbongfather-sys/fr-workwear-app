@@ -8029,18 +8029,19 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     return clientNames.find(n => payablesNameMatch(n, depName)) || "";
   };
 
-  // 해당 거래처의 미입금 청구 목록 (모든 월, 최신순)
-  const unpaidOf = (clientName) => {
-    const name = (clientName || "").trim();
-    if (!name) return [];
-    const out = [];
+  // 거래처별 미입금 청구 (모든 월, 최신순) — 표의 모든 행이 이걸 조회하므로 한 번만 만들어 쓴다
+  const unpaidCache = React.useMemo(() => {
+    const by = {};
     Object.keys(ledgers || {}).sort().reverse().forEach(ym => {
       ((((ledgers || {})[ym]) || {}).clients || []).forEach(c => {
-        if ((c.name || "").trim() === name && c.status === "미입금") out.push({ ym, id: c.id, total: parseFloat(c.total) || 0 });
+        if (c.status !== "미입금") return;
+        const n = (c.name || "").trim(); if (!n) return;
+        (by[n] = by[n] || []).push({ ym, id: c.id, total: parseFloat(c.total) || 0 });
       });
     });
-    return out;
-  };
+    return by;
+  }, [ledgers]);
+  const unpaidOf = (clientName) => unpaidCache[(clientName || "").trim()] || [];
   // 거래처/금액이 정해졌을 때 기본 연결 대상: 금액이 정확히 일치하는 미입금 청구 우선
   const defaultLinkFor = (clientName, amount) => {
     const ups = unpaidOf(clientName);
@@ -8157,7 +8158,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     setOpenId(null);
     showToast(`${fmt(dep.amount)}원 → "${name}" 입금완료 처리했습니다`, "success");
   };
-  const undoDeposit = (dep) => {
+  const undoDeposit = (dep, silent) => {
     const link = dep.link || {};
     // 한 청구를 여러 입금으로 나눠 받은 경우(일괄 처리), 다른 입금이 아직 남아 있으면
     // 장부는 "입금완료"로 두어야 한다. 안 그러면 한 건만 되돌려도 청구 전체가 미입금이 된다.
@@ -8165,7 +8166,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       ? items.filter(x => x.id !== dep.id && x.status === "done" && x.link && x.link.kind === "ledger"
           && x.link.ym === link.ym && String(x.link.clientId) === String(link.clientId))
       : [];
-    if (!window.confirm(
+    if (!silent && !window.confirm(
       `"${dep.client}" ${fmt(dep.amount)}원 처리를 되돌릴까요?\n` +
       (siblings.length > 0
         ? `같은 청구에 묶인 입금이 ${siblings.length}건 더 있어 장부는 입금완료로 유지됩니다.`
@@ -8187,17 +8188,25 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       nameMap: ((prev || {}).nameMap) || {},
     }));
   };
-  const removeDeposit = (dep) => {
-    if (!window.confirm("이 입금 행을 삭제할까요?")) return;
+  const removeDeposit = (dep, silent) => {
+    if (!silent && !window.confirm("이 입금 행을 삭제할까요?")) return;
     setBankDeposits(prev => ({ items: (((prev || {}).items) || []).filter(x => x.id !== dep.id), nameMap: ((prev || {}).nameMap) || {} }));
   };
+
+  // ── 미처리 행마다 "어디에 붙을지"를 미리 정해둔다 ──
+  // 추천은 이미 앱이 알고 있다. 사용자에게 '지정'을 시킬 게 아니라 '확인'을 받아야 한다.
+  const sugMap = React.useMemo(() => {
+    const m = {};
+    items.forEach(x => { if (x.status === "pending") m[x.id] = suggestClient(x.name); });
+    return m;
+  }, [items, nameMap, clientNames]);
 
   const pending = items.filter(x => x.status === "pending");
   const done = items.filter(x => x.status === "done");
   // 검색: 입금자명 + 지정된 거래처 + (미처리 행은) 추천 거래처까지 거래처명으로 찾기
   const q = search.trim();
   const shown = items
-    .filter(x => filter === "all" ? true : x.status === filter)
+    .filter(x => filter === "all" ? true : filter === "nosug" ? (x.status === "pending" && !sugMap[x.id]) : x.status === filter)
     .filter(x => {
       if (!q) return true;
       if ((x.name || "").includes(q) || (x.client || "").includes(q)) return true;
@@ -8329,39 +8338,394 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
   });
 
+  // 자동으로 장부 청구에 붙이는 것은 금액이 정확히 맞을 때뿐이다.
+  // 안 그러면 소액 입금 한 건으로 큰 청구가 통째로 입금완료가 되어버린다.
+  const targetFor = (dep, clientName) => {
+    const client = (clientName || "").trim();
+    if (!client) return { client: "", link: "", exact: null, near: null };
+    const ups = unpaidOf(client);
+    const exact = ups.find(u => Math.round(u.total) === Math.round(dep.amount)) || null;
+    return { client, link: exact ? `led|${exact.ym}|${exact.id}` : "ar", exact, near: exact ? null : (ups[0] || null) };
+  };
+  const autoTargetOf = (dep) => targetFor(dep, sugMap[dep.id]);
+
+  // 여러 건을 한 번에 — 장부/미수금/입금내역을 각각 한 번씩만 갱신한다 (429건 × 3회 setState 방지)
+  const completeRows = (rows, resolve) => {
+    const plan = [];
+    rows.forEach(r => { const t = resolve(r); if (t && t.client) plan.push({ row: r, client: t.client, link: t.link }); });
+    if (!plan.length) return 0;
+
+    const ledgerHits = {};
+    plan.forEach(p => {
+      if (!String(p.link).startsWith("led|")) return;
+      const [, ym, id] = p.link.split("|");
+      (ledgerHits[ym] = ledgerHits[ym] || new Set()).add(String(id));
+    });
+    if (Object.keys(ledgerHits).length) {
+      setLedgers(prev => {
+        const next = { ...prev };
+        Object.keys(ledgerHits).forEach(ym => {
+          const m = next[ym]; if (!m) return;
+          next[ym] = { ...m, clients: (m.clients || []).map(c => ledgerHits[ym].has(String(c.id)) ? { ...c, status: "입금완료" } : c) };
+        });
+        return next;
+      });
+    }
+
+    const base = Date.now();
+    const linkOf = {}, clientOf = {}, arAdds = {};
+    plan.forEach((p, i) => {
+      clientOf[p.row.id] = p.client;
+      if (String(p.link).startsWith("led|")) {
+        const [, ym, id] = p.link.split("|");
+        linkOf[p.row.id] = { kind: "ledger", ym, clientId: id };
+      } else if (p.link === "ar") {
+        const eid = base + i;
+        (arAdds[p.client] = arAdds[p.client] || []).push({ id: eid, type: "입금", desc: `은행입금 (${p.row.name})`, amount: p.row.amount, date: p.row.date });
+        linkOf[p.row.id] = { kind: "ar", entryId: eid };
+      } else linkOf[p.row.id] = { kind: "none" };
+    });
+    if (Object.keys(arAdds).length) {
+      setClientAR(prev => {
+        const next = { ...prev };
+        Object.keys(arAdds).forEach(n => { const cur = next[n] || { entries: [] }; next[n] = { ...cur, entries: [...(cur.entries || []), ...arAdds[n]] }; });
+        return next;
+      });
+    }
+    setBankDeposits(prev => {
+      const nm = { ...(((prev || {}).nameMap) || {}) };
+      plan.forEach(p => { nm[payablesNameNorm(p.row.name)] = p.client; });
+      return {
+        items: (((prev || {}).items) || []).map(x => linkOf[x.id] ? { ...x, status: "done", client: clientOf[x.id], link: linkOf[x.id], doneAt: Date.now() } : x),
+        nameMap: nm,
+      };
+    });
+    return plan.length;
+  };
+
+  const lastDoneRef = useRef(null);
+  const confirmOne = (dep, clientName) => {
+    const t = clientName != null ? targetFor(dep, clientName) : autoTargetOf(dep);
+    if (!t.client) { openProcess(dep); showToast("거래처를 먼저 고르세요"); return; }
+    completeRows([dep], () => t);
+    lastDoneRef.current = dep.id;
+    showToast(`${fmt(dep.amount)}원 → "${t.client}" 입금완료`, "success");
+  };
+  const undoLast = () => {
+    const id = lastDoneRef.current;
+    const cur = id != null ? items.find(x => x.id === id) : null;
+    if (!cur || cur.status !== "done") { showToast("되돌릴 항목이 없습니다"); return; }
+    undoDeposit(cur, true);
+    lastDoneRef.current = null;
+    showToast(`${fmt(cur.amount)}원 처리를 되돌렸습니다`);
+  };
+
+  const pendingSug = pending.filter(x => sugMap[x.id]);
+  const pendingNoSug = pending.filter(x => !sugMap[x.id]);
+  const pendingSugTotal = pendingSug.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
+  const doneTotal = done.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
+  const confirmAllSuggested = () => {
+    if (!pendingSug.length) return;
+    const exactN = pendingSug.filter(x => autoTargetOf(x).exact).length;
+    if (!window.confirm(
+      `추천이 잡힌 ${pendingSug.length}건 ${fmt(pendingSugTotal)}원을 입금완료 처리합니다.\n\n` +
+      `· 청구액과 금액이 정확히 일치하는 ${exactN}건 — 그 달 장부를 입금완료로 바꿉니다\n` +
+      `· 나머지 ${pendingSug.length - exactN}건 — 미수금 원장에 입금으로 기록합니다 (장부 청구는 건드리지 않습니다)\n\n계속할까요?`
+    )) return;
+    const n = completeRows(pendingSug, autoTargetOf);
+    showToast(`${n}건 입금완료 처리했습니다`, "success");
+  };
+
+  // ── 하나씩 보기 (빠른 처리) ──
+  const [focusMode, setFocusMode] = useState(false);
+  const [focusIdx, setFocusIdx] = useState(0);
+  const [focusPick, setFocusPick] = useState("");
+  const focusQueue = shown.filter(x => x.status === "pending");
+  const focusDep = focusQueue.length ? focusQueue[Math.min(focusIdx, focusQueue.length - 1)] : null;
+  const focusRef = useRef({});
+  focusRef.current = { dep: focusDep, len: focusQueue.length, pick: focusPick };
+  const focusDepId = focusDep ? focusDep.id : null;
+  useEffect(() => { setFocusPick(focusDepId != null ? (sugMap[focusDepId] || "") : ""); }, [focusDepId]);
+  useEffect(() => {
+    if (!focusMode) return;
+    const onKey = (e) => {
+      const tag = e.target && e.target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        if (e.key === "Escape") e.target.blur();
+        return;
+      }
+      const { dep, len, pick } = focusRef.current;
+      const k = e.key;
+      if (k === "Enter") { if (dep) { e.preventDefault(); confirmOne(dep, pick); } }
+      else if (k === "ArrowRight" || k === "s" || k === "S" || k === "ㄴ") { e.preventDefault(); setFocusIdx(i => Math.min(i + 1, Math.max(0, len - 1))); }
+      else if (k === "ArrowLeft") { e.preventDefault(); setFocusIdx(i => Math.max(0, i - 1)); }
+      else if (k === "d" || k === "D" || k === "ㅇ") { if (dep) removeDeposit(dep); }
+      else if (k === "z" || k === "Z" || k === "ㅋ") { undoLast(); }
+      else if (k === "Escape") setFocusMode(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusMode]);
+  const enterFocus = () => { setFilter("pending"); setFocusIdx(0); setFocusMode(true); };
+
+  // ── 날짜별로 묶기 — 같은 날짜를 줄마다 반복하지 않는다 ──
+  const WD = ["일", "월", "화", "수", "목", "금", "토"];
+  const dayLabel = (d) => { const [y, m, dd] = String(d).split("-").map(Number); return `${m}월 ${dd}일 (${WD[new Date(y, m - 1, dd).getDay()]})`; };
+  const dayGroups = [];
+  shown.forEach(x => {
+    const last = dayGroups[dayGroups.length - 1];
+    if (last && last.date === x.date) { last.rows.push(x); last.sum += parseFloat(x.amount) || 0; }
+    else dayGroups.push({ date: x.date, rows: [x], sum: parseFloat(x.amount) || 0 });
+  });
+
+  const importBtn = (
+    <button onClick={() => fileRef.current && fileRef.current.click()}
+      style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 34, padding: "0 13px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+      <Icon name="folderOpen" size={15} />거래내역 엑셀 가져오기
+    </button>
+  );
+  const fileInput = (
+    <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }}
+      onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ""; }} />
+  );
+  const keyCap = (t) => (
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 22, height: 22, padding: "0 6px", borderRadius: 6, background: "var(--surface2)", border: "1px solid var(--border)", borderBottomWidth: 2, color: "var(--text2)", fontSize: 11, fontWeight: 800 }}>{t}</span>
+  );
+
+  // ══ 하나씩 보기 ══
+  if (focusMode) {
+    const t = focusDep ? targetFor(focusDep, focusPick) : null;
+    const doneN = items.filter(x => x.status === "done").length;
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {fileInput}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="coins" size={15} />입금 빠른 처리
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text3)" }}>한 건씩 크게 띄우고 키보드로 넘깁니다</div>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => setFocusMode(false)}
+            style={{ height: 34, padding: "0 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>목록으로 보기</button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderRadius: 12, background: "var(--surface)", border: "1px solid var(--border)" }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+            {focusQueue.length ? Math.min(focusIdx + 1, focusQueue.length) : 0} <span style={{ color: "var(--text3)", fontWeight: 700 }}>/ {focusQueue.length}</span>
+          </span>
+          <div style={{ flex: 1, height: 6, borderRadius: 100, background: "var(--surface2)", overflow: "hidden", display: "flex" }}>
+            <div style={{ width: `${items.length ? (doneN / items.length) * 100 : 0}%`, background: "#DB6B2E" }} />
+          </div>
+          <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>처리완료 {doneN}건 · 남은 {pending.length}건</span>
+        </div>
+
+        {!focusDep ? (
+          <div className="card" style={{ padding: "48px 20px", textAlign: "center" }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>처리할 입금이 없습니다</div>
+            <div style={{ fontSize: 12.5, color: "var(--text3)", marginTop: 6 }}>모두 처리했거나, 검색 조건에 맞는 미처리 건이 없습니다.</div>
+          </div>
+        ) : (
+          <>
+            <div className="card" style={{ padding: "28px 30px" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{focusDep.date.replace(/-/g, ".")} {dayLabel(focusDep.date).replace(/^\d+월 \d+일 /, "")}</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.9, color: "var(--text1)", marginTop: 6, wordBreak: "break-all" }}>{focusDep.name}</div>
+                  {focusDep.memo && focusDep.memo !== focusDep.name && <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>{focusDep.memo}</div>}
+                </div>
+                <div style={{ flex: 1 }} />
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: "var(--text3)" }}>입금액</div>
+                  <div style={{ fontSize: 33, fontWeight: 800, letterSpacing: -1.3, color: "var(--text1)", marginTop: 2, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                    {fmt(focusDep.amount)}<span style={{ fontSize: 17, fontWeight: 700, color: "var(--text3)", marginLeft: 3 }}>원</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ height: 1, background: "var(--divider)", margin: "20px 0" }} />
+
+              <div className="dep-focus-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+                <div style={{ padding: "14px 16px", borderRadius: 13, background: "var(--accent-tonal)" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: "var(--accent-strong)", opacity: 0.85 }}>붙일 거래처</div>
+                  <input list="frw-dep-clients" value={focusPick} onChange={e => setFocusPick(e.target.value)} placeholder="거래처명 입력/선택"
+                    style={{ width: "100%", height: 40, marginTop: 7, fontSize: 15, fontWeight: 700, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)" }} />
+                  <div style={{ fontSize: 11.5, color: "var(--accent-strong)", opacity: 0.8, marginTop: 6 }}>
+                    {sugMap[focusDep.id] ? "전에 지정했거나 이름이 일치해 자동으로 채웠습니다" : "추천이 없습니다 — 직접 골라주세요"}
+                  </div>
+                </div>
+                <div style={{ padding: "14px 16px", borderRadius: 13, background: t && t.exact ? "var(--positive-bg)" : "var(--row-bg)", border: `1px solid ${t && t.exact ? "rgba(3,178,108,0.32)" : "var(--divider)"}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: t && t.exact ? "var(--positive-text)" : "var(--text3)" }}>연결될 청구</div>
+                  {t && t.exact ? (
+                    <>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 9, marginTop: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)" }}>{t.exact.ym}</span>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(t.exact.total)}원</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--positive-text)", marginTop: 6 }}>✓ 금액이 정확히 일치합니다 — 그 달 장부를 입금완료로 바꿉니다</div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text1)", marginTop: 8 }}>{t && t.client ? "미수금 원장에 입금 기록" : "거래처를 고르면 정해집니다"}</div>
+                      {t && t.near && (
+                        <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>
+                          {t.near.ym} 청구 {fmt(t.near.total)}원 · 차액 {fmt(Math.abs(Math.round(focusDep.amount) - Math.round(t.near.total)))}원 — 금액이 달라 장부는 건드리지 않습니다
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 22, flexWrap: "wrap" }}>
+                <button onClick={() => confirmOne(focusDep, focusPick)} disabled={!focusPick.trim()}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8, height: 46, padding: "0 22px", borderRadius: 12, border: "none", background: "#03B26C", color: "#fff", fontSize: 15, fontWeight: 800, cursor: focusPick.trim() ? "pointer" : "not-allowed", opacity: focusPick.trim() ? 1 : 0.45, fontFamily: "inherit" }}>
+                  ✓ 입금완료 {keyCap("Enter")}
+                </button>
+                <button onClick={() => setFocusIdx(i => Math.min(i + 1, Math.max(0, focusQueue.length - 1)))}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8, height: 46, padding: "0 18px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  건너뛰기 {keyCap("S")}
+                </button>
+                <button onClick={() => removeDeposit(focusDep)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8, height: 46, padding: "0 18px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  이 행 삭제 {keyCap("D")}
+                </button>
+                <div style={{ flex: 1 }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text3)", flexWrap: "wrap" }}>
+                  {keyCap("←")}{keyCap("→")} 앞뒤로 · {keyCap("Z")} 방금 것 되돌리기 · {keyCap("Esc")} 목록
+                </div>
+              </div>
+            </div>
+
+            {focusQueue.length > 1 && (
+              <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text1)" }}>다음 차례</div>
+                  <div style={{ flex: 1 }} />
+                  <div style={{ fontSize: 11.5, color: "var(--text3)" }}>추천 없는 건은 주황으로 표시됩니다</div>
+                </div>
+                {focusQueue.slice(focusIdx + 1, focusIdx + 6).map(x => {
+                  const s = sugMap[x.id];
+                  return (
+                    <div key={x.id} style={{ display: "grid", gridTemplateColumns: "92px minmax(0,1fr) 118px", gap: 10, alignItems: "center", padding: "9px 14px", borderTop: "1px solid var(--divider)", background: s ? "transparent" : "var(--warning-bg)" }}>
+                      <span style={{ fontSize: 12.5, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{x.date.replace(/-/g, ".")}</span>
+                      <span style={{ fontSize: 13, color: "var(--text1)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {x.name}
+                        <span style={{ marginLeft: 7, fontWeight: s ? 500 : 700, color: s ? "var(--text3)" : "var(--warning-text)" }}>→ {s || "거래처 미지정"}</span>
+                      </span>
+                      <span style={{ textAlign: "right", fontSize: 13, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(x.amount)}원</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+        <datalist id="frw-dep-clients">{clientNames.map(n => <option key={n} value={n} />)}</datalist>
+      </div>
+    );
+  }
+
+  // ══ 목록 ══
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}
+      onDragOver={e => { e.preventDefault(); setDragActive(true); }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDragActive(false); }}
+      onDrop={e => { e.preventDefault(); setDragActive(false); handleFile(e.dataTransfer.files && e.dataTransfer.files[0]); }}>
+      {fileInput}
+
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)" }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, verticalAlign: "middle" }}><Icon name="coins" size={15}/>은행 입금내역</span>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="coins" size={15} />은행 입금내역
         </div>
-        <div style={{ fontSize: 12, color: "var(--text3)" }}>은행 거래내역 엑셀 업로드 → 항목별 거래처 지정 → 입금완료 처리 · 지정한 입금자명은 기억해 자동 추천</div>
+        <div style={{ fontSize: 12, color: "var(--text3)" }}>지정한 입금자명은 기억해 다음부터 자동으로 채웁니다</div>
+        <div style={{ flex: 1 }} />
+        {importBtn}
       </div>
 
-      {/* 업로드 존 */}
-      <div
-        onClick={() => fileRef.current && fileRef.current.click()}
-        onDragOver={e => { e.preventDefault(); setDragActive(true); }}
-        onDragLeave={() => setDragActive(false)}
-        onDrop={e => { e.preventDefault(); setDragActive(false); handleFile(e.dataTransfer.files && e.dataTransfer.files[0]); }}
-        style={{
-          border: `2px dashed ${dragActive ? "#DB6B2E" : "var(--border)"}`, borderRadius: 14,
-          background: dragActive ? "rgba(219,107,46,0.06)" : "var(--surface2)",
-          padding: "22px 16px", textAlign: "center", cursor: "pointer", transition: "all 0.15s",
-        }}>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }}
-          onChange={e => { handleFile(e.target.files && e.target.files[0]); e.target.value = ""; }} />
-        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 8 }}><Icon name="folderOpen" size={16}/>은행 거래내역 엑셀 가져오기</div>
-        <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>
-          인터넷뱅킹 거래내역 .xlsx/.xls 를 드래그하거나 클릭해서 선택 · 거래일/입금액/입금자 헤더 자동 인식 · 입금 행만 가져오고 중복은 자동 제외
+      {/* 파일을 끌고 오면 그때만 큰 상자가 열린다 */}
+      {dragActive && (
+        <div style={{ border: "2px dashed var(--accent)", borderRadius: 14, background: "rgba(219,107,46,0.06)", padding: "26px 16px", textAlign: "center" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--accent-strong)" }}>여기에 놓으면 가져옵니다</div>
+          <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>거래일/입금액/입금자 헤더 자동 인식 · 입금 행만 가져오고 중복은 자동 제외</div>
         </div>
-      </div>
+      )}
 
-      {/* 요약 + 필터 + 검색 */}
+      {/* 남은 일 */}
+      {items.length > 0 && (
+        <div className="card" style={{ padding: "15px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text3)" }}>아직 거래처를 못 붙인 입금</div>
+            <div style={{ flex: 1 }} />
+            <div style={{ fontSize: 11.5, color: "var(--text3)" }}>전체 {items.length}건 중 {done.length}건 처리됨</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 7, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: -1, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>
+              {pending.length.toLocaleString()}<span style={{ fontSize: 14, fontWeight: 700, color: "var(--text3)", marginLeft: 3 }}>건</span>
+            </div>
+            <div style={{ width: 1, height: 22, background: "var(--border)" }} />
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: -1, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>
+              {fmt(pending.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0))}<span style={{ fontSize: 14, fontWeight: 700, color: "var(--text3)", marginLeft: 3 }}>원</span>
+            </div>
+          </div>
+          <div style={{ height: 6, borderRadius: 100, background: "var(--surface2)", marginTop: 12, overflow: "hidden", display: "flex" }}>
+            <div style={{ width: `${items.length ? (done.length / items.length) * 100 : 0}%`, background: "var(--positive)" }} />
+          </div>
+        </div>
+      )}
+
+      {/* 추천대로 한 번에 — 앱이 이미 답을 알고 있다 */}
+      {pendingSug.length > 0 && (
+        <div style={{ border: "1.5px solid rgba(3,178,108,0.45)", background: "rgba(3,178,108,0.06)", borderRadius: 14, padding: "14px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>✓ 추천이 잡힌 {pendingSug.length}건 · {fmt(pendingSugTotal)}원</div>
+              <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 4, lineHeight: 1.6 }}>
+                기억해 둔 입금자명이거나 거래처명이 그대로 일치합니다. 아래 표에서 붙을 거래처와 청구를 확인하고 한 번에 처리하세요.
+              </div>
+            </div>
+            <div style={{ flex: 1 }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button onClick={enterFocus}
+                style={{ height: 38, padding: "0 15px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>하나씩 보기</button>
+              <button onClick={confirmAllSuggested}
+                style={{ height: 38, padding: "0 17px", borderRadius: 10, border: "none", background: "#03B26C", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                ✓ 추천대로 {pendingSug.length}건 확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 직접 지정이 필요한 것 */}
+      {pendingNoSug.length > 0 && (
+        <div style={{ border: "1px solid rgba(254,152,0,0.4)", background: "var(--warning-bg)", borderRadius: 14, padding: "13px 16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>추천이 없는 {pendingNoSug.length}건 — 직접 지정해야 합니다</div>
+            <div style={{ flex: 1 }} />
+            <button onClick={() => setFilter(filter === "nosug" ? "pending" : "nosug")}
+              style={{ height: 30, padding: "0 12px", borderRadius: 8, background: filter === "nosug" ? "var(--warning-text)" : "var(--surface)", border: "1px solid rgba(254,152,0,0.5)", color: filter === "nosug" ? "#fff" : "var(--warning-text)", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              {filter === "nosug" ? "전체 미처리 보기" : "이것만 보기"}
+            </button>
+          </div>
+          {filter !== "nosug" && (
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 }}>
+              {pendingNoSug.slice(0, 4).map(x => (
+                <span key={x.id} style={{ fontSize: 12, color: "var(--text2)", padding: "4px 10px", borderRadius: 100, background: "var(--surface)", border: "1px solid var(--border)" }}>
+                  {x.name} <span style={{ color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{fmt(x.amount)}원</span>
+                </span>
+              ))}
+              {pendingNoSug.length > 4 && <span style={{ fontSize: 12, color: "var(--text3)", alignSelf: "center" }}>외 {pendingNoSug.length - 4}건</span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 필터 + 검색 */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={() => setFilter("pending")} style={chipStyle(filter === "pending")}>미처리 {pending.length}건 · {fmt(pending.reduce((s, x) => s + x.amount, 0))}원</button>
-        <button onClick={() => setFilter("done")} style={chipStyle(filter === "done")}>처리완료 {done.length}건</button>
+        <button onClick={() => setFilter("pending")} style={chipStyle(filter === "pending")}>미처리 {pending.length}건</button>
+        <button onClick={() => setFilter("done")} style={chipStyle(filter === "done")}>처리완료 {done.length}건 · {fmt(doneTotal)}원</button>
         <button onClick={() => setFilter("all")} style={chipStyle(filter === "all")}>전체 {items.length}건</button>
+        {filter === "nosug" && <span style={{ ...chipStyle(true), cursor: "default" }}>추천 없음 {pendingNoSug.length}건</span>}
         <span style={{ marginLeft: "auto", position: "relative", display: "inline-flex", alignItems: "center" }}>
           <span style={{ position: "absolute", left: 10, display: "inline-flex", color: "var(--text3)", pointerEvents: "none" }}><Icon name="search" size={13}/></span>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="거래처명·입금자 검색"
@@ -8373,17 +8737,17 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         </span>
       </div>
 
-      {/* 합계 바: 표시된 항목 합계 + 체크 선택 합계 */}
+      {/* 합계 바 */}
       {items.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", borderRadius: 12, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
           <span style={{ fontSize: 12.5, color: "var(--text2)" }}>
             표시 <b style={{ color: "var(--text1)" }}>{shown.length}건</b> 합계
-            <b style={{ color: "var(--text1)", marginLeft: 6, fontSize: 14 }}>{fmt(shownTotal)}원</b>
+            <b style={{ color: "var(--text1)", marginLeft: 6, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>{fmt(shownTotal)}원</b>
           </span>
           {selectedItems.length > 0 && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "5px 12px", borderRadius: 100, background: "rgba(219,107,46,0.12)", border: "1px solid rgba(219,107,46,0.35)" }}>
               <span style={{ fontSize: 12.5, fontWeight: 700, color: "#DB6B2E" }}>
-                ✓ 선택 {selectedItems.length}건 합계 <span style={{ fontSize: 14 }}>{fmt(selectedTotal)}원</span>
+                ✓ 선택 {selectedItems.length}건 합계 <span style={{ fontSize: 14, fontVariantNumeric: "tabular-nums" }}>{fmt(selectedTotal)}원</span>
               </span>
               <button onClick={() => setSelectedIds(new Set())} title="선택 해제"
                 style={{ border: "none", background: "transparent", color: "#DB6B2E", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>해제 ×</button>
@@ -8425,7 +8789,6 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
               ✓ {selectedPending.length}건 일괄 입금완료
             </button>
           </div>
-          {/* 합계 대조 — 맞으면 초록, 다르면 차액을 정확히 알려준다 */}
           {bulkTarget && (
             <div style={{ marginTop: 10, fontSize: 12.5, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
               <span style={{ color: "var(--text2)" }}>선택 합계 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(selectedPendingTotal)}원</b></span>
@@ -8449,107 +8812,154 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         </div>
       )}
 
-      {/* 목록 */}
+      {/* 목록 — 누르기 전에 어디에 붙을지가 이미 보인다 */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {shown.length === 0 ? (
           <div style={{ padding: "36px 16px", textAlign: "center", fontSize: 13, color: "var(--text3)" }}>
-            {items.length === 0 ? <>아직 가져온 입금내역이 없습니다.<br/>위 상자에 은행 거래내역 엑셀을 업로드하세요.</> : "조건에 맞는 내역이 없습니다."}
+            {items.length === 0 ? <>아직 가져온 입금내역이 없습니다.<br/>오른쪽 위 「거래내역 엑셀 가져오기」를 누르거나 파일을 이 화면에 끌어다 놓으세요.</> : "조건에 맞는 내역이 없습니다."}
           </div>
         ) : (
-          /* 전역 table 규칙(display:block + width:max-content)을 쓰면 셀이 내용 폭으로만
-             배치돼 표가 카드 왼쪽에 몰린다. table-plain으로 진짜 표 레이아웃을 쓰고
-             가로 스크롤은 바깥 div가 맡는다. 열 폭은 colgroup으로 배분 —
-             '입금자 / 적요'가 남는 폭을 모두 가져간다. */
           <div style={{ overflowX: "auto" }}>
-            <table className="table-plain" style={{ width: "100%", minWidth: 760, borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="table-plain" style={{ width: "100%", minWidth: 940, borderCollapse: "collapse", fontSize: 13 }}>
               <colgroup>
                 <col style={{ width: 44 }} />
-                <col style={{ width: 108 }} />
                 <col />
-                <col style={{ width: 140 }} />
-                <col style={{ width: 260 }} />
+                <col style={{ width: 132 }} />
+                <col style={{ width: 196 }} />
+                <col style={{ width: 250 }} />
+                <col style={{ width: 108 }} />
               </colgroup>
               <thead><tr style={{ background: "var(--surface2)", color: "var(--text2)", fontSize: 12 }}>
                 <th style={{ padding: "10px 8px 10px 12px", textAlign: "center" }}>
                   <input type="checkbox" checked={allShownSelected} onChange={toggleSelectAllShown} title="표시된 항목 전체 선택/해제" style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer" }} />
                 </th>
-                <th style={{ padding: "10px 12px", textAlign: "left", whiteSpace: "nowrap" }}>거래일</th>
                 <th style={{ padding: "10px 12px", textAlign: "left" }}>입금자 / 적요</th>
                 <th style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>입금액</th>
-                <th style={{ padding: "10px 12px", textAlign: "center" }}>처리</th>
+                <th style={{ padding: "10px 12px", textAlign: "left" }}>붙일 거래처</th>
+                <th style={{ padding: "10px 12px", textAlign: "left" }}>연결될 청구</th>
+                <th style={{ padding: "10px 12px", textAlign: "center" }}></th>
               </tr></thead>
               <tbody>
-                {shown.map(dep => {
-                  const isOpen = openId === dep.id;
-                  const isDone = dep.status === "done";
-                  const sug = !isDone ? suggestClient(dep.name) : "";
-                  return (
-                    <React.Fragment key={dep.id}>
-                      <tr onMouseEnter={() => enterRowDrag(dep.id)}
-                        style={{ borderTop: "1px solid var(--divider)", userSelect: dragSelecting ? "none" : "auto", background: selectedIds.has(dep.id) ? "rgba(219,107,46,0.08)" : isDone ? (darkMode ? "rgba(0,180,147,0.10)" : "rgba(0,180,147,0.07)") : isOpen ? "rgba(219,107,46,0.06)" : "transparent" }}>
-                        <td onMouseDown={(e) => beginRowDrag(dep.id, e)} title="드래그하여 여러 건 선택"
-                          style={{ padding: "10px 8px 10px 12px", textAlign: "center", cursor: "pointer", userSelect: "none" }}>
-                          <input type="checkbox" checked={selectedIds.has(dep.id)} readOnly tabIndex={-1} style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer", pointerEvents: "none" }} />
-                        </td>
-                        <td style={{ padding: "10px 12px", whiteSpace: "nowrap", color: "var(--text2)", fontSize: 12.5 }}>{dep.date.replace(/-/g, ".")}</td>
-                        <td style={{ padding: "10px 12px" }}>
-                          <div style={{ fontWeight: 600, color: "var(--text1)" }}>{dep.name}</div>
-                          {dep.memo && dep.memo !== dep.name && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{dep.memo}</div>}
-                          {isDone && <div style={{ fontSize: 11, color: "#00B493", marginTop: 3, fontWeight: 600 }}>→ {dep.client} · {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 입금 기록" : "확인 처리"}</div>}
-                        </td>
-                        <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", color: isDone ? "#00B493" : "var(--text1)" }}>{fmt(dep.amount)}원</td>
-                        <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
-                          {isDone ? (
-                            <button onClick={() => undoDeposit(dep)} title="처리 되돌리기" style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>↩ 되돌리기</button>
-                          ) : (
-                            <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
-                              <button onClick={() => isOpen ? setOpenId(null) : openProcess(dep)} className="btn-orange"
-                                style={{ padding: "6px 13px", borderRadius: 8, border: "none", background: "#DB6B2E", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                                {isOpen ? "닫기" : sug ? `거래처 지정 (추천: ${sug.length > 8 ? sug.slice(0, 8) + "…" : sug})` : "거래처 지정"}
-                              </button>
-                              <button onClick={() => removeDeposit(dep)} title="행 삭제" style={{ width: 26, height: 26, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>×</button>
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                      {isOpen && !isDone && (
-                        <tr style={{ background: "rgba(219,107,46,0.05)" }}>
-                          <td colSpan={5} style={{ padding: "12px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
-                            <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>거래처</label>
-                                <input list="frw-dep-clients" value={pickClient}
-                                  onChange={e => { const v = e.target.value; setPickClient(v); setPickLink(v.trim() ? defaultLinkFor(v, dep.amount) : "none"); }}
-                                  placeholder="거래처명 입력/선택"
-                                  style={{ height: 38, padding: "0 10px", fontSize: 13, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }} />
-                              </div>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>연결할 항목</label>
-                                <select value={pickLink} onChange={e => setPickLink(e.target.value)}
-                                  style={{ height: 38, padding: "0 10px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", maxWidth: 300 }}>
-                                  {unpaidOf(pickClient).map(u => (
-                                    <option key={`${u.ym}-${u.id}`} value={`led|${u.ym}|${u.id}`}>
-                                      {u.ym} 장부 청구 {fmt(u.total)}원 → 입금완료{Math.round(u.total) === Math.round(dep.amount) ? " (금액 일치)" : ""}
-                                    </option>
-                                  ))}
-                                  <option value="ar">미수금 원장에 입금으로 기록</option>
-                                  <option value="none">연결 없이 확인 처리만</option>
-                                </select>
-                              </div>
-                              <button onClick={() => completeDeposit(dep)}
-                                style={{ height: 38, padding: "0 18px", borderRadius: 9, border: "none", background: "#00B493", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                                ✓ 입금완료 처리
-                              </button>
-                            </div>
-                            {pickClient.trim() && unpaidOf(pickClient).length === 0 && (
-                              <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>이 거래처의 미입금 청구가 없어 미수금 원장 기록 또는 확인 처리만 가능합니다.</div>
+                {dayGroups.map(g => (
+                  <React.Fragment key={g.date}>
+                    <tr>
+                      <td colSpan={6} style={{ padding: "8px 12px", background: "var(--row-bg)", borderTop: "1px solid var(--divider)", fontSize: 11.5, fontWeight: 700, color: "var(--text3)" }}>
+                        {dayLabel(g.date)} · {g.rows.length}건 · <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmt(g.sum)}원</span>
+                      </td>
+                    </tr>
+                    {g.rows.map(dep => {
+                      const isOpen = openId === dep.id;
+                      const isDone = dep.status === "done";
+                      const t = isDone ? null : autoTargetOf(dep);
+                      return (
+                        <React.Fragment key={dep.id}>
+                          <tr onMouseEnter={() => enterRowDrag(dep.id)}
+                            style={{ borderTop: "1px solid var(--divider)", userSelect: dragSelecting ? "none" : "auto", background: selectedIds.has(dep.id) ? "rgba(219,107,46,0.08)" : isDone ? (darkMode ? "rgba(0,180,147,0.10)" : "rgba(0,180,147,0.07)") : isOpen ? "rgba(219,107,46,0.06)" : t && !t.client ? "var(--warning-bg)" : "transparent" }}>
+                            <td onMouseDown={(e) => beginRowDrag(dep.id, e)} title="드래그하여 여러 건 선택"
+                              style={{ padding: "10px 8px 10px 12px", textAlign: "center", cursor: "pointer", userSelect: "none" }}>
+                              <input type="checkbox" checked={selectedIds.has(dep.id)} readOnly tabIndex={-1} style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer", pointerEvents: "none" }} />
+                            </td>
+                            <td style={{ padding: "10px 12px" }}>
+                              <div style={{ fontWeight: 600, color: "var(--text1)" }}>{dep.name}</div>
+                              {dep.memo && dep.memo !== dep.name && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{dep.memo}</div>}
+                              {isDone && <div style={{ fontSize: 11, color: "#00B493", marginTop: 3, fontWeight: 600 }}>→ {dep.client} · {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 입금 기록" : "확인 처리"}</div>}
+                            </td>
+                            <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: isDone ? "#00B493" : "var(--text1)" }}>{fmt(dep.amount)}원</td>
+
+                            {isDone ? (
+                              <>
+                                <td style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>{dep.client}</td>
+                                <td style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>
+                                  {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 원장 입금 기록" : "확인 처리만"}
+                                </td>
+                                <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
+                                  <button onClick={() => undoDeposit(dep)} title="처리 되돌리기" style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>↩ 되돌리기</button>
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                <td style={{ padding: "10px 12px" }}>
+                                  <button onClick={() => isOpen ? setOpenId(null) : openProcess(dep)} title="눌러서 바꾸기"
+                                    style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: "100%", height: 27, padding: "0 9px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+                                      border: t.client ? "1px solid transparent" : "1px dashed var(--warning)",
+                                      background: t.client ? "var(--accent-tonal)" : "transparent",
+                                      color: t.client ? "var(--accent-strong)" : "var(--warning-text)" }}>
+                                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.client || "거래처 고르기"}</span>
+                                    <span style={{ opacity: 0.5, flexShrink: 0 }}>▾</span>
+                                  </button>
+                                </td>
+                                <td style={{ padding: "10px 12px", fontSize: 12 }}>
+                                  {!t.client ? (
+                                    <span style={{ color: "var(--warning-text)" }}>거래처를 고르면 붙일 청구를 찾아드립니다</span>
+                                  ) : t.exact ? (
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                                      <span style={{ color: "var(--text2)" }}>{t.exact.ym} 청구 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(t.exact.total)}원</b></span>
+                                      <span style={{ padding: "2px 7px", borderRadius: 100, background: "var(--positive-bg)", color: "var(--positive-text)", fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>✓ 금액 일치</span>
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: "var(--text3)" }}>
+                                      미수금 원장에 입금 기록
+                                      {t.near && (
+                                        <div style={{ fontSize: 10.5, marginTop: 2 }}>
+                                          {t.near.ym} 청구 {fmt(t.near.total)}원 · 차액 <b style={{ color: "var(--negative-text)" }}>{fmt(Math.abs(Math.round(dep.amount) - Math.round(t.near.total)))}원</b>
+                                        </div>
+                                      )}
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
+                                  <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                                    <button onClick={() => confirmOne(dep)} disabled={!t.client} title={t.exact ? "청구액과 일치 — 그 달 장부를 입금완료로" : "미수금 원장에 입금으로 기록"}
+                                      style={{ height: 28, padding: "0 12px", borderRadius: 8, cursor: t.client ? "pointer" : "not-allowed", fontFamily: "inherit", fontSize: 12, fontWeight: 700, opacity: t.client ? 1 : 0.4,
+                                        border: t.exact ? "1px solid #03B26C" : "1px solid var(--border)",
+                                        background: t.exact ? "#03B26C" : "var(--surface)",
+                                        color: t.exact ? "#fff" : "var(--text2)" }}>확인</button>
+                                    <button onClick={() => removeDeposit(dep)} title="행 삭제" style={{ width: 24, height: 24, border: "none", borderRadius: 6, background: "transparent", color: "var(--text3)", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>×</button>
+                                  </span>
+                                </td>
+                              </>
                             )}
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
+                          </tr>
+                          {isOpen && !isDone && (
+                            <tr style={{ background: "rgba(219,107,46,0.05)" }}>
+                              <td colSpan={6} style={{ padding: "12px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
+                                <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                    <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>거래처</label>
+                                    <input list="frw-dep-clients" value={pickClient}
+                                      onChange={e => { const v = e.target.value; setPickClient(v); setPickLink(v.trim() ? defaultLinkFor(v, dep.amount) : "none"); }}
+                                      placeholder="거래처명 입력/선택"
+                                      style={{ height: 38, padding: "0 10px", fontSize: 13, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }} />
+                                  </div>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                    <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>연결할 항목</label>
+                                    <select value={pickLink} onChange={e => setPickLink(e.target.value)}
+                                      style={{ height: 38, padding: "0 10px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", maxWidth: 300 }}>
+                                      {unpaidOf(pickClient).map(u => (
+                                        <option key={`${u.ym}-${u.id}`} value={`led|${u.ym}|${u.id}`}>
+                                          {u.ym} 장부 청구 {fmt(u.total)}원 → 입금완료{Math.round(u.total) === Math.round(dep.amount) ? " (금액 일치)" : ""}
+                                        </option>
+                                      ))}
+                                      <option value="ar">미수금 원장에 입금으로 기록</option>
+                                      <option value="none">연결 없이 확인 처리만</option>
+                                    </select>
+                                  </div>
+                                  <button onClick={() => completeDeposit(dep)}
+                                    style={{ height: 38, padding: "0 18px", borderRadius: 9, border: "none", background: "#00B493", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                    ✓ 입금완료 처리
+                                  </button>
+                                </div>
+                                {pickClient.trim() && unpaidOf(pickClient).length === 0 && (
+                                  <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>이 거래처의 미입금 청구가 없어 미수금 원장 기록 또는 확인 처리만 가능합니다.</div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
               </tbody>
             </table>
           </div>
@@ -8570,7 +8980,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
           <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", whiteSpace: "nowrap" }}>
             ✓ 선택 <span style={{ color: "#DB6B2E" }}>{selectedItems.length}건</span>
           </span>
-          <span style={{ fontSize: 16, fontWeight: 800, color: "#DB6B2E", whiteSpace: "nowrap" }}>{fmt(selectedTotal)}원</span>
+          <span style={{ fontSize: 16, fontWeight: 800, color: "#DB6B2E", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmt(selectedTotal)}원</span>
           <button onClick={() => setSelectedIds(new Set())} title="선택 해제"
             style={{ width: 26, height: 26, border: "none", borderRadius: 13, background: "var(--surface2)", color: "var(--text2)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>×</button>
           <style>{`
@@ -8580,6 +8990,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
           `}</style>
         </div>
       )}
+      <style>{`@media (max-width: 720px) { .dep-focus-grid { grid-template-columns: minmax(0, 1fr) !important; } }`}</style>
     </div>
   );
 }
