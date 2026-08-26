@@ -23477,6 +23477,31 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     catch { showToast(text); }
   };
 
+  // ── 하루 기록 모달 — 캘린더에서 그 날의 메모·일기를 바로 쓴다 ──
+  // '하루 기록' 서브탭과 같은 데이터(dailyNotes)를 쓰므로 어느 쪽에서 써도 이어진다.
+  const [dailyModal, setDailyModal] = React.useState(null); // { date, text, star }
+  const openDaily = (dateStr) => {
+    const e = (dailyNotes || {})[dateStr] || {};
+    setDailyModal({ date: dateStr, text: e.text || "", star: !!e.star });
+  };
+  const saveDaily = (close = true) => {
+    if (!dailyModal || !setDailyNotes) { setDailyModal(null); return; }
+    const { date, text, star } = dailyModal;
+    const had = !!(dailyNotes || {})[date];
+    setDailyNotes(prev => {
+      const next = { ...(prev || {}) };
+      if (!String(text || "").trim() && !star) delete next[date];
+      else next[date] = { ...(next[date] || {}), text, star, updatedAt: Date.now() };
+      return next;
+    });
+    if (close) setDailyModal(null);
+    const body = String(text || "").trim();
+    showToast(body || star
+      ? `${date.replace(/-/g, ".")} 하루 기록을 저장했습니다`
+      : (had ? `${date.replace(/-/g, ".")} 하루 기록을 지웠습니다` : "내용이 비어 저장하지 않았습니다"),
+      body || star ? "success" : undefined);
+  };
+
   // ── 일정 추가 모달 (노션 '새 페이지' 스타일) — 캘린더 셀 + 버튼/더블클릭으로 열림 ──
   const [addModal, setAddModal] = React.useState(null); // { date, endDate, text, memo }
   const openAdd = (dateStr) => setAddModal({ date: dateStr || ymd(new Date()), endDate: "", text: "", memo: "", atts: [] });
@@ -23879,10 +23904,19 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                               alignSelf: "flex-end",
                               fontVariantNumeric: "tabular-nums",
                             }}>{d.getDate() === 1 && !isToday ? `${d.getMonth() + 1}월 1일` : d.getDate()}</span>
-                            {/* 하루 기록이 있는 날 표시 — '하루 기록' 탭에서 볼 수 있다 */}
-                            {(() => { const dn = (dailyNotes || {})[k]; if (!dn || (!(dn.text || "").trim() && !dn.star)) return null;
-                              return <span title="하루 기록이 있는 날" style={{ position: "absolute", left: 7, top: 9, fontSize: 10, lineHeight: 1, color: dn.star ? "#DB6B2E" : "var(--text3)", pointerEvents: "none" }}>{dn.star ? "★" : "✎"}</span>; })()}
                             <span className="sched-addbtn" title="일정 추가" onClick={(e) => { e.stopPropagation(); openAdd(k); }}>+</span>
+                            {/* 하루 기록 — 기록이 있는 날은 항상 보이고(✎/★), 없는 날은 칸에 마우스를 올리면 나타난다 */}
+                            {(() => {
+                              const dn = (dailyNotes || {})[k];
+                              const has = !!(dn && ((dn.text || "").trim() || dn.star));
+                              return (
+                                <span className={"sched-notebtn" + (has ? " sched-notebtn-on" : "") + (has && dn.star ? " sched-notebtn-star" : "")}
+                                  title={has ? `하루 기록 — ${(dn.text || "").trim().split("\n")[0].slice(0, 40) || "중요 표시"}` : "하루 기록 쓰기"}
+                                  onClick={(e) => { e.stopPropagation(); openDaily(k); }}>
+                                  {has && dn.star ? "★" : "✎"}
+                                </span>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -24313,6 +24347,55 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
         );
       })()}
 
+      {/* ── 하루 기록 모달 (캘린더에서 바로 쓰기) ── */}
+      {dailyModal && (() => {
+        const [dy, dm, dd] = dailyModal.date.split("-").map(Number);
+        const WDK = ["일", "월", "화", "수", "목", "금", "토"];
+        const dayTodos = todos.filter(t => t.date === dailyModal.date || (t.endDate && t.date <= dailyModal.date && t.endDate >= dailyModal.date));
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, animation: "fadeIn 0.18s ease" }}
+            onClick={() => saveDaily(true)}>
+            <div className="frw-rise" onClick={e => e.stopPropagation()}
+              onKeyDown={e => { if (e.key === "Escape") saveDaily(true); }}
+              style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 560, maxHeight: "86vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.45)", border: "1px solid var(--border)", animation: "frwRise 0.25s cubic-bezier(0,0,0.2,1)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 18px 0", flexWrap: "wrap" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>
+                  <Icon name="edit" size={16}/> {dy}년 {dm}월 {dd}일 ({WDK[new Date(dy, dm - 1, dd).getDay()]}) 기록
+                </span>
+                {dailyModal.date === todayKey && <span style={{ fontSize: 11, fontWeight: 800, color: "#DB6B2E", background: "rgba(219,107,46,0.12)", padding: "2px 8px", borderRadius: 100 }}>오늘</span>}
+                <button onClick={() => setDailyModal(d => ({ ...d, star: !d.star }))} title={dailyModal.star ? "중요 표시 해제" : "중요한 날로 표시"}
+                  style={{ marginLeft: "auto", height: 30, padding: "0 11px", borderRadius: 8, border: dailyModal.star ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)", background: dailyModal.star ? "rgba(219,107,46,0.12)" : "var(--surface2)", color: dailyModal.star ? "#DB6B2E" : "var(--text2)", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                  {dailyModal.star ? "★ 중요" : "☆ 중요"}
+                </button>
+                <button onClick={() => saveDaily(true)} title="저장하고 닫기"
+                  style={{ width: 30, height: 30, border: "none", borderRadius: 8, background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>✕</button>
+              </div>
+              <div style={{ padding: "12px 18px 0", overflowY: "auto", flex: 1 }}>
+                {dayTodos.length > 0 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "8px 11px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--divider)", marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>이 날 일정 {dayTodos.length}건</span>
+                    {dayTodos.slice(0, 3).map(t => (
+                      <span key={t.id} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 100, background: "var(--surface)", border: "1px solid var(--border)", color: t.done ? "var(--text3)" : "var(--text1)", textDecoration: t.done ? "line-through" : "none", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</span>
+                    ))}
+                    {dayTodos.length > 3 && <span style={{ fontSize: 11, color: "var(--text3)" }}>외 {dayTodos.length - 3}건</span>}
+                  </div>
+                )}
+                <textarea autoFocus value={dailyModal.text} onChange={e => setDailyModal(d => ({ ...d, text: e.target.value }))}
+                  placeholder={"오늘 있었던 일, 결정한 것, 기억할 것을 적어두세요."}
+                  style={{ width: "100%", minHeight: 260, fontSize: 14, lineHeight: 1.75, borderRadius: 12, padding: "13px 15px", resize: "vertical", background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text1)", fontFamily: "inherit" }} />
+              </div>
+              <div style={{ padding: "10px 18px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>{(dailyModal.text || "").length.toLocaleString()}자 · '하루 기록' 탭에서 모아볼 수 있습니다</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setDailyModal(null)} style={{ height: 38, padding: "0 14px", background: "var(--surface2)", color: "var(--text1)", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+                  <button className="btn-orange" onClick={() => saveDaily(true)} style={{ height: 38, padding: "0 18px" }}>저장</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── 드래그 중 따라다니는 카드 — 놓을 날짜를 항상 보여준다 ── */}
       {dragTodoId != null && (
         <div ref={ghostRef} className="sched-ghost">
@@ -24352,6 +24435,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           items.push({ icon: "trash", label: "삭제", danger: true, on: () => { if (window.confirm(`"${t.text}" 일정을 삭제할까요?`)) removeTodo(t.id); } });
         } else {
           items.push({ icon: "plus", label: "여기에 일정 추가", sub: dot(ctxMenu.date), on: () => openAdd(ctxMenu.date) });
+          {
+            const dn = (dailyNotes || {})[ctxMenu.date];
+            const has = !!(dn && ((dn.text || "").trim() || dn.star));
+            items.push({ icon: "edit", label: has ? "하루 기록 이어쓰기" : "하루 기록 쓰기",
+              sub: has ? (dn.text || "").trim().split("\n")[0].slice(0, 14) : "메모·일기",
+              on: () => openDaily(ctxMenu.date) });
+          }
           if (clipTodo) {
             const src = todos.find(x => x.id === clipTodo.id) || clipTodo;
             items.push({ icon: "copy", label: "여기에 붙여넣기", sub: (src.text || "").slice(0, 18), on: () => duplicateAndToast(src, ctxMenu.date) });
@@ -24508,6 +24598,26 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           transition: opacity .15s, transform .18s cubic-bezier(.2,.9,.3,1.3), background .15s, color .15s;
         }
         .sched-cell:hover .sched-addbtn { opacity: 1; transform: scale(1); }
+        /* 하루 기록 버튼 — 기록 없는 날은 hover로, 있는 날(-on)은 항상 보인다 */
+        .sched-notebtn {
+          position: absolute; top: 5px; left: 31px;
+          width: 22px; height: 22px; border-radius: 7px;
+          display: inline-flex; align-items: center; justify-content: center;
+          font-size: 11.5px; line-height: 1;
+          color: var(--text3); background: var(--surface2);
+          opacity: 0; transform: scale(.7); cursor: pointer;
+          transition: opacity .15s, transform .18s cubic-bezier(.2,.9,.3,1.3), background .15s, color .15s, left .15s;
+        }
+        .sched-cell:hover .sched-notebtn { opacity: 1; transform: scale(1); left: 31px; }
+        .sched-notebtn:hover { background: rgba(219,107,46,0.14); color: #DB6B2E; }
+        /* 기록이 있는 날은 평소엔 맨 왼쪽에, 칸에 마우스를 올리면 + 옆으로 비켜난다 */
+        .sched-notebtn-on { opacity: 1; transform: none; left: 5px; background: rgba(219,107,46,0.10); color: #DB6B2E; }
+        .sched-notebtn-star { font-size: 12.5px; }
+        /* 터치 기기는 hover가 없으니 '+'(일정 추가)와 나란히 항상 보여준다 — 탭하면 그 날 기록이 열린다 */
+        @media (hover: none) {
+          .sched-notebtn { opacity: 1; transform: scale(1); left: 31px; }
+          .sched-notebtn-on { opacity: 1; left: 31px; }
+        }
         .sched-addbtn:hover { background: #DB6B2E; color: #fff; }
         .sched-evcheck { transition: transform .12s, background .15s; }
         .sched-evcheck:hover { transform: scale(1.2); }
