@@ -12335,6 +12335,84 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
   }
   pushMonth();
 
+  // ── 미지급 정산 엑셀 내보내기 ──
+  // 화면의 원장(ledger)을 그대로 옮긴다 — 월계 행과 누적잔액까지 같은 순서로.
+  // 매입 당시 단가를 함께 실어, 나중에 단가표가 바뀌어도 그때 값이 남게 한다.
+  const exportPayablesExcel = () => {
+    if (!ledger.length && !opening) { showToast("내보낼 내역이 없습니다."); return; }
+    const today = new Date().toISOString().slice(0, 10);
+    const border = { top:{style:"thin",color:{rgb:"E5E7EB"}}, bottom:{style:"thin",color:{rgb:"E5E7EB"}}, left:{style:"thin",color:{rgb:"E5E7EB"}}, right:{style:"thin",color:{rgb:"E5E7EB"}} };
+    const titleStyle = { font:{bold:true,sz:16}, alignment:{horizontal:"center",vertical:"center"} };
+    const headerStyle = { font:{bold:true,color:{rgb:"FFFFFF"},sz:12}, fill:{fgColor:{rgb:"1E293B"}}, alignment:{horizontal:"center",vertical:"center"}, border };
+    const cellL = { alignment:{horizontal:"left",vertical:"center"}, border };
+    const cellC = { alignment:{horizontal:"center",vertical:"center"}, border };
+    const num  = { alignment:{horizontal:"right"}, numFmt:'#,##0"원"', border };
+    const qtyS = { alignment:{horizontal:"right"}, numFmt:'#,##0.##', border };
+    const monthFill = { fill:{fgColor:{rgb:"F1F5F9"}}, font:{bold:true} };
+    const payFill = { font:{color:{rgb:"AB4F1F"},bold:true} };
+
+    const HEAD = ["거래일자", "구분", "품목 / 내용", "수량", "당시 단가", "매입액(VAT포함)", "지급액", "미지급잔액"];
+    const aoa = [
+      [`${supplier} 미지급 정산`, "", "", "", "", "", "", ""],
+      [`내보낸 날짜 ${today}${openDate ? ` · 기초 기준일 ${openDate}` : ""}`, "", "", "", "", "", "", ""],
+      [],
+      HEAD,
+      [openDate || "", "기초", "전기이월 미지급잔액", "", "", "", "", Math.round(opening)],
+    ];
+    const meta = [];   // 행별 스타일 힌트
+    ledger.forEach(r => {
+      if (r.kind === "month") {
+        aoa.push([r.ym || "", "월계", "", "", "", Math.round(r.buy), Math.round(r.pay), ""]);
+        meta.push("month");
+      } else if (r.kind === "pay") {
+        aoa.push([r.date || "", "지급", r.label || "", "", "", "", Math.round(r.amount), Math.round(r.bal)]);
+        meta.push("pay");
+      } else {
+        aoa.push([
+          r.date || "", r.isReturn ? "반품" : "매입", r.label || "",
+          r.qty != null && r.qty !== "" ? Number(r.qty) : "",
+          r.unitPrice > 0 ? Math.round(r.unitPrice) : "",
+          Math.round(r.amount), "", Math.round(r.bal),
+        ]);
+        meta.push("buy");
+      }
+    });
+    aoa.push([]);
+    aoa.push(["", "합계", "", "", "", Math.round(buyTotal), Math.round(payTotal), Math.round(closing)]);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{wch:12},{wch:8},{wch:42},{wch:10},{wch:12},{wch:16},{wch:14},{wch:16}];
+    ws["!merges"] = [{ s:{r:0,c:0}, e:{r:0,c:7} }, { s:{r:1,c:0}, e:{r:1,c:7} }];
+    const COLS = ["A","B","C","D","E","F","G","H"];
+    if (ws["A1"]) ws["A1"].s = titleStyle;
+    if (ws["A2"]) ws["A2"].s = { font:{sz:10,color:{rgb:"64748B"}}, alignment:{horizontal:"center"} };
+    COLS.forEach(c => { if (ws[c+"4"]) ws[c+"4"].s = headerStyle; });
+    const styleRow = (row, kind) => {
+      const fill = kind === "month" ? monthFill : {};
+      COLS.forEach((c, ci) => {
+        const cell = ws[c + row];
+        if (!cell) return;
+        let base = ci === 0 || ci === 1 ? cellC : ci === 2 ? cellL : ci === 3 ? qtyS : num;
+        if (kind === "pay" && (ci === 6)) base = { ...base, ...payFill };
+        cell.s = { ...base, ...fill };
+      });
+    };
+    styleRow(5, "opening");                       // 기초 행
+    meta.forEach((k, i) => styleRow(6 + i, k));   // 원장 행들
+    const sumRow = 6 + meta.length + 1;           // 빈 줄 하나 건너뛴 합계
+    COLS.forEach((c, ci) => {
+      const cell = ws[c + sumRow];
+      if (!cell) return;
+      cell.s = { ...(ci >= 3 ? num : cellC), font:{bold:true,sz:12}, fill:{fgColor:{rgb:"FEF3C7"}}, border };
+    });
+
+    const wb = XLSX.utils.book_new();
+    const safe = (supplier || "공급처").replace(/[\\/:*?"<>|\[\]]/g, "_").slice(0, 28);
+    XLSX.utils.book_append_sheet(wb, ws, safe || "미지급");
+    XLSX.writeFile(wb, `미지급정산_${safe}_${today}.xlsx`);
+    showToast(`${supplier} 미지급 정산을 엑셀로 내보냈습니다`, "success");
+  };
+
   const kpi = (label, val, color) => (
     <div className="card" style={{ flex: "1 1 160px", minWidth: 150 }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
@@ -12411,6 +12489,21 @@ function PayablesView({ supplier, fabricIntakes, setFabricIntakes, payables, set
       </div>
 
       {/* 결제원장 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>결제 원장</div>
+        <div style={{ fontSize: 11.5, color: "var(--text3)" }}>매입·지급을 시간순으로 · 누적 미지급잔액</div>
+        <div style={{ flex: 1 }} />
+        <button onClick={exportPayablesExcel} disabled={!ledger.length && !opening}
+          title="화면의 원장을 그대로 엑셀로 — 월계·누적잔액·매입 당시 단가 포함"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6, height: 34, padding: "0 14px",
+            borderRadius: 9, border: "1px solid var(--divider)", background: "var(--surface)",
+            color: (!ledger.length && !opening) ? "var(--text3)" : "var(--text2)",
+            fontSize: 12.5, fontWeight: 700, cursor: (!ledger.length && !opening) ? "default" : "pointer", fontFamily: "inherit",
+          }}>
+          <Icon name="fileSheet" size={14} />엑셀 내보내기
+        </button>
+      </div>
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
