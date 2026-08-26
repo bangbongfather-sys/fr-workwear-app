@@ -20552,7 +20552,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "schedule" && (
           <>
           <KakaoAlertCard/>
-          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} />
+          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} />
           </>
         )}
         {tab === "news" && (
@@ -23012,7 +23012,7 @@ function AttachmentField({ value = [], onChange }) {
   );
 }
 
-function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode }) {
+function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab }) {
   const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","daily","notes","recurring"], "data-schedule-sub");
   const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
@@ -24783,7 +24783,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       </>)}
 
       {scheduleSub === "daily" && (
-        <DailyNotesPanel dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} todos={todos} darkMode={darkMode} startDate={selectedDate} />
+        <DailyNotesPanel dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} todos={todos} setTodos={setTodos} darkMode={darkMode} startDate={selectedDate} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} />
       )}
 
       {scheduleSub === "notes" && (
@@ -24802,15 +24802,21 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 // 하루에 한 장. dailyNotes = { "2026-08-26": { text, star, updatedAt } } 형태로
 // 날짜를 키로 저장해 같은 날을 다시 열면 이어서 쓴다. 내용이 비고 별표도 없으면
 // 그 날짜 키를 지워서 빈 기록이 쌓이지 않게 한다. 저장은 앱 공용 동기화에 위임(자동).
-function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], darkMode, startDate }) {
+function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], setTodos, darkMode, startDate,
+                           purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab }) {
   const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const WD = ["일", "월", "화", "수", "목", "금", "토"];
   const todayKey = ymd(new Date());
   const [sel, setSel] = React.useState(() => startDate || todayKey);
   const [search, setSearch] = React.useState("");
+  const [showSearch, setShowSearch] = React.useState(false);
+  // 잔디가 보여줄 달. 날짜를 옮기면 그 달을 따라가고, 화살표로 따로 넘겨볼 수도 있다.
+  const [month, setMonth] = React.useState(() => (startDate || todayKey).slice(0, 7));
   // 캘린더에서 고른 날짜(또는 통합 검색으로 들어온 날짜)를 따라간다
   React.useEffect(() => { if (startDate) setSel(startDate); }, [startDate]);
+  React.useEffect(() => { setMonth(sel.slice(0, 7)); }, [sel]);
   const taRef = React.useRef(null);
+  const searchRef = React.useRef(null);
 
   const entryOf = (k) => dailyNotes[k] || { text: "", star: false };
   const cur = entryOf(sel);
@@ -24828,8 +24834,14 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], darkMode,
     const [y, m, d] = sel.split("-").map(Number);
     setSel(ymd(new Date(y, m - 1, d + days)));
   };
+  const shiftMonth = (n) => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(y, m - 1 + n, 1);
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  };
   const fmtLong = (k) => { const [y, m, d] = k.split("-").map(Number); return `${y}년 ${m}월 ${d}일 (${WD[new Date(y, m - 1, d).getDay()]})`; };
-  const fmtShort = (k) => { const [y, m, d] = k.split("-").map(Number); return `${m}/${d}(${WD[new Date(y, m - 1, d).getDay()]})`; };
+  const fmtShort = (k) => { const [y, m, d] = k.split("-").map(Number); return `${m}/${d} (${WD[new Date(y, m - 1, d).getDay()]})`; };
+  const selWd = (() => { const [y, m, d] = sel.split("-").map(Number); return WD[new Date(y, m - 1, d).getDay()]; })();
 
   // 기록이 있는 날 (내용 또는 별표)
   const written = Object.keys(dailyNotes || {})
@@ -24837,8 +24849,6 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], darkMode,
     .sort((a, b) => b.localeCompare(a));
   const q = search.trim().toLowerCase();
   const shown = q ? written.filter(k => (dailyNotes[k].text || "").toLowerCase().includes(q) || k.includes(q)) : written;
-  const monthPrefix = todayKey.slice(0, 7);
-  const monthCount = written.filter(k => k.startsWith(monthPrefix)).length;
   // 연속 기록 — 오늘(없으면 어제)부터 거슬러 올라가며 끊기지 않은 날 수
   const streak = (() => {
     const set = new Set(written);
@@ -24848,120 +24858,222 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], darkMode,
     while (set.has(ymd(d))) { n++; d.setDate(d.getDate() - 1); }
     return n;
   })();
-  // 그 날의 일정 — 기록을 쓸 때 참고용
-  const dayTodos = (todos || []).filter(t => t.date === sel || (t.endDate && t.date <= sel && t.endDate >= sel));
 
-  const box = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14 };
-  const navBtn = { width: 32, height: 32, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
+  // ── 잔디: 그 달의 날짜별 기록 밀도 ──
+  const lenOf = (k) => { const e = dailyNotes[k]; if (!e) return 0; const t = (e.text || "").trim().length; return t || (e.star ? 1 : 0); };
+  const heatOf = (n) => n <= 0 ? 0 : n < 100 ? 0.28 : n < 300 ? 0.5 : n < 800 ? 0.75 : 1;
+  const [mY, mM] = month.split("-").map(Number);
+  const monthDays = new Date(mY, mM, 0).getDate();
+  const heatCells = [];
+  for (let i = 0, lead = new Date(mY, mM - 1, 1).getDay(); i < lead; i++) heatCells.push(null);
+  for (let d = 1; d <= monthDays; d++) heatCells.push(d);
+  while (heatCells.length % 7) heatCells.push(null);
+  const dayKey = (d) => `${month}-${String(d).padStart(2, "0")}`;
+  const monthCount = written.filter(k => k.startsWith(month)).length;
+
+  // ── 그 날의 일정 ──
+  const dayTodos = (todos || []).filter(t => t.date === sel || (t.endDate && t.date <= sel && t.endDate >= sel));
+  const doneCount = dayTodos.filter(t => t.done).length;
+  const toggleTodo = (id) => { if (setTodos) setTodos(prev => (prev || []).map(t => t.id === id ? { ...t, done: !t.done } : t)); };
+
+  // ── 그 날 움직인 것 — 발주·입고·입금에 이 날짜로 기록된 건 ──
+  const poCount = (purchaseOrders || []).filter(p => (p.orderDate || String(p.dateStr || "").replaceAll(".", "-")) === sel).length;
+  const inCount = (fabricIntakes || []).filter(r => r.date === sel).length;
+  const depSum = (((bankDeposits || {}).items) || []).filter(d => d.date === sel).reduce((s, d) => s + (parseFloat(d.amount) || 0), 0);
+
+  const navBtn = { width: 28, height: 28, borderRadius: 8, border: "none", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontSize: 15, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
+  const iconBtn = { width: 34, height: 34, borderRadius: 10, border: "1px solid var(--border)", cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 };
+  const cardHd = { fontSize: 13, fontWeight: 800, color: "var(--text1)" };
+
+  const moveTile = (label, value, suffix, tone, go) => {
+    const on = value > 0;
+    return (
+      <button onClick={() => { if (on && setTab && go) setTab(go); }} disabled={!on}
+        title={on ? "해당 탭으로 이동" : "이 날 기록 없음"}
+        style={{ textAlign: "left", padding: "10px 11px", borderRadius: 11, background: "var(--row-bg)", border: "1px solid var(--divider)", cursor: on ? "pointer" : "default", fontFamily: "inherit", minWidth: 0 }}>
+        <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.5, color: "var(--text3)" }}>{label}</div>
+        <div style={{ fontSize: 17.5, fontWeight: 800, letterSpacing: -0.5, marginTop: 3, color: on ? (tone || "var(--text1)") : "var(--text3)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {value.toLocaleString()}<span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", marginLeft: 2 }}>{suffix}</span>
+        </div>
+      </button>
+    );
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* 헤더 */}
-      <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.2, display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <Icon name="edit" size={17}/> 하루 기록
-          </div>
-          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>날짜별 메모·일기·중요 노트 — 하루에 한 장씩 쌓입니다 · 쓰는 즉시 자동 저장</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* ── 툴바 — 날짜 이동·검색·중요를 한 줄로 (기존 헤더 카드 대체) ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 11, padding: 3 }}>
+          <button style={navBtn} onClick={() => shift(-1)} title="하루 전" aria-label="하루 전">‹</button>
+          <input type="date" value={sel} onChange={e => e.target.value && setSel(e.target.value)}
+            style={{ height: 30, minHeight: 30, padding: "0 8px", fontSize: 13, fontWeight: 700, borderRadius: 8, border: "none", background: "transparent", color: "var(--text1)", width: 146 }} />
+          <button style={navBtn} onClick={() => shift(1)} title="하루 뒤" aria-label="하루 뒤">›</button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span title="기록한 날" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "0 12px", height: 36, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", fontSize: 12, fontWeight: 700, color: "var(--text2)" }}>
-            총 {written.length}일 <span style={{ color: "var(--text3)", fontWeight: 500 }}>· 이번 달 {monthCount}일</span>
-          </span>
-          {streak > 0 && (
-            <span title="오늘까지 이어 쓴 날" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "0 12px", height: 36, borderRadius: 8, border: "1px solid rgba(219,107,46,0.35)", background: "rgba(219,107,46,0.10)", fontSize: 12, fontWeight: 800, color: "#DB6B2E" }}>
-              🔥 연속 {streak}일
-            </span>
-          )}
-          <button className="btn-orange" onClick={() => { setSel(todayKey); setTimeout(() => taRef.current && taRef.current.focus(), 60); }}
-            style={{ height: 36, padding: "0 14px", fontSize: 13, whiteSpace: "nowrap" }}>오늘 기록하기</button>
-        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{selWd}요일</div>
+        {sel === todayKey
+          ? <span style={{ padding: "3px 9px", borderRadius: 100, background: "var(--accent-tonal)", color: "var(--accent-strong)", fontSize: 11, fontWeight: 800 }}>오늘</span>
+          : <button onClick={() => { setSel(todayKey); setTimeout(() => taRef.current && taRef.current.focus(), 60); }}
+              style={{ height: 28, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>오늘로</button>}
+        <div style={{ flex: 1 }} />
+        {showSearch
+          ? <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)} placeholder="내용·날짜 검색"
+              style={{ height: 34, minHeight: 34, width: 210, fontSize: 12.5, borderRadius: 10 }} />
+          : <div style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600 }}>기록한 날 <span style={{ color: "var(--text2)", fontWeight: 800 }}>{written.length}일</span></div>}
+        <button onClick={() => { const n = !showSearch; setShowSearch(n); if (n) setTimeout(() => searchRef.current && searchRef.current.focus(), 40); else setSearch(""); }}
+          title={showSearch ? "검색 닫기" : "기록 검색"}
+          style={{ ...iconBtn, background: showSearch ? "var(--accent-tonal)" : "var(--surface)", color: showSearch ? "var(--accent-strong)" : "var(--text2)", borderColor: showSearch ? "transparent" : "var(--border)" }}>
+          <Icon name="search" size={16} />
+        </button>
+        <button onClick={() => patchEntry({ star: !cur.star })} title={cur.star ? "중요 표시 해제" : "중요한 날로 표시"}
+          style={{ height: 34, padding: "0 13px", borderRadius: 10, border: cur.star ? "1px solid transparent" : "1px solid var(--border)", background: cur.star ? "var(--accent-tonal)" : "var(--surface)", color: cur.star ? "var(--accent-strong)" : "var(--text3)", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+          {cur.star ? "★ 중요" : "☆ 중요"}
+        </button>
       </div>
 
-      <div className="daily-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 16, alignItems: "start" }}>
-        {/* 왼쪽: 그날의 기록 */}
-        <div className="card" style={{ padding: "16px 18px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <button style={navBtn} onClick={() => shift(-1)} title="하루 전" aria-label="하루 전">‹</button>
-            <input type="date" value={sel} onChange={e => e.target.value && setSel(e.target.value)}
-              style={{ height: 36, minHeight: 36, padding: "0 10px", fontSize: 13, borderRadius: 9, width: 158 }} />
-            <button style={navBtn} onClick={() => shift(1)} title="하루 뒤" aria-label="하루 뒤">›</button>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", marginLeft: 2 }}>
-              {fmtLong(sel)}
-              {sel === todayKey && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 800, color: "#DB6B2E", background: "rgba(219,107,46,0.12)", padding: "2px 8px", borderRadius: 100 }}>오늘</span>}
-            </div>
-            <button onClick={() => patchEntry({ star: !cur.star })} title={cur.star ? "중요 표시 해제" : "중요한 날로 표시"}
-              style={{ marginLeft: "auto", height: 34, padding: "0 12px", borderRadius: 9, border: cur.star ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)", background: cur.star ? "rgba(219,107,46,0.12)" : "var(--surface2)", color: cur.star ? "#DB6B2E" : "var(--text2)", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-              {cur.star ? "★ 중요" : "☆ 중요"}
-            </button>
-          </div>
+      <div className="daily-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 372px", gridTemplateRows: "minmax(720px, auto)", gap: 16, alignItems: "stretch" }}>
 
-          {dayTodos.length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "8px 11px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>이 날 일정 {dayTodos.length}건</span>
-              {dayTodos.slice(0, 4).map(t => (
-                <span key={t.id} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 100, background: "var(--surface)", border: "1px solid var(--border)", color: t.done ? "var(--text3)" : "var(--text1)", textDecoration: t.done ? "line-through" : "none", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</span>
-              ))}
-              {dayTodos.length > 4 && <span style={{ fontSize: 11, color: "var(--text3)" }}>외 {dayTodos.length - 4}건</span>}
-            </div>
-          )}
-
+        {/* ── 왼쪽: 그날의 기록 — 카드 자체가 원고지 ── */}
+        <div className="card" style={{ padding: "22px 26px 0", display: "flex", flexDirection: "column", minWidth: 0 }}>
           <textarea ref={taRef} value={cur.text || ""} onChange={e => patchEntry({ text: e.target.value })}
             placeholder={"오늘 있었던 일, 결정한 것, 기억할 것을 적어두세요.\n\n예) 한울기획 반사전사 단가 200원으로 확정 — 다음 발주부터 적용\n    성목실업 어음 5,000,000원 8/15 입금 예정"}
-            style={{ width: "100%", minHeight: 340, fontSize: 14, lineHeight: 1.75, borderRadius: 12, padding: "14px 16px", resize: "vertical", background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text1)", fontFamily: "inherit" }} />
+            style={{ flex: 1, width: "100%", minHeight: 240, fontSize: 15.5, lineHeight: 1.82, border: "none", outline: "none", background: "transparent", color: "var(--text1)", fontFamily: "inherit", resize: "none", padding: 0 }} />
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 11, color: "var(--text3)" }}>
-            <span>{(cur.text || "").length.toLocaleString()}자</span>
-            {cur.updatedAt && <span>· 마지막 저장 {new Date(cur.updatedAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
-            <span style={{ color: "#10B981", fontWeight: 700 }}>✓ 자동 저장</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "16px -26px 0", padding: "12px 20px", borderTop: "1px solid var(--divider)", fontSize: 11.5, color: "var(--text3)" }}>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>{(cur.text || "").length.toLocaleString()}자</span>
+            {cur.updatedAt
+              ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: 100, background: "var(--positive)" }} />
+                  {new Date(cur.updatedAt).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 저장됨
+                </span>
+              : <span>쓰는 즉시 자동 저장됩니다</span>}
+            <div style={{ flex: 1 }} />
             {((cur.text || "").trim() || cur.star) && (
               <button onClick={() => { if (window.confirm(`${fmtLong(sel)} 기록을 지울까요?`)) patchEntry({ text: "", star: false }); }}
-                style={{ marginLeft: "auto", border: "none", background: "transparent", color: "#EF4444", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>이 날 기록 삭제</button>
+                style={{ border: "none", background: "transparent", color: "var(--negative-text)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>이 날 기록 삭제</button>
             )}
           </div>
         </div>
 
-        {/* 오른쪽: 기록한 날 목록 */}
-        <div className="card" style={{ padding: 0, overflow: "hidden", ...box }}>
-          <div style={{ padding: "13px 14px 10px" }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 8 }}>
-              기록한 날 <span style={{ color: "var(--accent)" }}>{written.length}</span>
+        {/* ── 오른쪽: 오늘의 맥락 → 다른 날로 이동 ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, minHeight: 0, minWidth: 0 }}>
+
+          {/* 이 날 일정 */}
+          <div className="card" style={{ padding: "15px 17px", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: dayTodos.length ? 11 : 0 }}>
+              <div style={cardHd}>이 날 일정</div>
+              <div style={{ padding: "1px 7px", borderRadius: 100, background: "var(--surface2)", color: "var(--text2)", fontSize: 10.5, fontWeight: 800 }}>{dayTodos.length}</div>
+              <div style={{ flex: 1 }} />
+              {dayTodos.length > 0 && <div style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>{doneCount} / {dayTodos.length} 완료</div>}
             </div>
-            <div style={{ position: "relative" }}>
-              <Icon name="search" size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", pointerEvents: "none" }}/>
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="내용·날짜 검색"
-                style={{ width: "100%", height: 34, paddingLeft: 30, fontSize: 12.5, borderRadius: 9 }} />
+            {dayTodos.length === 0
+              ? <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 6 }}>이 날 등록된 일정이 없습니다</div>
+              : (
+                <div className="daily-todo-list" style={{ display: "flex", flexDirection: "column", gap: 9, maxHeight: 196, overflowY: "auto" }}>
+                  {dayTodos.map(t => (
+                    <button key={t.id} onClick={() => toggleTodo(t.id)}
+                      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                      <span style={{ width: 17, height: 17, borderRadius: 5, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        border: t.done ? "1.7px solid var(--positive)" : "1.7px solid var(--border)", background: t.done ? "var(--positive)" : "transparent", color: "#fff", fontSize: 11, fontWeight: 800 }}>{t.done ? "✓" : ""}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: t.done ? 500 : 600, color: t.done ? "var(--text3)" : "var(--text1)", textDecoration: t.done ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.text}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+          </div>
+
+          {/* 이 날 움직인 것 */}
+          <div className="card" style={{ padding: "15px 17px", flexShrink: 0 }}>
+            <div style={{ ...cardHd, marginBottom: 11 }}>이 날 움직인 것</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+              {moveTile("발주", poCount, "건", null, "purchase")}
+              {moveTile("입고", inCount, "건", null, "inventory")}
+              {depSum >= 10000
+                ? moveTile("입금", Math.round(depSum / 10000), "만", "var(--positive-text)", "ledger")
+                : moveTile("입금", Math.round(depSum), "원", "var(--positive-text)", "ledger")}
             </div>
           </div>
-          <div style={{ maxHeight: 520, overflowY: "auto", borderTop: "1px solid var(--divider)" }}>
-            {shown.length === 0 ? (
-              <div style={{ padding: "28px 16px", textAlign: "center", fontSize: 12.5, color: "var(--text3)", lineHeight: 1.7 }}>
-                {written.length === 0 ? <>아직 기록이 없습니다.<br/>왼쪽에 오늘 하루를 적어보세요.</> : "검색 결과가 없습니다"}
-              </div>
-            ) : shown.map(k => {
-              const e = dailyNotes[k];
-              const on = k === sel;
-              const preview = (e.text || "").trim().split("\n").find(l => l.trim()) || "(내용 없음)";
-              return (
-                <button key={k} onClick={() => setSel(k)}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", border: "none", borderBottom: "1px solid var(--divider)",
-                    background: on ? "rgba(219,107,46,0.10)" : "transparent", cursor: "pointer", fontFamily: "inherit" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: on ? "#DB6B2E" : "var(--text2)" }}>{fmtShort(k)}</span>
-                    {e.star && <span style={{ fontSize: 11, color: "#DB6B2E" }}>★</span>}
-                    {k === todayKey && <span style={{ fontSize: 9.5, fontWeight: 800, color: "#DB6B2E" }}>오늘</span>}
-                    <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text3)" }}>{(e.text || "").length}자</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text2)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview}</div>
-                </button>
-              );
-            })}
+
+          {/* 기록한 날 — 잔디 + 목록 */}
+          <div className="card" style={{ padding: "15px 17px 8px", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: 11, flexShrink: 0 }}>
+              <button style={navBtn} onClick={() => shiftMonth(-1)} title="이전 달" aria-label="이전 달">‹</button>
+              <div style={cardHd}>{mY}년 {mM}월</div>
+              <button style={navBtn} onClick={() => shiftMonth(1)} title="다음 달" aria-label="다음 달">›</button>
+              <div style={{ flex: 1 }} />
+              {streak > 0 && (
+                <span title="오늘까지 이어 쓴 날" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 100, background: "var(--accent-tonal)", color: "var(--accent-strong)", fontSize: 11, fontWeight: 800 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: 100, background: "var(--accent)" }} />연속 {streak}일
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4, flexShrink: 0 }}>
+              {WD.map((w, i) => (
+                <div key={w} style={{ fontSize: 10, fontWeight: 700, textAlign: "center", color: "var(--text3)", opacity: (i === 0 || i === 6) ? 0.55 : 1 }}>{w}</div>
+              ))}
+              {heatCells.map((d, i) => {
+                if (d === null) return <div key={"blank" + i} />;
+                const k = dayKey(d);
+                const h = heatOf(lenOf(k));
+                const isSel = k === sel, isToday = k === todayKey;
+                return (
+                  <button key={k} onClick={() => setSel(k)}
+                    title={h > 0 ? `${fmtShort(k)} — ${lenOf(k).toLocaleString()}자` : `${fmtShort(k)} — 기록 없음`}
+                    style={{ height: 30, borderRadius: 8, padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                      background: h > 0 ? `rgba(219,107,46,${h})` : "var(--surface2)",
+                      color: h >= 0.5 ? "#fff" : (h > 0 ? "var(--accent-strong)" : "var(--text3)"),
+                      border: isSel ? "2px solid var(--accent)" : "1px solid transparent",
+                      boxShadow: (isToday && !isSel) ? "inset 0 0 0 1.5px var(--accent)" : "none" }}>{d}</button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 11, flexShrink: 0 }}>
+              <span style={{ fontSize: 10.5, color: "var(--text3)" }}>적게</span>
+              {[0, 0.28, 0.5, 0.75, 1].slice(1).map((v, i) => (
+                <span key={i} style={{ width: 11, height: 11, borderRadius: 4, background: `rgba(219,107,46,${v})` }} />
+              ))}
+              <span style={{ fontSize: 10.5, color: "var(--text3)" }}>많이</span>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>이 달 {monthCount}일 · 총 {written.length}일</span>
+            </div>
+
+            <div style={{ height: 1, background: "var(--divider)", margin: "11px -17px 0", flexShrink: 0 }} />
+
+            <div className="daily-day-list" style={{ flex: 1, minHeight: 0, overflowY: "auto", margin: "0 -8px", padding: "6px 0 0" }}>
+              {shown.length === 0 ? (
+                <div style={{ padding: "22px 16px", textAlign: "center", fontSize: 12.5, color: "var(--text3)", lineHeight: 1.7 }}>
+                  {written.length === 0 ? <>아직 기록이 없습니다.<br />왼쪽에 오늘 하루를 적어보세요.</> : "검색 결과가 없습니다"}
+                </div>
+              ) : shown.map(k => {
+                const e = dailyNotes[k];
+                const on = k === sel;
+                const preview = (e.text || "").trim().split("\n").find(l => l.trim()) || "(내용 없음)";
+                return (
+                  <button key={k} onClick={() => setSel(k)}
+                    style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 10px", border: "none", borderRadius: 9,
+                      background: on ? "var(--accent-tonal)" : "transparent", cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: on ? "var(--accent-strong)" : "var(--text2)" }}>{fmtShort(k)}</span>
+                      {e.star && <span style={{ fontSize: 10.5, color: "var(--accent)" }}>★</span>}
+                      {k === todayKey && <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--accent)" }}>오늘</span>}
+                      <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text3)" }}>{(e.text || "").length}자</span>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: on ? "var(--accent-strong)" : "var(--text3)", opacity: on ? 0.85 : 1, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview}</div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
 
       <style>{`
-        @media (max-width: 900px) { .daily-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+        .daily-todo-list > *, .daily-day-list > * { flex-shrink: 0; }
+        @media (max-width: 900px) {
+          .daily-grid { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: auto !important; }
+          .daily-day-list { max-height: 300px; }
+        }
       `}</style>
     </div>
   );
