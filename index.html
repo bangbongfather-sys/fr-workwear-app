@@ -13150,7 +13150,7 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
     if (activeSubTab !== "dashboard") return;
     if (typeof Chart === "undefined") return;
     const STATUSES_LIST = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
-    const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
+    const SC = {"주문완료":"#4E5968","운송중":"#FE9800","입고완료":"#DB6B2E","검수중":"#6366F1","검수완료":"#03B26C","반품":"#F04452"};
 
     // 1) 상태별 도넛
     const statusCounts = {};
@@ -13455,7 +13455,7 @@ function PurchaseDashboardView({ fabricIntakes, dashStatusRef, dashMonthlyRef, d
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             {recent.map(r => {
               const total = parseFloat(r.unitPrice||0)*parseFloat(r.qty||0);
-              const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
+              const SC = {"주문완료":"#4E5968","운송중":"#FE9800","입고완료":"#DB6B2E","검수중":"#6366F1","검수완료":"#03B26C","반품":"#F04452"};
               const sc = SC[r.status]||"#8B95A1";
               return (
                 <div key={r.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,background:"var(--surface2)",border:"1px solid var(--divider)"}}>
@@ -13720,7 +13720,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
     setEditingMemoKey(k);
   };
   const STATUSES = ["주문완료","운송중","입고완료","검수중","검수완료","반품"];
-  const SC = {"주문완료":"#007AFF","운송중":"#FF9500","입고완료":"#00B493","검수중":"#5856D6","검수완료":"#34C759","반품":"#F04452"};
+  const SC = {"주문완료":"#4E5968","운송중":"#FE9800","입고완료":"#DB6B2E","검수중":"#6366F1","검수완료":"#03B26C","반품":"#F04452"};
   // 기간 필터: 시작일/종료일 (YYYY-MM-DD). 둘 다 빈 값이면 전체 기간.
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
@@ -13752,6 +13752,13 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const [filterMat, setFilterMat] = useState(""); // 정확히 일치하는 품목명 필터
   const [searchMat, setSearchMat] = useState(""); // 품목명 부분 검색
   const [showMatSummary, setShowMatSummary] = useState(false); // 품목별 합계 펼침 토글
+  const [showVat, setShowVat] = useState(() => load("frw_purchase_show_vat", false)); // VAT 포함 금액 함께 보기
+  const [groupMode, setGroupMode] = useState(() => load("frw_purchase_group_mode", "date")); // "date" 매입일순 | "material" 품목별
+  const [expandedMats, setExpandedMats] = useState(() => new Set());
+  const [moreOpen, setMoreOpen] = useState(false); // ⋯ 메뉴
+  useEffect(() => { save("frw_purchase_show_vat", showVat); }, [showVat]);
+  useEffect(() => { save("frw_purchase_group_mode", groupMode); }, [groupMode]);
+  const toggleMatExpand = (name) => setExpandedMats(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
   const [showForm, setShowForm] = useState(false);
   // 2026-05-20: 단일 품목 등록 → 매입일 1개 + 품목 N개 배치 등록으로 변경.
   // 스키마는 그대로 (각 fabricIntakes row = 1품목). UI만 매입일을 그룹 키로 사용.
@@ -13983,18 +13990,61 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   };
 
   const thisMonth = new Date().toISOString().slice(0,7);
-  const pendingCnt = supplierFiltered.filter(r=>["주문완료","운송중","검수중"].includes(r.status)).length;
   const thisMoComp = supplierFiltered.filter(r=>r.date?.startsWith(thisMonth)&&["입고완료","검수완료"].includes(r.status)).length;
 
-  const filtered = supplierFiltered.filter(r => {
+  // 상태를 뺀 나머지 필터 결과 — 파이프라인은 이걸 세야 모든 단계가 다 보인다
+  const filteredNoStatus = supplierFiltered.filter(r => {
     // 기간 필터: YYYY-MM-DD 문자열은 사전식 정렬이 시간순과 일치하므로 직접 비교 가능
     if (filterFrom && (r.date||"") < filterFrom) return false;
     if (filterTo && (r.date||"") > filterTo) return false;
-    if (filterStatus && r.status !== filterStatus) return false;
     if (filterMat && (r.materialName||"") !== filterMat) return false;
     if (searchMat.trim() && !(r.materialName||"").toLowerCase().includes(searchMat.trim().toLowerCase())) return false;
     return true;
   });
+  const filtered = filterStatus ? filteredNoStatus.filter(r => r.status === filterStatus) : filteredNoStatus;
+
+  // 상태 6종은 실은 순서가 있는 흐름이다 — 그 순서대로 세운다. 반품만 흐름 밖.
+  const STAGE_FLOW = ["주문완료", "운송중", "입고완료", "검수중", "검수완료"];
+  const stageStat = (st) => {
+    const rows = filteredNoStatus.filter(r => r.status === st);
+    return { count: rows.length, amount: rows.reduce((s, r) => s + parseFloat(r.unitPrice||0) * parseFloat(r.qty||0), 0) };
+  };
+  const returnStat = stageStat("반품");
+
+  // 품목별 묶음 (시안 D) — 단가가 언제 어떻게 움직였는지가 보이게
+  const matGroups = React.useMemo(() => {
+    const m = {};
+    filtered.forEach(r => {
+      const key = (r.materialName||"(미지정)").trim() || "(미지정)";
+      if (!m[key]) m[key] = { name: key, rows: [], qtyByUnit: {}, amount: 0, suppliers: new Set() };
+      const g = m[key];
+      g.rows.push(r);
+      const u = (r.unit||"").trim() || "개";
+      g.qtyByUnit[u] = (g.qtyByUnit[u] || 0) + (parseFloat(r.qty) || 0);
+      g.amount += parseFloat(r.unitPrice||0) * parseFloat(r.qty||0);
+      const sup = (r.supplier||"").trim(); if (sup) g.suppliers.add(sup);
+    });
+    return Object.values(m).map(g => {
+      // 단가 흐름은 시간순 스냅샷. 단가가 적힌 행만 쓴다.
+      const chron = g.rows.filter(r => parseFloat(r.unitPrice) > 0).sort((a,b) => (a.date||"").localeCompare(b.date||""));
+      const prices = chron.map(r => parseFloat(r.unitPrice));
+      const first = prices.length ? prices[0] : 0;
+      const last = prices.length ? prices[prices.length-1] : 0;
+      const pct = (first > 0 && last > 0 && prices.length > 1) ? ((last - first) / first) * 100 : null;
+      const units = Object.keys(g.qtyByUnit).filter(u => g.qtyByUnit[u] > 0);
+      const totalQty = units.length === 1 ? g.qtyByUnit[units[0]] : 0;
+      return { ...g, rows: [...g.rows].sort((a,b)=>(b.date||"").localeCompare(a.date||"")),
+        prices, first, last, pct, units,
+        avg: totalQty > 0 ? g.amount / totalQty : null };
+    }).sort((a,b) => b.amount - a.amount);
+  }, [filtered]);
+
+  // 작은 꺾은선 — 값이 2개 이상일 때만
+  const sparkPoints = (vals, w, h) => {
+    if (!vals || vals.length < 2) return "";
+    const min = Math.min(...vals), max = Math.max(...vals), span = (max - min) || 1;
+    return vals.map((v, i) => `${(i / (vals.length - 1)) * (w - 5) + 2.5},${h - 3 - ((v - min) / span) * (h - 6)}`).join(" ");
+  };
 
   // 현재 필터 결과 기준 총합
   const totalVal = filtered.reduce((s,r)=>s+parseFloat(r.unitPrice||0)*parseFloat(r.qty||0),0);
@@ -14046,95 +14096,130 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
     resetBatch();
     setShowForm(false);
   };
-  const statCard = (label,val,color) => (
-    <div className="card" style={{flex:1,minWidth:120}}>
-      <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{label}</div>
-      <div className="kpi-num" style={{color:color||"var(--text1)",lineHeight:1}}>{val}</div>
-    </div>
-  );
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-        {statCard("이번달 입고완료", thisMoComp+"건", "#475569")}
-        {statCard("처리 대기", pendingCnt+"건", pendingCnt>0?"#FE9800":"#00B493")}
-        {statCard("매입 기록 (필터 적용)", filtered.length+" / "+supplierFiltered.length+"건", null)}
-        {statCard("매입 가액 (필터 기준)", Math.round(totalVal).toLocaleString()+"원", null)}
-        {statCard("부가세포함 금액", Math.round(totalVal*1.1).toLocaleString()+"원", "var(--text1)")}
-        {(filterFrom||filterTo||filterStatus||filterMat||searchMat.trim()) && statCard("전체 매입 총합", Math.round(grandTotal).toLocaleString()+"원", "var(--text2)")}
+      {/* 지금 어디까지 왔나 — 상태를 화면의 뼈대로 */}
+      <div className="card" style={{padding:"16px 18px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:13,flexWrap:"wrap"}}>
+          <div style={{fontSize:13,fontWeight:800,color:"var(--text1)"}}>지금 어디까지 왔나</div>
+          <div style={{flex:1}}/>
+          <div style={{fontSize:11.5,color:"var(--text3)"}}>
+            {filterStatus ? <>「{filterStatus}」만 보는 중</> : "단계를 누르면 그 단계만 봅니다"}
+            {(filterFrom||filterTo) && <> · {filterFrom||"전체"} ~ {filterTo||"오늘"}</>}
+          </div>
+        </div>
+
+        <div className="stage-grid" style={{display:"grid",gridTemplateColumns:"repeat(5, minmax(0, 1fr))",gap:8}}>
+          {STAGE_FLOW.map(st => {
+            const { count, amount } = stageStat(st);
+            const on = filterStatus === st;
+            const c = SC[st];
+            return (
+              <button key={st} onClick={()=>setFilterStatus(on ? "" : st)} title={on ? "이 단계 필터 해제" : `${st}만 보기`}
+                style={{textAlign:"left",padding:"12px 13px",borderRadius:12,cursor:"pointer",fontFamily:"inherit",minWidth:0,
+                  background: on ? c+"1F" : (count > 0 ? "var(--row-bg)" : "transparent"),
+                  border: on ? `1.5px solid ${c}` : "1px solid var(--divider)",
+                  opacity: count === 0 && !on ? 0.55 : 1}}>
+                <span style={{display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{width:7,height:7,borderRadius:100,background:c,flexShrink:0}}/>
+                  <span style={{fontSize:11.5,fontWeight:on?800:700,color:on?c:"var(--text2)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st}</span>
+                </span>
+                <div style={{fontSize:20,fontWeight:800,letterSpacing:-0.6,color:"var(--text1)",marginTop:5,fontVariantNumeric:"tabular-nums"}}>
+                  {count.toLocaleString()}<span style={{fontSize:11,fontWeight:700,color:"var(--text3)",marginLeft:2}}>건</span>
+                </div>
+                <div style={{fontSize:11.5,color:on?c:"var(--text3)",marginTop:2,fontVariantNumeric:"tabular-nums",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {Math.round(amount).toLocaleString()}원
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,paddingTop:12,borderTop:"1px solid var(--divider)",flexWrap:"wrap"}}>
+          {returnStat.count > 0 && (
+            <button onClick={()=>setFilterStatus(filterStatus==="반품" ? "" : "반품")}
+              style={{display:"inline-flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:100,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:800,
+                background:"var(--negative-bg)",color:"var(--negative-text)",
+                border: filterStatus==="반품" ? "1.5px solid var(--negative)" : "1px solid transparent"}}>
+              반품 {returnStat.count}건 · {Math.round(returnStat.amount).toLocaleString()}원
+            </button>
+          )}
+          <div style={{flex:1}}/>
+          <span style={{fontSize:12,color:"var(--text2)"}}>
+            이번 달 입고·검수완료 <b style={{color:"var(--text1)"}}>{thisMoComp}건</b>
+            <span style={{color:"var(--text3)",margin:"0 6px"}}>·</span>
+            전체 매입 총합 <b style={{color:"var(--text1)",fontVariantNumeric:"tabular-nums"}}>{Math.round(grandTotal).toLocaleString()}원</b>
+          </span>
+          <button onClick={()=>setShowVat(v=>!v)}
+            style={{display:"inline-flex",alignItems:"center",height:28,padding:"0 12px",borderRadius:100,cursor:"pointer",fontFamily:"inherit",fontSize:11.5,fontWeight:700,
+              background: showVat ? "var(--accent-tonal)" : "var(--surface2)",
+              border: showVat ? "1px solid var(--accent)" : "1px solid var(--border)",
+              color: showVat ? "var(--accent-strong)" : "var(--text2)"}}>VAT 포함 보기</button>
+        </div>
       </div>
       <div className="card">
-        {/* 메인 필터 행: 기간 + 상태 + 품목 + 검색 + 초기화 */}
-        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
-          <div style={{display:"inline-flex",alignItems:"center",gap:6,padding:"0 10px",height:40,background:"var(--surface2)",borderRadius:10,border:"1px solid var(--border)",flex:"0 0 auto"}} title="매입일 기간 필터">
-            <input type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} style={{height:32,fontSize:12,border:"none",background:"none",padding:0,width:130}} title="시작일"/>
-            <span style={{color:"var(--text3)",fontSize:12,fontWeight:700}}>~</span>
-            <input type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} style={{height:32,fontSize:12,border:"none",background:"none",padding:0,width:130}} title="종료일"/>
+        {/* 필터 — 두 줄짜리 벽을 한 줄로. 파괴적인 「전체 삭제」는 ⋯ 안으로 */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:12}}>
+          {[{key:"thisMonth",label:"이번 달"},{key:"lastMonth",label:"지난 달"},{key:"last3",label:"최근 3개월"},{key:"thisYear",label:"올해"},{key:"lastYear",label:"작년"}].map(pr => (
+            <button key={pr.key} onClick={()=>setRangePreset(pr.key)}
+              style={{height:30,padding:"0 12px",borderRadius:100,border:"1px solid var(--border)",background:"var(--surface2)",color:"var(--text2)",cursor:"pointer",fontSize:11.5,fontFamily:"inherit",fontWeight:700,whiteSpace:"nowrap"}}>{pr.label}</button>
+          ))}
+          <div style={{display:"inline-flex",alignItems:"center",gap:6,padding:"0 10px",height:30,background:"var(--surface)",borderRadius:100,border:"1px solid var(--border)"}} title="매입일 기간">
+            <input type="date" value={filterFrom} onChange={e=>setFilterFrom(e.target.value)} style={{height:26,fontSize:11.5,border:"none",background:"none",padding:0,width:118,color:"var(--text1)"}} title="시작일"/>
+            <span style={{color:"var(--text3)",fontSize:11,fontWeight:700}}>~</span>
+            <input type="date" value={filterTo} onChange={e=>setFilterTo(e.target.value)} style={{height:26,fontSize:11.5,border:"none",background:"none",padding:0,width:118,color:"var(--text1)"}} title="종료일"/>
           </div>
-          <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{height:40,fontSize:13,width:140}}>
-            <option value="">전체 상태</option>
-            {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={filterMat} onChange={e=>setFilterMat(e.target.value)} style={{height:40,fontSize:13,minWidth:200,flex:"0 1 240px"}} title="품목 단일 선택 필터">
+          <div style={{width:1,height:20,background:"var(--border)"}}/>
+          <select value={filterMat} onChange={e=>setFilterMat(e.target.value)} title="품목 필터"
+            style={{height:30,fontSize:12,borderRadius:100,padding:"0 10px",maxWidth:180}}>
             <option value="">전체 품목</option>
             {allMatNames.map(n=><option key={n} value={n}>{n}</option>)}
           </select>
-          <div style={{position:"relative",flex:"1 1 220px",minWidth:200}}>
-            <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"var(--text3)",display:"inline-flex",pointerEvents:"none"}}><Icon name="search" size={14}/></span>
-            <input value={searchMat} onChange={e=>setSearchMat(e.target.value)} placeholder="품목명 부분 검색 (예: 아라미드)"
-              style={{height:40,fontSize:13,paddingLeft:34,width:"100%"}}/>
+          <div style={{position:"relative",flex:"1 1 180px",minWidth:160,maxWidth:260}}>
+            <span style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:"var(--text3)",display:"inline-flex",pointerEvents:"none"}}><Icon name="search" size={13}/></span>
+            <input value={searchMat} onChange={e=>setSearchMat(e.target.value)} placeholder="품목명 검색"
+              style={{height:30,fontSize:12,paddingLeft:31,width:"100%",borderRadius:100}}/>
           </div>
           {(filterFrom||filterTo||filterStatus||filterMat||searchMat.trim())&&(
-            <button onClick={()=>{setFilterFrom("");setFilterTo("");setFilterStatus("");setFilterMat("");setSearchMat("");}} style={{padding:"8px 14px",borderRadius:10,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:13,color:"var(--text2)",fontFamily:"inherit",whiteSpace:"nowrap"}}>필터 초기화</button>
+            <button onClick={()=>{setFilterFrom("");setFilterTo("");setFilterStatus("");setFilterMat("");setSearchMat("");}}
+              style={{height:30,padding:"0 12px",borderRadius:100,border:"1px solid var(--border)",background:"none",cursor:"pointer",fontSize:11.5,fontWeight:700,color:"var(--text2)",fontFamily:"inherit",whiteSpace:"nowrap"}}>필터 초기화</button>
           )}
           <div style={{flex:1}}/>
-          {fabricIntakes.length > 0 && (
-            <button onClick={deleteAll}
-              style={{ padding:"8px 12px", fontSize:12, fontWeight:700, color:"#F04452", background:"transparent", border:"1.5px solid rgba(240,68,82,0.4)", borderRadius:10, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}
-              title="전체 입고 기록 삭제 (확인 2회)"
-            ><span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="trash" size={12}/>전체 삭제</span></button>
-          )}
-          <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{padding:"8px 18px",fontSize:13}}>{showForm?"닫기":"+ 입고 등록"}</button>
-        </div>
-
-        {/* 빠른 기간 선택 + 현재 조회 기간 표시 */}
-        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:14,flexWrap:"wrap"}}>
-          <span style={{fontSize:11,color:"var(--text3)",fontWeight:700,textTransform:"uppercase",letterSpacing:0.3,marginRight:4}}>빠른 기간</span>
-          {[
-            {key:"thisMonth", label:"이번 달"},
-            {key:"lastMonth", label:"지난 달"},
-            {key:"last3", label:"최근 3개월"},
-            {key:"thisYear", label:"올해"},
-            {key:"lastYear", label:"작년"},
-          ].map(p => (
-            <button key={p.key} onClick={()=>setRangePreset(p.key)}
-              style={{padding:"4px 12px",height:28,borderRadius:14,border:"1px solid var(--border)",background:"var(--surface2)",color:"var(--text2)",cursor:"pointer",fontSize:11,fontFamily:"inherit",fontWeight:600,whiteSpace:"nowrap"}}
-              onMouseEnter={e=>{e.currentTarget.style.background="rgba(219,107,46,0.10)";e.currentTarget.style.borderColor="rgba(219,107,46,0.4)";e.currentTarget.style.color="#DB6B2E";}}
-              onMouseLeave={e=>{e.currentTarget.style.background="var(--surface2)";e.currentTarget.style.borderColor="var(--border)";e.currentTarget.style.color="var(--text2)";}}>
-              {p.label}
-            </button>
-          ))}
-          {(filterFrom||filterTo) && (() => {
-            // 조회 기간 표시 (선택 기간 + 일수)
-            let days = null;
-            if (filterFrom && filterTo) {
-              days = Math.round((new Date(filterTo) - new Date(filterFrom)) / 86400000) + 1;
-            }
-            return (
+          <div style={{display:"inline-flex",gap:3,padding:3,background:"var(--surface2)",borderRadius:100}}>
+            {[["date","매입일순"],["material","품목별"]].map(([k,label]) => (
+              <button key={k} onClick={()=>setGroupMode(k)}
+                style={{padding:"6px 13px",borderRadius:100,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:groupMode===k?800:700,
+                  background: groupMode===k ? "var(--surface)" : "transparent",
+                  color: groupMode===k ? "var(--accent-strong)" : "var(--text2)",
+                  boxShadow: groupMode===k ? "0 1px 3px rgba(0,0,0,0.09)" : "none"}}>{label}</button>
+            ))}
+          </div>
+          <button onClick={()=>setShowForm(v=>!v)} className="btn-primary" style={{height:34,padding:"0 16px",fontSize:13}}>{showForm?"닫기":"+ 입고 등록"}</button>
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setMoreOpen(v=>!v)} title="더 보기"
+              style={{width:34,height:34,borderRadius:10,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text3)",fontSize:16,fontWeight:800,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
+            {moreOpen && (
               <>
-                <div style={{flex:1,minWidth:12}}/>
-                <span style={{fontSize:11,color:"var(--text2)",fontWeight:600,padding:"4px 10px",background:"rgba(219,107,46,0.08)",borderRadius:8,border:"1px solid rgba(219,107,46,0.25)",whiteSpace:"nowrap"}}>
-                  <Icon name="calendar" size={13} style={{marginRight:5,verticalAlign:"-2px"}}/>조회 기간 <b style={{color:"#DB6B2E"}}>{filterFrom||"전체"} ~ {filterTo||"오늘"}</b>
-                  {days != null && <span style={{color:"var(--text3)",fontWeight:500,marginLeft:4}}>({days}일)</span>}
-                  {" · "}<b style={{color:"var(--text1)"}}>{filtered.length}건</b>
-                  {" · "}<b style={{color:"var(--text1)"}}>{Math.round(totalVal).toLocaleString()}원</b>
-                </span>
+                <div onClick={()=>setMoreOpen(false)} style={{position:"fixed",inset:0,zIndex:40}}/>
+                <div style={{position:"absolute",right:0,top:38,zIndex:41,minWidth:200,padding:6,borderRadius:12,background:"var(--surface)",border:"1px solid var(--border)",boxShadow:"var(--elev-3)"}}>
+                  <button onClick={()=>{setShowVat(v=>!v);setMoreOpen(false);}}
+                    style={{display:"block",width:"100%",textAlign:"left",padding:"9px 10px",borderRadius:8,border:"none",background:"transparent",color:"var(--text1)",fontSize:12.5,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    VAT 포함 금액 {showVat ? "숨기기" : "함께 보기"}
+                  </button>
+                  {fabricIntakes.length > 0 && (
+                    <button onClick={()=>{setMoreOpen(false);deleteAll();}}
+                      style={{display:"block",width:"100%",textAlign:"left",padding:"9px 10px",borderRadius:8,border:"none",background:"transparent",color:"var(--negative-text)",fontSize:12.5,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                      전체 입고 기록 삭제
+                    </button>
+                  )}
+                </div>
               </>
-            );
-          })()}
+            )}
+          </div>
         </div>
 
         {/* 품목별 합계 (현재 필터 결과 기준) */}
-        {matSummary.length > 0 && (
+        {groupMode === "date" && matSummary.length > 0 && (
           <div style={{marginBottom:16,padding:"10px 14px",background:"var(--surface2)",borderRadius:10,border:"1px solid var(--border)"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,cursor:"pointer"}} onClick={()=>setShowMatSummary(v=>!v)}>
               <div style={{fontSize:12,fontWeight:700,color:"var(--text1)",display:"inline-flex",alignItems:"center",gap:8}}>
@@ -14488,10 +14573,125 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
           <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>
             {fabricIntakes.length===0?"매입 기록이 없습니다\n위 버튼으로 매입을 등록하세요":"조건에 맞는 기록이 없습니다"}
           </div>
-        ):(
+        ): groupMode === "material" ? (
+          /* ── 품목별로 보기 (시안 D) — 이 원단을 얼마에 얼마나 샀나 ── */
           <div style={{overflowX:"auto"}}>
-            <table><thead><tr>
-              <th style={{ width: 40, textAlign: "center", padding: "10px 6px" }}>
+            <div style={{minWidth:820}}>
+              <div className="mat-head" style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 128px 132px 154px 148px",gap:12,alignItems:"center",padding:"11px 16px",background:"var(--surface2)",borderRadius:10,fontSize:11.5,fontWeight:700,color:"var(--text2)"}}>
+                <span>품목 / 공급업체</span>
+                <span style={{textAlign:"right"}}>총 수량</span>
+                <span style={{textAlign:"right"}}>최근 단가</span>
+                <span style={{textAlign:"right"}}>단가 흐름</span>
+                <span style={{textAlign:"right"}}>총 매입액</span>
+              </div>
+
+              {matGroups.map(g => {
+                const open = expandedMats.has(g.name);
+                const up = g.pct != null && g.pct > 0.5, down = g.pct != null && g.pct < -0.5;
+                const trendCol = up ? "var(--negative-text)" : down ? "var(--positive-text)" : "var(--text3)";
+                const qtyStr = Object.entries(g.qtyByUnit).filter(([,v])=>v>0)
+                  .map(([u,v])=>`${Number(v.toFixed(2)).toLocaleString()} ${u}`).join(" · ") || "—";
+                return (
+                  <React.Fragment key={g.name}>
+                    <div onClick={()=>toggleMatExpand(g.name)}
+                      style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 128px 132px 154px 148px",gap:12,alignItems:"center",padding:"13px 16px",
+                        borderTop:"1px solid var(--divider)",cursor:"pointer",background: open ? "var(--accent-tonal)" : "transparent"}}>
+                      <div style={{minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:7}}>
+                          <span style={{fontSize:10,color: open ? "var(--accent-strong)" : "var(--text3)",width:10,flexShrink:0}}>{open ? "▼" : "▶"}</span>
+                          <span style={{fontSize:14,fontWeight:open?800:700,color:"var(--text1)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.name}</span>
+                        </div>
+                        <div style={{fontSize:11.5,color: open ? "var(--accent-strong)" : "var(--text3)",opacity: open ? 0.85 : 1,marginTop:3,paddingLeft:17,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {Array.from(g.suppliers).join(", ") || "공급업체 미지정"} · {g.rows.length}건
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right",fontSize:12.5,fontWeight:700,color:"var(--text2)",fontVariantNumeric:"tabular-nums",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{qtyStr}</div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",fontVariantNumeric:"tabular-nums"}}>{g.last ? Math.round(g.last).toLocaleString()+"원" : "—"}</div>
+                        {g.avg != null && g.avg > 0 && (
+                          <div style={{fontSize:10.5,color:"var(--text3)",marginTop:2,fontVariantNumeric:"tabular-nums"}}>평균 {Math.round(g.avg).toLocaleString()}원</div>
+                        )}
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        {g.prices.length > 1 ? (
+                          <>
+                            <div style={{display:"flex",alignItems:"center",gap:7,justifyContent:"flex-end"}}>
+                              <svg width="76" height="24" viewBox="0 0 76 24" fill="none" style={{flexShrink:0}}>
+                                <polyline points={sparkPoints(g.prices, 76, 24)} stroke={up?"#DB6B2E":down?"#03B26C":"#8B95A1"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                              <span style={{fontSize:12,fontWeight:800,color:trendCol,whiteSpace:"nowrap",fontVariantNumeric:"tabular-nums"}}>
+                                {g.pct == null || Math.abs(g.pct) < 0.5 ? "변동 없음" : `${g.pct > 0 ? "+" : ""}${g.pct.toFixed(1)}%`}
+                              </span>
+                            </div>
+                            <div style={{fontSize:10.5,color:"var(--text3)",marginTop:2,fontVariantNumeric:"tabular-nums"}}>
+                              {Math.round(g.first).toLocaleString()} → {Math.round(g.last).toLocaleString()}
+                            </div>
+                          </>
+                        ) : <span style={{fontSize:11.5,color:"var(--text3)"}}>기록 1건</span>}
+                      </div>
+                      <div style={{textAlign:"right",fontSize:14,fontWeight:800,color:"var(--text1)",fontVariantNumeric:"tabular-nums"}}>{Math.round(g.amount).toLocaleString()}원</div>
+                    </div>
+
+                    {open && (
+                      <div style={{background:"var(--accent-tonal)",padding:"0 16px 14px"}}>
+                        <div style={{background:"var(--surface)",borderRadius:12,border:"1px solid var(--border)",overflow:"hidden"}}>
+                          <div className="mat-sub" style={{display:"grid",gridTemplateColumns:"106px minmax(0,1fr) 108px 118px 130px 106px 66px",gap:10,alignItems:"center",padding:"9px 14px",background:"var(--row-bg)",fontSize:11,fontWeight:700,color:"var(--text3)"}}>
+                            <span>매입일</span><span>공급업체 / 발주</span><span style={{textAlign:"right"}}>수량</span>
+                            <span style={{textAlign:"right"}}>당시 단가</span><span style={{textAlign:"right"}}>공급가</span>
+                            <span style={{textAlign:"center"}}>상태</span><span/>
+                          </div>
+                          {g.rows.map(r => {
+                            const amt = parseFloat(r.unitPrice||0) * parseFloat(r.qty||0);
+                            const c = SC[r.status] || "#8B95A1";
+                            const isRet = r.status === "반품";
+                            return (
+                              <div key={r.id} className="mat-sub" style={{display:"grid",gridTemplateColumns:"106px minmax(0,1fr) 108px 118px 130px 106px 66px",gap:10,alignItems:"center",padding:"10px 14px",borderTop:"1px solid var(--divider)",background: isRet ? "var(--negative-bg)" : "transparent"}}>
+                                <span style={{fontSize:12,color:"var(--text2)",fontVariantNumeric:"tabular-nums"}}>{r.date}</span>
+                                <span style={{fontSize:12.5,color:"var(--text1)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                                  {r.supplier || "—"}
+                                  {r.sourcePoId && <span style={{fontSize:10.5,color:"var(--accent-strong)",background:"var(--accent-tonal)",padding:"1px 7px",borderRadius:100,marginLeft:5}}>발주에서</span>}
+                                  {r.note && <span style={{fontSize:10.5,color:"var(--text3)",marginLeft:5}}>· {r.note}</span>}
+                                </span>
+                                <span style={{textAlign:"right",fontSize:12.5,color:"var(--text2)",fontVariantNumeric:"tabular-nums"}}>{parseFloat(r.qty||0).toLocaleString()} {r.unit}</span>
+                                <span style={{textAlign:"right",fontSize:13,fontWeight:800,color:"var(--text1)",fontVariantNumeric:"tabular-nums"}}>{parseFloat(r.unitPrice||0).toLocaleString()}원</span>
+                                <span style={{textAlign:"right",fontSize:12.5,fontWeight:700,color:"var(--text1)",fontVariantNumeric:"tabular-nums"}}>{amt>0?Math.round(amt).toLocaleString()+"원":"—"}</span>
+                                <span style={{textAlign:"center"}}><span style={{display:"inline-block",padding:"3px 9px",borderRadius:100,fontSize:10.5,fontWeight:800,background:c+"22",color:c,whiteSpace:"nowrap"}}>{r.status}</span></span>
+                                <span style={{textAlign:"center"}}>
+                                  <button onClick={()=>{setGroupMode("date");startEdit(r);}} title="매입일순으로 열어 수정"
+                                    style={{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",fontFamily:"inherit"}}><Icon name="edit" size={14}/></button>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+
+              <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 128px 132px 154px 148px",gap:12,alignItems:"center",padding:"14px 16px",borderTop:"2px solid var(--border)",background:"var(--row-bg)"}}>
+                <div style={{fontSize:13,fontWeight:800,color:"var(--text1)",paddingLeft:17}}>합계 · {matGroups.length}개 품목 · {filtered.length}건</div>
+                <div style={{textAlign:"right",fontSize:12,fontWeight:700,color:"var(--text2)",fontVariantNumeric:"tabular-nums",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {Object.entries(totalQtyByUnit).filter(([,q])=>q>0).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" · ") || "—"}
+                </div>
+                <div/><div/>
+                <div style={{textAlign:"right",fontSize:15,fontWeight:800,color:"var(--accent-strong)",fontVariantNumeric:"tabular-nums"}}>
+                  {Math.round(totalVal).toLocaleString()}원
+                  {showVat && <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",marginTop:2}}>VAT 포함 {Math.round(totalVal*1.1).toLocaleString()}원</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+        ):(
+          /* ── 매입일순 (시안 A) — 12열을 7열로 ── */
+          <div style={{overflowX:"auto"}}>
+            <table className="table-plain" style={{width:"100%",minWidth:900,borderCollapse:"collapse",tableLayout:"fixed"}}>
+              <colgroup>
+                <col style={{width:44}}/><col/><col style={{width:122}}/><col style={{width:140}}/><col style={{width:146}}/><col style={{width:112}}/><col style={{width:88}}/>
+              </colgroup>
+              <thead><tr style={{background:"var(--surface2)",color:"var(--text2)",fontSize:11.5,fontWeight:700}}>
+              <th style={{ width: 44, textAlign: "center", padding: "10px 6px" }}>
                 {(() => {
                   const visibleIds = filtered.map(r => r.id);
                   const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
@@ -14508,14 +14708,16 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                         }
                       }}
                       title={allSelected ? "전체 해제" : "전체 선택"}
-                      style={{ width: 18, height: 18, accentColor: "#475569", cursor: "pointer" }} />
+                      style={{ width: 17, height: 17, accentColor: "#DB6B2E", cursor: "pointer" }} />
                   );
                 })()}
               </th>
-              <th>매입일</th><th>품목명</th><th>공급업체</th>
-              <th style={{textAlign:"right"}}>수량</th><th style={{textAlign:"right", minWidth: 118}}>매입 당시 단가</th>
-              <th style={{textAlign:"right"}}>공급가</th><th style={{textAlign:"right"}}>VAT 포함</th><th style={{textAlign:"center"}}>상태</th>
-              <th>담당자</th><th>비고</th><th style={{textAlign:"center", minWidth: 110}}>관리</th>
+              <th style={{padding:"10px 12px",textAlign:"left"}}>품목 / 공급업체</th>
+              <th style={{padding:"10px 12px",textAlign:"right"}}>수량</th>
+              <th style={{padding:"10px 12px",textAlign:"right"}}>매입 당시 단가</th>
+              <th style={{padding:"10px 12px",textAlign:"right"}}>공급가</th>
+              <th style={{padding:"10px 12px",textAlign:"center"}}>상태</th>
+              <th style={{padding:"10px 12px",textAlign:"center"}}>관리</th>
             </tr></thead>
             <tbody>
               {(() => {
@@ -14552,7 +14754,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                           onClick={e=>e.stopPropagation()}
                           style={{width:18, height:18, accentColor:"#DB6B2E", cursor:"pointer"}} />
                       </td>
-                      <td colSpan={11} style={{padding:"10px 14px", userSelect:"none"}}>
+                      <td colSpan={6} style={{padding:"10px 14px", userSelect:"none"}}>
                         <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", gap:10, flexWrap:"wrap"}}>
                           <span style={{display:"inline-flex", alignItems:"center", gap:10, fontSize:13, flexWrap:"wrap", cursor:"pointer", flex:"1 1 auto", minWidth:0}} onClick={() => toggleDateExpand(group.date)}>
                             <span style={{fontSize:11, color:"var(--text3)", fontFamily:"monospace", minWidth:14, display:"inline-block"}}>{isCollapsed ? "▶" : "▼"}</span>
@@ -14563,7 +14765,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                               <span style={{color:"var(--text3)", fontSize:11}}>· {Object.entries(groupQtyByUnit).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" + ")}</span>
                             )}
                             <span style={{color:"var(--text2)", fontSize:12}}>· 공급가 <b style={{color:"#DB6B2E", fontSize:14}}>{Math.round(groupSum).toLocaleString()}원</b></span>
-                            <span style={{color:"var(--text3)", fontSize:11}}>(VAT 포함 {Math.round(groupSum*1.1).toLocaleString()}원)</span>
+                            {showVat && <span style={{color:"var(--text3)", fontSize:11}}>(VAT 포함 {Math.round(groupSum*1.1).toLocaleString()}원)</span>}
                           </span>
                           <span style={{display:"inline-flex", alignItems:"center", gap:6, flexShrink:0}} onClick={e=>e.stopPropagation()}>
                             {currentMemo && !isEditingMemo && (
@@ -14605,72 +14807,96 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                 const isEditing = editId === r.id;
                 if (isEditing && editDraft) {
                   const editTotal = parseFloat(editDraft.unitPrice||0) * parseFloat(editDraft.qty||0);
+                  const inp = {height:34,fontSize:12.5,padding:"0 8px",borderRadius:8,border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text1)",fontFamily:"inherit"};
+                  const lbl = {fontSize:10.5,fontWeight:700,color:"var(--text3)",display:"block",marginBottom:4};
                   return (
-                    <tr key={r.id} style={{background:"var(--surface2)"}}>
-                      <td style={{textAlign:"center"}}>
-                        <input type="checkbox" disabled style={{width:18,height:18,opacity:0.4}} />
-                      </td>
-                      <td><input type="date" value={editDraft.date||""} onChange={e=>setEditDraft(d=>({...d,date:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
-                      <td>
-                        <select value={editDraft.materialName||""} onChange={e=>{
-                          const nm = e.target.value;
-                          // 자재 + 공임 둘 다 탐색 (신규 폼과 동일)
-                          const found = materials.find(m=>m.name===nm) || laborItems.find(l=>l.name===nm);
-                          // 이미 적혀 있는 단가는 그 매입 시점의 값이다 — 품목명을 다시 골랐다고
-                          // 오늘 단가로 덮어쓰면 과거 기록이 조용히 바뀐다. 비어 있을 때만 채운다.
-                          const hadPrice = parseFloat(editDraft && editDraft.unitPrice) > 0;
-                          if (found && hadPrice && String(found.price ?? "") !== String(editDraft.unitPrice)) {
-                            showToast(`단가는 그대로 둡니다 — 이 매입 당시 ${Number(editDraft.unitPrice).toLocaleString()}원 (지금 단가표는 ${Number(found.price || 0).toLocaleString()}원). 바꾸려면 단가 칸을 직접 고치세요.`, "info");
-                          }
-                          setEditDraft(d=>({
-                            ...d,
-                            materialName: nm,
-                            ...(found ? {
-                              unitPrice: (parseFloat(d.unitPrice) > 0) ? d.unitPrice : String(found.price ?? ""),
-                              unit: d.unit || found.unit,
-                            } : {}),
-                          }));
-                        }} style={{height:34,fontSize:12,padding:"0 6px"}}>
-                          <option value="">선택...</option>
-                          {materials.length > 0 && (
-                            <optgroup label="📦 원단/자재 (단가표)">
-                              {materials.map(m=><option key={`em-${m.id}`} value={m.name}>{m.name}</option>)}
-                            </optgroup>
-                          )}
-                          {laborItems.length > 0 && (
-                            <optgroup label="🛠 공임/임가공">
-                              {laborItems.map(l=><option key={`el-${l.id}`} value={l.name}>{l.name}</option>)}
-                            </optgroup>
-                          )}
-                          {editDraft.materialName
-                            && !materials.find(m=>m.name===editDraft.materialName)
-                            && !laborItems.find(l=>l.name===editDraft.materialName)
-                            && <option value={editDraft.materialName}>{editDraft.materialName} (직접입력)</option>}
-                        </select>
-                      </td>
-                      <td><input value={editDraft.supplier||""} onChange={e=>setEditDraft(d=>({...d,supplier:e.target.value}))} placeholder="공급업체" style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
-                      <td>
-                        <div style={{display:"flex",gap:4}}>
-                          <input type="number" value={editDraft.qty||""} onChange={e=>setEditDraft(d=>({...d,qty:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px",textAlign:"right",width:80}}/>
-                          <select value={editDraft.unit||"yard"} onChange={e=>setEditDraft(d=>({...d,unit:e.target.value}))} style={{height:34,fontSize:11,padding:"0 4px",width:60}}>
-                            <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
-                            <option value="벌">벌</option><option value="장">장</option><option value="개">개</option><option value="식">식</option><option value="pc">pc</option>
-                          </select>
+                    <tr key={r.id} style={{background:"var(--accent-tonal)"}}>
+                      <td colSpan={7} style={{padding:"14px 16px",borderTop:"1px solid var(--divider)"}}>
+                        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+                          <div style={{flex:"0 0 132px"}}>
+                            <label style={lbl}>매입일</label>
+                            <input type="date" value={editDraft.date||""} onChange={e=>setEditDraft(d=>({...d,date:e.target.value}))} style={{...inp,width:"100%"}}/>
+                          </div>
+                          <div style={{flex:"1 1 220px",minWidth:180}}>
+                            <label style={lbl}>품목명</label>
+                            <select value={editDraft.materialName||""} onChange={e=>{
+                              const nm = e.target.value;
+                              // 자재 + 공임 둘 다 탐색 (신규 폼과 동일)
+                              const found = materials.find(m=>m.name===nm) || laborItems.find(l=>l.name===nm);
+                              // 이미 적혀 있는 단가는 그 매입 시점의 값이다 — 품목명을 다시 골랐다고
+                              // 오늘 단가로 덮어쓰면 과거 기록이 조용히 바뀐다. 비어 있을 때만 채운다.
+                              const hadPrice = parseFloat(editDraft && editDraft.unitPrice) > 0;
+                              if (found && hadPrice && String(found.price ?? "") !== String(editDraft.unitPrice)) {
+                                showToast(`단가는 그대로 둡니다 — 이 매입 당시 ${Number(editDraft.unitPrice).toLocaleString()}원 (지금 단가표는 ${Number(found.price || 0).toLocaleString()}원). 바꾸려면 단가 칸을 직접 고치세요.`, "info");
+                              }
+                              setEditDraft(d=>({
+                                ...d,
+                                materialName: nm,
+                                ...(found ? {
+                                  unitPrice: (parseFloat(d.unitPrice) > 0) ? d.unitPrice : String(found.price ?? ""),
+                                  unit: d.unit || found.unit,
+                                } : {}),
+                              }));
+                            }} style={{...inp,width:"100%"}}>
+                              <option value="">선택...</option>
+                              {materials.length > 0 && (
+                                <optgroup label="원단/자재 (단가표)">
+                                  {materials.map(m=><option key={`em-${m.id}`} value={m.name}>{m.name}</option>)}
+                                </optgroup>
+                              )}
+                              {laborItems.length > 0 && (
+                                <optgroup label="공임/임가공">
+                                  {laborItems.map(l=><option key={`el-${l.id}`} value={l.name}>{l.name}</option>)}
+                                </optgroup>
+                              )}
+                              {editDraft.materialName
+                                && !materials.find(m=>m.name===editDraft.materialName)
+                                && !laborItems.find(l=>l.name===editDraft.materialName)
+                                && <option value={editDraft.materialName}>{editDraft.materialName} (직접입력)</option>}
+                            </select>
+                          </div>
+                          <div style={{flex:"0 0 160px"}}>
+                            <label style={lbl}>공급업체</label>
+                            <input value={editDraft.supplier||""} onChange={e=>setEditDraft(d=>({...d,supplier:e.target.value}))} placeholder="공급업체" style={{...inp,width:"100%"}}/>
+                          </div>
+                          <div style={{flex:"0 0 156px"}}>
+                            <label style={lbl}>수량</label>
+                            <div style={{display:"flex",gap:4}}>
+                              <input type="number" value={editDraft.qty||""} onChange={e=>setEditDraft(d=>({...d,qty:e.target.value}))} style={{...inp,textAlign:"right",width:92}}/>
+                              <select value={editDraft.unit||"yard"} onChange={e=>setEditDraft(d=>({...d,unit:e.target.value}))} style={{...inp,fontSize:11,padding:"0 4px",width:60}}>
+                                <option value="yard">yard</option><option value="m">m</option><option value="kg">kg</option><option value="롤">롤</option>
+                                <option value="벌">벌</option><option value="장">장</option><option value="개">개</option><option value="식">식</option><option value="pc">pc</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div style={{flex:"0 0 124px"}}>
+                            <label style={lbl}>매입 당시 단가</label>
+                            <input type="number" value={editDraft.unitPrice||""} onChange={e=>setEditDraft(d=>({...d,unitPrice:e.target.value}))} style={{...inp,textAlign:"right",width:"100%"}}/>
+                          </div>
+                          <div style={{flex:"0 0 130px"}}>
+                            <label style={lbl}>상태</label>
+                            <select value={editDraft.status||"주문완료"} onChange={e=>setEditDraft(d=>({...d,status:e.target.value}))} style={{...inp,width:"100%"}}>
+                              {STATUSES.map(st=><option key={st} value={st}>{st}</option>)}
+                            </select>
+                          </div>
+                          <div style={{flex:"0 0 130px"}}>
+                            <label style={lbl}>검수 담당자</label>
+                            <input value={editDraft.inspector||""} onChange={e=>setEditDraft(d=>({...d,inspector:e.target.value}))} placeholder="담당자" style={{...inp,width:"100%"}}/>
+                          </div>
+                          <div style={{flex:"1 1 180px",minWidth:150}}>
+                            <label style={lbl}>비고</label>
+                            <input value={editDraft.note||""} onChange={e=>setEditDraft(d=>({...d,note:e.target.value}))} placeholder="비고" style={{...inp,width:"100%"}}/>
+                          </div>
                         </div>
-                      </td>
-                      <td><input type="number" value={editDraft.unitPrice||""} onChange={e=>setEditDraft(d=>({...d,unitPrice:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px",textAlign:"right",width:100}}/></td>
-                      <td style={{textAlign:"right",fontWeight:700,fontSize:13,whiteSpace:"nowrap",color:"#DB6B2E"}}>{editTotal>0?Math.round(editTotal).toLocaleString()+"원":"—"}</td>
-                      <td style={{textAlign:"right",fontWeight:600,fontSize:13,whiteSpace:"nowrap",color:"var(--text1)"}}>{editTotal>0?Math.round(editTotal*1.1).toLocaleString()+"원":"—"}</td>
-                      <td style={{textAlign:"center"}}>
-                        <select value={editDraft.status||"주문완료"} onChange={e=>setEditDraft(d=>({...d,status:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}>
-                          {STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </td>
-                      <td><input value={editDraft.inspector||""} onChange={e=>setEditDraft(d=>({...d,inspector:e.target.value}))} placeholder="담당자" style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
-                      <td><input value={editDraft.note||""} onChange={e=>setEditDraft(d=>({...d,note:e.target.value}))} placeholder="비고" style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
-                      <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
-                        <button onClick={saveEdit} style={{background:"#DB6B2E",border:"none",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,borderRadius:6,padding:"5px 9px",marginRight:4,fontFamily:"inherit"}}>저장</button>
-                        <button onClick={cancelEdit} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:12,fontWeight:600,borderRadius:6,padding:"4px 8px",fontFamily:"inherit"}}>취소</button>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginTop:12,flexWrap:"wrap"}}>
+                          <span style={{fontSize:12.5,color:"var(--text2)"}}>
+                            공급가 <b style={{color:"var(--text1)",fontSize:14,fontVariantNumeric:"tabular-nums"}}>{editTotal>0?Math.round(editTotal).toLocaleString()+"원":"—"}</b>
+                            {editTotal>0 && <span style={{color:"var(--text3)",marginLeft:8}}>VAT 포함 {Math.round(editTotal*1.1).toLocaleString()}원</span>}
+                          </span>
+                          <div style={{flex:1}}/>
+                          <button onClick={cancelEdit} style={{height:34,padding:"0 14px",background:"var(--surface)",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:12.5,fontWeight:700,borderRadius:9,fontFamily:"inherit"}}>취소</button>
+                          <button onClick={saveEdit} style={{height:34,padding:"0 18px",background:"var(--accent)",border:"none",cursor:"pointer",color:"#fff",fontSize:12.5,fontWeight:800,borderRadius:9,fontFamily:"inherit"}}>저장</button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -14678,42 +14904,48 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                 const total=parseFloat(r.unitPrice||0)*parseFloat(r.qty||0);
                 const sc=SC[r.status]||"#8B95A1";
                 const isSelected = selectedIds.has(r.id);
-                return (<tr key={r.id} style={{background: isSelected ? (darkMode ? "rgba(219,107,46,0.10)" : "rgba(219,107,46,0.06)") : "transparent"}}>
-                  <td style={{textAlign:"center"}}>
+                const curPrice = (materials.find(m => m.name === r.materialName) || laborItems.find(l => l.name === r.materialName));
+                const nowP = curPrice ? Number(curPrice.price) || 0 : 0;
+                const wasP = parseFloat(r.unitPrice) || 0;
+                const drift = (nowP && wasP && nowP !== wasP) ? (nowP > wasP ? "up" : "down") : null;
+                return (<tr key={r.id} style={{borderTop:"1px solid var(--divider)", background: isSelected ? (darkMode ? "rgba(219,107,46,0.10)" : "rgba(219,107,46,0.06)") : r.status === "반품" ? "var(--negative-bg)" : "transparent"}}>
+                  <td style={{textAlign:"center",padding:"11px 6px"}}>
                     <input type="checkbox" checked={isSelected} onChange={()=>toggleSelect(r.id)}
-                      style={{width:18,height:18,accentColor:"#475569",cursor:"pointer"}}/>
+                      style={{width:17,height:17,accentColor:"#DB6B2E",cursor:"pointer"}}/>
                   </td>
-                  <td style={{whiteSpace:"nowrap",fontSize:13}}>{r.date}</td>
-                  <td style={{fontWeight:600,fontSize:13}}>{r.materialName}</td>
-                  <td style={{fontSize:13}}>{r.supplier}</td>
-                  <td style={{textAlign:"right",fontSize:13}}>{parseFloat(r.qty||0).toLocaleString()} {r.unit}</td>
+                  {/* 품목명 아래로 공급업체·발주·담당자·비고를 모았다 — 열 넷을 하나로 */}
+                  <td style={{padding:"11px 12px",minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"var(--text1)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.materialName}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,flexWrap:"wrap"}}>
+                      {r.supplier && <span style={{fontSize:11.5,color:"var(--text3)"}}>{r.supplier}</span>}
+                      {r.sourcePoId && <span title="발주관리에서 입고 처리된 건입니다" style={{fontSize:10.5,fontWeight:700,color:"var(--accent-strong)",background:"var(--accent-tonal)",padding:"1px 7px",borderRadius:100}}>발주에서</span>}
+                      {r.inspector && <span style={{fontSize:11,color:"var(--text3)"}}>· 검수 {r.inspector}</span>}
+                      {r.note && <span style={{fontSize:11,color:"var(--text3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:260}}>· {r.note}</span>}
+                    </div>
+                  </td>
+                  <td style={{padding:"11px 12px",textAlign:"right",fontSize:13,color:"var(--text2)",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>
+                    {parseFloat(r.qty||0).toLocaleString()} <span style={{fontSize:11,color:"var(--text3)"}}>{r.unit}</span>
+                  </td>
                   {/* 이 행의 단가는 매입 당시 스냅샷이다. 단가표가 그 뒤 바뀌었으면 그 사실을 알려
                       "왜 다르지?"를 없앤다 — 값 자체는 절대 따라 바뀌지 않는다. */}
-                  <td style={{textAlign:"right",fontSize:13}}>
-                    <span style={{ fontSize: 14.5, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.01em" }}>{parseFloat(r.unitPrice||0).toLocaleString()}</span><span style={{ fontSize: 11, color: "var(--text3)" }}>원</span>
-                    {(() => {
-                      const cur = (materials.find(m => m.name === r.materialName) || laborItems.find(l => l.name === r.materialName));
-                      const now = cur ? Number(cur.price) || 0 : 0;
-                      const was = parseFloat(r.unitPrice) || 0;
-                      if (!now || !was || now === was) return null;
-                      const up = now > was;
-                      return (
-                        <div title={`매입 당시 ${was.toLocaleString()}원 · 지금 단가표 ${now.toLocaleString()}원 — 이 행은 당시 값 그대로입니다`}
-                          style={{ display: "block", fontSize: 11, fontWeight: 700, marginTop: 2,
-                            color: up ? "var(--negative-text)" : "var(--positive-text)", whiteSpace: "nowrap" }}>
-                          지금 {now.toLocaleString()}원 {up ? "▲" : "▼"}
-                        </div>
-                      );
-                    })()}
+                  <td style={{padding:"11px 12px",textAlign:"right"}}>
+                    <span style={{ fontSize: 14.5, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.01em" }}>{wasP.toLocaleString()}</span><span style={{ fontSize: 11, color: "var(--text3)" }}>원</span>
+                    {drift && (
+                      <div title={`매입 당시 ${wasP.toLocaleString()}원 · 지금 단가표 ${nowP.toLocaleString()}원 — 이 행은 당시 값 그대로입니다`}
+                        style={{ fontSize: 11, fontWeight: 700, marginTop: 2, whiteSpace: "nowrap",
+                          color: drift === "up" ? "var(--negative-text)" : "var(--positive-text)" }}>
+                        지금 {nowP.toLocaleString()}원 {drift === "up" ? "▲" : "▼"}
+                      </div>
+                    )}
                   </td>
-                  <td style={{textAlign:"right",fontWeight:700,fontSize:13,color:"#DB6B2E"}}>{total>0?Math.round(total).toLocaleString()+"원":"—"}</td>
-                  <td style={{textAlign:"right",fontWeight:600,fontSize:13,color:"var(--text1)"}}>{total>0?Math.round(total*1.1).toLocaleString()+"원":"—"}</td>
-                  <td style={{textAlign:"center"}}><span style={{display:"inline-block",padding:"3px 9px",borderRadius:100,fontSize:11,fontWeight:700,background:sc+"22",color:sc,whiteSpace:"nowrap"}}>{r.status}</span></td>
-                  <td style={{fontSize:13,color:"var(--text2)"}}>{r.inspector}</td>
-                  <td style={{fontSize:12,color:"var(--text2)"}}>{r.note}</td>
-                  <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
-                    <button onClick={()=>startEdit(r)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#DB6B2E",fontSize:15,marginRight:6}}><Icon name="edit" size={14}/></button>
-                    <button onClick={()=>{ if(window.confirm(`이 입고 기록을 삭제할까요?\n${r.date} · ${r.materialName}`)) setFabricIntakes(prev=>prev.filter(x=>x.id!==r.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:15}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
+                  <td style={{padding:"11px 12px",textAlign:"right"}}>
+                    <div style={{fontWeight:800,fontSize:13.5,color:"var(--text1)",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{total>0?Math.round(total).toLocaleString()+"원":"—"}</div>
+                    {showVat && total>0 && <div style={{fontSize:11,color:"var(--text3)",marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>VAT {Math.round(total*1.1).toLocaleString()}원</div>}
+                  </td>
+                  <td style={{padding:"11px 12px",textAlign:"center"}}><span style={{display:"inline-block",padding:"3px 9px",borderRadius:100,fontSize:11,fontWeight:800,background:sc+"22",color:sc,whiteSpace:"nowrap"}}>{r.status}</span></td>
+                  <td style={{padding:"11px 12px",textAlign:"center",whiteSpace:"nowrap"}}>
+                    <button onClick={()=>startEdit(r)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"var(--accent)",marginRight:6,fontFamily:"inherit"}}><Icon name="edit" size={14}/></button>
+                    <button onClick={()=>{ if(window.confirm(`이 입고 기록을 삭제할까요?\n${r.date} · ${r.materialName}`)) setFabricIntakes(prev=>prev.filter(x=>x.id!==r.id)); }} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"var(--negative-text)",fontFamily:"inherit"}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                   </td>
                 </tr>);
               })}
@@ -14721,54 +14953,44 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                   );
                 });
               })()}
-              {/* 🔥 총합계 행 — 현재 필터 결과 기준 (기간/상태/품목/검색 모두 반영) */}
-              {filtered.length > 0 && (
-                <tr style={{borderTop:"3px double var(--text2)", background: darkMode ? "rgba(219,107,46,0.08)" : "rgba(219,107,46,0.05)"}}>
+              {/* 총합계 행 — 현재 필터 결과 기준 (기간/상태/품목/검색 모두 반영) */}
+              {filtered.length > 0 && (() => {
+                const allDates = new Set(filtered.map(r => r.date || "(날짜 없음)"));
+                const anyExpanded = [...allDates].some(d => expandedDates.has(d));
+                return (
+                <tr style={{borderTop:"2px solid var(--border)", background:"var(--row-bg)"}}>
                   <td/>
-                  <td colSpan={3} style={{padding:"14px 16px", fontWeight:800, fontSize:15, color:"var(--text1)"}}>
-                    <Icon name="coins" size={14} style={{marginRight:6,verticalAlign:"-2px"}}/>총합계
-                    <span style={{marginLeft:10, fontSize:12, color:"var(--text2)", fontWeight:600}}>
-                      · {filtered.length}건
-                    </span>
-                    {(filterFrom||filterTo) && (
-                      <span style={{marginLeft:6, fontSize:11, color:"var(--text3)", fontWeight:500}}>
-                        · 기간 {filterFrom||"전체"} ~ {filterTo||"오늘"}
-                      </span>
-                    )}
+                  <td style={{padding:"14px 12px"}}>
+                    <span style={{fontWeight:800,fontSize:14,color:"var(--text1)"}}>총합계</span>
+                    <span style={{marginLeft:8,fontSize:12,color:"var(--text2)",fontWeight:600}}>{filtered.length}건</span>
+                    {(filterFrom||filterTo) && <span style={{marginLeft:6,fontSize:11,color:"var(--text3)"}}>· {filterFrom||"전체"} ~ {filterTo||"오늘"}</span>}
+                    {filterStatus && <span style={{marginLeft:6,fontSize:11,color:"var(--text3)"}}>· {filterStatus}</span>}
                   </td>
-                  <td style={{textAlign:"right", fontWeight:700, fontSize:13, color:"var(--text1)", padding:"14px 8px", fontVariantNumeric:"tabular-nums"}}>
-                    {Object.keys(totalQtyByUnit).length > 0
-                      ? Object.entries(totalQtyByUnit).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" + ")
-                      : "—"}
+                  <td style={{padding:"14px 12px",textAlign:"right",fontWeight:700,fontSize:12.5,color:"var(--text2)",fontVariantNumeric:"tabular-nums"}}>
+                    {Object.entries(totalQtyByUnit).filter(([,q])=>q>0).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" · ") || "—"}
                   </td>
                   <td/>
-                  <td style={{textAlign:"right", fontWeight:800, fontSize:16, color:"#DB6B2E", padding:"14px 8px", fontVariantNumeric:"tabular-nums"}}>
-                    {Math.round(totalVal).toLocaleString()}원
+                  <td style={{padding:"14px 12px",textAlign:"right"}}>
+                    <div style={{fontWeight:800,fontSize:15.5,color:"var(--accent-strong)",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{Math.round(totalVal).toLocaleString()}원</div>
+                    {showVat && <div style={{fontSize:11.5,fontWeight:700,color:"var(--text3)",marginTop:2,fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>VAT 포함 {Math.round(totalVal*1.1).toLocaleString()}원</div>}
                   </td>
-                  <td style={{textAlign:"right", fontWeight:700, fontSize:14, color:"var(--text1)", padding:"14px 8px", fontVariantNumeric:"tabular-nums"}}>
-                    {Math.round(totalVal*1.1).toLocaleString()}원
-                  </td>
-                  <td colSpan={4} style={{textAlign:"right", padding:"14px 8px"}}>
-                    <button onClick={()=>{
-                      // 모든 그룹 펼침/접힘 토글
-                      const allDates = new Set(filtered.map(r => r.date || "(날짜 없음)"));
-                      const anyExpanded = [...allDates].some(d => expandedDates.has(d));
-                      if (anyExpanded) collapseAllGroups();
-                      else expandAllGroups(allDates);
-                    }} style={{padding:"6px 12px", fontSize:11, fontWeight:600, color:"var(--text2)", background:"transparent", border:"1px solid var(--border)", borderRadius:8, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>
-                      {(() => {
-                        const allDates = new Set(filtered.map(r => r.date || "(날짜 없음)"));
-                        const anyExpanded = [...allDates].some(d => expandedDates.has(d));
-                        return anyExpanded ? "전체 접기" : "전체 펼치기";
-                      })()}
+                  <td colSpan={2} style={{textAlign:"center",padding:"14px 8px"}}>
+                    <button onClick={()=>{ if (anyExpanded) collapseAllGroups(); else expandAllGroups(allDates); }}
+                      style={{padding:"6px 11px",fontSize:11,fontWeight:700,color:"var(--text2)",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      {anyExpanded ? "모두 접기" : "모두 펼치기"}
                     </button>
                   </td>
                 </tr>
-              )}
+                );
+              })()}
             </tbody></table>
           </div>
         )}
       </div>
+      <style>{`
+        @media (max-width: 900px) { .stage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; } }
+        @media (max-width: 560px) { .stage-grid { grid-template-columns: minmax(0, 1fr) !important; } }
+      `}</style>
     </div>
   );
 }
