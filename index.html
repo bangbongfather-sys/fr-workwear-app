@@ -8156,6 +8156,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       nameMap: { ...(((prev || {}).nameMap) || {}), [payablesNameNorm(dep.name)]: name },
     }));
     setOpenId(null);
+    markJustDone([dep.id]);
     showToast(`${fmt(dep.amount)}원 → "${name}" 입금완료 처리했습니다`, "success");
   };
   const undoDeposit = (dep, silent) => {
@@ -8187,6 +8188,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       items: (((prev || {}).items) || []).map(x => x.id === dep.id ? { ...x, status: "pending", client: "", link: null } : x),
       nameMap: ((prev || {}).nameMap) || {},
     }));
+    setJustDone(prev => { const n = new Set(prev); n.delete(dep.id); return n; });
   };
   const removeDeposit = (dep, silent) => {
     if (!silent && !window.confirm("이 입금 행을 삭제할까요?")) return;
@@ -8204,27 +8206,40 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const pending = items.filter(x => x.status === "pending");
   const done = items.filter(x => x.status === "done");
   // 검색: 입금자명 + 지정된 거래처 + (미처리 행은) 추천 거래처까지 거래처명으로 찾기
+  // 미처리 목록에서 처리하면 행이 그 자리에서 사라진다. 잘못 눌렀는지 확인할 길이 없어
+  // 방금 처리한 건은 초록으로 자리에 남겨 두고, 필터를 바꾸거나 「정리」를 누를 때 치운다.
+  const [justDone, setJustDone] = useState(() => new Set());
+  const JUST_DONE_SHOW_MAX = 50; // 429건을 통째로 남기면 목록이 의미를 잃는다
+  const markJustDone = (ids) => setJustDone(prev => { const n = new Set(prev); ids.forEach(id => n.add(id)); return n; });
+  useEffect(() => { setJustDone(new Set()); }, [filter, search]);
+
   const q = search.trim();
-  const shown = items
-    .filter(x => filter === "all" ? true : filter === "nosug" ? (x.status === "pending" && !sugMap[x.id]) : x.status === filter)
-    .filter(x => {
-      if (!q) return true;
-      if ((x.name || "").includes(q) || (x.client || "").includes(q)) return true;
-      if (x.status === "pending") {
-        const sug = suggestClient(x.name);
-        if (sug && sug.includes(q)) return true;
-      }
-      return false;
-    });
+  const qMatch = (x) => {
+    if (!q) return true;
+    if ((x.name || "").includes(q) || (x.client || "").includes(q)) return true;
+    if (x.status === "pending") {
+      const sug = suggestClient(x.name);
+      if (sug && sug.includes(q)) return true;
+    }
+    return false;
+  };
+  const inFilter = (x) => filter === "all" ? true : filter === "nosug" ? (x.status === "pending" && !sugMap[x.id]) : x.status === filter;
+  const pendingView = filter === "pending" || filter === "nosug";
+  // 방금 처리한 건은 미처리 화면에서도 자리를 지킨다 — 잘못 눌렀는지 확인할 수 있게
+  const justDoneInline = justDone.size > 0 && justDone.size <= JUST_DONE_SHOW_MAX;
+  const shown = items.filter(x => (inFilter(x) || (pendingView && justDoneInline && justDone.has(x.id))) && qMatch(x));
+  // 남겨 둔 건은 합계·전체선택에서 뺀다. 이미 처리된 돈이라 미처리 합계에 섞이면 안 된다.
+  const shownActive = pendingView ? shown.filter(x => !justDone.has(x.id)) : shown;
+  const justDoneShown = pendingView ? shown.filter(x => justDone.has(x.id)) : [];
   // 합계: 표시 중인 항목 / 체크 선택한 항목
-  const shownTotal = shown.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
+  const shownTotal = shownActive.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
   const selectedItems = items.filter(x => selectedIds.has(x.id));
   const selectedTotal = selectedItems.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
-  const allShownSelected = shown.length > 0 && shown.every(x => selectedIds.has(x.id));
+  const allShownSelected = shownActive.length > 0 && shownActive.every(x => selectedIds.has(x.id));
   const toggleSelect = (id) => setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const toggleSelectAllShown = () => setSelectedIds(prev => {
     const n = new Set(prev);
-    if (allShownSelected) shown.forEach(x => n.delete(x.id)); else shown.forEach(x => n.add(x.id));
+    if (allShownSelected) shownActive.forEach(x => n.delete(x.id)); else shownActive.forEach(x => n.add(x.id));
     return n;
   });
   // ── 드래그해서 여러 건 선택 (체크박스 칸을 누른 채 위/아래 행을 훑기) ──
@@ -8329,6 +8344,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     });
     setSelectedIds(new Set());
     setOpenId(null);
+    markJustDone(rows.map(r => r.id));
     showToast(`${rows.length}건 ${fmt(selectedPendingTotal)}원 → "${name}" 일괄 입금완료 처리했습니다`, "success");
   };
 
@@ -8400,15 +8416,16 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         nameMap: nm,
       };
     });
-    return plan.length;
+    return plan.map(x => x.row.id);
   };
 
   const lastDoneRef = useRef(null);
   const confirmOne = (dep, clientName) => {
     const t = clientName != null ? targetFor(dep, clientName) : autoTargetOf(dep);
     if (!t.client) { openProcess(dep); showToast("거래처를 먼저 고르세요"); return; }
-    completeRows([dep], () => t);
+    const doneIds = completeRows([dep], () => t);
     lastDoneRef.current = dep.id;
+    markJustDone(doneIds);
     showToast(`${fmt(dep.amount)}원 → "${t.client}" 입금완료`, "success");
   };
   const undoLast = () => {
@@ -8432,8 +8449,9 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       `· 청구액과 금액이 정확히 일치하는 ${exactN}건 — 그 달 장부를 입금완료로 바꿉니다\n` +
       `· 나머지 ${pendingSug.length - exactN}건 — 미수금 원장에 입금으로 기록합니다 (장부 청구는 건드리지 않습니다)\n\n계속할까요?`
     )) return;
-    const n = completeRows(pendingSug, autoTargetOf);
-    showToast(`${n}건 입금완료 처리했습니다`, "success");
+    const doneIds = completeRows(pendingSug, autoTargetOf);
+    markJustDone(doneIds);
+    showToast(`${doneIds.length}건 입금완료 처리했습니다`, "success");
   };
 
   // ── 하나씩 보기 (빠른 처리) ──
@@ -8741,7 +8759,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       {items.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", borderRadius: 12, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
           <span style={{ fontSize: 12.5, color: "var(--text2)" }}>
-            표시 <b style={{ color: "var(--text1)" }}>{shown.length}건</b> 합계
+            표시 <b style={{ color: "var(--text1)" }}>{shownActive.length}건</b> 합계
             <b style={{ color: "var(--text1)", marginLeft: 6, fontSize: 14, fontVariantNumeric: "tabular-nums" }}>{fmt(shownTotal)}원</b>
           </span>
           {selectedItems.length > 0 && (
@@ -8754,6 +8772,25 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
             </span>
           )}
           {selectedItems.length === 0 && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>체크박스를 클릭하거나 위아래로 드래그해 여러 건 선택 · 다른 탭에 다녀와도 선택은 유지됩니다</span>}
+        </div>
+      )}
+
+      {/* 방금 처리한 건 — 미처리 목록에서 사라져 버리면 잘못 눌렀는지 확인할 길이 없다 */}
+      {pendingView && justDone.size > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "11px 15px", borderRadius: 12, border: "1.5px solid rgba(3,178,108,0.45)", background: "rgba(3,178,108,0.07)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 800, color: "var(--positive-text)" }}>
+            <Icon name="checkCircle" size={16} />방금 {justDone.size}건 처리했습니다
+          </span>
+          <span style={{ fontSize: 12, color: "var(--text2)" }}>
+            {justDoneShown.length >= justDone.size
+              ? "아래 목록에 초록으로 남겨 뒀습니다. 잘못 눌렀으면 그 줄의 「되돌리기」를 누르세요."
+              : `아래에 ${justDoneShown.length}건만 남겨 뒀습니다 (나머지는 「처리완료」 필터에서 확인하세요).`}
+          </span>
+          <div style={{ flex: 1 }} />
+          <button onClick={() => setJustDone(new Set())}
+            style={{ height: 30, padding: "0 13px", borderRadius: 8, border: "1px solid rgba(3,178,108,0.45)", background: "var(--surface)", color: "var(--positive-text)", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            목록에서 정리
+          </button>
         </div>
       )}
 
@@ -8850,11 +8887,14 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                     {g.rows.map(dep => {
                       const isOpen = openId === dep.id;
                       const isDone = dep.status === "done";
+                      const fresh = justDone.has(dep.id); // 방금 이 화면에서 처리한 건
                       const t = isDone ? null : autoTargetOf(dep);
                       return (
                         <React.Fragment key={dep.id}>
                           <tr onMouseEnter={() => enterRowDrag(dep.id)}
-                            style={{ borderTop: "1px solid var(--divider)", userSelect: dragSelecting ? "none" : "auto", background: selectedIds.has(dep.id) ? "rgba(219,107,46,0.08)" : isDone ? (darkMode ? "rgba(0,180,147,0.10)" : "rgba(0,180,147,0.07)") : isOpen ? "rgba(219,107,46,0.06)" : t && !t.client ? "var(--warning-bg)" : "transparent" }}>
+                            style={{ borderTop: "1px solid var(--divider)", userSelect: dragSelecting ? "none" : "auto",
+                              boxShadow: fresh ? "inset 3px 0 0 var(--positive)" : "none",
+                              background: selectedIds.has(dep.id) ? "rgba(219,107,46,0.08)" : isDone ? (darkMode ? "rgba(0,180,147,0.10)" : "rgba(0,180,147,0.07)") : isOpen ? "rgba(219,107,46,0.06)" : t && !t.client ? "var(--warning-bg)" : "transparent" }}>
                             <td onMouseDown={(e) => beginRowDrag(dep.id, e)} title="드래그하여 여러 건 선택"
                               style={{ padding: "10px 8px 10px 12px", textAlign: "center", cursor: "pointer", userSelect: "none" }}>
                               <input type="checkbox" checked={selectedIds.has(dep.id)} readOnly tabIndex={-1} style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer", pointerEvents: "none" }} />
@@ -8862,7 +8902,18 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                             <td style={{ padding: "10px 12px" }}>
                               <div style={{ fontWeight: 600, color: "var(--text1)" }}>{dep.name}</div>
                               {dep.memo && dep.memo !== dep.name && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{dep.memo}</div>}
-                              {isDone && <div style={{ fontSize: 11, color: "#00B493", marginTop: 3, fontWeight: 600 }}>→ {dep.client} · {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 입금 기록" : "확인 처리"}</div>}
+                              {isDone && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                                  {fresh && (
+                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "1px 7px", borderRadius: 100, background: "var(--positive)", color: "#fff", fontSize: 10, fontWeight: 800 }}>
+                                      ✓ 방금 처리
+                                    </span>
+                                  )}
+                                  <span style={{ fontSize: 11, color: "var(--positive-text)", fontWeight: 600 }}>
+                                    → {dep.client} · {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 입금 기록" : "확인 처리"}
+                                  </span>
+                                </div>
+                              )}
                             </td>
                             <td style={{ padding: "10px 12px", textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: isDone ? "#00B493" : "var(--text1)" }}>{fmt(dep.amount)}원</td>
 
@@ -8873,7 +8924,11 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                                   {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 원장 입금 기록" : "확인 처리만"}
                                 </td>
                                 <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
-                                  <button onClick={() => undoDeposit(dep)} title="처리 되돌리기" style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>↩ 되돌리기</button>
+                                  <button onClick={() => undoDeposit(dep)} title="처리 되돌리기"
+                                    style={{ padding: "5px 12px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: fresh ? 800 : 600,
+                                      border: fresh ? "1px solid var(--positive)" : "1px solid var(--border)",
+                                      background: fresh ? "var(--surface)" : "transparent",
+                                      color: fresh ? "var(--positive-text)" : "var(--text2)" }}>↩ 되돌리기</button>
                                 </td>
                               </>
                             ) : (
@@ -18161,6 +18216,49 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury", "tax"] },
     { label: "일정·외부", ids: ["schedule", "meeting", "bids", "files", "mail", "news"] },
   ];
+  // 사이드바 하단 바로가기 — 평소엔 한 줄만, 누르면 위로 팝오버가 열린다.
+  // 박스 4개가 사이드바 아래 4분의 1을 늘 차지하고 있었다(216px). 링크가 늘어도 안 무너진다.
+  const EXTERNAL_LINKS = [
+    { id: "ecount",  label: "이카운트 ERP",    host: "login.ecount.com",      icon: "building", accent: true,
+      url: "https://login.ecount.com/Login/",                   title: "이카운트 ERP 로그인 — 회계·재고 본 시스템" },
+    { id: "catalog", label: "제품 카탈로그",   host: "catalog-app",           icon: "shirt",
+      url: "https://catalog-app.njsafety91.workers.dev/",       title: "제품 카탈로그 앱" },
+    { id: "site",    label: "회사 웹사이트",   host: "njfashion.co.kr",       icon: "link",
+      url: "https://nj-safety-website.njsafety91.workers.dev/", title: "회사 공개 웹사이트" },
+    { id: "admin",   label: "웹사이트 관리자", host: "njfashion.co.kr/admin", icon: "key",
+      url: "https://njfashion.co.kr/admin",                     title: "회사 웹사이트 관리자 페이지" },
+  ];
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [linksPos, setLinksPos] = useState(null);
+  const linksBtnRef = useRef(null);
+  // 사이드바는 overflow:hidden 이고 모바일에선 transform 까지 걸린다. 팝오버를 안에 두면
+  // 잘리므로 aside 바깥에 fixed 로 그리고, 위치는 버튼을 재서 잡는다.
+  const openLinks = () => {
+    const el = linksBtnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const W = 244;
+    setLinksPos({
+      left: Math.max(8, Math.min(r.left, window.innerWidth - W - 8)),
+      bottom: Math.max(8, window.innerHeight - r.top + 8),
+      width: W,
+    });
+    setLinksOpen(true);
+  };
+  useEffect(() => {
+    if (!linksOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setLinksOpen(false); };
+    const onMove = () => setLinksOpen(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onMove);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", onMove); };
+  }, [linksOpen]);
+  const extArrow = (c) => (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <path d="M8 16L16 8M9.5 8H16v6.5"/>
+    </svg>
+  );
+
   // 화면별 페이지 헤더 부제 (토스 핸드오프 — 제목은 TABS label, 부제는 아래 맵)
   const PAGE_SUBTITLES = {
     pricedb: "원단·부자재 단가 기준 관리",
@@ -18434,101 +18532,31 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             </React.Fragment>
           ))}
         </nav>
-        {/* 제품 카탈로그 — 외부 앱(catalog-app). 일반 탭과 헷갈리지 않게 구분선 + 오렌지 박스로 하단 분리·고정 */}
-        <div style={{ padding: sidebarCollapsed ? "10px 8px" : "10px 12px", borderTop: "1px solid rgba(255,255,255,0.09)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-          {/* 이카운트 ERP — 회계·재고 본 시스템 (새 탭) */}
-          <button onClick={() => window.open("https://login.ecount.com/Login/", "_blank", "noopener,noreferrer")}
-            title="이카운트 ERP 로그인 — 새 탭에서 열립니다"
+        {/* 바로가기 — 평소엔 이 한 줄만. 팝오버는 aside 바깥에 그린다(overflow:hidden 회피) */}
+        <div style={{ padding: sidebarCollapsed ? "10px 8px 12px" : "10px 12px 12px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
+          <button ref={linksBtnRef} onClick={() => linksOpen ? setLinksOpen(false) : openLinks()}
+            title={sidebarCollapsed ? "바로가기" : "연결된 사이트 열기"}
             style={{
-              display: "flex", alignItems: "center", gap: 10, width: "100%",
-              padding: sidebarCollapsed ? "10px 0" : "10px 12px",
-              border: "1px solid rgba(219,107,46,0.28)", borderRadius: 10,
-              background: "rgba(219,107,46,0.08)", color: "#DB6B2E",
-              cursor: "pointer", fontFamily: "inherit",
+              display: "flex", alignItems: "center", gap: 12, width: "100%",
+              padding: sidebarCollapsed ? "11px 0" : "11px 13px",
+              border: "none", borderRadius: 11,
+              background: linksOpen ? "rgba(219,107,46,0.14)" : "rgba(255,255,255,0.06)",
+              color: linksOpen ? "#DB6B2E" : "#B4BAC4",
+              cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600,
               justifyContent: sidebarCollapsed ? "center" : "flex-start", textAlign: "left",
-              transition: "background 0.15s",
+              transition: "background 0.15s, color 0.15s",
             }}
-            onMouseEnter={e => { e.currentTarget.style.background = "rgba(219,107,46,0.16)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "rgba(219,107,46,0.08)"; }}>
+            onMouseEnter={e => { if (!linksOpen) { e.currentTarget.style.background = "rgba(255,255,255,0.10)"; e.currentTarget.style.color = "#E5E8ED"; } }}
+            onMouseLeave={e => { if (!linksOpen) { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "#B4BAC4"; } }}>
             <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center" }}>
-              <Icon name="building" size={18} strokeWidth={1.8}/>
+              <Icon name="grip" size={18} strokeWidth={1.8}/>
             </span>
             {!sidebarCollapsed && (
-              <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>이카운트 ERP <span style={{ fontSize: 11, opacity: 0.7 }}>↗</span></span>
-                <span style={{ fontSize: 10, color: "rgba(219,107,46,0.7)", fontWeight: 500 }}>login.ecount.com · 새 탭</span>
-              </span>
-            )}
-          </button>
-          <button onClick={() => window.open("https://catalog-app.njsafety91.workers.dev/", "_blank", "noopener,noreferrer")}
-            title="제품 카탈로그 — 새 탭에서 열립니다"
-            style={{
-              display: "flex", alignItems: "center", gap: 10, width: "100%",
-              padding: sidebarCollapsed ? "10px 0" : "10px 12px",
-              border: "1px solid rgba(219,107,46,0.28)", borderRadius: 10,
-              background: "rgba(219,107,46,0.08)", color: "#DB6B2E",
-              cursor: "pointer", fontFamily: "inherit",
-              justifyContent: sidebarCollapsed ? "center" : "flex-start", textAlign: "left",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "rgba(219,107,46,0.16)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "rgba(219,107,46,0.08)"; }}>
-            <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center" }}>
-              <Icon name="image" size={18} strokeWidth={1.8}/>
-            </span>
-            {!sidebarCollapsed && (
-              <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>제품 카탈로그 <span style={{ fontSize: 11, opacity: 0.7 }}>↗</span></span>
-                <span style={{ fontSize: 10, color: "rgba(219,107,46,0.7)", fontWeight: 500 }}>외부 카탈로그 앱 · 새 탭</span>
-              </span>
-            )}
-          </button>
-          {/* 웹사이트 바로가기 — 회사 공개 웹사이트 홈 (새 탭) */}
-          <button onClick={() => window.open("https://nj-safety-website.njsafety91.workers.dev/", "_blank", "noopener,noreferrer")}
-            title="회사 웹사이트 — 새 탭에서 열립니다"
-            style={{
-              display: "flex", alignItems: "center", gap: 10, width: "100%",
-              padding: sidebarCollapsed ? "10px 0" : "10px 12px",
-              border: "1px solid rgba(219,107,46,0.28)", borderRadius: 10,
-              background: "rgba(219,107,46,0.08)", color: "#DB6B2E",
-              cursor: "pointer", fontFamily: "inherit",
-              justifyContent: sidebarCollapsed ? "center" : "flex-start", textAlign: "left",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "rgba(219,107,46,0.16)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "rgba(219,107,46,0.08)"; }}>
-            <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center" }}>
-              <Icon name="link" size={18} strokeWidth={1.8}/>
-            </span>
-            {!sidebarCollapsed && (
-              <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>웹사이트 바로가기 <span style={{ fontSize: 11, opacity: 0.7 }}>↗</span></span>
-                <span style={{ fontSize: 10, color: "rgba(219,107,46,0.7)", fontWeight: 500 }}>회사 홈페이지 · 새 탭</span>
-              </span>
-            )}
-          </button>
-          {/* 웹사이트 관리자 — 회사 도메인 admin (새 탭) */}
-          <button onClick={() => window.open("https://njfashion.co.kr/admin", "_blank", "noopener,noreferrer")}
-            title="웹사이트 관리자 — 새 탭에서 열립니다"
-            style={{
-              display: "flex", alignItems: "center", gap: 10, width: "100%",
-              padding: sidebarCollapsed ? "10px 0" : "10px 12px",
-              border: "1px solid rgba(219,107,46,0.28)", borderRadius: 10,
-              background: "rgba(219,107,46,0.08)", color: "#DB6B2E",
-              cursor: "pointer", fontFamily: "inherit",
-              justifyContent: sidebarCollapsed ? "center" : "flex-start", textAlign: "left",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "rgba(219,107,46,0.16)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "rgba(219,107,46,0.08)"; }}>
-            <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center" }}>
-              <Icon name="settings" size={18} strokeWidth={1.8}/>
-            </span>
-            {!sidebarCollapsed && (
-              <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.25, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>웹사이트 관리자 <span style={{ fontSize: 11, opacity: 0.7 }}>↗</span></span>
-                <span style={{ fontSize: 10, color: "rgba(219,107,46,0.7)", fontWeight: 500 }}>njfashion.co.kr/admin · 새 탭</span>
-              </span>
+              <>
+                <span style={{ flex: 1, whiteSpace: "nowrap" }}>바로가기</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: linksOpen ? "rgba(219,107,46,0.75)" : "#6B7685" }}>{EXTERNAL_LINKS.length}</span>
+                <span style={{ fontSize: 9, color: linksOpen ? "rgba(219,107,46,0.75)" : "#6B7685" }}>{linksOpen ? "▼" : "▲"}</span>
+              </>
             )}
           </button>
         </div>
@@ -18536,6 +18564,45 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           {sidebarCollapsed ? "v2" : "NJ SAFETY · v2"}
         </div>
       </aside>
+
+      {/* 바로가기 팝오버 — 사이드바의 overflow/transform 밖에서 그린다 */}
+      {linksOpen && linksPos && (
+        <>
+          <div onClick={() => setLinksOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 1000 }} />
+          <div className="frw-links-pop" style={{
+            position: "fixed", left: linksPos.left, bottom: linksPos.bottom, width: linksPos.width, zIndex: 1001,
+            padding: 6, borderRadius: 14, background: "#24262A",
+            border: "1px solid rgba(255,255,255,0.10)", boxShadow: "0 16px 40px rgba(0,0,0,0.5)",
+          }}>
+            {EXTERNAL_LINKS.map(l => (
+              <button key={l.id} title={l.title + " — 새 탭에서 열립니다"}
+                onClick={() => { window.open(l.url, "_blank", "noopener,noreferrer"); setLinksOpen(false); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, width: "100%",
+                  padding: "10px 11px", border: "none", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                  background: l.accent ? "rgba(219,107,46,0.14)" : "transparent",
+                  color: l.accent ? "#F0B48A" : "#B4BAC4",
+                  transition: "background 0.13s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = l.accent ? "rgba(219,107,46,0.22)" : "rgba(255,255,255,0.07)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = l.accent ? "rgba(219,107,46,0.14)" : "transparent"; }}>
+                <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center", color: l.accent ? "#DB6B2E" : "#8B95A1" }}>
+                  <Icon name={l.icon} size={18} strokeWidth={1.8}/>
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 12.5, fontWeight: l.accent ? 700 : 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.label}</span>
+                  <span style={{ display: "block", fontSize: 10, marginTop: 1, color: l.accent ? "#8A6249" : "#5B6472", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.host}</span>
+                </span>
+                {extArrow(l.accent ? "#8A6249" : "#5B6472")}
+              </button>
+            ))}
+          </div>
+          <style>{`
+            .frw-links-pop { animation: frwLinksPop .16s cubic-bezier(.2,.9,.3,1.15); transform-origin: bottom left; }
+            @keyframes frwLinksPop { from { opacity: 0; transform: translateY(6px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+          `}</style>
+        </>
+      )}
 
       {/* ── 메인 영역 ── */}
       <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: "12px 12px 12px 12px", gap: 12 }}>
