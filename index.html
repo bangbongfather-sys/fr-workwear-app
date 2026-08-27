@@ -343,6 +343,40 @@
     /* 목록 스크롤바는 얇게 (전역 규칙과 동일 톤) */
     .pdb-list::-webkit-scrollbar { width: 6px; }
 
+    /* 아주 좁은 폰(≤400px)에서 헤더 우측 버튼이 화면 밖으로 밀리지 않게 간격·여백 축소 */
+    @media (max-width: 400px) {
+      .app-header > div { gap: 6px !important; padding-left: 10px !important; padding-right: 10px !important; }
+    }
+
+    /* 동기화 상태 뱃지 — 좁은 화면에서는 긴 라벨을 짧게 (헤더가 넘치거나 글자가 세로로 쌓이는 것 방지) */
+    .sync-badge .sb-short { display: none; }
+    @media (max-width: 480px) {
+      .sync-badge .sb-full { display: none; }
+      .sync-badge .sb-short { display: inline; }
+    }
+
+    /* ─── 서브탭 바 (장부·자금·발주·일정·단가표 …) ───
+       좁은 화면에서 칸이 눌리면 한글이 한 글자씩 세로로 쌓여 보기 흉했다.
+       버튼은 절대 줄바꿈하지 않고, 폭이 모자라면 바 자체가 가로로 스크롤된다. */
+    .subtab-strip > button { white-space: nowrap; flex-shrink: 0; }
+    @media (max-width: 768px) {
+      .subtab-strip {
+        width: 100% !important; max-width: 100% !important;
+        overflow-x: auto !important; flex-wrap: nowrap !important;
+        -webkit-overflow-scrolling: touch;
+        scroll-snap-type: x proximity;
+        scrollbar-width: none;
+      }
+      .subtab-strip::-webkit-scrollbar { display: none; }
+      .subtab-strip > button {
+        padding: 9px 13px !important; font-size: 12.5px !important; gap: 6px !important;
+        scroll-snap-align: center;
+      }
+    }
+    @media (max-width: 380px) {
+      .subtab-strip > button { padding: 9px 11px !important; font-size: 12px !important; }
+    }
+
     /* ─── KPI 스트립 (시안 D) — 좁은 화면에서 4칸 → 2×2 ─── */
     @media (max-width: 900px) {
       .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
@@ -9595,7 +9629,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 토글 */}
-      <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content" }}>
+      <div className="no-print subtab-strip" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content" }}>
         {ledgerSubOrder.order.map(id => {
           const { label, icon: ic } = LEDGER_SUBTABS[id] || {};
           if (!label) return null;
@@ -11104,7 +11138,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 */}
-      <div className="no-print scroll-x" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content", flexWrap: "wrap" }}>
+      <div className="no-print scroll-x subtab-strip" style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, width: "fit-content", flexWrap: "wrap" }}>
         {treasurySubOrder.order.map(id => {
           const cfg = TREASURY_SUBTABS[id]; if (!cfg) return null;
           const dragging = treasurySubOrder.isDragging(id);
@@ -18191,18 +18225,20 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
   const SyncBadge = () => {
     const styles = {
-      wrap: { display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 100, padding: "5px 12px", border: `1px solid ${darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"}`, background: darkMode ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)", color: darkMode ? "rgba(239,241,244,0.78)" : "rgba(15,15,26,0.6)" },
-      text: { fontSize: 12, fontWeight: 600, letterSpacing: -0.1 },
+      // flexShrink:0 + nowrap — 좁은 헤더에서 눌리면 "연결 오류 · 재시도"가
+      // 한 글자씩 세로로 쌓여 보였다
+      wrap: { display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 100, padding: "5px 12px", border: `1px solid ${darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)"}`, background: darkMode ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)", color: darkMode ? "rgba(239,241,244,0.78)" : "rgba(15,15,26,0.6)", whiteSpace: "nowrap", flexShrink: 0 },
+      text: { fontSize: 12, fontWeight: 600, letterSpacing: -0.1, whiteSpace: "nowrap" },
     };
-    if (syncStatus === "syncing") return <div style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span style={styles.text}>저장 중</span></div>;
+    if (syncStatus === "syncing") return <div className="sync-badge" style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span style={styles.text}>저장 중</span></div>;
     // "동기화됨"도 눌러서 즉시 확인할 수 있게 — 저장 대기분이 있으면 바로 밀어올리고,
     // 없으면 클라우드 최신본을 다시 받아온다. (정말 저장됐는지 불안할 때 쓰는 수단)
     if (syncStatus === "saved") return <div onClick={() => {
       if (dirtySections.current.size > 0) { if (syncTimer.current) { clearTimeout(syncTimer.current); syncTimer.current = null; } setSyncStatus("syncing"); runSave(0); }
       else { setSyncStatus("syncing"); cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); showToast("클라우드 최신본으로 맞췄습니다 ✓"); }).catch(() => setSyncStatus("error")); }
-    }} style={{ ...styles.wrap, cursor: "pointer" }} title="클릭하면 지금 바로 동기화합니다 (저장 대기분이 있으면 즉시 저장, 없으면 클라우드 최신본 확인)"><Icon name="check" size={13}/><span style={styles.text}>동기화됨</span></div>;
-    if (syncStatus === "conflict") return <div onClick={() => window.location.reload()} style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="같은 항목을 다른 기기에서도 동시에 수정했어요. 다른 항목들은 자동으로 합쳐 저장됐습니다. 클릭하면 이 항목을 최신본으로 새로고침합니다 (지금 화면의 이 항목 수정은 사라질 수 있어요)."><Icon name="alert" size={13}/><span style={styles.text}>충돌 · 새로고침</span></div>;
-    return <div onClick={() => { if (dirtySections.current.size > 0) { setOnlineRetryTick(t => t + 1); } else { setSyncStatus("syncing"); cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error")); } }} style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="클라우드 저장에 실패했어요. 클릭하면 즉시 재시도합니다. (자동으로도 8초마다 재시도돼요)"><Icon name="alert" size={13}/><span style={styles.text}>연결 오류 · 재시도</span></div>;
+    }} className="sync-badge" style={{ ...styles.wrap, cursor: "pointer" }} title="클릭하면 지금 바로 동기화합니다 (저장 대기분이 있으면 즉시 저장, 없으면 클라우드 최신본 확인)"><Icon name="check" size={13}/><span style={styles.text}>동기화됨</span></div>;
+    if (syncStatus === "conflict") return <div onClick={() => window.location.reload()} className="sync-badge" style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="같은 항목을 다른 기기에서도 동시에 수정했어요. 다른 항목들은 자동으로 합쳐 저장됐습니다. 클릭하면 이 항목을 최신본으로 새로고침합니다 (지금 화면의 이 항목 수정은 사라질 수 있어요)."><Icon name="alert" size={13}/><span style={styles.text}><span className="sb-full">충돌 · 새로고침</span><span className="sb-short">충돌</span></span></div>;
+    return <div onClick={() => { if (dirtySections.current.size > 0) { setOnlineRetryTick(t => t + 1); } else { setSyncStatus("syncing"); cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error")); } }} className="sync-badge" style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="클라우드 저장에 실패했어요. 클릭하면 즉시 재시도합니다. (자동으로도 8초마다 재시도돼요)"><Icon name="alert" size={13}/><span style={styles.text}><span className="sb-full">연결 오류 · 재시도</span><span className="sb-short">재시도</span></span></div>;
   };
 
   // 인라인 스타일용 테마 토큰
@@ -18823,7 +18859,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "calc" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* 서브탭 네비게이션 */}
-            <div className="no-print scroll-x" style={{ display: "flex", gap: 4, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
+            <div className="no-print scroll-x subtab-strip" style={{ display: "flex", gap: 4, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
               {calcSubOrder.order.map(id => {
                 const cfg = CALC_SUBTABS[id]; if (!cfg) return null;
                 const dragging = calcSubOrder.isDragging(id);
@@ -19872,7 +19908,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "quote" && (
           <div>
             {/* 서브탭 네비게이션 */}
-            <div className="no-print scroll-x" style={{ display: "flex", gap: 4, marginBottom: 20, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
+            <div className="no-print scroll-x subtab-strip" style={{ display: "flex", gap: 4, marginBottom: 20, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
               {quoteSubOrder.order.map(id => {
                 const cfg = QUOTE_SUBTABS[id]; if (!cfg) return null;
                 const dragging = quoteSubOrder.isDragging(id);
@@ -24487,7 +24523,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* 서브탭 네비게이션 */}
-      <div className="no-print" style={{ display: "flex", gap: 4, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
+      <div className="no-print subtab-strip" style={{ display: "flex", gap: 4, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
         {scheduleSubOrder.order.map(id => {
           const cfg = SCHEDULE_SUBTABS[id]; if (!cfg) return null;
           const dragging = scheduleSubOrder.isDragging(id);
