@@ -1,11 +1,13 @@
-// ── Claude 커스텀 커넥터용 MCP 서버 (authless, stateless Streamable HTTP) ──
+// ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
 //
 // 프로토콜: JSON-RPC 2.0 over HTTP POST /mcp.
 //  - 세션/서버주도 스트리밍 없음(stateless). 단일 요청-응답만 처리.
 //  - 클라이언트가 Accept: text/event-stream 요청 시 단일 message 이벤트(SSE)로 응답, 아니면 JSON.
-//  - 인증 없음 — 개인/내부용. 민감 쓰기 도구는 추가하지 않고 읽기 전용만 노출.
+//  - 기본은 읽기 전용. 유일한 쓰기 도구는 mark_tax_paid(세무 탭 납부일 기록)뿐이며,
+//    MCP_TOKEN 이 설정돼 엔드포인트가 잠겨 있을 때를 전제로 한다. 토큰을 해제하면
+//    누구나 납부일을 고칠 수 있으니 반드시 유지할 것.
 //
 // 도구는 worker가 이미 쓰는 FIREBASE_DB_SECRET으로 RTDB를 직접 읽는다.
 
@@ -123,6 +125,23 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "mark_tax_paid",
+    description:
+      "세무 탭의 특정 고지 건에 납부일을 기록합니다(또는 지웁니다). 대상은 id로 지정하며, get_business_section(section:\"taxes\")로 먼저 id를 확인하세요. paidDate 필드만 바꾸고 금액·기한·메모는 건드리지 않습니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: ["string", "number"], description: "세무 레코드의 id (taxes 조회 결과의 id 값)" },
+        paidDate: {
+          type: "string",
+          description: "납부일 YYYY-MM-DD. 빈 문자열(\"\")을 주면 납부 기록을 지우고 미납으로 되돌립니다.",
+        },
+      },
+      required: ["id", "paidDate"],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
 ];
 
 async function fbGet(node, secret) {
@@ -130,6 +149,44 @@ async function fbGet(node, secret) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Firebase ${res.status}`);
   return await res.json();
+}
+
+// 지정한 노드의 일부 필드만 갱신(RTDB PATCH). 노드 전체를 덮어쓰지 않는다.
+async function fbPatch(node, patch, secret) {
+  const url = `https://${FB_HOST}${node}.json?auth=${encodeURIComponent(secret)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`Firebase ${res.status}`);
+  return await res.json();
+}
+
+// YYYY-MM-DD 가 실제로 존재하는 날짜인지. Date.parse 는 2026-02-30 을
+// 3월 2일로 굴려버리므로 구성요소를 되짚어 확인해야 한다.
+function isRealDate(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return false;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+// /frw/<section> 에서 id가 일치하는 레코드의 RTDB 키를 찾는다.
+// 배열로 저장돼 있으면 인덱스, 객체면 그 키. 못 찾으면 null.
+function findRecordKey(data, id) {
+  const want = String(id);
+  if (Array.isArray(data)) {
+    const i = data.findIndex((r) => r && String(r.id) === want);
+    return i >= 0 ? { key: String(i), record: data[i] } : null;
+  }
+  if (data && typeof data === "object") {
+    for (const [k, v] of Object.entries(data)) {
+      if (v && String(v.id) === want) return { key: k, record: v };
+    }
+  }
+  return null;
 }
 
 function textContent(obj) {
@@ -280,6 +337,48 @@ async function toolGetPricing(args, env) {
   return textContent({ 제품수: out.length, 제품: out });
 }
 
+// 세무 탭의 납부일만 기록/해제한다. 유일한 쓰기 도구이므로 대상과 형식을 엄격히 검증한다.
+async function toolMarkTaxPaid(args, env) {
+  const id = args.id;
+  if (id === undefined || id === null || String(id).trim() === "") {
+    return errContent("id가 필요합니다. get_business_section(section:\"taxes\")로 대상 건의 id를 먼저 확인하세요.");
+  }
+  const paidDate = String(args.paidDate ?? "");
+  if (paidDate !== "" && !isRealDate(paidDate)) {
+    return errContent(
+      `paidDate 가 잘못됐습니다: "${paidDate}". 실제로 존재하는 YYYY-MM-DD 날짜 또는 빈 문자열이어야 합니다.`);
+  }
+
+  const data = await fbGet("/frw/taxes", env.FIREBASE_DB_SECRET);
+  const found = findRecordKey(data, id);
+  if (!found) return errContent(`세무 탭에 id=${id} 인 건이 없습니다.`);
+
+  const before = found.record.paidDate || "";
+  if (before === paidDate) {
+    return textContent({
+      결과: "변경 없음",
+      사유: paidDate === "" ? "이미 미납 상태입니다." : `이미 ${paidDate} 로 기록돼 있습니다.`,
+      건: { id: found.record.id, 세목: found.record.taxType, 기간: found.record.period, 사업체: found.record.biz },
+    });
+  }
+
+  await fbPatch(`/frw/taxes/${found.key}`, { paidDate }, env.FIREBASE_DB_SECRET);
+
+  return textContent({
+    결과: paidDate === "" ? "납부 기록 해제" : "납부일 기록 완료",
+    건: {
+      id: found.record.id,
+      세목: found.record.taxType,
+      기간: found.record.period,
+      사업체: found.record.biz,
+      금액: found.record.amount,
+      기한: found.record.dueDate,
+    },
+    이전_납부일: before || "(없음)",
+    변경_납부일: paidDate || "(없음)",
+  });
+}
+
 async function callTool(params, env) {
   const name = params?.name;
   const args = params?.arguments || {};
@@ -290,6 +389,7 @@ async function callTool(params, env) {
     if (name === "get_business_section") return await toolGetSection(args, env);
     if (name === "search_purchases") return await toolSearchPurchases(args, env);
     if (name === "get_pricing") return await toolGetPricing(args, env);
+    if (name === "mark_tax_paid") return await toolMarkTaxPaid(args, env);
     return errContent(`알 수 없는 도구: ${name}`);
   } catch (e) {
     return errContent(`도구 실행 오류: ${e?.message || String(e)}`);

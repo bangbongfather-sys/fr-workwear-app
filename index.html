@@ -8174,7 +8174,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         });
         if (!fresh.length) { showToast(`새 입금 내역이 없습니다. (이미 가져온 ${dup}건 제외)`); return; }
         setBankDeposits(prev => ({
-          items: [...(((prev || {}).items) || []), ...fresh].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id),
+          items: [...(((prev || {}).items) || []), ...fresh].sort((a, b) => String(b.date||"").localeCompare(String(a.date||"")) || (a.id - b.id)),
           nameMap: ((prev || {}).nameMap) || {},
         }));
         showToast(`✅ 입금 ${fresh.length}건 가져왔습니다${dup ? ` (중복 ${dup}건 제외)` : ""}`, "success");
@@ -8285,6 +8285,9 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   // 남겨 둔 건은 합계·전체선택에서 뺀다. 이미 처리된 돈이라 미처리 합계에 섞이면 안 된다.
   const shownActive = pendingView ? shown.filter(x => !justDone.has(x.id)) : shown;
   const justDoneShown = pendingView ? shown.filter(x => justDone.has(x.id)) : [];
+  // 저장된 배열 순서를 믿지 않는다. 날짜는 최신순, 같은 날짜 안에서는 엑셀에 적힌 순서.
+  // id 는 파싱할 때 파일 위→아래로 매겨지므로 오름차순이 곧 파일 순서다.
+  const shownSorted = [...shown].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id));
   // 합계: 표시 중인 항목 / 체크 선택한 항목
   const shownTotal = shownActive.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
   const selectedItems = items.filter(x => selectedIds.has(x.id));
@@ -8512,7 +8515,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const [focusMode, setFocusMode] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
   const [focusPick, setFocusPick] = useState("");
-  const focusQueue = shown.filter(x => x.status === "pending");
+  const focusQueue = shownSorted.filter(x => x.status === "pending");
   const focusDep = focusQueue.length ? focusQueue[Math.min(focusIdx, focusQueue.length - 1)] : null;
   const focusRef = useRef({});
   focusRef.current = { dep: focusDep, len: focusQueue.length, pick: focusPick };
@@ -8544,7 +8547,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const WD = ["일", "월", "화", "수", "목", "금", "토"];
   const dayLabel = (d) => { const [y, m, dd] = String(d).split("-").map(Number); return `${m}월 ${dd}일 (${WD[new Date(y, m - 1, dd).getDay()]})`; };
   const dayGroups = [];
-  shown.forEach(x => {
+  shownSorted.forEach(x => {
     const last = dayGroups[dayGroups.length - 1];
     if (last && last.date === x.date) { last.rows.push(x); last.sum += parseFloat(x.amount) || 0; }
     else dayGroups.push({ date: x.date, rows: [x], sum: parseFloat(x.amount) || 0 });
