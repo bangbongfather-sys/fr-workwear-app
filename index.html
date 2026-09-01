@@ -8511,6 +8511,61 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     showToast(`${doneIds.length}건 입금완료 처리했습니다`, "success");
   };
 
+  // ── 미수금 원장에 쌓인 입금이 어느 달 청구액과 맞는지 ──
+  // 입금을 원장에 기록해 두면 잔액은 줄지만 그 달 청구는 계속 "미입금"으로 남는다.
+  // 합이 청구액과 맞는 순간 그 달을 닫고, 원장에 쌓아 둔 입금은 지운다.
+  // 잔액 = 미입금청구합 + 수동청구 − 원장입금합 이므로, 청구를 입금완료로 바꾸면서
+  // 같은 금액의 원장 입금을 지워야 잔액이 그대로다. 안 지우면 두 번 차감된다.
+  const arSettle = React.useMemo(() => {
+    const out = [];
+    Object.keys(clientAR || {}).forEach(name => {
+      const paidEntries = (((clientAR[name] || {}).entries) || []).filter(e => e.type === "입금");
+      if (!paidEntries.length) return;
+      const sum = paidEntries.reduce((a, e) => a + (parseFloat(e.amount) || 0), 0);
+      if (!(sum > 0)) return;
+      const ups = unpaidOf(name);
+      if (!ups.length) return;
+      const exact = ups.find(u => Math.round(u.total) === Math.round(sum)) || null;
+      let near = null;
+      if (!exact) ups.forEach(u => {
+        const d = Math.round(sum) - Math.round(u.total);
+        if (!near || Math.abs(d) < Math.abs(near.diff)) near = { ...u, diff: d };
+      });
+      out.push({ name, paidEntries, sum, exact, near });
+    });
+    return out.sort((a, b) => (b.exact ? 1 : 0) - (a.exact ? 1 : 0) || b.sum - a.sum);
+  }, [clientAR, unpaidCache]);
+  const arSettleReady = arSettle.filter(x => x.exact);
+
+  const settleMonthFromAR = (row) => {
+    const u = row.exact;
+    if (!u) return;
+    const ids = new Set(row.paidEntries.map(e => e.id));
+    if (!window.confirm(
+      `"${row.name}" ${u.ym} 청구 ${fmt(u.total)}원을 입금완료로 처리합니다.\n\n` +
+      `· 미수금 원장에 쌓아 둔 입금 ${row.paidEntries.length}건 ${fmt(row.sum)}원을 지웁니다\n` +
+      `· 그 입금들은 ${u.ym} 장부 청구에 붙습니다\n` +
+      `· 미수금 잔액은 그대로입니다 (청구가 빠지는 만큼 입금도 빠집니다)\n\n계속할까요?`
+    )) return;
+
+    setLedgers(prev => {
+      const m = prev[u.ym]; if (!m) return prev;
+      return { ...prev, [u.ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === String(u.id) ? { ...c, status: "입금완료" } : c) } };
+    });
+    setClientAR(prev => {
+      const cur = prev[row.name]; if (!cur) return prev;
+      return { ...prev, [row.name]: { ...cur, entries: (cur.entries || []).filter(e => !ids.has(e.id)) } };
+    });
+    // 원장에 걸려 있던 입금 행들을 그 달 청구로 옮겨 단다 — 되돌리기가 제대로 동작하게
+    setBankDeposits(prev => ({
+      items: (((prev || {}).items) || []).map(x =>
+        (x.link && x.link.kind === "ar" && ids.has(x.link.entryId))
+          ? { ...x, link: { kind: "ledger", ym: u.ym, clientId: String(u.id) } } : x),
+      nameMap: ((prev || {}).nameMap) || {},
+    }));
+    showToast(`"${row.name}" ${u.ym} 수금 완료 — 원장 입금 ${row.paidEntries.length}건을 정리했습니다`, "success");
+  };
+
   // ── 하나씩 보기 (빠른 처리) ──
   const [focusMode, setFocusMode] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
@@ -8767,6 +8822,64 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                 ✓ 추천대로 {pendingSug.length}건 확인
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 미수금 원장에 쌓인 입금 → 그 달 수금 닫기 */}
+      {arSettle.length > 0 && (
+        <div style={{ borderRadius: 14, padding: "14px 18px",
+          border: arSettleReady.length ? "1.5px solid rgba(3,178,108,0.45)" : "1px solid var(--border)",
+          background: arSettleReady.length ? "rgba(3,178,108,0.06)" : "var(--surface)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 11 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13.5, fontWeight: 800, color: "var(--text1)" }}>
+              <Icon name="ledger" size={15} />미수금 원장에 쌓인 입금
+            </span>
+            {arSettleReady.length > 0 && (
+              <span style={{ padding: "2px 9px", borderRadius: 100, background: "var(--positive)", color: "#fff", fontSize: 11, fontWeight: 800 }}>
+                {arSettleReady.length}곳 청구액과 일치
+              </span>
+            )}
+            <div style={{ flex: 1 }} />
+            <span style={{ fontSize: 11.5, color: "var(--text3)" }}>합이 맞는 달은 여기서 바로 닫을 수 있습니다</span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {arSettle.slice(0, 8).map(row => (
+              <div key={row.name} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 13px", borderRadius: 11,
+                background: "var(--surface)", border: row.exact ? "1px solid rgba(3,178,108,0.35)" : "1px solid var(--divider)" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{row.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 2 }}>
+                    원장 입금 {row.paidEntries.length}건 · <b style={{ color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{fmt(row.sum)}원</b>
+                  </div>
+                </div>
+                <div style={{ flex: 1 }} />
+                {row.exact ? (
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--text2)", textAlign: "right" }}>
+                      <div>{row.exact.ym} 청구 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(row.exact.total)}원</b></div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "var(--positive-text)", marginTop: 2 }}>✓ 금액이 정확히 일치합니다</div>
+                    </div>
+                    <button onClick={() => settleMonthFromAR(row)}
+                      title={`${row.exact.ym} 청구를 입금완료로 바꾸고 원장 입금을 정리합니다`}
+                      style={{ height: 36, padding: "0 16px", borderRadius: 10, border: "none", background: "#03B26C", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                      {row.exact.ym} 수금 완료
+                    </button>
+                  </>
+                ) : row.near ? (
+                  <div style={{ fontSize: 12, color: "var(--text3)", textAlign: "right" }}>
+                    <div>가장 가까운 {row.near.ym} 청구 <b style={{ color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{fmt(row.near.total)}원</b></div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--negative-text)", marginTop: 2 }}>
+                      {fmt(Math.abs(row.near.diff))}원 {row.near.diff > 0 ? "초과" : "부족"} — 나머지가 들어오면 여기서 닫힙니다
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ))}
+            {arSettle.length > 8 && (
+              <div style={{ fontSize: 11.5, color: "var(--text3)", paddingLeft: 3 }}>외 {arSettle.length - 8}곳 — 장부 → 거래처별 미수금에서 볼 수 있습니다</div>
+            )}
           </div>
         </div>
       )}
