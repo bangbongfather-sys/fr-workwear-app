@@ -8054,7 +8054,7 @@ function ClientRankSection({ ledgers = {}, darkMode }) {
 // 장부의 미입금 청구를 입금완료 처리하거나 미수금 원장에 입금으로 기록한다.
 // 한 번 지정한 입금자명→거래처 매핑은 기억해 다음 업로드부터 자동 추천.
 // (은행 인증정보는 어디에도 저장하지 않음 — 엑셀 파일만 사용)
-function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedgers, clientAR = {}, setClientAR, clients = [], darkMode }) {
+function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedgers, clientAR = {}, setClientAR, clients = [], darkMode, focusClient = null, clearFocus, onBackToLedger }) {
   const items = (bankDeposits && bankDeposits.items) || [];
   const nameMap = (bankDeposits && bankDeposits.nameMap) || {};
   const [dragActive, setDragActive] = useState(false);
@@ -8069,6 +8069,17 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const fmt = (n) => Math.round(parseFloat(n) || 0).toLocaleString();
   useEffect(() => { save("frw_bank_dep_filter", filter); }, [filter]);
   useEffect(() => { save("frw_bank_dep_search", search); }, [search]);
+  // 월별 장부에서 "이 거래처 입금내역 확인" 으로 넘어온 경우 — 거래처명으로 검색하고
+  // 처리완료 건까지 다 보이도록 필터를 '전체'로 바꾼다 (미처리만 보이면 이미 들어온 돈을 놓친다)
+  const [fromLedger, setFromLedger] = useState(null); // 장부에서 넘어온 거래처명 (안내 띠 표시용)
+  useEffect(() => {
+    if (!focusClient) return;
+    setSearch(focusClient);
+    setFilter("all");
+    setFromLedger(focusClient);
+    if (clearFocus) clearFocus();
+  }, [focusClient]);
+  useEffect(() => { if (fromLedger && search.trim() !== fromLedger) setFromLedger(null); }, [search]);
   useEffect(() => { save("frw_bank_dep_selected", Array.from(selectedIds)); }, [selectedIds]);
 
   // 거래처 후보: 거래처별 단가 + 모든 월 장부 + 미수금 원장의 이름 합집합
@@ -8909,6 +8920,19 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       )}
 
       {/* 필터 + 검색 */}
+      {fromLedger && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", borderRadius: 12, background: "rgba(219,107,46,0.08)", border: "1px solid rgba(219,107,46,0.35)" }}>
+          <Icon name="ledger" size={15} style={{ color: "#DB6B2E", flexShrink: 0 }}/>
+          <span style={{ fontSize: 12.5, color: "var(--text1)" }}>
+            월별 장부에서 넘어옴 — <b style={{ color: "#DB6B2E" }}>{fromLedger}</b> 입금내역만 보고 있습니다 <span style={{ color: "var(--text3)" }}>(처리완료 포함 전체)</span>
+          </span>
+          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+            {onBackToLedger && <button onClick={onBackToLedger} style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>← 월별 장부로</button>}
+            <button onClick={() => { setSearch(""); setFromLedger(null); }} style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "none", background: "var(--surface2)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>검색 해제</button>
+          </span>
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <button onClick={() => setFilter("pending")} style={chipStyle(filter === "pending")}>미처리 {pending.length}건</button>
         <button onClick={() => setFilter("done")} style={chipStyle(filter === "done")}>처리완료 {done.length}건 · {fmt(doneTotal)}원</button>
@@ -9742,6 +9766,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   const LEDGER_SUBTABS = { monthly: { label: "월별 장부", icon: "ledger" }, ar: { label: "거래처별 미수금", icon: "treasury" }, pattern: { label: "수금 패턴", icon: "trendingUp" }, deposits: { label: "입금내역", icon: "coins" }, yearly: { label: "연매출 추이", icon: "dashboard" } };
   const ledgerSubOrder = useSubtabOrder("frw_ledger_subtab_order", ["monthly", "ar", "pattern", "deposits", "yearly"], "data-ledger-sub");
   const [arJumpName, setArJumpName] = useState(null); // 수금 패턴 행 클릭 → 거래처별 미수금으로 점프
+  const [depJumpName, setDepJumpName] = useState(null); // 월별 장부 거래처 → 입금내역으로 점프 (거래처명 자동 검색)
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 토글 */}
@@ -9780,7 +9805,8 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         <CollectionPatternView ledgers={ledgers} clientAR={clientAR} bankDeposits={bankDeposits} darkMode={darkMode} onJump={(name) => { setArJumpName(name); setSubTab("ar"); }} />
       )}
       {subTab === "deposits" && (
-        <BankDepositsView bankDeposits={bankDeposits} setBankDeposits={setBankDeposits} ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} clients={clients} darkMode={darkMode} />
+        <BankDepositsView bankDeposits={bankDeposits} setBankDeposits={setBankDeposits} ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} clients={clients} darkMode={darkMode}
+          focusClient={depJumpName} clearFocus={() => setDepJumpName(null)} onBackToLedger={() => setSubTab("monthly")} />
       )}
       {subTab !== "yearly" && subTab !== "ar" && subTab !== "pattern" && subTab !== "deposits" && (<>
       {/* 헤더 + 월 선택 */}
@@ -10125,6 +10151,22 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
                               <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="ledger" size={14}/>자동 미수금 (장부 미입금 상태)</span></div>
                               <div style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"rgba(219, 107, 46,0.1)",color:"#DB6B2E",fontWeight:700}}>장부에서 입금완료로 바꾸면 자동 차감</div>
+                              {/* 이 거래처의 은행 입금내역으로 바로 이동 — 입금내역 탭에서 거래처명으로 자동 검색 */}
+                              {(() => {
+                                const nm = (c.name||"").trim();
+                                const nq = nm.toLowerCase();
+                                const depItems = ((bankDeposits||{}).items)||[];
+                                const hit = nq ? depItems.filter(d => [d.client, d.name, d.memo].some(v => (v||"").toLowerCase().includes(nq))) : [];
+                                const doneN = hit.filter(d => d.status === "done").length;
+                                return (
+                                  <button onClick={() => { setDepJumpName(nm); setSubTab("deposits"); }} disabled={!nm}
+                                    title="입금내역 탭으로 이동해 이 거래처명으로 자동 검색합니다 (처리완료 포함)"
+                                    style={{marginLeft:"auto",height:32,padding:"0 13px",borderRadius:8,border:"1px solid rgba(219,107,46,0.4)",background:"rgba(219,107,46,0.10)",color:"#DB6B2E",fontSize:12,fontWeight:800,cursor:nm?"pointer":"not-allowed",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>
+                                    <Icon name="coins" size={13}/>이 거래처 입금내역 확인하기
+                                    <span style={{fontSize:10.5,fontWeight:700,padding:"1px 7px",borderRadius:100,background:hit.length?"#DB6B2E":"var(--surface)",color:hit.length?"#fff":"var(--text3)",border:hit.length?"none":"1px solid var(--border)"}}>{hit.length ? `${hit.length}건${doneN?` · 완료 ${doneN}`:""}` : "0건"}</span>
+                                  </button>
+                                );
+                              })()}
                             </div>
                             {(() => {
                               const unpaidRows = expAutoEntries.filter(e => e.status === "미입금");
