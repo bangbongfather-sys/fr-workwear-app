@@ -1603,28 +1603,79 @@ function showToast(message, type) {
   } catch { /* 토스트 실패는 조용히 무시 */ }
 }
 
-function load(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
-}
-// localStorage 쓰기 실패(quota 초과 등)는 사용자가 모르고 데이터 일관성이 깨지므로
-// 1회 한정으로 사용자에게 알림. 가장 흔한 원인: 너무 많은 견적/이미지 → quota 초과.
+// ── 로컬 저장 2단 구조: localStorage(작은 값) + IndexedDB(큰 값·용량 초과분) ──
+// localStorage는 폰 사파리 기준 5MB가 한계라 첨부 사진이 몇 장만 쌓여도 "저장 공간 부족"이 떴다.
+// IndexedDB는 수백 MB까지 쓸 수 있으므로, 큰 값(LS_BIG_LIMIT 초과)이나 localStorage가
+// 꽉 차서 못 쓴 값은 IndexedDB(frw_db/kv, "ls:" 접두)로 보낸다.
+// load()는 동기 함수라 IndexedDB를 바로 읽을 수 없는데, 부팅 스크립트가 앱 실행 전에
+// "ls:" 항목을 전부 읽어 window.__frwKV(Map)에 담아 두므로 여기서는 그 메모리 사본을 본다.
+// 클라우드 동기화는 React 상태를 기준으로 하므로 저장 위치와 무관하게 그대로 동작한다.
+const LS_BIG_LIMIT = 200 * 1024;
+const _kvMem = (typeof window !== "undefined" && window.__frwKV instanceof Map) ? window.__frwKV : new Map();
+const _kvPending = new Map(); // key → 문자열(저장) | null(삭제) — 150ms 안에 모아 한 트랜잭션으로
+let _kvFlushTimer = null;
 let _saveErrAlerted = false;
-function save(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    if (!_saveErrAlerted) {
-      _saveErrAlerted = true;
-      console.warn("[save] localStorage 쓰기 실패", key, e);
-      // alert 은 렌더 흐름 안에서 부담스러우니 setTimeout 으로
-      setTimeout(() => {
-        try {
-          showToast("⚠️ 브라우저 저장 공간이 부족합니다.\n\n오래된 견적/이미지를 삭제하거나 사용 중인 다른 사이트의 데이터를 정리해 주세요.\n클라우드 동기화는 정상 작동합니다.");
-        } catch {}
-      }, 100);
-    }
-  }
+function _kvNotifyFail(e) {
+  if (_saveErrAlerted) return;
+  _saveErrAlerted = true;
+  console.warn("[save] 로컬 저장 실패", e);
+  setTimeout(() => { try { showToast("⚠️ 브라우저에 로컬 저장을 못 했습니다.\n\n시크릿 모드이거나 기기 저장 공간이 거의 없을 수 있어요.\n클라우드 동기화는 정상 작동하니 작업 내용은 안전합니다."); } catch {} }, 100);
 }
+function _kvQueue(key, strOrNull) {
+  _kvPending.set(key, strOrNull);
+  if (_kvFlushTimer) return;
+  _kvFlushTimer = setTimeout(async () => {
+    _kvFlushTimer = null;
+    const batch = new Map(_kvPending); _kvPending.clear();
+    try {
+      const db = await idbOpen();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction("kv", "readwrite");
+        const st = tx.objectStore("kv");
+        batch.forEach((v, k) => { if (v == null) st.delete("ls:" + k); else st.put(v, "ls:" + k); });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    } catch (e) { _kvNotifyFail(e); }
+  }, 150);
+}
+function load(key, fallback) {
+  try {
+    const v = localStorage.getItem(key);
+    if (v != null) return JSON.parse(v);
+    if (_kvMem.has(key)) { const sv = _kvMem.get(key); return sv ? JSON.parse(sv) : fallback; }
+    return fallback;
+  } catch { return fallback; }
+}
+function save(key, value) {
+  let str;
+  try { str = JSON.stringify(value); } catch (e) { console.warn("[save] 직렬화 실패", key, e); return; }
+  if (str.length <= LS_BIG_LIMIT) {
+    try {
+      localStorage.setItem(key, str);
+      if (_kvMem.has(key)) { _kvMem.delete(key); _kvQueue(key, null); } // 작아졌으면 IndexedDB 사본 정리
+      return;
+    } catch (e) { /* quota 초과 → 아래 IndexedDB 경로 */ }
+  }
+  try { localStorage.removeItem(key); } catch {}
+  _kvMem.set(key, str);
+  _kvQueue(key, str);
+}
+// 첫 실행 시 이미 localStorage에 들어 있는 큰 값을 IndexedDB로 옮겨 공간을 비운다.
+// (이걸 안 하면 다른 작은 값 저장이 계속 실패한 채로 남는다)
+(function migrateBigLocalStorage() {
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("frw_")) keys.push(k); }
+    let moved = 0;
+    for (const k of keys) {
+      const v = localStorage.getItem(k);
+      if (v != null && v.length > LS_BIG_LIMIT) { _kvMem.set(k, v); _kvQueue(k, v); localStorage.removeItem(k); moved++; }
+    }
+    if (moved) console.info(`[storage] 큰 항목 ${moved}개를 IndexedDB로 옮겼습니다`);
+  } catch {}
+})();
 
 // localStorage 용량 절약: 이미지(base64)는 클라우드(원본)와 IndexedDB(로컬 캐시)에 보관하므로
 // localStorage 사본에서는 제거한다. 클라우드 동기화 페이로드는 영향 없음 → 모든 기기에서 이미지 표시 유지.
@@ -29634,10 +29685,10 @@ function Root() {
   let body;
   if (!authed) body = <LoginScreen onSuccess={() => setAuthed(true)} />;
   else if (!welcomeSeen) body = <WelcomeScreen
-    orders={(() => { try { return JSON.parse(localStorage.getItem("frw_orders") || "[]"); } catch { return []; } })()}
-    ledgers={(() => { try { return JSON.parse(localStorage.getItem("frw_ledgers") || "{}"); } catch { return {}; } })()}
-    products={(() => { try { return JSON.parse(localStorage.getItem("frw_products") || "[]"); } catch { return []; } })()}
-    todos={(() => { try { return JSON.parse(localStorage.getItem("frw_todos") || "[]"); } catch { return []; } })()}
+    orders={load("frw_orders", [])}
+    ledgers={load("frw_ledgers", {})}
+    products={load("frw_products", [])}
+    todos={load("frw_todos", [])}
     onEnter={(targetTab) => {
       if (targetTab) { try { localStorage.setItem("frw_tab", JSON.stringify(targetTab)); } catch {} }
       sessionStorage.setItem("nj_welcome_seen", "1");
@@ -29732,12 +29783,50 @@ ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
     s.text = code + '\n//# sourceURL=frw-app.js';
     document.body.appendChild(s);
   }
+  // 앱의 load()가 동기라서, localStorage에서 넘친 큰 값(IndexedDB frw_db/kv, "ls:" 접두)을
+  // 앱 실행 전에 전부 읽어 window.__frwKV 에 담아 둔다. 실패·지연(3초)은 빈 Map으로 계속 진행.
+  function preloadKV() {
+    return new Promise(function (res) {
+      var map = new Map();
+      var done = false;
+      var finish = function () { if (!done) { done = true; window.__frwKV = map; res(); } };
+      setTimeout(finish, 3000);
+      try {
+        var r = indexedDB.open('frw_db', 2);
+        r.onupgradeneeded = function () {
+          var db = r.result;
+          if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+          if (!db.objectStoreNames.contains('prodimg')) db.createObjectStore('prodimg');
+        };
+        r.onsuccess = function () {
+          try {
+            var db = r.result;
+            if (!db.objectStoreNames.contains('kv')) { db.close(); return finish(); }
+            var st = db.transaction('kv', 'readonly').objectStore('kv');
+            var range = IDBKeyRange.bound('ls:', 'ls:\uffff');
+            var cur = st.openCursor(range);
+            cur.onsuccess = function () {
+              var c = cur.result;
+              if (!c) { db.close(); return finish(); }
+              map.set(String(c.key).slice(3), c.value);
+              c.continue();
+            };
+            cur.onerror = function () { db.close(); finish(); };
+          } catch (e) { finish(); }
+        };
+        r.onerror = function () { finish(); };
+        r.onblocked = function () { finish(); };
+      } catch (e) { finish(); }
+    });
+  }
+  // 브라우저가 저장소를 임의로 비우지 않도록 요청 (지원 브라우저만, 실패 무시)
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {}); } catch (e) {}
   function boot() {
     var el = document.getElementById('frw-app-src');
     if (!el) { showErr('⚠️ 앱 소스를 찾을 수 없습니다'); return; }
     var src = el.textContent;
     var key = 'v1:' + hashSrc(src);
-    cacheGet(key).catch(function () { return null; }).then(function (cached) {
+    preloadKV().then(function () { return cacheGet(key).catch(function () { return null; }); }).then(function (cached) {
       if (cached) { runCode(cached); return; }
       return loadBabel().then(function () {
         var out = window.Babel.transform(src, { presets: ['react'] }).code;
