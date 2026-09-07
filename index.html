@@ -24232,12 +24232,45 @@ function DataSafetyPanel({ onClose, darkMode }) {
   const [busy, setBusy] = React.useState("");
   const [snapshot, setSnapshot] = React.useState(null); // 선택 슬롯의 원본 (복원에 사용)
 
-  React.useEffect(() => {
-    fetch(`${FB_URL}/backups`)
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-      .then(j => setSlots(Array.isArray(j.slots) ? j.slots : []))
-      .catch(e => setErr("백업 목록을 불러오지 못했습니다 — " + (e.message || "")));
-  }, []);
+  // 슬롯 이름은 UTC 기준이라 그대로 보여주면 9시간 어긋나 보인다. 이 기기 시각으로 바꾼다.
+  // _HH = 4시간마다 자동, _HHMM = 사람이 직접 누른 백업.
+  const slotInfo = (sl) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:_(\d{2})(\d{2})?)?$/.exec(sl);
+    if (!m) return { text: sl, manual: false };
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 0, m[5] ? +m[5] : 0));
+    return {
+      text: d.toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+      manual: !!m[5],
+    };
+  };
+
+  const loadSlots = () => fetch(`${FB_URL}/backups`)
+    .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+    .then(j => setSlots(Array.isArray(j.slots) ? j.slots : []))
+    .catch(e => setErr("백업 목록을 불러오지 못했습니다 — " + (e.message || "")));
+
+  // 지금 이 순간을 백업으로 남긴다. 4시간 간격을 기다리지 않아도 되게.
+  const backupNow = async () => {
+    setBusy("백업하는 중");
+    try {
+      const cur = await fetch(`${FB_URL}`).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))));
+      if (!validateBackupData(cur)) throw new Error("백업할 데이터를 확인하지 못했습니다");
+      const now = new Date();
+      const slot = `${now.toISOString().slice(0, 10)}_${String(now.getUTCHours()).padStart(2, "0")}${String(now.getUTCMinutes()).padStart(2, "0")}`;
+      const r = await fetch(`${FB_URL}/backup/${slot}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cur),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      await loadSlots();
+      setBusy("");
+      showToast(`지금 상태를 백업했습니다 — ${slotInfo(slot).text}`, "success");
+    } catch (e) {
+      setBusy("");
+      showToast("백업에 실패했습니다 — " + (e.message || ""), "error");
+    }
+  };
+
+  React.useEffect(() => { loadSlots(); }, []);
 
   const openSlot = async (slot) => {
     setSel(slot); setRows(null); setSnapshot(null); setBusy("불러오는 중");
@@ -24308,6 +24341,10 @@ function DataSafetyPanel({ onClose, darkMode }) {
           <div style={{ fontSize: 16, fontWeight: 800, color: t1 }}>데이터 안전</div>
           <div style={{ fontSize: 12, color: t3 }}>4시간마다 자동으로 남긴 백업입니다. 항목별로 그 시점으로 되돌릴 수 있습니다.</div>
           <div style={{ flex: 1 }} />
+          <button onClick={backupNow} disabled={!!busy} title="4시간 간격을 기다리지 않고, 지금 이 상태를 백업으로 남깁니다"
+            style={{ height: 32, padding: "0 13px", marginRight: 8, borderRadius: 9, border: "none", background: "var(--accent)", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: busy ? "default" : "pointer", opacity: busy ? 0.5 : 1, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            지금 상태 백업
+          </button>
           <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 9, border: `1px solid ${line}`, background: "transparent", color: t3, cursor: "pointer", fontFamily: "inherit", fontSize: 15 }}>×</button>
         </div>
 
@@ -24322,7 +24359,8 @@ function DataSafetyPanel({ onClose, darkMode }) {
                 style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 11px", marginBottom: 2, borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "inherit",
                   background: sel === sl ? "var(--accent-tonal)" : "transparent",
                   color: sel === sl ? "var(--accent-strong)" : t1, fontSize: 12.5, fontWeight: sel === sl ? 800 : 600 }}>
-                {sl.replace("_", " ")}<span style={{ fontSize: 10, color: t3, marginLeft: 6 }}>UTC</span>
+                {slotInfo(sl).text}
+                {slotInfo(sl).manual && <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--accent)", marginLeft: 6 }}>직접</span>}
               </button>
             ))}
           </div>
