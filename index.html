@@ -1677,6 +1677,17 @@ function save(key, value) {
   } catch {}
 })();
 
+// "2026-09-03" → { label: "수", color } — 날짜 옆 요일 표시용 (일=빨강, 토=파랑)
+const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
+function weekdayOf(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr || ""));
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (isNaN(d.getTime())) return null;
+  const w = d.getDay();
+  return { label: WEEKDAY_KO[w], dow: w, color: w === 0 ? "#EF4444" : w === 6 ? "#3B82F6" : "var(--text3)" };
+}
+
 // localStorage 용량 절약: 이미지(base64)는 클라우드(원본)와 IndexedDB(로컬 캐시)에 보관하므로
 // localStorage 사본에서는 제거한다. 클라우드 동기화 페이로드는 영향 없음 → 모든 기기에서 이미지 표시 유지.
 const IMG_DATA_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[^)"'\s]+/g;
@@ -14964,7 +14975,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                             const isRet = r.status === "반품";
                             return (
                               <div key={r.id} className="mat-sub" style={{display:"grid",gridTemplateColumns:"106px minmax(0,1fr) 108px 118px 130px 106px 66px",gap:10,alignItems:"center",padding:"10px 14px",borderTop:"1px solid var(--divider)",background: isRet ? "var(--negative-bg)" : "transparent"}}>
-                                <span style={{fontSize:12,color:"var(--text2)",fontVariantNumeric:"tabular-nums"}}>{r.date}</span>
+                                <span style={{fontSize:12,color:"var(--text2)",fontVariantNumeric:"tabular-nums",whiteSpace:"nowrap"}}>{r.date}{(() => { const w = weekdayOf(r.date); return w ? <span style={{marginLeft:4,fontSize:11,fontWeight:700,color:w.color}}>({w.label})</span> : null; })()}</span>
                                 <span style={{fontSize:12.5,color:"var(--text1)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                                   {r.supplier || "—"}
                                   {r.sourcePoId && <span style={{fontSize:10.5,color:"var(--accent-strong)",background:"var(--accent-tonal)",padding:"1px 7px",borderRadius:100,marginLeft:5}}>발주에서</span>}
@@ -15078,6 +15089,9 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                             <span style={{fontSize:11, color:"var(--text3)", fontFamily:"monospace", minWidth:14, display:"inline-block"}}>{isCollapsed ? "▶" : "▼"}</span>
                             <Icon name="calendar" size={14}/>
                             <b style={{color:"var(--text1)", fontSize:14, fontVariantNumeric:"tabular-nums"}}>{group.date}</b>
+                            {(() => { const w = weekdayOf(group.date); return w ? (
+                              <span style={{fontSize:11.5, fontWeight:800, color:w.color, background:w.dow===0?"rgba(239,68,68,0.10)":w.dow===6?"rgba(59,130,246,0.10)":"var(--surface2)", border:"1px solid var(--divider)", padding:"1px 7px", borderRadius:100, lineHeight:1.6, flexShrink:0}}>{w.label}</span>
+                            ) : null; })()}
                             <span style={{color:"var(--text2)", fontSize:12}}>· <b style={{color:"var(--text1)"}}>{group.rows.length}건</b></span>
                             {Object.keys(groupQtyByUnit).length > 0 && (
                               <span style={{color:"var(--text3)", fontSize:11}}>· {Object.entries(groupQtyByUnit).map(([u,q])=>`${Math.round(q).toLocaleString()}${u||""}`).join(" + ")}</span>
