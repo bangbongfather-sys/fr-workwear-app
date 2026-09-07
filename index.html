@@ -17042,8 +17042,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   const resaveRef = useRef(false);     // 저장 중에 또 바뀜 → 저장 끝나면 한 번 더 돌린다
   // dirty 플래그와 dirty 섹션 목록을 localStorage에 함께 보존 → 오프라인 작업 후 앱을 껐다 켜도
   // (특히 오프라인 상태로 재시작해 cloudLoad가 실패해도) 복원돼 재연결 시 정상 푸시됨.
-  const markDirtyPersist = () => { save("frw_dirty", true); save("frw_dirty_sections", Array.from(dirtySections.current)); };
-  const clearDirtyPersist = () => { save("frw_dirty", false); save("frw_dirty_sections", []); };
+  // dirty 표시와 함께 "그때 내가 알던 서버 rev" 도 남긴다. 재시작 후 서버 rev 가 이보다 앞서
+  // 있으면 그 섹션은 다른 기기에서 이미 바뀐 것이라, 내 옛 복사본으로 덮어쓰면 안 된다.
+  const markDirtyPersist = () => { save("frw_dirty", true); save("frw_dirty_sections", Array.from(dirtySections.current)); save("frw_dirty_revs", { ...knownRevs.current }); };
+  const clearDirtyPersist = () => { save("frw_dirty", false); save("frw_dirty_sections", []); save("frw_dirty_revs", {}); };
   const prodNameRef = useRef(null);
   const dragProd = useRef(null);
   const dragFabric = useRef(null);
@@ -17184,6 +17186,30 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         // 충돌 감지용 서버 리비전만 기억하고 데이터는 로컬 유지
         if (d && typeof d._rev === "number") lastKnownRev.current = d._rev;
         if (d && d._revs && typeof d._revs === "object") knownRevs.current = { ...d._revs };
+        // ── 2026-09 요척서 유실 사고 재발 방지 ──
+        // 예전엔 frw_dirty 가 켜진 채 다시 열면 dirty 섹션 전부를 "내 로컬이 최신"으로 보고
+        // 통째로 밀어올렸다. 그 사이 다른 기기가 같은 섹션을 바꿨어도 방금 받은 rev 를
+        // 기준으로 삼아 충돌을 못 봤고, 옛 복사본이 서버의 새 데이터를 덮었다.
+        // 이제 dirty 표시 당시의 rev(frw_dirty_revs)와 서버 rev 를 비교해, 서버가 앞서 있는
+        // 섹션은 서버 것을 적용하고 dirty 에서 뺀다. 기록이 없으면(레거시) 전부 서버를 따른다.
+        const dirtyRevs = load("frw_dirty_revs", null);
+        const srv = (d && d._revs && typeof d._revs === "object") ? d._revs : {};
+        const stale = [];
+        Array.from(dirtySections.current).forEach(sec => {
+          const mine = dirtyRevs && typeof dirtyRevs === "object" ? dirtyRevs[sec] : undefined;
+          const theirs = srv[sec];
+          const serverMoved = (mine == null) ? (theirs != null) : (theirs != null && theirs !== mine);
+          if (serverMoved) stale.push(sec);
+        });
+        if (stale.length && d) {
+          const partial = {};
+          stale.forEach(sec => { if (d[sec] !== undefined) partial[sec] = d[sec]; });
+          partial._revs = d._revs;
+          applyCloudData(partial);
+          stale.forEach(sec => dirtySections.current.delete(sec));
+          if (dirtySections.current.size === 0) clearDirtyPersist(); else markDirtyPersist();
+          setTimeout(() => showToast(`다른 기기에서 먼저 바뀐 ${stale.length}개 항목(${stale.slice(0, 4).join(", ")}${stale.length > 4 ? " 외" : ""})은 서버 데이터를 따랐습니다 — 이 기기의 옛 복사본으로 덮어쓰지 않았습니다`, "info"), 800);
+        }
         setSyncStatus("syncing");
       } else {
         applyCloudData(d);

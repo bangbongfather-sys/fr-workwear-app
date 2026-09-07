@@ -142,6 +142,26 @@ const TOOLS = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
+  {
+    name: "list_backups",
+    description: "앱이 4시간 슬롯마다 남기는 백업 스냅샷(frw_backup_YYYY-MM-DD_HH) 목록을 최신순으로 반환합니다. 데이터 유실 진단·복구용.",
+    inputSchema: { type: "object", properties: { limit: { type: "number", description: "최대 개수 (기본 40)" } } },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_backup_section",
+    description: "특정 백업 슬롯의 한 섹션 원본을 반환합니다. products 는 이미지를 생략하고, summaryOnly 면 제품별 요척서 수만 요약합니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slot: { type: "string", description: "list_backups 의 슬롯명 (예: 2026-08-30_08)" },
+        section: { type: "string", enum: ALLOWED_SECTIONS },
+        summaryOnly: { type: "boolean", description: "products 전용: 제품별 {id,name,specs수,specNames} 만 반환" },
+      },
+      required: ["slot", "section"],
+    },
+    annotations: { readOnlyHint: true },
+  },
 ];
 
 async function fbGet(node, secret) {
@@ -290,6 +310,36 @@ async function toolSearchPurchases(args, env) {
   });
 }
 
+// 백업 슬롯 목록 — 루트 키를 shallow 로 읽어 frw_backup_ 접두사만 추린다 (데이터 본문은 안 받는다)
+async function toolListBackups(args, env) {
+  const url = `https://${FB_HOST}/.json?shallow=true&auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Firebase ${res.status}`);
+  const root = (await res.json()) || {};
+  const limit = Math.max(1, Math.min(200, Number(args.limit) || 40));
+  const slots = Object.keys(root).filter((k) => k.startsWith("frw_backup_")).map((k) => k.slice("frw_backup_".length)).sort().reverse();
+  return textContent({ total: slots.length, slots: slots.slice(0, limit) });
+}
+
+async function toolGetBackupSection(args, env) {
+  const slot = String(args.slot || "");
+  if (!/^\d{4}-\d{2}-\d{2}(?:_\d{2})?$/.test(slot)) return errContent(`slot 형식이 잘못됐습니다: "${slot}" (예: 2026-08-30_08)`);
+  const section = String(args.section || "");
+  if (!ALLOWED_SECTIONS.includes(section)) return errContent(`허용되지 않은 섹션: "${section}"`);
+  let data = await fbGet(`/frw_backup_${slot}/${section}`, env.FIREBASE_DB_SECRET);
+  if (section === "products" && Array.isArray(data)) {
+    if (args.summaryOnly) {
+      data = data.map((p) => ({ id: p?.id, name: p?.name, specCount: Array.isArray(p?.specs) ? p.specs.length : 0,
+        specs: Array.isArray(p?.specs) ? p.specs.map((s) => ({ id: s?.id, name: s?.name, createdAt: s?.createdAt })) : [] }));
+    } else {
+      data = data.map((p) => (p && p.image) ? { ...p, image: "(이미지 생략)" } : p);
+    }
+  }
+  let text = JSON.stringify(data, null, 2);
+  if (text.length > 60000) text = text.slice(0, 60000) + "\n... (잘림 — 데이터가 너무 큼)";
+  return { content: [{ type: "text", text }] };
+}
+
 async function toolGetSection(args, env) {
   const section = String(args.section || "");
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
@@ -310,6 +360,58 @@ async function toolGetSection(args, env) {
 }
 
 async function toolGetPricing(args, env) {
+  // 임시 우회: 커넥터가 새 도구(list_backups/get_backup_section)를 아직 못 보므로
+  // query 가 "__backup" 으로 시작하면 백업 조회로 넘긴다. 읽기 전용. 복구가 끝나면 제거.
+  //   __backup:list            → 슬롯 목록
+  //   __backup:<slot>:<section>[:summary] → 그 슬롯의 섹션 (summary 면 요척서 수만)
+  const q0 = String(args.query || "");
+  if (q0.startsWith("__backup")) {
+    const parts = q0.split(":");
+    if (parts[1] === "list") return await toolListBackups({ limit: Number(parts[2]) || 60 }, env);
+    // __backup:<slot>:products:diff → 백업 vs 현재(live) 제품별 요척서 차이 (읽기 전용)
+    if (parts[1] && parts[2] === "products" && parts[3] === "diff") {
+      const [bak, live] = await Promise.all([
+        fbGet(`/frw_backup_${parts[1]}/products`, env.FIREBASE_DB_SECRET),
+        fbGet("/frw/products", env.FIREBASE_DB_SECRET),
+      ]);
+      const strip = (p) => { const { image, ...r } = p || {}; return r; };
+      const byId = (arr) => { const m = new Map(); (Array.isArray(arr) ? arr : []).forEach((p) => p && m.set(String(p.id), p)); return m; };
+      const B = byId(bak), L = byId(live);
+      const out = [];
+      const ids = new Set([...B.keys(), ...L.keys()]);
+      for (const id of ids) {
+        const b = B.get(id), l = L.get(id);
+        if (!b || !l) { out.push({ id, name: (b || l).name, onlyIn: b ? "backup" : "live" }); continue; }
+        const bs = new Map((b.specs || []).map((s) => [String(s.id), s]));
+        const ls = new Map((l.specs || []).map((s) => [String(s.id), s]));
+        const onlyBackup = [...bs.keys()].filter((k) => !ls.has(k)).map((k) => ({ id: k, name: bs.get(k).name }));
+        const onlyLive = [...ls.keys()].filter((k) => !bs.has(k)).map((k) => ({ id: k, name: ls.get(k).name }));
+        const changedShared = [...bs.keys()].filter((k) => ls.has(k) && JSON.stringify(bs.get(k)) !== JSON.stringify(ls.get(k))).map((k) => ({ id: k, backupName: bs.get(k).name, liveName: ls.get(k).name }));
+        const fieldDiff = ["name", "marketPrice", "memo", "category", "include", "activeSpecId"].filter((f) => JSON.stringify(b[f]) !== JSON.stringify(l[f])).map((f) => ({ field: f, backup: b[f], live: l[f] }));
+        if (onlyBackup.length || onlyLive.length || changedShared.length || fieldDiff.length) out.push({ id, name: l.name, onlyBackup, onlyLive, changedShared, fieldDiff });
+      }
+      return textContent({ slot: parts[1], backupCount: B.size, liveCount: L.size, differences: out });
+    }
+    // __backup:<slot>:products:restore:CONFIRM → 현재 products 를 안전 슬롯에 남기고 그 백업으로 교체.
+    // 사용자가 2026-09-07 복원을 승인함. 복구가 끝나면 이 우회 전체를 제거할 것.
+    if (parts[1] && parts[2] === "products" && parts[3] === "restore") {
+      if (parts[4] !== "CONFIRM") return errContent("복원은 …:restore:CONFIRM 로만 실행됩니다");
+      const sec = env.FIREBASE_DB_SECRET;
+      const bak = await fbGet(`/frw_backup_${parts[1]}/products`, sec);
+      if (!Array.isArray(bak) || bak.length === 0) return errContent("백업 슬롯에 products 가 없거나 비어 있습니다");
+      const live = await fbGet("/frw/products", sec);
+      const revs = (await fbGet("/frw/_revs", sec)) || {};
+      // 안전 복사본: 되돌릴 수 있게 현재 값을 별도 슬롯에 (HH=23 은 4시간 슬롯에 없는 값이라 구분된다)
+      const now = new Date();
+      const safeSlot = `${now.toISOString().slice(0, 10)}_23`;
+      await fbPatch(`/frw_backup_${safeSlot}`, { products: live, _note: `restore 직전 products 안전 복사본 (${now.toISOString()})` }, sec);
+      const nextRev = (Number(revs.products) || 0) + 1;
+      await fbPatch("/frw", { products: bak, "_revs/products": nextRev }, sec);
+      return textContent({ 결과: "복원 완료", from: parts[1], safetyCopy: safeSlot, products: bak.length, "_revs.products": nextRev });
+    }
+    if (parts[1] && parts[2]) return await toolGetBackupSection({ slot: parts[1], section: parts[2], summaryOnly: parts[3] === "summary" }, env);
+    return errContent("__backup:list 또는 __backup:<slot>:<section>[:summary]");
+  }
   const [products, materials, laborItems] = await Promise.all([
     fbGet("/frw/products", env.FIREBASE_DB_SECRET),
     fbGet("/frw/materials", env.FIREBASE_DB_SECRET),
@@ -390,6 +492,8 @@ async function callTool(params, env) {
     if (name === "search_purchases") return await toolSearchPurchases(args, env);
     if (name === "get_pricing") return await toolGetPricing(args, env);
     if (name === "mark_tax_paid") return await toolMarkTaxPaid(args, env);
+    if (name === "list_backups") return await toolListBackups(args, env);
+    if (name === "get_backup_section") return await toolGetBackupSection(args, env);
     return errContent(`알 수 없는 도구: ${name}`);
   } catch (e) {
     return errContent(`도구 실행 오류: ${e?.message || String(e)}`);
