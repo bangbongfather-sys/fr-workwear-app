@@ -392,23 +392,6 @@ async function toolGetPricing(args, env) {
       }
       return textContent({ slot: parts[1], backupCount: B.size, liveCount: L.size, differences: out });
     }
-    // __backup:<slot>:products:restore:CONFIRM → 현재 products 를 안전 슬롯에 남기고 그 백업으로 교체.
-    // 사용자가 2026-09-07 복원을 승인함. 복구가 끝나면 이 우회 전체를 제거할 것.
-    if (parts[1] && parts[2] === "products" && parts[3] === "restore") {
-      if (parts[4] !== "CONFIRM") return errContent("복원은 …:restore:CONFIRM 로만 실행됩니다");
-      const sec = env.FIREBASE_DB_SECRET;
-      const bak = await fbGet(`/frw_backup_${parts[1]}/products`, sec);
-      if (!Array.isArray(bak) || bak.length === 0) return errContent("백업 슬롯에 products 가 없거나 비어 있습니다");
-      const live = await fbGet("/frw/products", sec);
-      const revs = (await fbGet("/frw/_revs", sec)) || {};
-      // 안전 복사본: 되돌릴 수 있게 현재 값을 별도 슬롯에 (HH=23 은 4시간 슬롯에 없는 값이라 구분된다)
-      const now = new Date();
-      const safeSlot = `${now.toISOString().slice(0, 10)}_23`;
-      await fbPatch(`/frw_backup_${safeSlot}`, { products: live, _note: `restore 직전 products 안전 복사본 (${now.toISOString()})` }, sec);
-      const nextRev = (Number(revs.products) || 0) + 1;
-      await fbPatch("/frw", { products: bak, "_revs/products": nextRev }, sec);
-      return textContent({ 결과: "복원 완료", from: parts[1], safetyCopy: safeSlot, products: bak.length, "_revs.products": nextRev });
-    }
     if (parts[1] && parts[2]) return await toolGetBackupSection({ slot: parts[1], section: parts[2], summaryOnly: parts[3] === "summary" }, env);
     return errContent("__backup:list 또는 __backup:<slot>:<section>[:summary]");
   }
