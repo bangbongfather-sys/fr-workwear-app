@@ -354,6 +354,13 @@ async function handleFirebaseSync(request, env, url) {
   } else if (url.pathname === "/api/sync/rev") {
     // (레거시) 전역 리비전 번호 — _revs 도입 후 미사용. 하위호환 위해 경로 유지.
     fbPath = "/frw/_rev.json";
+  } else if (url.pathname === "/api/sync/backups") {
+    // 백업 슬롯 목록만. 루트를 shallow 로 읽어 키 이름만 받는다(본문 미수신).
+    const r = await fetch(`https://${FB_HOST}/.json?shallow=true&auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`);
+    if (!r.ok) return new Response(JSON.stringify({ error: `Firebase ${r.status}` }), { status: 502, headers: corsHeaders });
+    const root = (await r.json()) || {};
+    const slots = Object.keys(root).filter(k => k.startsWith("frw_backup_")).map(k => k.slice("frw_backup_".length)).sort().reverse();
+    return new Response(JSON.stringify({ slots }), { status: 200, headers: corsHeaders });
   } else if (url.pathname === "/api/sync/sigs") {
     // 섹션별 내용 지문 {n,m} — 저장 전에 "사고 수준으로 줄어드는 저장"인지 판정하는 데 쓴다.
     fbPath = "/frw/_sigs.json";
@@ -362,7 +369,7 @@ async function handleFirebaseSync(request, env, url) {
     fbPath = "/frw/_revs.json";
   } else {
     // YYYY-MM-DD (일일) 또는 YYYY-MM-DD_HH (4시간 슬롯) 둘 다 허용
-    const m = url.pathname.match(/^\/api\/sync\/backup\/(\d{4}-\d{2}-\d{2}(?:_\d{2})?)\/?$/);
+    const m = url.pathname.match(/^\/api\/sync\/backup\/(\d{4}-\d{2}-\d{2}(?:_\d{2}(?:\d{2})?)?)\/?$/);
     if (!m) {
       return new Response(JSON.stringify({ error: "Not found", path: url.pathname }), { status: 404, headers: corsHeaders });
     }
