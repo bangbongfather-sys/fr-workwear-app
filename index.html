@@ -23857,6 +23857,63 @@ function attDownload(att) {
   a.href = att.dataUrl; a.download = att.name || "첨부파일";
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
 }
+// 파일 목록 → 첨부로 변환해 추가. 개수 제한·이미지 압축·실패 토스트를 한곳에서 처리한다.
+async function attachFilesTo(fileList, current, onAdd) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return 0;
+  const cur = current || [];
+  const room = ATT_MAX_COUNT - cur.length;
+  if (room <= 0) { showToast(`첨부는 항목당 최대 ${ATT_MAX_COUNT}개까지 가능합니다`); return 0; }
+  const take = files.slice(0, room);
+  if (files.length > room) showToast(`첨부는 최대 ${ATT_MAX_COUNT}개까지 — ${room}개만 넣었습니다`);
+  const added = [];
+  for (const f of take) {
+    try { added.push(await fileToAttachment(f)); }
+    catch (e) { showToast(e.message || "첨부 실패"); }
+  }
+  if (added.length) onAdd(added);
+  return added.length;
+}
+
+// 모달 전체에서 붙여넣기(Ctrl+V)·드래그&드롭으로 파일을 받는 공용 훅.
+// 카드 어디에 놓아도, 어느 입력칸에 커서가 있어도 첨부가 된다.
+// 글자 붙여넣기는 막지 않는다(클립보드에 파일이 있을 때만 가로챈다).
+function useAttachInbox(atts, setAtts) {
+  const [dropping, setDropping] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const add = async (fileList) => {
+    setBusy(true);
+    const n = await attachFilesTo(fileList, atts, (added) => setAtts([...(atts || []), ...added]));
+    setBusy(false);
+    if (n > 0) showToast(`${n}개 첨부했습니다`, "success");
+  };
+  const onPaste = (e) => {
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const files = [];
+    if (cd.files && cd.files.length) files.push(...Array.from(cd.files));
+    else if (cd.items) for (const it of cd.items) { if (it.kind === "file") { const f = it.getAsFile(); if (f) files.push(f); } }
+    if (!files.length) return;   // 글자 붙여넣기는 그대로 통과
+    e.preventDefault();
+    add(files);
+  };
+  const hasFiles = (e) => !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files"));
+  const dropProps = {
+    onDragOver: (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); if (!dropping) setDropping(true); },
+    onDragLeave: (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false); },
+    onDrop: (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); setDropping(false); add(e.dataTransfer.files); },
+  };
+  // 카드 위에 덮이는 안내막 (파일을 끌고 들어왔을 때만)
+  const overlay = (dropping || busy) ? (
+    <div style={{ position: "absolute", inset: 0, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6,
+      borderRadius: 18, background: "rgba(219,107,46,0.12)", border: "2px dashed #DB6B2E", color: "#DB6B2E", fontSize: 15, fontWeight: 800, pointerEvents: "none", backdropFilter: "blur(1px)" }}>
+      {busy ? "첨부 처리 중…" : "여기에 놓으면 첨부됩니다 📎"}
+      {!busy && <span style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>사진은 자동 압축 · 파일은 1MB까지</span>}
+    </div>
+  ) : null;
+  return { onPaste, dropProps, overlay };
+}
+
 // 공용 첨부 필드 — value: 첨부 배열, onChange(next배열)
 function AttachmentField({ value = [], onChange }) {
   const inputRef = React.useRef(null);
@@ -23901,7 +23958,7 @@ function AttachmentField({ value = [], onChange }) {
           style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", borderRadius: 8, border: "1.5px dashed var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
           <Icon name="camera" size={13}/>{busy ? "처리 중…" : "사진·파일 첨부"}
         </button>
-        <span style={{ fontSize: 10.5, color: "var(--text3)" }}>드래그&드롭 또는 클릭 · 사진 자동 압축 · 파일 1MB까지{value.length ? ` · ${value.length}개 · ${attFmtSize(totalBytes)}` : ""}</span>
+        <span style={{ fontSize: 10.5, color: "var(--text3)" }}>클릭 · 드래그&드롭 · 붙여넣기(Ctrl+V) · 사진 자동 압축 · 파일 1MB까지{value.length ? ` · ${value.length}개 · ${attFmtSize(totalBytes)}` : ""}</span>
         <input ref={inputRef} type="file" multiple accept="image/*,.pdf,.xlsx,.xls,.docx,.doc,.hwp,.txt,.zip" style={{ display: "none" }}
           onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
       </div>
@@ -24541,8 +24598,12 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     });
   };
 
+  // 모달 전체 붙여넣기·드래그&드롭 첨부 (추가/상세 각각)
+  const addInbox = useAttachInbox(addModal ? (addModal.atts || []) : [], (next) => setAddModal(m => m ? { ...m, atts: next } : m));
+
   // ── 일정 상세 모달 (노션 스타일: 제목 + 내용 메모) ──
   const [detail, setDetail] = React.useState(null); // { id, text, memo, date, endDate } — 편집 중 드래프트
+  const detailInbox = useAttachInbox(detail ? (detail.atts || []) : [], (next) => setDetail(d => d ? { ...d, atts: next } : d));
   const openDetail = (t) => { setMoveToNotePin(false); setDetail({ id: t.id, text: t.text, memo: t.memo || "", date: t.date, endDate: t.endDate || "", atts: t.atts || [] }); };
   const closeDetail = (saveIt = true) => {
     if (saveIt && detail) {
@@ -25183,12 +25244,14 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           onClick={() => setAddModal(null)}>
           <div className="frw-rise" onClick={e => e.stopPropagation()}
             onKeyDown={e => { if (e.key === "Escape") setAddModal(null); }}
+            onPaste={addInbox.onPaste} {...addInbox.dropProps}
             style={{
               background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 560, maxHeight: "85vh",
-              display: "flex", flexDirection: "column", overflow: "hidden",
+              display: "flex", flexDirection: "column", overflow: "hidden", position: "relative",
               boxShadow: "0 24px 64px rgba(0,0,0,0.45)", border: "1px solid var(--border)",
               animation: "frwRise 0.25s cubic-bezier(0,0,0.2,1)",
             }}>
+            {addInbox.overlay}
             <div style={{ padding: "20px 24px 0", overflowY: "auto", flex: 1 }}>
               <input autoFocus value={addModal.text}
                 onChange={e => setAddModal({ ...addModal, text: e.target.value })}
@@ -25240,14 +25303,17 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9998,
           display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
         }} onClick={() => closeDetail(true)}>
-          <div onClick={e => e.stopPropagation()} style={{
+          <div onClick={e => e.stopPropagation()}
+            onPaste={detailInbox.onPaste} {...detailInbox.dropProps}
+            style={{
             background: "var(--surface)", borderRadius: 18,
             width: "100%", maxWidth: 560, maxHeight: "85vh",
             display: "flex", flexDirection: "column",
             boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
             border: "1px solid var(--border)",
-            overflow: "hidden",
+            overflow: "hidden", position: "relative",
           }}>
+            {detailInbox.overlay}
             {/* 헤더: 완료 토글 + 닫기 */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px 0" }}>
               {orig && (
