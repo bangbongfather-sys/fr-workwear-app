@@ -335,6 +335,7 @@ async function handleNotionApi(request, env, url) {
 //
 // 경로 매핑:
 //   /api/sync                       → /frw.json            (메인 데이터: GET/PUT/PATCH)
+//   /api/sync/sigs                  → /frw/_sigs.json      (섹션별 내용 지문: GET)
 //   /api/sync/backup/YYYY-MM-DD[_HH] → /frw_backup_<slot>.json (백업 스냅샷: GET/PUT, 4시간 슬롯)
 //
 // 보안: FIREBASE_DB_SECRET가 Firebase RTDB ?auth= 쿼리에 자동 부착되어, Firebase 규칙은
@@ -353,6 +354,9 @@ async function handleFirebaseSync(request, env, url) {
   } else if (url.pathname === "/api/sync/rev") {
     // (레거시) 전역 리비전 번호 — _revs 도입 후 미사용. 하위호환 위해 경로 유지.
     fbPath = "/frw/_rev.json";
+  } else if (url.pathname === "/api/sync/sigs") {
+    // 섹션별 내용 지문 {n,m} — 저장 전에 "사고 수준으로 줄어드는 저장"인지 판정하는 데 쓴다.
+    fbPath = "/frw/_sigs.json";
   } else if (url.pathname === "/api/sync/revs") {
     // 섹션별 충돌 감지용 리비전 맵 (경량 GET). frw 전체를 받지 않고 _revs 객체만 조회.
     fbPath = "/frw/_revs.json";

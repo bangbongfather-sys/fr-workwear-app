@@ -1509,6 +1509,16 @@ const ORANGE = "#F59E0B";
 
 // 클라우드 동기화 섹션 목록 (top-level key 단위). 섹션별 자동 병합·충돌 판정의 기준.
 // 여기 순서/이름이 Firebase /frw 의 top-level key 및 _revs 키와 1:1 대응한다.
+// 경고 문구용 섹션 이름 (사용자에게 "products" 라고 보여줄 수는 없다)
+const SECTION_LABELS = {
+  materials: "원단 단가표", laborItems: "공임 단가표", products: "단가계산기 제품", quoteHistory: "견적 이력",
+  orders: "수주", clients: "거래처", suppliers: "공급처", purchaseOrders: "발주", fabricIntakes: "매입 현황",
+  monthlySales: "월매출", bids: "입찰", ledgers: "장부", clientAR: "거래처 미수금", accounts: "통장",
+  investments: "투자", cashFlows: "자금흐름", scheduledExpenses: "예정지출", purchaseSubTabs: "매입 거래처 탭",
+  todos: "일정", notes: "중요 메모", recurringSchedules: "정기 일정", yearlyRevenue: "연매출",
+  purchaseDateMemos: "매입일 메모", stock: "재고", payables: "미지급", bankDeposits: "입금내역",
+  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록",
+};
 const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes"];
 
 
@@ -1820,7 +1830,7 @@ async function cloudSave(data) {
   // 2026-05-14 수정: PUT → PATCH. 부분 저장이 안전해짐.
   // "_revs/<섹션>" 같은 deep-path 키는 의도된 슬래시라 보존하고, 섹션 데이터 값의 키만 이스케이프.
   const safe = {};
-  for (const k of Object.keys(data)) safe[k] = k.startsWith("_revs/") ? data[k] : fbEscapeKeys(data[k]);
+  for (const k of Object.keys(data)) safe[k] = (k.startsWith("_revs/") || k.startsWith("_sigs/")) ? data[k] : fbEscapeKeys(data[k]);
   const r = await fetch(FB_URL, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(safe) });
   if (!r.ok) throw new Error("save failed");
 }
@@ -1853,6 +1863,74 @@ async function cloudBackupDaily(data) {
     const r = await fetch(`${FB_URL}/backup/${slot}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fbEscapeKeys(data)) });
     if (r.ok) save(lastKey, slot);
   } catch { /* 백업 실패는 무시 — 본 동기화를 방해하지 않음 */ }
+}
+
+// ─── 동기화 안전장치 ───────────────────────────────────────────────
+// 2026-08-28 요척서 유실 사고 이후 추가. 아래 세 함수는 순수 함수로 떼어 두었다.
+// 화면과 얽히면 검증할 수 없고, 검증 못 하는 안전장치는 없느니만 못하다.
+
+// 섹션 내용의 지문. n = 최상위 레코드 수, m = 한 단계 아래 레코드 수.
+// products 면 n=제품 수, m=요척서 총합. ledgers 면 n=월 수, m=거래처 행 총합.
+// 요척서만 사라진 사고에서는 n(14)이 그대로였고 m(23→15)만 줄었다 — 그래서 m 을 본다.
+function sectionSignature(v) {
+  const recs = Array.isArray(v) ? v : (v && typeof v === "object" ? Object.values(v) : []);
+  let n = 0, m = 0;
+  for (const r of recs) {
+    n++;
+    if (r && typeof r === "object" && !Array.isArray(r)) {
+      for (const k of Object.keys(r)) if (Array.isArray(r[k])) m += r[k].length;
+    }
+  }
+  return { n, m };
+}
+
+// 지금 올리려는 값이 서버보다 "많이" 줄었는지. 한두 개 지운 건 정상 작업이므로
+// 통과시키고, 사고 수준(3개 이상 + 20% 이상)만 잡는다.
+function isBigShrink(mySig, srvSig) {
+  if (!mySig || !srvSig) return false;
+  const lostN = (srvSig.n || 0) - (mySig.n || 0);
+  const lostM = (srvSig.m || 0) - (mySig.m || 0);
+  const bigN = lostN >= 3 && lostN / Math.max(srvSig.n || 1, 1) >= 0.2;
+  const bigM = lostM >= 3 && lostM / Math.max(srvSig.m || 1, 1) >= 0.2;
+  return bigN || bigM;
+}
+
+// 어떤 섹션을 올려도 되는지 판정.
+//  revsOk=false (서버 rev 를 못 읽음) → 아무것도 올리지 않는다. 예전엔 "안전 우선"이라며
+//    그냥 올렸는데, 그건 통신이 한 번 끊기면 검사 없이 덮어쓴다는 뜻이었다.
+//  srvRev 없음 → 서버가 그 섹션을 가진 적 없음 → 첫 저장이므로 올린다.
+//  knownRev 없음 → 서버엔 있는데 내가 뭘 봤는지 모른다 → 덮으면 안 된다. (예전엔 통과였다)
+//  srvRev !== knownRev → 내가 본 뒤 다른 기기가 바꿨다 → 충돌.
+function planPush({ sections, knownRevs, serverRevs, revsOk, mySigs, serverSigs }) {
+  if (!revsOk) return { push: [], conflict: [], shrink: [], retry: true };
+  const push = [], conflict = [], shrink = [];
+  for (const s of sections) {
+    const srv = serverRevs ? serverRevs[s] : undefined;
+    const known = knownRevs ? knownRevs[s] : undefined;
+    if (srv == null) { push.push(s); continue; }
+    if (known == null) { conflict.push(s); continue; }
+    if (srv !== known) { conflict.push(s); continue; }
+    if (isBigShrink(mySigs && mySigs[s], serverSigs && serverSigs[s])) { shrink.push(s); continue; }
+    push.push(s);
+  }
+  return { push, conflict, shrink, retry: false };
+}
+
+// 미동기화 상태로 다시 열렸을 때, 어느 섹션이 "내 옛 복사본"인지 가려낸다.
+// dirty 로 표시하던 시점의 서버 rev 보다 지금 서버 rev 가 앞서 있으면 다른 기기가 먼저
+// 바꾼 것이므로, 내 것으로 덮지 말고 서버 것을 받아야 한다.
+function planStaleSections(dirtySections, dirtyRevs, serverRevs) {
+  const srv = serverRevs && typeof serverRevs === "object" ? serverRevs : {};
+  const mine = dirtyRevs && typeof dirtyRevs === "object" ? dirtyRevs : null;
+  const stale = [];
+  for (const sec of dirtySections) {
+    const theirs = srv[sec];
+    const known = mine ? mine[sec] : undefined;
+    // 기록이 없으면(구버전에서 넘어온 상태) 서버에 값이 있는 한 서버를 따른다.
+    const serverMoved = (known == null) ? (theirs != null) : (theirs != null && theirs !== known);
+    if (serverMoved) stale.push(sec);
+  }
+  return stale;
 }
 
 // 이미지 압축 (Firebase RTDB 안전 사이즈로): 최대 1024px wide, JPEG quality 0.75 → 보통 50~150KB
@@ -17119,6 +17197,23 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     });
   }, [tab, activeProdId]);
 
+  // 서버가 아직 지문을 갖고 있지 않은 섹션에만, 방금 받은 서버 값의 지문을 올린다.
+  // 데이터는 건드리지 않고 _sigs 만 쓴다. 실패해도 조용히 넘어간다(다음 저장 때 채워진다).
+  const seedMissingSigs = async (d) => {
+    if (!d || typeof d !== "object") return;
+    const have = (d._sigs && typeof d._sigs === "object") ? d._sigs : {};
+    const payload = {};
+    for (const sec of CLOUD_SECTIONS) {
+      if (have[sec] != null) continue;
+      if (d[sec] === undefined) continue;
+      const sig = sectionSignature(d[sec]);
+      if (sig.n === 0 && sig.m === 0) continue; // 빈 섹션은 기준으로 삼을 게 없다
+      payload[`_sigs/${sec}`] = sig;
+    }
+    if (Object.keys(payload).length === 0) return;
+    try { await cloudSave(payload); } catch { /* 다음 기회에 */ }
+  };
+
   const applyCloudData = (d) => {
     if (!d) return;
     // 클라우드 데이터를 state에 반영하면 저장 effect가 깨어나지만, 이는 사용자 입력이 아니므로
@@ -17192,15 +17287,11 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         // 기준으로 삼아 충돌을 못 봤고, 옛 복사본이 서버의 새 데이터를 덮었다.
         // 이제 dirty 표시 당시의 rev(frw_dirty_revs)와 서버 rev 를 비교해, 서버가 앞서 있는
         // 섹션은 서버 것을 적용하고 dirty 에서 뺀다. 기록이 없으면(레거시) 전부 서버를 따른다.
-        const dirtyRevs = load("frw_dirty_revs", null);
-        const srv = (d && d._revs && typeof d._revs === "object") ? d._revs : {};
-        const stale = [];
-        Array.from(dirtySections.current).forEach(sec => {
-          const mine = dirtyRevs && typeof dirtyRevs === "object" ? dirtyRevs[sec] : undefined;
-          const theirs = srv[sec];
-          const serverMoved = (mine == null) ? (theirs != null) : (theirs != null && theirs !== mine);
-          if (serverMoved) stale.push(sec);
-        });
+        const stale = planStaleSections(
+          Array.from(dirtySections.current),
+          load("frw_dirty_revs", null),
+          (d && d._revs && typeof d._revs === "object") ? d._revs : {}
+        );
         if (stale.length && d) {
           const partial = {};
           stale.forEach(sec => { if (d[sec] !== undefined) partial[sec] = d[sec]; });
@@ -17208,7 +17299,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
           applyCloudData(partial);
           stale.forEach(sec => dirtySections.current.delete(sec));
           if (dirtySections.current.size === 0) clearDirtyPersist(); else markDirtyPersist();
-          setTimeout(() => showToast(`다른 기기에서 먼저 바뀐 ${stale.length}개 항목(${stale.slice(0, 4).join(", ")}${stale.length > 4 ? " 외" : ""})은 서버 데이터를 따랐습니다 — 이 기기의 옛 복사본으로 덮어쓰지 않았습니다`, "info"), 800);
+          const names = stale.slice(0, 4).map(x => SECTION_LABELS[x] || x).join(", ");
+          setTimeout(() => showToast(`다른 기기에서 먼저 바뀐 ${stale.length}개 항목(${names}${stale.length > 4 ? " 외" : ""})은 서버 데이터를 따랐습니다 — 이 기기의 옛 복사본으로 덮어쓰지 않았습니다`, "info"), 800);
         }
         setSyncStatus("syncing");
       } else {
@@ -17216,6 +17308,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         setSyncStatus("saved");
         // 로드 직후 데이터 그대로 일일 백업 (하루 한 번). 오늘 작업하다 실수로 덮어쓰면 어제 백업으로 복구.
         cloudBackupDaily(d);
+        // 축소 감지용 지문(_sigs) 심기 — 아직 없는 섹션만.
+        // 방금 서버에서 받은 값으로 계산하므로 이 지문은 서버 내용 그대로다.
+        // (내 로컬이 오래됐을 수도 있는 상황에서는 절대 심지 않는다 — 위 hasUnsynced 분기)
+        seedMissingSigs(d);
       }
     })
       .catch(() => setSyncStatus("error"))
@@ -17331,22 +17427,47 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     // 바뀐 섹션이 없으면 그냥 정상. (예전엔 이 경우까지 "충돌"로 처리해 사용자를 놀라게 했다)
     if (sections.length === 0) { clearDirtyPersist(); setSyncStatus("saved"); return; }
     const cur = latestSnapshot.current || {};
-    // 섹션별 충돌 감지: 서버의 섹션별 rev(_revs)를 읽어, 내가 동기화한 이후 그 섹션이 서버에서 또 바뀌었는지 확인.
-    let serverRevs = null;
+    // 서버의 섹션별 rev(_revs)와 내용 지문(_sig)을 읽어, 이 저장이 안전한지 판정한다.
+    let serverRevs = null, serverSigs = null, revsOk = false;
     try {
-      const rr = await fetch(`${FB_URL}/revs`);
-      if (rr.ok) { const j = await rr.json(); if (j && typeof j === "object") serverRevs = j; }
-    } catch { /* _revs 못 읽으면 충돌검사 스킵하고 그냥 저장(안전 우선) */ }
-    const conflicts = [], pushable = [];
-    for (const s of sections) {
-      const known = knownRevs.current[s];
-      const srv = serverRevs ? serverRevs[s] : undefined;
-      // 같은 섹션이 다른 기기에서 내 동기화 이후 바뀐 경우에만 충돌. 그 외(다른 섹션)는 자동 병합.
-      if (serverRevs && known != null && srv != null && srv !== known) conflicts.push(s);
-      else pushable.push(s);
+      const [rr, sr] = await Promise.all([fetch(`${FB_URL}/revs`), fetch(`${FB_URL}/sigs`)]);
+      if (rr.ok) { const j = await rr.json(); if (j == null || typeof j === "object") { serverRevs = j || {}; revsOk = true; } }
+      if (sr.ok) { const j = await sr.json(); if (j && typeof j === "object") serverSigs = j; }
+    } catch { /* 못 읽으면 revsOk=false → 이번엔 올리지 않고 다시 시도한다 */ }
+
+    const mySigs = {};
+    for (const sec of sections) mySigs[sec] = sectionSignature(cur[sec]);
+    const plan = planPush({ sections, knownRevs: knownRevs.current, serverRevs, revsOk, mySigs, serverSigs });
+
+    if (plan.retry) {
+      // 서버 상태를 못 읽었다 → 검사 없이 덮어쓰지 않는다. dirty 를 유지한 채 잠시 후 재시도.
+      if (attempt < 4) {
+        if (syncTimer.current) clearTimeout(syncTimer.current);
+        syncTimer.current = setTimeout(() => { syncTimer.current = null; runSave(attempt + 1); }, 2000 * Math.pow(2, attempt));
+        setSyncStatus("syncing");
+      } else setSyncStatus("error");
+      return;
     }
+
+    // 사고 수준으로 데이터가 줄어드는 저장 — 사람에게 묻는다. 2026-08-28 유실은 이 지점에서 막혔을 것이다.
+    const pushable = [...plan.push];
+    const conflicts = [...plan.conflict];
+    for (const s of plan.shrink) {
+      const my = mySigs[s] || { n: 0, m: 0 }, srv = (serverSigs && serverSigs[s]) || { n: 0, m: 0 };
+      const label = SECTION_LABELS[s] || s;
+      const ok = window.confirm(
+        `⚠️ 저장하려는 「${label}」 데이터가 서버보다 많이 적습니다.\n\n` +
+        `  이 기기: 항목 ${my.n}개 / 하위 ${my.m}개\n` +
+        `  서버:     항목 ${srv.n}개 / 하위 ${srv.m}개\n\n` +
+        `이 기기의 데이터가 오래된 것일 수 있습니다.\n\n` +
+        `[취소] = 서버 데이터를 받습니다 (권장)\n` +
+        `[확인] = 그래도 이 기기 것으로 덮어씁니다`
+      );
+      if (ok) pushable.push(s); else conflicts.push(s);
+    }
+
     if (pushable.length === 0) {
-      // dirty 섹션 전부가 같은-섹션 충돌 → 푸시 보류, 충돌 표시 (사용자가 새로고침으로 결정).
+      // 올릴 게 없음 → 푸시 보류, 충돌 표시 (사용자가 새로고침으로 서버 것을 받게).
       // frw_dirty=false 로 두어 새로고침 시 서버 최신본을 정상 적용(=상대 버전 채택)하게 함.
       clearDirtyPersist();
       setSyncStatus("conflict");
@@ -17361,6 +17482,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       const base = (serverRevs && serverRevs[s] != null) ? serverRevs[s] : (knownRevs.current[s] || 0);
       bumped[s] = base + 1;
       payload[`_revs/${s}`] = base + 1;
+      payload[`_sigs/${s}`] = mySigs[s] || sectionSignature(cur[s]); // 다음 저장의 축소 감지 기준
     }
     savingRef.current = true;
     try {

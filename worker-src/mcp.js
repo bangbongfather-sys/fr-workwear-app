@@ -368,6 +368,15 @@ async function toolGetPricing(args, env) {
   if (q0.startsWith("__backup")) {
     const parts = q0.split(":");
     if (parts[1] === "list") return await toolListBackups({ limit: Number(parts[2]) || 60 }, env);
+    // __backup:sync → 동기화 안전장치 상태 점검 (섹션별 rev 와 내용 지문). 읽기 전용.
+    if (parts[1] === "sync") {
+      const [revs, sigs] = await Promise.all([
+        fbGet("/frw/_revs", env.FIREBASE_DB_SECRET),
+        fbGet("/frw/_sigs", env.FIREBASE_DB_SECRET),
+      ]);
+      const keys = Object.keys(sigs || {});
+      return textContent({ revs: revs || {}, sigs: sigs || {}, sigSections: keys.length });
+    }
     // __backup:<slot>:products:diff → 백업 vs 현재(live) 제품별 요척서 차이 (읽기 전용)
     if (parts[1] && parts[2] === "products" && parts[3] === "diff") {
       const [bak, live] = await Promise.all([
