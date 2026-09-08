@@ -24866,6 +24866,29 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       if (forceDate && target.notionPageId) notionPatch(target.notionPageId, { date: target.date, endDate: target.endDate || null });
     }
   };
+  // ── 타임테이블 빠른 등록 ──
+  // 모달을 열지 않고 시간표 빈 곳을 눌러 그 자리에서 바로 적는다.
+  // quickAdd = { date, startMin(null이면 시간 미지정), text }
+  const [quickAdd, setQuickAdd] = React.useState(null);
+  const [quickBar, setQuickBar] = React.useState("");   // 하단 한 줄 입력
+  const quickAddSave = (payload) => {
+    const q = payload || quickAdd;
+    if (!q) return;
+    let text = String(q.text || "").trim();
+    if (!text) { setQuickAdd(null); return; }
+    let startMin = Number.isFinite(q.startMin) ? Number(q.startMin) : null;
+    // "14:00 미팅" 처럼 앞에 시각을 적었으면 그 시각을 우선한다
+    const m = /^\s*([01]?\d|2[0-3])\s*[:시]\s*([0-5]\d)?\s*/.exec(text);
+    if (m) { startMin = Number(m[1]) * 60 + Number(m[2] || 0); text = text.slice(m[0].length).trim() || text.trim(); }
+    const t = { id: Date.now(), date: q.date || selectedDate, endDate: "", text, memo: "", done: false, createdAt: Date.now(), atts: [] };
+    if (Number.isFinite(startMin)) { t.startMin = startMin; t.durMin = 60; }
+    setTodos(prev => [...prev, t]);
+    setQuickAdd(null); setQuickBar("");
+    const hhmm = Number.isFinite(startMin) ? `${String(Math.floor(startMin / 60)).padStart(2, "0")}:${String(startMin % 60).padStart(2, "0")} · ` : "";
+    showToast(`${hhmm}"${text.slice(0, 18)}" 추가했습니다`, "success");
+    notionCreate(t).then(pageId => { if (pageId) setTodos(prev => prev.map(x => x.id === t.id ? { ...x, notionPageId: pageId } : x)); });
+  };
+
   // 타임테이블 블록 아래 손잡이를 끌어 소요 시간 조절 (15분 스냅)
   const resizeRef = React.useRef(null);
   const [resizingId, setResizingId] = React.useState(null);
@@ -25642,7 +25665,16 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
               )}
 
               <div data-sched-rail="1" data-rail-starth={startH} data-rail-endh={endH} data-rail-hourh={HOUR_H}
-                style={{ position: "relative", height: railH, marginTop: 2, borderRadius: 10, outline: dragTodoId != null ? "2px dashed rgba(219,107,46,0.45)" : "none", outlineOffset: 4, transition: "outline-color .15s" }}>
+                onClick={(e) => {
+                  // 블록·입력칸을 누른 게 아니라 빈 곳을 눌렀을 때만 그 시각으로 빠른 등록
+                  if (e.target.closest("[data-tt-block]") || e.target.closest("[data-tt-quick]")) return;
+                  if (dragTodoId != null || resizingId != null) return;
+                  const min = minFromPoint(e.clientX, e.clientY);
+                  if (min == null) return;
+                  setQuickAdd({ date: selectedDate, startMin: min, text: "" });
+                }}
+                title="빈 곳을 누르면 그 시각에 바로 일정을 적을 수 있습니다"
+                style={{ position: "relative", height: railH, marginTop: 2, cursor: "copy", borderRadius: 10, outline: dragTodoId != null ? "2px dashed rgba(219,107,46,0.45)" : "none", outlineOffset: 4, transition: "outline-color .15s" }}>
                 {hours.map(h => (
                   <div key={h} style={{ position: "absolute", left: 0, right: 0, top: (h - startH) * HOUR_H, display: "flex", alignItems: "center", gap: 7 }}>
                     <span style={{ width: 36, fontSize: 9.5, color: "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{String(h).padStart(2, "0")}:00</span>
@@ -25655,8 +25687,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   const done = x.t.done;
                   const fmtT = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
                   return (
-                    <div key={x.t.id}
-                      onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(x.t); }}
+                    <div key={x.t.id} data-tt-block="1"
+                      onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(x.t); }}
                       onContextMenu={(e) => openCtx(e, { id: x.t.id })}
                       onPointerDown={(e) => beginDrag(e, x.t)} draggable={false}
                       title="끌어서 시간을 옮길 수 있습니다"
@@ -25686,6 +25718,24 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                     <span style={{ flex: 1, height: 2, background: "#DB6B2E", borderRadius: 2 }} />
                   </div>
                 )}
+                {quickAdd && quickAdd.date === selectedDate && Number.isFinite(quickAdd.startMin) && (
+                  <div data-tt-quick="1" onClick={(e) => e.stopPropagation()}
+                    style={{ position: "absolute", left: 46, right: 2, top: yOf(quickAdd.startMin) + 6, height: Math.max(34, HOUR_H - 4), zIndex: 5,
+                      borderRadius: 8, border: "1.5px solid #DB6B2E", background: "var(--surface)", boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+                      display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 800, color: "#DB6B2E", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                      {String(Math.floor(quickAdd.startMin / 60)).padStart(2, "0")}:{String(quickAdd.startMin % 60).padStart(2, "0")}
+                    </span>
+                    <input autoFocus value={quickAdd.text}
+                      onChange={(e) => setQuickAdd(q => ({ ...q, text: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); quickAddSave(); } else if (e.key === "Escape") { e.preventDefault(); setQuickAdd(null); } }}
+                      onBlur={() => { if ((quickAdd.text || "").trim()) quickAddSave(); else setQuickAdd(null); }}
+                      placeholder="할 일 입력 후 Enter"
+                      style={{ flex: 1, minWidth: 0, height: 26, minHeight: 26, fontSize: 12, border: "none", background: "transparent", padding: 0, outline: "none", color: "var(--text1)" }} />
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => setQuickAdd(null)} title="취소"
+                      style={{ width: 20, height: 20, borderRadius: 6, border: "none", background: "var(--surface2)", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>×</button>
+                  </div>
+                )}
                 {showNow && (
                   <div style={{ position: "absolute", left: 0, right: 0, top: yOf(nowMin), display: "flex", alignItems: "center", gap: 5, zIndex: 2, pointerEvents: "none" }}>
                     <span style={{ width: 36, textAlign: "right", fontSize: 9.5, fontWeight: 800, color: "#F04452", fontVariantNumeric: "tabular-nums" }}>{String(Math.floor(nowMin / 60)).padStart(2, "0")}:{String(nowMin % 60).padStart(2, "0")}</span>
@@ -25695,10 +25745,21 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 )}
               </div>
 
-              <button onClick={() => openAdd(selectedDate)}
-                style={{ height: 38, borderRadius: 10, border: "1px dashed var(--border)", background: "var(--input-bg)", color: "var(--text3)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                + 일정 추가 — 끌어다 놓기 · "14:00 미팅" 입력 · 블록 아래를 끌면 소요 시간 조절
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input value={quickBar}
+                  onChange={(e) => setQuickBar(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && quickBar.trim()) { e.preventDefault(); quickAddSave({ date: selectedDate, startMin: null, text: quickBar }); } }}
+                  placeholder='여기에 바로 입력 — "14:00 미팅" 처럼 시각을 넣어도 됩니다'
+                  style={{ flex: 1, minWidth: 0, height: 38, minHeight: 38, fontSize: 12.5, borderRadius: 10, padding: "0 12px" }} />
+                <button onClick={() => quickBar.trim() ? quickAddSave({ date: selectedDate, startMin: null, text: quickBar }) : openAdd(selectedDate)}
+                  className={quickBar.trim() ? "btn-orange" : ""}
+                  title={quickBar.trim() ? "이 내용으로 추가" : "자세히 입력 (메모·첨부·기간)"}
+                  style={{ height: 38, padding: "0 13px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+                    border: quickBar.trim() ? "none" : "1px solid var(--border)", background: quickBar.trim() ? undefined : "var(--surface2)", color: quickBar.trim() ? undefined : "var(--text2)" }}>
+                  {quickBar.trim() ? "추가" : "자세히"}
+                </button>
+              </div>
+              
             </div>
           );
         })()}
