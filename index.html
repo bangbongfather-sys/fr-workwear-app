@@ -24878,15 +24878,20 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     if (!text) { setQuickAdd(null); return; }
     let startMin = Number.isFinite(q.startMin) ? Number(q.startMin) : null;
     // "14:00 미팅" 처럼 앞에 시각을 적었으면 그 시각을 우선한다
-    const m = /^\s*([01]?\d|2[0-3])\s*[:시]\s*([0-5]\d)?\s*/.exec(text);
-    if (m) { startMin = Number(m[1]) * 60 + Number(m[2] || 0); text = text.slice(m[0].length).trim() || text.trim(); }
-    const t = { id: Date.now(), date: q.date || selectedDate, endDate: "", text, memo: "", done: false, createdAt: Date.now(), atts: [] };
+    // "14:00" · "14시" · "9시30분" 만 시각으로 인식. "3시간 작업" 처럼 '시간'으로 이어지면 건드리지 않는다
+    const m = /^\s*([01]?\d|2[0-3])\s*(?::\s*([0-5]\d)|시(?!간)\s*(?:([0-5]?\d)\s*분)?)\s*/.exec(text);
+    if (m) {
+      const mm = m[2] != null ? Number(m[2]) : (m[3] != null ? Number(m[3]) : 0);
+      startMin = Number(m[1]) * 60 + mm;
+      text = text.slice(m[0].length).trim() || text.trim();
+    }
+    // ttOnly: 이 시간표에만 두는 항목 — 달력에는 올리지 않고 노션에도 보내지 않는다
+    const t = { id: Date.now(), date: q.date || selectedDate, endDate: "", text, memo: "", done: false, createdAt: Date.now(), atts: [], ttOnly: true };
     if (Number.isFinite(startMin)) { t.startMin = startMin; t.durMin = 60; }
     setTodos(prev => [...prev, t]);
     setQuickAdd(null); setQuickBar("");
     const hhmm = Number.isFinite(startMin) ? `${String(Math.floor(startMin / 60)).padStart(2, "0")}:${String(startMin % 60).padStart(2, "0")} · ` : "";
-    showToast(`${hhmm}"${text.slice(0, 18)}" 추가했습니다`, "success");
-    notionCreate(t).then(pageId => { if (pageId) setTodos(prev => prev.map(x => x.id === t.id ? { ...x, notionPageId: pageId } : x)); });
+    showToast(`${hhmm}"${text.slice(0, 18)}" 시간표에 추가했습니다\n(달력에는 올라가지 않습니다)`, "success");
   };
 
   // 타임테이블 블록 아래 손잡이를 끌어 소요 시간 조절 (15분 스냅)
@@ -24928,6 +24933,26 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", finish);
     document.addEventListener("touchmove", blockScroll, { passive: false });
+  };
+
+  // 시간표 전용 ↔ 달력 일정 전환. 달력으로 올릴 때 노션에도 등록한다.
+  const toggleCalendarVisible = (id) => {
+    let target = null, toCal = false;
+    setTodos(prev => prev.map(t => {
+      if (t.id !== id) return t;
+      toCal = !!t.ttOnly;
+      const n = { ...t };
+      if (toCal) delete n.ttOnly; else n.ttOnly = true;
+      target = n;
+      return n;
+    }));
+    if (!target) return;
+    if (toCal) {
+      showToast(`"${(target.text || "").slice(0, 18)}" 을(를) 달력 일정으로 올렸습니다`, "success");
+      if (!target.notionPageId) notionCreate(target).then(pageId => { if (pageId) setTodos(prev => prev.map(x => x.id === id ? { ...x, notionPageId: pageId } : x)); });
+    } else {
+      showToast(`"${(target.text || "").slice(0, 18)}" 은(는) 이제 시간표에만 표시됩니다`, "success");
+    }
   };
 
   const clearTodoTime = (id) => {
@@ -25190,10 +25215,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     while (cur <= last) { out.push(ymd(cur)); cur.setDate(cur.getDate() + 1); }
     return out;
   };
+  // 타임테이블에서 바로 적은 항목(ttOnly)은 그날의 시간표에만 두고 달력에는 띄우지 않는다.
+  // 달력·다가오는 일정·일정 검색은 calTodos, 타임테이블·하루 기록은 todos 전체를 쓴다.
+  const calTodos = todos.filter(t => !t.ttOnly);
   const countByDate = {};
   const doneByDate = {};
   const todosByDate = {};
-  todos.forEach(t => {
+  calTodos.forEach(t => {
     expandRange(t).forEach(k => {
       countByDate[k] = (countByDate[k] || 0) + 1;
       if (t.done) doneByDate[k] = (doneByDate[k] || 0) + 1;
@@ -25214,7 +25242,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     return false;
   }).sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
   // 다가오는 일정: 종료일이 오늘 이후인 미완료 todo
-  const allUpcoming = todos
+  const allUpcoming = calTodos
     .filter(t => !t.done && (t.endDate || t.date) >= todayKey)
     .sort((a,b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
 
@@ -25308,7 +25336,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
       {search.trim() && (() => {
         const q = search.trim().toLowerCase();
-        const results = (todos || [])
+        const results = (calTodos || [])
           .filter(t => ((t.text || "").toLowerCase().includes(q)) || (t.date || "").includes(q) || (t.endDate || "").includes(q))
           .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
         const WD = ["일", "월", "화", "수", "목", "금", "토"];
@@ -25399,7 +25427,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
                   // 이번 주에 걸치는 이벤트 추출 + 컬럼 위치 계산
                   const weekEvents = [];
-                  todos.forEach(t => {
+                  calTodos.forEach(t => {
                     if (!t.date) return;
                     const tStart = t.date;
                     const tEnd = t.endDate && t.endDate >= t.date ? t.endDate : t.date;
@@ -25658,6 +25686,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                       <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(t.id); }} title={t.done ? "미완료로" : "완료로 표시"}
                         style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 800 }}>{t.done ? "✓" : ""}</span>
                       <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: t.done ? "line-through" : "none" }}>{t.text}</span>
+                      {t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", border: "1px solid var(--divider)", padding: "1px 5px", borderRadius: 999, flexShrink: 0 }}>시간표</span>}
                       {t.endDate && t.endDate !== t.date && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "1px 6px", borderRadius: 999, flexShrink: 0 }}>기간</span>}
                     </div>
                   ))}
@@ -25698,6 +25727,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(x.t.id); }} title={done ? "미완료로" : "완료로 표시"}
                           style={{ width: 14, height: 14, borderRadius: 4, flexShrink: 0, border: done ? "none" : "1.5px solid rgba(219,107,46,0.5)", background: done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 800 }}>{done ? "✓" : ""}</span>
+                        {x.t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 8.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface)", border: "1px solid var(--divider)", padding: "0 4px", borderRadius: 999, flexShrink: 0, lineHeight: "13px" }}>시간표</span>}
                         <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none" }}>{x.t.text}</span>
                       </div>
                       {h >= 38 && <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 1, marginLeft: 20 }}>{fmtT(x.s)} – {fmtT(x.e)}</div>}
@@ -25749,7 +25779,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 <input value={quickBar}
                   onChange={(e) => setQuickBar(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && quickBar.trim()) { e.preventDefault(); quickAddSave({ date: selectedDate, startMin: null, text: quickBar }); } }}
-                  placeholder='여기에 바로 입력 — "14:00 미팅" 처럼 시각을 넣어도 됩니다'
+                  placeholder='여기에 바로 입력 — 시간표에만 기록 ("14:00 미팅" 처럼 시각 포함 가능)'
                   style={{ flex: 1, minWidth: 0, height: 38, minHeight: 38, fontSize: 12.5, borderRadius: 10, padding: "0 12px" }} />
                 <button onClick={() => quickBar.trim() ? quickAddSave({ date: selectedDate, startMin: null, text: quickBar }) : openAdd(selectedDate)}
                   className={quickBar.trim() ? "btn-orange" : ""}
@@ -26055,6 +26085,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           items.push({ icon: "clipboard", label: "복사해 두기", sub: "붙여넣기용", on: () => { setClipTodo(t); showToast(`"${(t.text || "").slice(0, 20)}" 복사됨\n원하는 날짜 칸을 우클릭해 붙여넣으세요`, "success"); } });
           items.push({ icon: "document",  label: "내용 텍스트 복사", sub: "카톡·메일용",            on: () => copyTodoText(t) });
           items.push({ sep: true });
+          items.push({ icon: t.ttOnly ? "calendar" : "clock", label: t.ttOnly ? "달력 일정으로 올리기" : "시간표에만 두기",
+            sub: t.ttOnly ? "지금은 시간표 전용" : "달력에서 숨김", on: () => toggleCalendarVisible(t.id) });
           items.push({ icon: "check", label: t.done ? "미완료로 표시" : "완료로 표시", on: () => toggleTodo(t.id) });
           items.push({ icon: "edit",  label: "상세 열기 / 수정", on: () => { setSelectedDate(t.date); openDetail(t); } });
           if (Number.isFinite(t.startMin)) {
