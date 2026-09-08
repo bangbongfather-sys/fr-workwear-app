@@ -24866,6 +24866,47 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       if (forceDate && target.notionPageId) notionPatch(target.notionPageId, { date: target.date, endDate: target.endDate || null });
     }
   };
+  // 타임테이블 블록 아래 손잡이를 끌어 소요 시간 조절 (15분 스냅)
+  const resizeRef = React.useRef(null);
+  const [resizingId, setResizingId] = React.useState(null);
+  const beginResizeTime = (e, t, hourH) => {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const start = Number.isFinite(t.startMin) ? Number(t.startMin) : 9 * 60;
+    const dur0 = Number(t.durMin) > 0 ? Number(t.durMin) : 60;
+    resizeRef.current = { id: t.id, pointerId: e.pointerId, y0: e.clientY, dur0, hourH, start, dur: dur0 };
+    setResizingId(t.id);
+    const onMove = (ev) => {
+      const r = resizeRef.current;
+      if (!r || ev.pointerId !== r.pointerId) return;
+      if (ev.cancelable) ev.preventDefault();
+      const deltaMin = (ev.clientY - r.y0) / r.hourH * 60;
+      let nd = Math.round((r.dur0 + deltaMin) / 15) * 15;
+      nd = Math.max(15, Math.min(24 * 60 - r.start, nd));
+      if (nd === r.dur) return;
+      r.dur = nd;
+      setTodos(prev => prev.map(x => x.id === r.id ? { ...x, startMin: r.start, durMin: nd } : x));
+    };
+    const finish = () => {
+      const r = resizeRef.current;
+      resizeRef.current = null;
+      setResizingId(null);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      document.removeEventListener("touchmove", blockScroll);
+      if (r && r.dur !== r.dur0) {
+        const h = Math.floor(r.dur / 60), m = r.dur % 60;
+        showToast(`소요 시간 ${h ? `${h}시간` : ""}${h && m ? " " : ""}${m ? `${m}분` : (h ? "" : "")}으로 바꿨습니다`, "success");
+      }
+    };
+    const blockScroll = (ev) => { if (resizeRef.current && ev.cancelable) ev.preventDefault(); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    document.addEventListener("touchmove", blockScroll, { passive: false });
+  };
+
   const clearTodoTime = (id) => {
     let found = null;
     setTodos(prev => prev.map(t => { if (t.id !== id) return t; found = t; const n = { ...t }; delete n.startMin; delete n.durMin; return n; }));
@@ -24995,7 +25036,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
   // ── 일정 추가 모달 (노션 '새 페이지' 스타일) — 캘린더 셀 + 버튼/더블클릭으로 열림 ──
   const [addModal, setAddModal] = React.useState(null); // { date, endDate, text, memo }
-  const openAdd = (dateStr) => setAddModal({ date: dateStr || ymd(new Date()), endDate: "", text: "", memo: "", atts: [] });
+  const openAdd = (dateStr, preset = {}) => setAddModal({ date: dateStr || ymd(new Date()), endDate: "", text: "", memo: "", atts: [], startMin: null, durMin: null, ...preset });
   const saveAdd = () => {
     if (!addModal) return;
     const text = addModal.text.trim();
@@ -25003,6 +25044,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     let start = addModal.date, end = addModal.endDate || "";
     if (end && end < start) { const tmp = start; start = end; end = tmp; }
     const t = { id: Date.now(), date: start, endDate: end || "", text, memo: addModal.memo.trim(), done: false, createdAt: Date.now(), atts: addModal.atts || [] };
+    if (Number.isFinite(addModal.startMin)) { t.startMin = Number(addModal.startMin); t.durMin = Number(addModal.durMin) > 0 ? Number(addModal.durMin) : 60; }
     setTodos(prev => [...prev, t]);
     setSelectedDate(start);
     setAddModal(null);
@@ -25018,7 +25060,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // ── 일정 상세 모달 (노션 스타일: 제목 + 내용 메모) ──
   const [detail, setDetail] = React.useState(null); // { id, text, memo, date, endDate } — 편집 중 드래프트
   const detailInbox = useAttachInbox(detail ? (detail.atts || []) : [], (next) => setDetail(d => d ? { ...d, atts: next } : d));
-  const openDetail = (t) => { setMoveToNotePin(false); setDetail({ id: t.id, text: t.text, memo: t.memo || "", date: t.date, endDate: t.endDate || "", atts: t.atts || [] }); };
+  const openDetail = (t) => { setMoveToNotePin(false); setDetail({ id: t.id, text: t.text, memo: t.memo || "", date: t.date, endDate: t.endDate || "", atts: t.atts || [], startMin: Number.isFinite(t.startMin) ? Number(t.startMin) : null, durMin: Number(t.durMin) > 0 ? Number(t.durMin) : null }); };
   const closeDetail = (saveIt = true) => {
     if (saveIt && detail) {
       let start = detail.date, end = detail.endDate;
@@ -25029,6 +25071,9 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       setTodos(prev => prev.map(t => {
         if (t.id !== detail.id) return t;
         target = { ...t, text, memo, date: start, endDate: end || "", atts: detail.atts || [] };
+        // 시간 지정/해제 반영 — 해제하면 필드를 지워 '시간 미지정'으로 돌아간다
+        if (Number.isFinite(detail.startMin)) { target.startMin = Number(detail.startMin); target.durMin = Number(detail.durMin) > 0 ? Number(detail.durMin) : 60; }
+        else { delete target.startMin; delete target.durMin; }
         return target;
       }));
       if (target?.notionPageId) notionPatch(target.notionPageId, { text, date: start, endDate: end || null });
@@ -25624,6 +25669,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                         <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none" }}>{x.t.text}</span>
                       </div>
                       {h >= 38 && <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 1, marginLeft: 20 }}>{fmtT(x.s)} – {fmtT(x.e)}</div>}
+                      {/* 아래 손잡이를 끌면 끝나는 시각(소요 시간)이 15분 단위로 조절된다 */}
+                      <span className="sched-tt-resize" onPointerDown={(ev) => beginResizeTime(ev, x.t, HOUR_H)}
+                        onClick={(ev) => ev.stopPropagation()}
+                        title="끌어서 소요 시간 조절 (15분 단위)"
+                        style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 9, cursor: "ns-resize", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 1, touchAction: "none" }}>
+                        <span style={{ width: 26, height: 3, borderRadius: 2, background: resizingId === x.t.id ? "#DB6B2E" : "rgba(219,107,46,0.45)" }} />
+                      </span>
                     </div>
                   );
                 })}
@@ -25645,7 +25697,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
               <button onClick={() => openAdd(selectedDate)}
                 style={{ height: 38, borderRadius: 10, border: "1px dashed var(--border)", background: "var(--input-bg)", color: "var(--text3)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                + 일정 추가 — 위 항목을 끌어다 놓거나 "14:00 미팅"처럼 입력
+                + 일정 추가 — 끌어다 놓기 · "14:00 미팅" 입력 · 블록 아래를 끌면 소요 시간 조절
               </button>
             </div>
           );
@@ -25683,6 +25735,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   {addModal.endDate
                     ? <button onClick={() => setAddModal({ ...addModal, endDate: "" })} style={{ border: "none", background: "var(--surface2)", color: "var(--text2)", borderRadius: 6, width: 24, height: 24, cursor: "pointer", fontFamily: "inherit" }}>×</button>
                     : <span style={{ fontSize: 11, color: "var(--text3)", fontStyle: "italic" }}>단일 일자</span>}
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text2)", fontWeight: 600, minWidth: 90, paddingTop: 6 }}><Icon name="clock" size={14}/> 시간</span>
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <ScheduleTimeFields startMin={addModal.startMin} durMin={addModal.durMin}
+                      onChange={({ startMin, durMin }) => setAddModal(m => ({ ...m, startMin, durMin }))} />
+                  </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text2)", fontWeight: 600, minWidth: 90, paddingTop: 8 }}><Icon name="clipboard" size={14}/> 메모</span>
@@ -25778,6 +25837,15 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                     </span>
                   </>
                 )}
+              </div>
+
+              {/* 시간 (타임테이블 배치) */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "var(--text3)", fontWeight: 700, paddingTop: 7, minWidth: 40 }}><Icon name="clock" size={14}/>시간</span>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <ScheduleTimeFields startMin={detail.startMin} durMin={detail.durMin}
+                    onChange={({ startMin, durMin }) => setDetail(d => ({ ...d, startMin, durMin }))} />
+                </div>
               </div>
 
               {/* 내용 메모 */}
@@ -26205,6 +26273,49 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 }
 
 // ─── 중요 메모 패널 ───
+// 일정 시간 지정 필드 — 시작/종료를 분 단위로 직접 입력한다.
+// 타임테이블 드래그는 15분 스냅이라 그보다 세밀하게 잡거나 소요 시간을 바꿀 때 쓴다.
+// 값은 startMin(0~1439) / durMin 으로 저장되며, 비우면 "시간 미지정"으로 돌아간다.
+function ScheduleTimeFields({ startMin, durMin, onChange }) {
+  const has = Number.isFinite(startMin) && startMin !== null;
+  const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(Math.floor(m) % 60).padStart(2, "0")}`;
+  const parse = (v) => { const m = /^(\d{1,2}):(\d{2})$/.exec(v || ""); if (!m) return null; const n = Number(m[1]) * 60 + Number(m[2]); return (n >= 0 && n <= 1439) ? n : null; };
+  const s = has ? Number(startMin) : null;
+  const dur = Number(durMin) > 0 ? Number(durMin) : 60;
+  const e = has ? Math.min(24 * 60, s + dur) : null;
+  const durLabel = (n) => { const h = Math.floor(n / 60), m = n % 60; return `${h ? `${h}시간` : ""}${h && m ? " " : ""}${m ? `${m}분` : (h ? "" : "0분")}`; };
+  const inp = { height: 34, minHeight: 34, padding: "0 8px", fontSize: 13, borderRadius: 8, fontVariantNumeric: "tabular-nums" };
+  if (!has) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={() => onChange({ startMin: 9 * 60, durMin: 60 })}
+          style={{ height: 34, padding: "0 12px", borderRadius: 8, border: "1px dashed var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="clock" size={13}/>시간 지정하기
+        </button>
+        <span style={{ fontSize: 11, color: "var(--text3)" }}>지정하지 않으면 타임테이블의 '시간 미지정'에 놓입니다</span>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+      <input type="time" step={300} value={hhmm(s)} style={{ ...inp, width: 118 }}
+        onChange={ev => { const v = parse(ev.target.value); if (v == null) return; onChange({ startMin: v, durMin: Math.max(5, Math.min(24 * 60 - v, dur)) }); }} />
+      <span style={{ color: "var(--text3)", fontSize: 12 }}>~</span>
+      <input type="time" step={300} value={hhmm(e)} style={{ ...inp, width: 118 }}
+        onChange={ev => { const v = parse(ev.target.value); if (v == null) return; onChange({ startMin: s, durMin: Math.max(5, v > s ? v - s : 5) }); }} />
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "3px 9px", borderRadius: 100, whiteSpace: "nowrap" }}>{durLabel(dur)}</span>
+      <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+        {[30, 60, 90, 120].map(d => (
+          <button key={d} onClick={() => onChange({ startMin: s, durMin: Math.min(24 * 60 - s, d) })} title={`소요 ${durLabel(d)}로`}
+            style={{ height: 26, padding: "0 8px", borderRadius: 7, border: dur === d ? "1px solid rgba(219,107,46,0.5)" : "1px solid var(--border)", background: dur === d ? "rgba(219,107,46,0.10)" : "var(--surface2)", color: dur === d ? "#DB6B2E" : "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{durLabel(d)}</button>
+        ))}
+      </span>
+      <button onClick={() => onChange({ startMin: null, durMin: null })} title="시간 미지정으로 되돌리기"
+        style={{ height: 26, padding: "0 9px", borderRadius: 7, border: "none", background: "var(--surface2)", color: "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>해제</button>
+    </div>
+  );
+}
+
 // ─── 하루 기록 (일별 메모·일기·중요 노트) ───
 // 하루에 한 장. dailyNotes = { "2026-08-26": { text, star, updatedAt } } 형태로
 // 날짜를 키로 저장해 같은 날을 다시 열면 이어서 쓴다. 내용이 비고 별표도 없으면
