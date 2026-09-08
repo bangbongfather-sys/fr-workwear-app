@@ -24871,6 +24871,9 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // quickAdd = { date, startMin(null이면 시간 미지정), text }
   const [quickAdd, setQuickAdd] = React.useState(null);
   const [quickBar, setQuickBar] = React.useState("");   // 하단 한 줄 입력
+  // 타임테이블 시간 범위 — 기본 08~22시, '하루 전체'면 00~24시 (선택은 기기에 기억)
+  const [ttFull, setTtFull] = React.useState(() => load("frw_tt_full", false));
+  React.useEffect(() => { save("frw_tt_full", ttFull); }, [ttFull]);
   const quickAddSave = (payload) => {
     const q = payload || quickAdd;
     if (!q) return;
@@ -25656,8 +25659,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           const timed = [], untimed = [];
           dayTodos.forEach(t => { const tm = parseTime(t); if (tm) timed.push({ t, ...tm }); else untimed.push(t); });
           const HOUR_H = 44;
-          let startH = 8, endH = 19;
-          timed.forEach(x => { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.ceil(x.e / 60)); });
+          // 기본은 업무 시간대(08~22시). '하루 전체'를 켜면 00~24시 전부 보여준다.
+          // 어느 쪽이든 그 범위 밖에 일정이 있으면 자동으로 늘려서 잘리지 않게 한다.
+          let startH = ttFull ? 0 : 8, endH = ttFull ? 24 : 22;
+          timed.forEach(x => { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(x.e / 60))); });
           const hours = []; for (let h = startH; h <= endH; h++) hours.push(h);
           const railH = (endH - startH) * HOUR_H;
           const yOf = (min) => (min - startH * 60) / 60 * HOUR_H;
@@ -25671,6 +25676,14 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 <span style={{ fontSize: 12, color: "var(--text3)" }}>{selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}</span>
                 <span style={{ flex: 1 }} />
                 {dayTodos.length > 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>{dayTodos.length}건 · 완료 {doneCnt}</span>}
+                <button onClick={() => setTtFull(v => !v)}
+                  title={ttFull ? "업무 시간대(08~22시)만 보기" : "새벽·심야까지 하루 전체(00~24시) 보기"}
+                  style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
+                    border: ttFull ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
+                    background: ttFull ? "rgba(219,107,46,0.10)" : "var(--surface2)",
+                    color: ttFull ? "#DB6B2E" : "var(--text3)" }}>
+                  {ttFull ? "하루 전체 00~24시" : "08~22시"}
+                </button>
               </div>
 
               {untimed.length > 0 && (
@@ -25706,7 +25719,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 style={{ position: "relative", height: railH, marginTop: 2, cursor: "copy", borderRadius: 10, outline: dragTodoId != null ? "2px dashed rgba(219,107,46,0.45)" : "none", outlineOffset: 4, transition: "outline-color .15s" }}>
                 {hours.map(h => (
                   <div key={h} style={{ position: "absolute", left: 0, right: 0, top: (h - startH) * HOUR_H, display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ width: 36, fontSize: 9.5, color: "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{String(h).padStart(2, "0")}:00</span>
+                    <span style={{ width: 36, fontSize: 9.5, color: h === 24 ? "var(--text3)" : (h < 8 || h >= 19 ? "var(--text3)" : "var(--text2)"), textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: (h < 8 || h > 19) ? 0.75 : 1 }}>{String(h).padStart(2, "0")}:00</span>
                     <span style={{ flex: 1, height: 1, background: "var(--divider)" }} />
                   </div>
                 ))}
