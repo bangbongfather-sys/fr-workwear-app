@@ -3129,6 +3129,35 @@ function effCurrentStock(m, stock) {
 
 // ─── 발주서 작성 시 재고·안전재고 참조 ───
 // 현재고: 단가표 직접입력(currentStock) 우선, 없으면 재고 현황 자동 참조. 안전재고: 단가표 safeStock 우선.
+// ─── 단가표 ↔ 매입 현황 연결 ───
+// 원단 이름으로 매입(입고) 기록을 찾아 최근 매입일·수량과 기간 합계를 낸다.
+// 이름은 공백·대소문자를 무시하고 맞추며, 한쪽이 다른 쪽을 포함해도(코드만 다른 표기) 같은 자재로 본다.
+const _mnorm = (v) => String(v || "").toLowerCase().replace(/\s+/g, "");
+function intakeSummaryOf(name, fabricIntakes, days) {
+  const n = _mnorm(name);
+  if (!n || n.length < 2) return null;
+  const since = new Date(); since.setHours(0, 0, 0, 0); since.setDate(since.getDate() - (days || 90));
+  const sinceStr = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, "0")}-${String(since.getDate()).padStart(2, "0")}`;
+  const rows = (fabricIntakes || []).filter(r => {
+    if (r.status === "반품") return false;
+    const rn = _mnorm(r.materialName);
+    if (!rn) return false;
+    return rn === n || (rn.length >= 6 && n.length >= 6 && (rn.includes(n) || n.includes(rn)));
+  }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  if (rows.length === 0) return null;
+  const inRange = rows.filter(r => String(r.date || "") >= sinceStr);
+  const sum = inRange.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+  const amount = inRange.reduce((s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.unitPrice) || 0), 0);
+  const last = rows[0];
+  return {
+    last, rows, recent: inRange,
+    sum, amount, count: inRange.length,
+    unit: last.unit || "",
+    lastQty: parseFloat(last.qty) || 0,
+    lastDate: last.date || "",
+  };
+}
+
 function poStockInfo(name, materials, stock) {
   const n = (name || "").trim();
   if (!n) return null;
@@ -3300,7 +3329,7 @@ function NotionSafeStockModal({ materials, setMaterials, onClose }) {
 // 왼쪽은 목록만, 오른쪽은 선택 항목의 상세. 표 안 인라인 편집을 없애 오터치로
 // 단가가 바뀌는 사고를 구조적으로 막는다 (단가 계산기 잠금 프레임과 같은 철학).
 // 목록의 각 행에는 재고 게이지가 붙고, 회색 세로선이 안전재고 지점이다.
-function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {}, products = [] }) {
+function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {}, products = [], fabricIntakes = [] }) {
   // 단가표 탭 — "원단 단가표"·"공임비 단가표"는 기본 탭이고, 사용자가 탭을 더 만들 수 있다.
   // 새 탭은 별도 데이터 저장소가 아니라 항목의 sheet 값으로 구분한다. 원단은 끝까지 원단,
   // 공임은 끝까지 공임으로 남아야 요척서의 참조(fabrics.matId / extras.laborId)가 안 깨지기 때문.
@@ -3313,6 +3342,9 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const [selLabId, setSelLabId] = useState(null);
   const [search, setSearch] = useState("");
   const [onlyLow, setOnlyLow] = useState(false);
+  // 매입 조회 기간 — 목록의 '최근 매입' 표시와 카테고리 합계에 함께 적용 (기기에 기억)
+  const [intakeDays, setIntakeDays] = useState(() => load("frw_pdb_intake_days", 90));
+  useEffect(() => { save("frw_pdb_intake_days", intakeDays); }, [intakeDays]);
   const [showAddMat, setShowAddMat] = useState(false);
   const [showAddLab, setShowAddLab] = useState(false);
   const [newMat, setNewMat] = useState({ name: "", price: "", unit: "yard", safeStock: "", currentStock: "", memo: "" });
@@ -3763,6 +3795,40 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
           {/* 좌: 목록 */}
           <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+            {/* 지금 보고 있는 목록의 매입 합계 — 카테고리(하계 등)를 고르면 그 카테고리 기준 */}
+            {showMats && visMats.length > 0 && (() => {
+              // visMats 원소는 { m, st } 형태다
+              const per = visMats.map(({ m }) => ({ m, iv: intakeSummaryOf(m.name, fabricIntakes, intakeDays) })).filter(x => x.iv && x.iv.count > 0);
+              const byUnit = {};
+              per.forEach(({ iv }) => { const u = iv.unit || ""; byUnit[u] = (byUnit[u] || 0) + iv.sum; });
+              const amount = per.reduce((a, { iv }) => a + iv.amount, 0);
+              const cnt = per.reduce((a, { iv }) => a + iv.count, 0);
+              const catName = catFilter === "all" ? tabLabel : catFilter === "__none" ? "미분류" : catFilter;
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8, padding: "8px 11px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text2)", whiteSpace: "nowrap" }}>
+                    <Icon name="inventory" size={12} style={{ marginRight: 4, verticalAlign: "-2px" }}/>{catName} 매입
+                  </span>
+                  <span style={{ display: "inline-flex", gap: 3 }}>
+                    {[30, 90, 180, 365].map(d => (
+                      <button key={d} onClick={() => setIntakeDays(d)} title={`최근 ${d}일 기준으로 보기`}
+                        style={{ height: 22, padding: "0 7px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700,
+                          border: intakeDays === d ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
+                          background: intakeDays === d ? "rgba(219,107,46,0.12)" : "var(--surface)",
+                          color: intakeDays === d ? "#DB6B2E" : "var(--text3)" }}>
+                        {d === 365 ? "1년" : `${Math.round(d / 30)}개월`}
+                      </button>
+                    ))}
+                  </span>
+                  <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text1)", fontWeight: 700, whiteSpace: "nowrap" }}>
+                    {cnt === 0 ? <span style={{ color: "var(--text3)", fontWeight: 500 }}>매입 없음</span> : <>
+                      {Object.entries(byUnit).map(([u, q]) => `${Math.round(q).toLocaleString()}${u}`).join(" + ")}
+                      <span style={{ color: "var(--text3)", fontWeight: 500 }}> · {cnt}건 · {Math.round(amount).toLocaleString()}원</span>
+                    </>}
+                  </span>
+                </div>
+              );
+            })()}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", letterSpacing: 1.1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tabLabel} {totalHere}종</div>
               {showMats && visMats.length > 0 && (
@@ -3819,6 +3885,21 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           </span>
                           <span style={{ padding: "3px 9px", borderRadius: 6, background: meta.bg, color: meta.text, fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>{meta.label}</span>
                         </div>
+                        {/* 최근 매입 — 발주·입고 수량을 목록에서 바로 확인 */}
+                        {(() => {
+                          const iv = intakeSummaryOf(m.name, fabricIntakes, intakeDays);
+                          if (!iv) return null;
+                          const md = (iv.lastDate || "").slice(5).replace("-", "/");
+                          return (
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10, color: on ? "rgba(171,79,31,0.85)" : "var(--text3)", whiteSpace: "nowrap", overflow: "hidden" }}>
+                              <Icon name="inventory" size={11} style={{ flexShrink: 0, opacity: 0.8 }}/>
+                              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                                최근 <b style={{ fontWeight: 700 }}>{md}</b> {iv.lastQty.toLocaleString()}{iv.unit}
+                                {iv.count > 1 && <span style={{ opacity: 0.85 }}> · {intakeDays}일 {iv.sum.toLocaleString()}{iv.unit} ({iv.count}건)</span>}
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </div>
                       {dropBot && <div style={{ height: 3, borderRadius: 3, background: "var(--accent)" }} />}
                     </React.Fragment>
@@ -4027,6 +4108,41 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                       {field("재고 금액", stockValue == null ? "—" : stockValue.toLocaleString(), stockValue == null ? "" : "원")}
                     </div>
                   )}
+
+                  {/* 최근 매입 내역 — 매입 현황 탭의 입고 기록을 이 원단 기준으로 모아 보여준다 */}
+                  {(() => {
+                    const iv = intakeSummaryOf(selMat.name, fabricIntakes, intakeDays);
+                    if (!iv) return null;
+                    const show = iv.rows.slice(0, 6);
+                    return (
+                      <div style={{ padding: "13px 15px", borderRadius: 13, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 9 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>최근 매입 내역</span>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: "#DB6B2E" }}>
+                            {intakeDays === 365 ? "1년" : `${Math.round(intakeDays / 30)}개월`} {Math.round(iv.sum).toLocaleString()}{iv.unit}
+                          </span>
+                          <span style={{ fontSize: 11, color: "var(--text3)" }}>· {iv.count}건 · {Math.round(iv.amount).toLocaleString()}원</span>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {show.map((r, i) => {
+                            const w = weekdayOf(r.date);
+                            const amt = (parseFloat(r.qty) || 0) * (parseFloat(r.unitPrice) || 0);
+                            return (
+                              <div key={r.id || i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap" }}>
+                                <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--text1)", fontWeight: 600, flexShrink: 0 }}>
+                                  {(r.date || "").replace(/-/g, ".")}{w && <span style={{ marginLeft: 3, fontSize: 10.5, fontWeight: 700, color: w.color }}>({w.label})</span>}
+                                </span>
+                                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, color: "var(--text3)" }}>{r.supplier || "—"}</span>
+                                <span style={{ fontWeight: 700, color: "var(--text1)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{(parseFloat(r.qty) || 0).toLocaleString()}{r.unit || iv.unit}</span>
+                                <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums", flexShrink: 0, minWidth: 78, textAlign: "right" }}>{Math.round(amt).toLocaleString()}원</span>
+                              </div>
+                            );
+                          })}
+                          {iv.rows.length > show.length && <div style={{ fontSize: 11, color: "var(--text3)" }}>외 {iv.rows.length - show.length}건 — 매입 현황 탭에서 전체 확인</div>}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* 재고 대비 안전선 */}
                   <div style={{ padding: "15px 17px", borderRadius: 13, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
@@ -19234,7 +19350,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
         {/* ── 단가표 탭 ── */}
         {tab === "pricedb" && (
-          <PriceDB materials={materials} setMaterials={setMaterials} laborItems={laborItems} setLaborItems={setLaborItems} stock={stock} products={products} />
+          <PriceDB materials={materials} setMaterials={setMaterials} laborItems={laborItems} setLaborItems={setLaborItems} stock={stock} products={products} fabricIntakes={fabricIntakes} />
         )}
 
         {/* ── 계산기 탭 ── */}
