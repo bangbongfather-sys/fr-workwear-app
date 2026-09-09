@@ -3129,31 +3129,52 @@ function effCurrentStock(m, stock) {
 
 // ─── 발주서 작성 시 재고·안전재고 참조 ───
 // 현재고: 단가표 직접입력(currentStock) 우선, 없으면 재고 현황 자동 참조. 안전재고: 단가표 safeStock 우선.
-// ─── 단가표 ↔ 매입 현황 연결 ───
-// 원단 이름으로 매입(입고) 기록을 찾아 최근 매입일·수량과 기간 합계를 낸다.
-// 이름은 공백·대소문자를 무시하고 맞추며, 한쪽이 다른 쪽을 포함해도(코드만 다른 표기) 같은 자재로 본다.
+// ─── 단가표 ↔ 발주 관리 연결 ───
+// 원단 이름으로 발주서(purchaseOrders)의 품목을 찾아 최근 발주일·수량과 기간 합계를 낸다.
+// 이름은 공백·대소문자를 무시하고 맞추며, 한쪽이 다른 쪽을 포함해도(코드 표기 차이) 같은 자재로 본다.
 const _mnorm = (v) => String(v || "").toLowerCase().replace(/\s+/g, "");
-function intakeSummaryOf(name, fabricIntakes, days) {
+// 발주일: orderDate(YYYY-MM-DD) → dateStr("2026.08.13") → 저장 시각 순으로 본다
+function poDateOf(po) {
+  if (po && typeof po.orderDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(po.orderDate)) return po.orderDate.slice(0, 10);
+  const m = /^(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/.exec(String((po && po.dateStr) || "").trim());
+  if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
+  if (po && po.savedAt) { const d = new Date(po.savedAt); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+  return "";
+}
+function poOrderSummaryOf(name, purchaseOrders, days) {
   const n = _mnorm(name);
   if (!n || n.length < 2) return null;
   const since = new Date(); since.setHours(0, 0, 0, 0); since.setDate(since.getDate() - (days || 90));
   const sinceStr = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, "0")}-${String(since.getDate()).padStart(2, "0")}`;
-  const rows = (fabricIntakes || []).filter(r => {
-    if (r.status === "반품") return false;
-    const rn = _mnorm(r.materialName);
-    if (!rn) return false;
-    return rn === n || (rn.length >= 6 && n.length >= 6 && (rn.includes(n) || n.includes(rn)));
-  }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  const rows = [];
+  (purchaseOrders || []).forEach(po => {
+    const date = poDateOf(po);
+    (po.items || []).forEach(it => {
+      const rn = _mnorm(it && it.name);
+      if (!rn) return;
+      const hit = rn === n || (rn.length >= 6 && n.length >= 6 && (rn.includes(n) || n.includes(rn)));
+      if (!hit) return;
+      const qty = parseFloat(it.qty) || 0;
+      if (qty <= 0) return;
+      rows.push({
+        key: `${po.id}-${it.id || rn}`, date, qty,
+        unit: it.unit || "", unitPrice: parseFloat(it.unitPrice) || 0,
+        supplier: (po.supplier && po.supplier.name) || "", title: po.title || "",
+        deliveryDate: po.deliveryDate || "",
+      });
+    });
+  });
   if (rows.length === 0) return null;
+  rows.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
   const inRange = rows.filter(r => String(r.date || "") >= sinceStr);
-  const sum = inRange.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
-  const amount = inRange.reduce((s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.unitPrice) || 0), 0);
   const last = rows[0];
   return {
     last, rows, recent: inRange,
-    sum, amount, count: inRange.length,
+    sum: inRange.reduce((s, r) => s + r.qty, 0),
+    amount: inRange.reduce((s, r) => s + r.qty * r.unitPrice, 0),
+    count: inRange.length,
     unit: last.unit || "",
-    lastQty: parseFloat(last.qty) || 0,
+    lastQty: last.qty,
     lastDate: last.date || "",
   };
 }
@@ -3329,7 +3350,7 @@ function NotionSafeStockModal({ materials, setMaterials, onClose }) {
 // 왼쪽은 목록만, 오른쪽은 선택 항목의 상세. 표 안 인라인 편집을 없애 오터치로
 // 단가가 바뀌는 사고를 구조적으로 막는다 (단가 계산기 잠금 프레임과 같은 철학).
 // 목록의 각 행에는 재고 게이지가 붙고, 회색 세로선이 안전재고 지점이다.
-function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {}, products = [], fabricIntakes = [] }) {
+function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {}, products = [], purchaseOrders = [] }) {
   // 단가표 탭 — "원단 단가표"·"공임비 단가표"는 기본 탭이고, 사용자가 탭을 더 만들 수 있다.
   // 새 탭은 별도 데이터 저장소가 아니라 항목의 sheet 값으로 구분한다. 원단은 끝까지 원단,
   // 공임은 끝까지 공임으로 남아야 요척서의 참조(fabrics.matId / extras.laborId)가 안 깨지기 때문.
@@ -3342,7 +3363,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   const [selLabId, setSelLabId] = useState(null);
   const [search, setSearch] = useState("");
   const [onlyLow, setOnlyLow] = useState(false);
-  // 매입 조회 기간 — 목록의 '최근 매입' 표시와 카테고리 합계에 함께 적용 (기기에 기억)
+  // 발주 조회 기간 — 목록의 '최근 발주' 표시와 카테고리 합계에 함께 적용 (기기에 기억)
   const [intakeDays, setIntakeDays] = useState(() => load("frw_pdb_intake_days", 90));
   useEffect(() => { save("frw_pdb_intake_days", intakeDays); }, [intakeDays]);
   const [showAddMat, setShowAddMat] = useState(false);
@@ -3795,10 +3816,10 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 
           {/* 좌: 목록 */}
           <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-            {/* 지금 보고 있는 목록의 매입 합계 — 카테고리(하계 등)를 고르면 그 카테고리 기준 */}
+            {/* 지금 보고 있는 목록의 발주 합계 — 카테고리(하계 등)를 고르면 그 카테고리 기준 */}
             {showMats && visMats.length > 0 && (() => {
               // visMats 원소는 { m, st } 형태다
-              const per = visMats.map(({ m }) => ({ m, iv: intakeSummaryOf(m.name, fabricIntakes, intakeDays) })).filter(x => x.iv && x.iv.count > 0);
+              const per = visMats.map(({ m }) => ({ m, iv: poOrderSummaryOf(m.name, purchaseOrders, intakeDays) })).filter(x => x.iv && x.iv.count > 0);
               const byUnit = {};
               per.forEach(({ iv }) => { const u = iv.unit || ""; byUnit[u] = (byUnit[u] || 0) + iv.sum; });
               const amount = per.reduce((a, { iv }) => a + iv.amount, 0);
@@ -3807,7 +3828,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
               return (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8, padding: "8px 11px", borderRadius: 10, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
                   <span style={{ fontSize: 11, fontWeight: 800, color: "var(--text2)", whiteSpace: "nowrap" }}>
-                    <Icon name="inventory" size={12} style={{ marginRight: 4, verticalAlign: "-2px" }}/>{catName} 매입
+                    <Icon name="purchase" size={12} style={{ marginRight: 4, verticalAlign: "-2px" }}/>{catName} 발주
                   </span>
                   <span style={{ display: "inline-flex", gap: 3 }}>
                     {[30, 90, 180, 365].map(d => (
@@ -3821,7 +3842,7 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                     ))}
                   </span>
                   <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text1)", fontWeight: 700, whiteSpace: "nowrap" }}>
-                    {cnt === 0 ? <span style={{ color: "var(--text3)", fontWeight: 500 }}>매입 없음</span> : <>
+                    {cnt === 0 ? <span style={{ color: "var(--text3)", fontWeight: 500 }}>발주 없음</span> : <>
                       {Object.entries(byUnit).map(([u, q]) => `${Math.round(q).toLocaleString()}${u}`).join(" + ")}
                       <span style={{ color: "var(--text3)", fontWeight: 500 }}> · {cnt}건 · {Math.round(amount).toLocaleString()}원</span>
                     </>}
@@ -3885,14 +3906,14 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                           </span>
                           <span style={{ padding: "3px 9px", borderRadius: 6, background: meta.bg, color: meta.text, fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>{meta.label}</span>
                         </div>
-                        {/* 최근 매입 — 발주·입고 수량을 목록에서 바로 확인 */}
+                        {/* 최근 발주 — 발주 관리 탭의 발주서 수량을 목록에서 바로 확인 */}
                         {(() => {
-                          const iv = intakeSummaryOf(m.name, fabricIntakes, intakeDays);
+                          const iv = poOrderSummaryOf(m.name, purchaseOrders, intakeDays);
                           if (!iv) return null;
                           const md = (iv.lastDate || "").slice(5).replace("-", "/");
                           return (
                             <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, fontSize: 10, color: on ? "rgba(171,79,31,0.85)" : "var(--text3)", whiteSpace: "nowrap", overflow: "hidden" }}>
-                              <Icon name="inventory" size={11} style={{ flexShrink: 0, opacity: 0.8 }}/>
+                              <Icon name="purchase" size={11} style={{ flexShrink: 0, opacity: 0.8 }}/>
                               <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
                                 최근 <b style={{ fontWeight: 700 }}>{md}</b> {iv.lastQty.toLocaleString()}{iv.unit}
                                 {iv.count > 1 && <span style={{ opacity: 0.85 }}> · {intakeDays}일 {iv.sum.toLocaleString()}{iv.unit} ({iv.count}건)</span>}
@@ -4109,15 +4130,15 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                     </div>
                   )}
 
-                  {/* 최근 매입 내역 — 매입 현황 탭의 입고 기록을 이 원단 기준으로 모아 보여준다 */}
+                  {/* 최근 발주 내역 — 발주 관리 탭의 발주서를 이 원단 기준으로 모아 보여준다 */}
                   {(() => {
-                    const iv = intakeSummaryOf(selMat.name, fabricIntakes, intakeDays);
+                    const iv = poOrderSummaryOf(selMat.name, purchaseOrders, intakeDays);
                     if (!iv) return null;
                     const show = iv.rows.slice(0, 6);
                     return (
                       <div style={{ padding: "13px 15px", borderRadius: 13, background: "var(--row-bg)", border: "1px solid var(--divider)" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 9 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>최근 매입 내역</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text3)", letterSpacing: 0.6 }}>최근 발주 내역</span>
                           <span style={{ fontSize: 11, fontWeight: 800, color: "#DB6B2E" }}>
                             {intakeDays === 365 ? "1년" : `${Math.round(intakeDays / 30)}개월`} {Math.round(iv.sum).toLocaleString()}{iv.unit}
                           </span>
@@ -4128,17 +4149,17 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
                             const w = weekdayOf(r.date);
                             const amt = (parseFloat(r.qty) || 0) * (parseFloat(r.unitPrice) || 0);
                             return (
-                              <div key={r.id || i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap" }}>
+                              <div key={r.key || i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap" }}>
                                 <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--text1)", fontWeight: 600, flexShrink: 0 }}>
                                   {(r.date || "").replace(/-/g, ".")}{w && <span style={{ marginLeft: 3, fontSize: 10.5, fontWeight: 700, color: w.color }}>({w.label})</span>}
                                 </span>
-                                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, color: "var(--text3)" }}>{r.supplier || "—"}</span>
+                                <span title={`${r.title || ""}${r.deliveryDate ? ` · 납기 ${r.deliveryDate}` : ""}`} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 11.5, color: "var(--text3)" }}>{r.supplier || "—"}</span>
                                 <span style={{ fontWeight: 700, color: "var(--text1)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{(parseFloat(r.qty) || 0).toLocaleString()}{r.unit || iv.unit}</span>
                                 <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums", flexShrink: 0, minWidth: 78, textAlign: "right" }}>{Math.round(amt).toLocaleString()}원</span>
                               </div>
                             );
                           })}
-                          {iv.rows.length > show.length && <div style={{ fontSize: 11, color: "var(--text3)" }}>외 {iv.rows.length - show.length}건 — 매입 현황 탭에서 전체 확인</div>}
+                          {iv.rows.length > show.length && <div style={{ fontSize: 11, color: "var(--text3)" }}>외 {iv.rows.length - show.length}건 — 발주 관리 탭에서 전체 확인</div>}
                         </div>
                       </div>
                     );
@@ -19350,7 +19371,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
         {/* ── 단가표 탭 ── */}
         {tab === "pricedb" && (
-          <PriceDB materials={materials} setMaterials={setMaterials} laborItems={laborItems} setLaborItems={setLaborItems} stock={stock} products={products} fabricIntakes={fabricIntakes} />
+          <PriceDB materials={materials} setMaterials={setMaterials} laborItems={laborItems} setLaborItems={setLaborItems} stock={stock} products={products} purchaseOrders={purchaseOrders} />
         )}
 
         {/* ── 계산기 탭 ── */}
