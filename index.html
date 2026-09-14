@@ -1176,7 +1176,7 @@
     }
 
     @media print {
-      .no-print { display: none !important; }
+      .no-print, #frw-toast-host { display: none !important; }
       body { background: white !important; margin: 0; padding: 0; }
       @page {
         size: A4 portrait;
@@ -4341,15 +4341,163 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 // 단가 계산기가 산출한 등급별 납품 단가를 제품별로 한 표에 모아 보여준다.
 // 값은 computeProduct() 결과라 계산기에서 원가·마진·직접 단가를 바꾸면 그대로 따라온다.
 // (회사 PDF 단가표와 같은 구성: 카테고리별 묶음 · 등급 열 · 판매가 환산 · 제작 옵션)
+// ─── 제품 단가표 · 인쇄용 "단가표 양식" ───
+// 회사에서 실제로 돌리는 한 장짜리 PRICE LIST 종이 양식을 그대로 재현한다.
+// 등급별 단가는 계산기(computeProduct)에서, 하단 판매가는 각 요척서의
+// '시장 소비자가'에서 그대로 가져온다 — 계산기 값을 고치면 이 양식도 같이 바뀐다.
+// 종이 단가표처럼 보여야 하므로 견적서·발주서와 같이 다크모드에서도 항상 흰 종이로 그린다.
+const PLIST_ROMAN = ["Ⅰ", "Ⅱ", "Ⅲ", "Ⅳ", "Ⅴ", "Ⅵ", "Ⅶ", "Ⅷ"];
+const PLIST_DEFAULT_OPTIONS = [
+  { id: "o1", name: "기장 수선", amt: 5000 },
+  { id: "o2", name: "특수 사이즈 제작", amt: 10000 },
+];
+// 오늘 날짜 (YYYY-MM-DD). toISOString()은 UTC라 한국 시간 새벽에 하루가 밀린다.
+const plistToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+// 제품의 '시장 소비자가' → 숫자 (콤마·원 같은 군더더기는 털어낸다)
+const plistSaleOf = (p) => {
+  const v = parseFloat(String(getMarketPrice(p) ?? "").replace(/[^\d.]/g, ""));
+  return isNaN(v) ? 0 : v;
+};
+
+function PriceSheet({ groups, allGrades, sets, options, optionNote, applyDate, vatMode, showSale, multiCat }) {
+  const fmt = (n) => Math.round(n || 0).toLocaleString();
+  const vat = (n) => vatMode ? Math.round(n * 1.1) : Math.round(n || 0);
+  const rowById = {};
+  groups.forEach(g => g.items.forEach(r => { rowById[r.p.id] = r; }));
+
+  // 종이 단가표와 같은 배치 — 세트는 그 구성품 중 마지막 제품 바로 아래에 붙는다
+  const lines = [];
+  groups.forEach(g => {
+    if (multiCat) lines.push({ kind: "cat", cat: g.cat, key: "c:" + g.cat });
+    const ids = g.items.map(r => r.p.id);
+    g.items.forEach((r, i) => {
+      lines.push({ kind: "item", r, key: "i:" + r.p.id });
+      (sets || []).forEach(st => {
+        const parts = (st.parts || []).filter(pt => rowById[pt.pid]);
+        if (parts.length === 0) return;
+        if (!parts.every(pt => ids.includes(pt.pid))) return;          // 이 분류 안에 다 있어야 한다
+        const lastIdx = Math.max(...parts.map(pt => ids.indexOf(pt.pid)));
+        if (lastIdx === i) lines.push({ kind: "set", st, parts, key: "s:" + st.id });
+      });
+    });
+  });
+  // 어느 분류에도 다 담기지 않은 세트(분류가 섞인 구성)는 맨 아래에 모아 붙인다
+  const placed = new Set(lines.filter(l => l.kind === "set").map(l => l.st.id));
+  (sets || []).forEach(st => {
+    if (placed.has(st.id)) return;
+    const parts = (st.parts || []).filter(pt => rowById[pt.pid]);
+    if (parts.length) lines.push({ kind: "set", st, parts, key: "s:" + st.id });
+  });
+
+  const priceOf = (r, gr) => vat(r.c.grades[gr] || 0);
+  const saleOf = (r) => vat(plistSaleOf(r.p));
+  const setPrice = (parts, gr) => parts.reduce((s, pt) => s + priceOf(rowById[pt.pid], gr) * (parseFloat(pt.qty) || 1), 0);
+  const setSale = (parts) => parts.reduce((s, pt) => s + saleOf(rowById[pt.pid]) * (parseFloat(pt.qty) || 1), 0);
+  const partsLabel = (parts) => parts.map(pt => {
+    const q = parseFloat(pt.qty) || 1;
+    return (rowById[pt.pid].p.name || "") + (q > 1 ? ` ×${q}` : "");
+  }).join(" + ");
+
+  const cell = (top, bottom) => (
+    <>
+      <div className="ps-p">{top > 0 ? fmt(top) : "—"}</div>
+      {showSale && <div className="ps-s">{bottom > 0 ? fmt(bottom) : "—"}</div>}
+    </>
+  );
+
+  return (
+    <div className="ps-paper">
+      <div className="ps-head">
+        <div className="ps-brandline">
+          <span className="ps-logo">NJ SAFETY</span>
+          <span className="ps-tag">FLAME RESISTANT WORKWEAR</span>
+        </div>
+        <div className="ps-title">제 품 단 가 표</div>
+        <div className="ps-eng">{(applyDate || "").slice(0, 4) || new Date().getFullYear()} PRICE LIST</div>
+        <div className="ps-meta">
+          {applyDate ? `${applyDate.replace(/-/g, ". ")}. 적용` : "적용일 미지정"} · 단위 원 · {vatMode ? "VAT 포함" : "VAT 별도"} · 상단 단가{showSale ? " · 하단 판매가" : ""} · 내부용
+        </div>
+      </div>
+
+      <div className="ps-scroll">
+      <table className="table-plain ps-tbl">
+        <colgroup>
+          <col style={{ width: "30%" }} />
+          {allGrades.map(g => <col key={g} />)}
+        </colgroup>
+        <thead>
+          <tr className="ps-h1">
+            <th />
+            {allGrades.map((g, i) => <th key={g}>{PLIST_ROMAN[i] || i + 1}</th>)}
+          </tr>
+          <tr className="ps-h2">
+            <th>품 목</th>
+            {allGrades.map(g => <th key={g}>{g} GROUP</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map(l => l.kind === "cat" ? (
+            <tr key={l.key} className="ps-cat"><td colSpan={1 + allGrades.length}><span className="ps-catlabel">{l.cat}</span></td></tr>
+          ) : l.kind === "set" ? (
+            <tr key={l.key} className="ps-set">
+              <td className="ps-name" title={partsLabel(l.parts)}>
+                <span className="ps-nm">
+                  <span className="ps-badge">{l.st.name || "SET"}</span>
+                  <span className="ps-parts">{partsLabel(l.parts)}</span>
+                </span>
+              </td>
+              {allGrades.map(g => <td key={g} className="ps-cell">{cell(setPrice(l.parts, g), setSale(l.parts))}</td>)}
+            </tr>
+          ) : (
+            <tr key={l.key}>
+              <td className="ps-name"><span className="ps-nm">{l.r.p.name || "(이름 없음)"}</span></td>
+              {allGrades.map(g => <td key={g} className="ps-cell">{cell(priceOf(l.r, g), saleOf(l.r))}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      </div>
+
+      {(options || []).length > 0 && (
+        <div className="ps-opt">
+          <span className="ps-opt-label">제작 옵션</span>
+          {options.map(o => (
+            <span key={o.id} className="ps-opt-item">{o.name} <b>+{fmt(o.amt)}</b>원</span>
+          ))}
+          {optionNote && <span className="ps-opt-note">{optionNote}</span>}
+        </div>
+      )}
+      <div className="ps-foot">NJ SAFETY · {BUYER_INFO.address} · {BUYER_INFO.tel}</div>
+    </div>
+  );
+}
+
 function ProductPriceListView({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
   const [search, setSearch] = React.useState("");
   const [catFilter, setCatFilter] = React.useState("all");
   const [vatMode, setVatMode] = React.useState(() => load("frw_plist_vat", false));   // 부가세 포함 보기
   const [showCost, setShowCost] = React.useState(() => load("frw_plist_cost", true)); // 원가·마진 열
   const [compact, setCompact] = React.useState(() => load("frw_plist_compact", true));
+  // ── 단가표 양식(종이 PRICE LIST) 전용 설정 ──
+  const [viewMode, setViewMode] = React.useState(() => load("frw_plist_view", "table")); // table | sheet
+  const [showSale, setShowSale] = React.useState(() => load("frw_plist_sale", true));    // 단가 아래 판매가 같이 찍기
+  const [applyDate, setApplyDate] = React.useState(() => load("frw_plist_date", plistToday()));
+  const [sets, setSets] = React.useState(() => load("frw_plist_sets", []));              // [{id,name,parts:[{pid,qty}]}]
+  const [options, setOptions] = React.useState(() => load("frw_plist_opts", PLIST_DEFAULT_OPTIONS));
+  const [optionNote, setOptionNote] = React.useState(() => load("frw_plist_optnote", "전 등급 동일 적용"));
+  const [editPanel, setEditPanel] = React.useState("");  // "" | sets | opts
   React.useEffect(() => { save("frw_plist_vat", vatMode); }, [vatMode]);
   React.useEffect(() => { save("frw_plist_cost", showCost); }, [showCost]);
   React.useEffect(() => { save("frw_plist_compact", compact); }, [compact]);
+  React.useEffect(() => { save("frw_plist_view", viewMode); }, [viewMode]);
+  React.useEffect(() => { save("frw_plist_sale", showSale); }, [showSale]);
+  React.useEffect(() => { save("frw_plist_date", applyDate); }, [applyDate]);
+  React.useEffect(() => { save("frw_plist_sets", sets); }, [sets]);
+  React.useEffect(() => { save("frw_plist_opts", options); }, [options]);
+  React.useEffect(() => { save("frw_plist_optnote", optionNote); }, [optionNote]);
 
   const rows = React.useMemo(() => (products || []).map(p => {
     const c = computeProduct(p, materials, laborItems);
@@ -4374,7 +4522,8 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
     if (!g) { g = { cat, items: [] }; groups.push(g); }
     g.items.push(r);
   });
-  groups.sort((a, b) => (a.cat === "미분류" ? 1 : b.cat === "미분류" ? -1 : a.cat.localeCompare(b.cat)));
+  // 분류 순서는 가나다가 아니라 단가 계산기의 제품 순서를 따른다 (사용자가 정한 순서 그대로).
+  groups.sort((a, b) => (a.cat === "미분류" ? 1 : 0) - (b.cat === "미분류" ? 1 : 0));
 
   const allGrades = React.useMemo(() => {
     const set = new Set();
@@ -4389,18 +4538,62 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
 
   // 카톡·메일용 텍스트
   const copyText = async () => {
-    const lines = [`NJ SAFETY 제품 단가표 — ${new Date().toLocaleDateString("ko-KR")} 기준${vatMode ? " (VAT 포함)" : " (VAT 별도)"}`];
+    const rowById = {};
+    rows.forEach(r => { rowById[r.p.id] = r; });
+    const head = viewMode === "sheet"
+      ? `NJ SAFETY 제품 단가표 — ${(applyDate || "").replace(/-/g, ". ")} 적용${vatMode ? " (VAT 포함)" : " (VAT 별도)"}${showSale ? " · 단가 / 판매가" : ""}`
+      : `NJ SAFETY 제품 단가표 — ${new Date().toLocaleDateString("ko-KR")} 기준${vatMode ? " (VAT 포함)" : " (VAT 별도)"}`;
+    const lines = [head];
+    const priceCells = (getPrice, getSale) => allGrades
+      .map(gr => { const v = getPrice(gr); return v > 0 ? `${gr} ${fmt(v)}${showSale && viewMode === "sheet" && getSale() > 0 ? `/${fmt(getSale())}` : ""}` : null; })
+      .filter(Boolean).join(" / ");
     groups.forEach(g => {
       lines.push("", `[${g.cat}]`);
-      g.items.forEach(({ p, c, gradeList }) => {
-        const cells = gradeList.filter(gr => (c.grades[gr] || 0) > 0).map(gr => `${gr} ${fmt(withVat(c.grades[gr]))}`).join(" / ");
+      const ids = g.items.map(r => r.p.id);
+      g.items.forEach((r, i) => {
+        const { p, c, gradeList } = r;
+        const cells = viewMode === "sheet"
+          ? priceCells(gr => withVat(c.grades[gr] || 0), () => withVat(plistSaleOf(p)))
+          : gradeList.filter(gr => (c.grades[gr] || 0) > 0).map(gr => `${gr} ${fmt(withVat(c.grades[gr]))}`).join(" / ");
         lines.push(`· ${p.name}${cells ? ` — ${cells}` : " — (단가 미설정)"}`);
+        if (viewMode !== "sheet") return;
+        (sets || []).forEach(st => {
+          const parts = (st.parts || []).filter(pt => rowById[pt.pid]);
+          if (parts.length === 0 || !parts.every(pt => ids.includes(pt.pid))) return;
+          if (Math.max(...parts.map(pt => ids.indexOf(pt.pid))) !== i) return;
+          const sum = (fn) => parts.reduce((acc, pt) => acc + fn(rowById[pt.pid]) * (parseFloat(pt.qty) || 1), 0);
+          const label = parts.map(pt => { const q = parseFloat(pt.qty) || 1; return rowById[pt.pid].p.name + (q > 1 ? ` ×${q}` : ""); }).join(" + ");
+          lines.push(`· [${st.name || "SET"}] ${label} — ${priceCells(gr => sum(x => withVat(x.c.grades[gr] || 0)), () => sum(x => withVat(plistSaleOf(x.p))))}`);
+        });
       });
     });
+    if (viewMode === "sheet" && (options || []).length) {
+      lines.push("", `제작 옵션 — ${options.map(o => `${o.name} +${fmt(o.amt)}원`).join(" · ")}${optionNote ? ` (${optionNote})` : ""}`);
+    }
     const text = lines.join("\n");
     try { await navigator.clipboard.writeText(text); showToast("단가표를 클립보드에 복사했습니다.\n카톡·메일에 붙여넣기 하세요.", "success"); }
     catch { showToast(text); }
   };
+
+  // ── 세트 구성 편집 ──
+  // 제품 칩을 누르면 1벌 → 2벌 → 3벌 → 해제 순으로 돌아간다 (별도 수량 입력칸 없이 끝내려고).
+  const upSet = (id, patch) => setSets(ss => ss.map(x => x.id === id ? { ...x, ...patch } : x));
+  const cyclePart = (id, pid) => setSets(ss => ss.map(st => {
+    if (st.id !== id) return st;
+    const parts = [...(st.parts || [])];
+    const i = parts.findIndex(x => x.pid === pid);
+    if (i < 0) return { ...st, parts: [...parts, { pid, qty: 1 }] };
+    const q = (parseFloat(parts[i].qty) || 1) + 1;
+    if (q > 3) parts.splice(i, 1); else parts[i] = { ...parts[i], qty: q };
+    return { ...st, parts };
+  }));
+  const addSet = () => setSets(ss => [...ss, { id: "st" + Date.now().toString(36), name: "SET", parts: [] }]);
+  const delSet = (id) => setSets(ss => ss.filter(x => x.id !== id));
+  const addOpt = () => setOptions(os => [...os, { id: "o" + Date.now().toString(36), name: "", amt: 0 }]);
+  const upOpt = (id, patch) => setOptions(os => os.map(x => x.id === id ? { ...x, ...patch } : x));
+  const delOpt = (id) => setOptions(os => os.filter(x => x.id !== id));
+  // 하단 판매가는 요척서의 '시장 소비자가'를 쓴다 — 비어 있는 제품이 있으면 알려준다
+  const noSaleCount = shown.filter(r => plistSaleOf(r.p) <= 0).length;
 
   const chip = (on, label, onClick, title) => (
     <button key={label} onClick={onClick} title={title}
@@ -4422,9 +4615,20 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
           </div>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ display: "inline-flex", padding: 2, gap: 2, borderRadius: 9, background: "var(--surface2)", border: "1px solid var(--border)" }}>
+            {[["table", "표 보기"], ["sheet", "단가표 양식"]].map(([v, label]) => (
+              <button key={v} onClick={() => setViewMode(v)}
+                title={v === "sheet" ? "회사 단가표(PRICE LIST) 종이 양식 그대로 보기 · 인쇄용" : "원가·마진까지 같이 보는 작업용 표"}
+                style={{ height: 26, padding: "0 10px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
+                  background: viewMode === v ? "var(--surface)" : "transparent",
+                  boxShadow: viewMode === v ? "0 1px 3px rgba(0,0,0,0.10)" : "none",
+                  color: viewMode === v ? "#DB6B2E" : "var(--text3)" }}>{label}</button>
+            ))}
+          </div>
           {chip(vatMode, vatMode ? "VAT 포함" : "VAT 별도", () => setVatMode(v => !v), "부가세 포함/별도 전환")}
-          {chip(showCost, "원가·마진", () => setShowCost(v => !v), "원가와 마진율 열 표시")}
-          {chip(compact, "좁게", () => setCompact(v => !v), "행 높이를 좁게")}
+          {viewMode === "table" && chip(showCost, "원가·마진", () => setShowCost(v => !v), "원가와 마진율 열 표시")}
+          {viewMode === "table" && chip(compact, "좁게", () => setCompact(v => !v), "행 높이를 좁게")}
+          {viewMode === "sheet" && chip(showSale, "하단 판매가", () => setShowSale(v => !v), "단가 아래에 판매가(요척서의 시장 소비자가)를 같이 찍습니다")}
           <button onClick={copyText} title="카톡·메일로 보낼 수 있게 텍스트로 복사"
             style={{ height: 30, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <Icon name="copy" size={12}/>복사
@@ -4444,6 +4648,80 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
         {rows.some(r => !(r.p.category || "").trim()) && chip(catFilter === "__none", `미분류 ${rows.filter(r => !(r.p.category || "").trim()).length}`, () => setCatFilter("__none"))}
       </div>
 
+      {viewMode === "sheet" && (
+        <div className="card no-print" style={{ padding: "11px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>적용일</span>
+            <input type="date" value={applyDate} onChange={e => setApplyDate(e.target.value)}
+              style={{ height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8, width: 148 }} />
+            {chip(editPanel === "sets", `세트 구성 ${sets.length || ""}`.trim(), () => setEditPanel(v => v === "sets" ? "" : "sets"), "상·하의 세트처럼 묶어 파는 구성을 만들면 단가표에 SET 줄로 나옵니다")}
+            {chip(editPanel === "opts", `제작 옵션 ${options.length || ""}`.trim(), () => setEditPanel(v => v === "opts" ? "" : "opts"), "기장 수선·특수 사이즈 같은 추가금 안내를 단가표 아래에 넣습니다")}
+          </div>
+          {showSale && noSaleCount > 0 && (
+            <div style={{ fontSize: 11, color: "#F0A742", lineHeight: 1.5 }}>
+              하단 판매가가 비어 있는 제품 {noSaleCount}개 — 단가 계산기에서 그 제품의 &lsquo;시장 소비자가&rsquo;를 넣으면 단가 아래에 같이 찍힙니다
+            </div>
+          )}
+
+          {editPanel === "sets" && (
+            <div style={{ borderTop: "1px solid var(--divider)", paddingTop: 9, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 11, color: "var(--text3)" }}>
+                제품을 누르면 <b>1벌 → 2벌 → 3벌 → 해제</b> 순으로 바뀝니다 · 세트 단가는 고른 제품들의 등급별 단가를 더해서 자동 계산됩니다
+              </div>
+              {sets.map(st => (
+                <div key={st.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap", padding: "8px 0", borderTop: "1px solid var(--divider)" }}>
+                  <input value={st.name} onChange={e => upSet(st.id, { name: e.target.value })} placeholder="SET"
+                    style={{ width: 88, height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8, fontWeight: 700 }} />
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", flex: 1, minWidth: 180 }}>
+                    {rows.map(r => {
+                      const pt = (st.parts || []).find(x => x.pid === r.p.id);
+                      const q = pt ? (parseFloat(pt.qty) || 1) : 0;
+                      return chip(!!pt, `${r.p.name || "(이름 없음)"}${q > 1 ? ` ×${q}` : ""}`, () => cyclePart(st.id, r.p.id));
+                    })}
+                  </div>
+                  <button onClick={() => delSet(st.id)} title="이 세트 삭제"
+                    style={{ height: 30, width: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "#F04452", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>×</button>
+                </div>
+              ))}
+              <button onClick={addSet}
+                style={{ alignSelf: "flex-start", height: 30, padding: "0 12px", borderRadius: 8, border: "1px dashed var(--border)", background: "transparent", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ 세트 추가</button>
+            </div>
+          )}
+
+          {editPanel === "opts" && (
+            <div style={{ borderTop: "1px solid var(--divider)", paddingTop: 9, display: "flex", flexDirection: "column", gap: 7 }}>
+              {options.map(o => (
+                <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <input value={o.name} onChange={e => upOpt(o.id, { name: e.target.value })} placeholder="옵션명 (예: 기장 수선)"
+                    style={{ flex: "1 1 150px", minWidth: 130, height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8 }} />
+                  <input type="number" value={o.amt} onChange={e => upOpt(o.id, { amt: parseFloat(e.target.value) || 0 })} placeholder="추가금"
+                    style={{ width: 110, height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8, textAlign: "right" }} />
+                  <span style={{ fontSize: 11.5, color: "var(--text3)" }}>원</span>
+                  <button onClick={() => delOpt(o.id)}
+                    style={{ height: 30, width: 30, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "#F04452", cursor: "pointer", fontFamily: "inherit", fontSize: 14 }}>×</button>
+                </div>
+              ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <button onClick={addOpt}
+                  style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px dashed var(--border)", background: "transparent", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>+ 옵션 추가</button>
+                <input value={optionNote} onChange={e => setOptionNote(e.target.value)} placeholder="꼬리말 (예: 전 등급 동일 적용)"
+                  style={{ flex: "1 1 180px", minWidth: 150, height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8 }} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewMode === "sheet" && (shown.length === 0 ? (
+        <div className="card" style={{ padding: "36px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+          {rows.length === 0 ? "등록된 제품이 없습니다 — 단가 계산에서 제품을 만들어 주세요" : "조건에 맞는 제품이 없습니다"}
+        </div>
+      ) : (
+        <PriceSheet groups={groups} allGrades={allGrades} sets={sets} options={options} optionNote={optionNote}
+          applyDate={applyDate} vatMode={vatMode} showSale={showSale} multiCat={groups.length > 1} />
+      ))}
+
+      {viewMode === "table" && (
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {shown.length === 0 ? (
           <div style={{ padding: "36px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
@@ -4525,6 +4803,7 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
           <span style={{ marginLeft: "auto" }}>제품을 누르면 단가 계산기로 이동합니다</span>
         </div>
       </div>
+      )}
 
       <style>{`
         .plist-row:hover { background: var(--row-bg); }
@@ -4532,7 +4811,70 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
         .plist-tbl .plist-name { position: sticky; left: 0; z-index: 1; background: var(--surface); }
         .plist-tbl thead .plist-name { background: var(--surface2); z-index: 2; }
         .plist-row:hover .plist-name { background: var(--row-bg); }
-        @media print { .no-print { display: none !important; } }
+
+        /* ─── 단가표 양식 — 회사 PRICE LIST 종이 그대로.
+           견적서·발주서와 같은 "인쇄물" 취급이라 다크모드에서도 항상 흰 종이로 그린다. ─── */
+        .ps-paper { background:#fff; color:#14161a; border:1px solid #e5e7eb; border-radius:14px;
+          padding:26px 24px 18px; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        .ps-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+        .ps-head { text-align:center; border-bottom:2px solid #14161a; padding-bottom:12px; margin-bottom:14px; }
+        .ps-brandline { display:flex; align-items:center; justify-content:center; gap:10px; flex-wrap:wrap; margin-bottom:9px; }
+        .ps-logo { font-size:13px; font-weight:900; letter-spacing:2px; color:#DB6B2E; }
+        .ps-tag { font-size:8.5px; letter-spacing:2.4px; color:#9aa0a6; }
+        .ps-title { font-size:25px; font-weight:900; letter-spacing:7px; }
+        .ps-eng { font-size:9.5px; letter-spacing:4px; color:#9aa0a6; margin-top:5px; }
+        .ps-meta { font-size:10.5px; color:#5b6068; margin-top:9px; }
+        table.ps-tbl { min-width:520px; table-layout:fixed; border-collapse:separate; border-spacing:0; }
+        .ps-tbl th, .ps-tbl td { border:none; border-right:1px solid #d7dade; border-bottom:1px solid #d7dade; }
+        .ps-tbl th:first-child, .ps-tbl td:first-child { border-left:1px solid #d7dade; }
+        .ps-tbl thead tr:first-child th { border-top:1px solid #d7dade; }
+        .ps-tbl tr:last-child td { border-bottom:1px solid #d7dade; }
+        .ps-nm { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+        .ps-tbl .ps-h1 th { padding:4px 6px; text-align:center; font-size:10px; font-weight:700;
+          color:#DB6B2E; background:#faf5f1; letter-spacing:1px; text-transform:none; }
+        .ps-tbl .ps-h2 th { padding:7px 6px; text-align:center; font-size:11px; font-weight:800;
+          color:#14161a; background:#f2f3f5; letter-spacing:1.4px; text-transform:none; }
+        .ps-tbl .ps-h2 th:first-child { letter-spacing:4px; }
+        .ps-tbl td { padding:7px 10px; font-size:12.5px; color:#14161a; background:#fff; border-bottom:1px solid #d7dade; }
+        .ps-tbl tr:hover td { background:#fff; }
+        .ps-tbl tr.ps-cat td, .ps-tbl tr.ps-cat:hover td { background:#faf5f1; font-size:10.5px; font-weight:800;
+          color:#DB6B2E; letter-spacing:1px; padding:5px 10px; }
+        .ps-tbl tr.ps-set td, .ps-tbl tr.ps-set:hover td { background:#fafbfc; }
+        .ps-name { font-weight:700; }
+        /* 폰처럼 좁은 화면에서 GROUP 열을 가로로 넘겨 봐도 품목명은 왼쪽에 남아 있어야 한다 */
+        /* box-shadow 의 앞쪽 값은 고정된 칸 왼쪽의 1~2px 비침을 덮는 흰 여백,
+           뒤쪽 값은 "옆으로 더 있다"를 알려주는 옅은 그림자다. */
+        .ps-tbl .ps-name { position:sticky; left:0; z-index:1; background:#fff;
+          box-shadow:3px 0 5px -3px rgba(0,0,0,0.18); }
+        .ps-tbl .ps-h1 th:first-child { position:sticky; left:0; z-index:2; background:#faf5f1; }
+        .ps-tbl .ps-h2 th:first-child { position:sticky; left:0; z-index:2; background:#f2f3f5; }
+        .ps-tbl tr.ps-set .ps-name, .ps-tbl tr.ps-set:hover .ps-name { background:#fafbfc; }
+        .ps-catlabel { position:sticky; left:0; display:inline-block; }
+        .ps-cell { text-align:right; font-variant-numeric:tabular-nums; }
+        .ps-p { font-weight:800; font-size:13px; }
+        .ps-s { font-size:11px; color:#9aa0a6; margin-top:1px; }
+        .ps-badge { display:inline-block; font-size:9px; font-weight:900; letter-spacing:2px; color:#fff;
+          background:#14161a; border-radius:3px; padding:1px 6px; margin-right:6px; vertical-align:middle; }
+        .ps-parts { font-size:11px; font-weight:600; color:#5b6068; word-break:keep-all; }
+        .ps-opt { display:flex; align-items:center; gap:14px; flex-wrap:wrap; background:#f8f9fa;
+          border:1px solid #d7dade; border-top:none; padding:8px 10px; font-size:11.5px; color:#14161a; }
+        .ps-opt-label { font-size:10px; font-weight:800; letter-spacing:2px; color:#DB6B2E; }
+        .ps-opt-note { margin-left:auto; font-size:10.5px; color:#9aa0a6; }
+        .ps-foot { text-align:center; font-size:10px; color:#9aa0a6; margin-top:12px; }
+        @media (max-width: 520px) {
+          .ps-paper { padding:18px 12px 14px; }
+          .ps-title { font-size:20px; letter-spacing:5px; }
+        }
+        @media print {
+          .no-print { display: none !important; }
+          .ps-paper { border:none; border-radius:0; padding:0; }
+          .ps-scroll { overflow:visible; }
+          table.ps-tbl { min-width:0; }
+          .ps-tbl .ps-name, .ps-tbl .ps-h1 th:first-child, .ps-tbl .ps-h2 th:first-child, .ps-catlabel { position:static; }
+          .ps-tbl .ps-name { box-shadow:none; }
+          .ps-nm { white-space:normal; overflow:visible; }
+          .ps-tbl tr { page-break-inside:avoid; }
+        }
       `}</style>
     </div>
   );
