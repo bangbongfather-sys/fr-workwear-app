@@ -4337,6 +4337,207 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
 }
 
 // 매출 추이 전용 상세 페이지
+// ─── 제품 단가표 (간략히 보기) ───
+// 단가 계산기가 산출한 등급별 납품 단가를 제품별로 한 표에 모아 보여준다.
+// 값은 computeProduct() 결과라 계산기에서 원가·마진·직접 단가를 바꾸면 그대로 따라온다.
+// (회사 PDF 단가표와 같은 구성: 카테고리별 묶음 · 등급 열 · 판매가 환산 · 제작 옵션)
+function ProductPriceListView({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
+  const [search, setSearch] = React.useState("");
+  const [catFilter, setCatFilter] = React.useState("all");
+  const [vatMode, setVatMode] = React.useState(() => load("frw_plist_vat", false));   // 부가세 포함 보기
+  const [showCost, setShowCost] = React.useState(() => load("frw_plist_cost", true)); // 원가·마진 열
+  const [compact, setCompact] = React.useState(() => load("frw_plist_compact", true));
+  React.useEffect(() => { save("frw_plist_vat", vatMode); }, [vatMode]);
+  React.useEffect(() => { save("frw_plist_cost", showCost); }, [showCost]);
+  React.useEffect(() => { save("frw_plist_compact", compact); }, [compact]);
+
+  const rows = React.useMemo(() => (products || []).map(p => {
+    const c = computeProduct(p, materials, laborItems);
+    return { p, c, gradeList: c.gradeList && c.gradeList.length ? c.gradeList : GRADES };
+  }), [products, materials, laborItems]);
+
+  const cats = React.useMemo(() => {
+    const set = new Set(rows.map(r => (r.p.category || "").trim()).filter(Boolean));
+    return [...set];
+  }, [rows]);
+  const q = search.trim().toLowerCase();
+  const shown = rows.filter(r => {
+    const cat = (r.p.category || "").trim();
+    if (catFilter === "__none" ? cat : catFilter !== "all" && cat !== catFilter) return false;
+    return !q || (r.p.name || "").toLowerCase().includes(q);
+  });
+  // 카테고리별 묶음 (미분류는 마지막)
+  const groups = [];
+  shown.forEach(r => {
+    const cat = (r.p.category || "").trim() || "미분류";
+    let g = groups.find(x => x.cat === cat);
+    if (!g) { g = { cat, items: [] }; groups.push(g); }
+    g.items.push(r);
+  });
+  groups.sort((a, b) => (a.cat === "미분류" ? 1 : b.cat === "미분류" ? -1 : a.cat.localeCompare(b.cat)));
+
+  const allGrades = React.useMemo(() => {
+    const set = new Set();
+    shown.forEach(r => r.gradeList.forEach(g => set.add(g)));
+    return GRADES.filter(g => set.has(g)).concat([...set].filter(g => !GRADES.includes(g)));
+  }, [shown]);
+
+  const withVat = (n) => vatMode ? Math.round(n * 1.1) : Math.round(n);
+  const fmt = (n) => Math.round(n || 0).toLocaleString();
+  const pad = compact ? "6px 10px" : "10px 12px";
+  const fs = compact ? 12.5 : 13.5;
+
+  // 카톡·메일용 텍스트
+  const copyText = async () => {
+    const lines = [`NJ SAFETY 제품 단가표 — ${new Date().toLocaleDateString("ko-KR")} 기준${vatMode ? " (VAT 포함)" : " (VAT 별도)"}`];
+    groups.forEach(g => {
+      lines.push("", `[${g.cat}]`);
+      g.items.forEach(({ p, c, gradeList }) => {
+        const cells = gradeList.filter(gr => (c.grades[gr] || 0) > 0).map(gr => `${gr} ${fmt(withVat(c.grades[gr]))}`).join(" / ");
+        lines.push(`· ${p.name}${cells ? ` — ${cells}` : " — (단가 미설정)"}`);
+      });
+    });
+    const text = lines.join("\n");
+    try { await navigator.clipboard.writeText(text); showToast("단가표를 클립보드에 복사했습니다.\n카톡·메일에 붙여넣기 하세요.", "success"); }
+    catch { showToast(text); }
+  };
+
+  const chip = (on, label, onClick, title) => (
+    <button key={label} onClick={onClick} title={title}
+      style={{ height: 30, padding: "0 11px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
+        border: on ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
+        background: on ? "rgba(219,107,46,0.12)" : "var(--surface)",
+        color: on ? "#DB6B2E" : "var(--text3)" }}>{label}</button>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="card no-print" style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <Icon name="pricedb" size={16}/> 제품 단가표
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>
+            단가 계산기의 등급별 단가를 그대로 모아 봅니다 · 계산기에서 값을 바꾸면 여기도 즉시 반영
+          </div>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {chip(vatMode, vatMode ? "VAT 포함" : "VAT 별도", () => setVatMode(v => !v), "부가세 포함/별도 전환")}
+          {chip(showCost, "원가·마진", () => setShowCost(v => !v), "원가와 마진율 열 표시")}
+          {chip(compact, "좁게", () => setCompact(v => !v), "행 높이를 좁게")}
+          <button onClick={copyText} title="카톡·메일로 보낼 수 있게 텍스트로 복사"
+            style={{ height: 30, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <Icon name="copy" size={12}/>복사
+          </button>
+          <button onClick={() => window.print()} className="btn-orange" style={{ height: 30, padding: "0 12px", fontSize: 11.5 }}>인쇄</button>
+        </div>
+      </div>
+
+      <div className="card no-print" style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "0 1 220px", minWidth: 160 }}>
+          <Icon name="search" size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", pointerEvents: "none" }}/>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="제품명 검색"
+            style={{ width: "100%", height: 32, paddingLeft: 30, fontSize: 12.5, borderRadius: 8 }} />
+        </div>
+        {chip(catFilter === "all", `전체 ${rows.length}`, () => setCatFilter("all"))}
+        {cats.map(c => chip(catFilter === c, `${c} ${rows.filter(r => (r.p.category || "").trim() === c).length}`, () => setCatFilter(c)))}
+        {rows.some(r => !(r.p.category || "").trim()) && chip(catFilter === "__none", `미분류 ${rows.filter(r => !(r.p.category || "").trim()).length}`, () => setCatFilter("__none"))}
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {shown.length === 0 ? (
+          <div style={{ padding: "36px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+            {rows.length === 0 ? "등록된 제품이 없습니다 — 단가 계산에서 제품을 만들어 주세요" : "조건에 맞는 제품이 없습니다"}
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="table-plain plist-tbl" style={{ width: "100%", minWidth: 640, borderCollapse: "collapse", fontSize: fs }}>
+              <colgroup>
+                <col />
+                {showCost && <col style={{ width: 108 }} />}
+                {allGrades.map(g => <col key={g} style={{ width: 104 }} />)}
+                {showCost && <col style={{ width: 72 }} />}
+              </colgroup>
+              <thead>
+                <tr style={{ background: "var(--surface2)", color: "var(--text2)", fontSize: compact ? 11 : 12 }}>
+                  <th className="plist-name" style={{ padding: pad, textAlign: "left" }}>제품</th>
+                  {showCost && <th style={{ padding: pad, textAlign: "right", whiteSpace: "nowrap" }}>원가</th>}
+                  {allGrades.map(g => (
+                    <th key={g} style={{ padding: pad, textAlign: "right", whiteSpace: "nowrap", color: "#DB6B2E" }}>{g}등급</th>
+                  ))}
+                  {showCost && <th style={{ padding: pad, textAlign: "right", whiteSpace: "nowrap" }}>마진</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map(g => (
+                  <React.Fragment key={g.cat}>
+                    <tr>
+                      <td colSpan={1 + allGrades.length + (showCost ? 2 : 0)}
+                        style={{ padding: "7px 12px", background: darkMode ? "rgba(219,107,46,0.10)" : "rgba(219,107,46,0.06)", borderTop: "1px solid var(--divider)", fontSize: 11, fontWeight: 800, color: "#DB6B2E", letterSpacing: 0.4 }}>
+                        <span style={{ position: "sticky", left: 12, display: "inline-block" }}>
+                          {g.cat} <span style={{ color: "var(--text3)", fontWeight: 600 }}>· {g.items.length}종</span>
+                        </span>
+                      </td>
+                    </tr>
+                    {g.items.map(({ p, c, gradeList }) => {
+                      const sel = c.selectedGrade;
+                      const marginPct = c.beforeMargin > 0 && c.finalPrice > 0 ? ((c.finalPrice - c.beforeMargin) / c.finalPrice * 100) : null;
+                      return (
+                        <tr key={p.id} className="plist-row"
+                          onClick={() => { setActiveProdId(p.id); setCalcSubTab("calculator"); }}
+                          title="클릭하면 단가 계산기에서 이 제품을 엽니다"
+                          style={{ borderTop: "1px solid var(--divider)", cursor: "pointer" }}>
+                          <td className="plist-name" style={{ padding: pad }}>
+                            <span style={{ fontWeight: 600, color: "var(--text1)" }}>{p.name || "(이름 없음)"}</span>
+                            {c.customPrice != null && <span title="직접 입력 단가" style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 800, color: "#8B5CF6", background: "rgba(139,92,246,0.12)", padding: "1px 6px", borderRadius: 100 }}>직접</span>}
+                          </td>
+                          {showCost && <td style={{ padding: pad, textAlign: "right", color: "var(--text3)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{c.beforeMargin > 0 ? fmt(withVat(c.beforeMargin)) : "—"}</td>}
+                          {allGrades.map(gr => {
+                            const has = gradeList.includes(gr);
+                            const val = has ? (c.grades[gr] || 0) : null;
+                            const isSel = gr === sel;
+                            return (
+                              <td key={gr} style={{ padding: pad, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
+                                fontWeight: isSel ? 800 : 600,
+                                color: !has ? "var(--text3)" : isSel ? "#DB6B2E" : "var(--text1)",
+                                background: isSel ? (darkMode ? "rgba(219,107,46,0.12)" : "rgba(219,107,46,0.07)") : "transparent" }}>
+                                {!has || !(val > 0) ? "—" : fmt(withVat(val))}
+                                {c.overridden && c.overridden[gr] && <span title="수동 지정 단가" style={{ marginLeft: 3, color: "#8B5CF6", fontSize: 10 }}>•</span>}
+                              </td>
+                            );
+                          })}
+                          {showCost && <td style={{ padding: pad, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: marginPct == null ? "var(--text3)" : marginPct >= 25 ? "var(--positive-text)" : marginPct >= 15 ? "var(--text2)" : "#F04452", fontWeight: 700 }}>
+                            {marginPct == null ? "—" : `${marginPct.toFixed(1)}%`}
+                          </td>}
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div style={{ padding: "9px 14px", borderTop: "1px solid var(--divider)", fontSize: 11, color: "var(--text3)", display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <span>단위 원 · {vatMode ? "VAT 포함" : "VAT 별도"}</span>
+          <span>· <b style={{ color: "#DB6B2E" }}>주황</b> = 그 제품에 지정된 등급</span>
+          <span>· <span style={{ color: "#8B5CF6" }}>•</span> = 계산기에서 수동 지정한 단가</span>
+          <span style={{ marginLeft: "auto" }}>제품을 누르면 단가 계산기로 이동합니다</span>
+        </div>
+      </div>
+
+      <style>{`
+        .plist-row:hover { background: var(--row-bg); }
+        /* 등급 열이 많아 가로 스크롤이 생겨도 제품명은 항상 보이게 왼쪽에 고정 */
+        .plist-tbl .plist-name { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+        .plist-tbl thead .plist-name { background: var(--surface2); z-index: 2; }
+        .plist-row:hover .plist-name { background: var(--row-bg); }
+        @media print { .no-print { display: none !important; } }
+      `}</style>
+    </div>
+  );
+}
+
 // ─── 제품별 수익성 분석 ───
 function ProductProfitabilityView({ products, materials, laborItems, orders, darkMode, setActiveProdId, setCalcSubTab, T }) {
   const [sortBy, setSortBy] = React.useState("totalProfit"); // totalProfit | marginRate | qty | revenue | name
@@ -17122,8 +17323,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     };
   }, [calcEdit]);
   useEffect(() => { save("frw_calc_subtab", calcSubTab); }, [calcSubTab]);
-  const CALC_SUBTABS = { calculator: { label: "단가 계산", icon: "calc" }, profitability: { label: "제품별 수익성 분석", icon: "trendingUp" }, simulator: { label: "인상 시뮬레이터", icon: "flame" } };
-  const calcSubOrder = useSubtabOrder("frw_calc_subtab_order", ["calculator", "profitability", "simulator"], "data-calc-sub");
+  const CALC_SUBTABS = { calculator: { label: "단가 계산", icon: "calc" }, pricelist: { label: "제품 단가표", icon: "pricedb" }, profitability: { label: "제품별 수익성 분석", icon: "trendingUp" }, simulator: { label: "인상 시뮬레이터", icon: "flame" } };
+  const calcSubOrder = useSubtabOrder("frw_calc_subtab_order", ["calculator", "pricelist", "profitability", "simulator"], "data-calc-sub");
   const [poStyle, setPoStyle] = useState(() => load("frw_po_style", "official")); // official | apple | bold | card | korean
   useEffect(() => { save("frw_po_style", poStyle); }, [poStyle]);
   const [poDraft, setPoDraft] = useState(() => load("frw_po_draft", null)); // 작성 중인 발주서
@@ -20552,6 +20753,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             </div>
           </div>
           </div>
+            )}
+            {calcSubTab === "pricelist" && (
+              <ProductPriceListView products={products} materials={materials} laborItems={laborItems} darkMode={darkMode} setActiveProdId={openProductInCalc} setCalcSubTab={setCalcSubTab} T={T}/>
             )}
             {calcSubTab === "profitability" && (
               <ProductProfitabilityView products={products} materials={materials} laborItems={laborItems} orders={orders} darkMode={darkMode} setActiveProdId={openProductInCalc} setCalcSubTab={setCalcSubTab} T={T}/>
