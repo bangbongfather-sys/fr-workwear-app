@@ -6389,12 +6389,15 @@ function OrdersDetailView({ onBack, orders, setOrders, clients, products = [], d
 }
 
 // ── 환율 훅 (USD/KRW) — 웰컴 화면·경영 대시보드 공용 ──
-// Worker의 /api/fx가 외부 제공처를 프록시·캐시한다 (시간당 갱신 소스이므로 10분 주기 폴링).
-// 전일 대비는 제공처가 주지 않아, 날짜별 스냅샷을 로컬에 남겨 "직전 기록"과 비교한다.
+// Worker의 /api/fx가 장중 환율(하나은행 고시)을 프록시·캐시한다.
+// 등락은 제공처가 주는 "전일 종가 대비"를 그대로 쓴다(live). 제공처가 죽어 하루 1회
+// 갱신 소스로 내려가면 그때만 날짜별 로컬 스냅샷과 비교한다 — 다만 마지막 기록이
+// 한참 전이면(예: 앱을 2주 만에 열었을 때) 그 차이는 "등락"이 아니므로 표시하지 않는다.
+const FX_HIST_MAX_GAP_DAYS = 7;
 function useFxRate() {
-  const [fx, setFx] = React.useState(null);       // { rates:{KRW,...}, updatedAt, stale? }
+  const [fx, setFx] = React.useState(null);       // { rates:{KRW,...}, updatedAt, live?, changePrice?, stale? }
   const [fxErr, setFxErr] = React.useState("");
-  const [fxPrev, setFxPrev] = React.useState(null); // { date, krw } — 비교 기준(다른 날짜의 마지막 기록)
+  const [fxPrev, setFxPrev] = React.useState(null); // { date, krw } — 예비 소스일 때의 비교 기준
   React.useEffect(() => {
     let alive = true;
     const ymdLocal = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
@@ -6419,17 +6422,39 @@ function useFxRate() {
       }
     };
     pull();
-    const iv = setInterval(pull, 10 * 60 * 1000);
-    return () => { alive = false; clearInterval(iv); };
+    // 장중에는 2분마다. 그리고 화면을 다시 볼 때(탭 복귀·앱 재진입) 즉시 한 번 더 받아온다 —
+    // 폰을 주머니에 넣었다 꺼냈을 때 낡은 값이 남아 있지 않게.
+    const iv = setInterval(pull, 2 * 60 * 1000);
+    const onWake = () => { if (document.visibilityState === "visible") pull(); };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    window.addEventListener("online", pull);
+    return () => {
+      alive = false; clearInterval(iv);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+      window.removeEventListener("online", pull);
+    };
   }, []);
   // 표시에 필요한 파생값을 한 곳에서 계산 (양쪽 화면이 같은 규칙을 쓰도록)
   const krw = fx && fx.rates ? fx.rates.KRW : null;
-  const diff = (krw && fxPrev && fxPrev.krw) ? krw - fxPrev.krw : null;
-  const pct = (diff !== null && fxPrev && fxPrev.krw) ? (diff / fxPrev.krw) * 100 : null;
+  const live = !!(fx && fx.live && fx.changePrice !== null && fx.changePrice !== undefined && isFinite(fx.changePrice));
+  // 예비 소스일 때만 쓰는 로컬 비교 기준 — 너무 오래된 기록은 버린다
+  const histUsable = (() => {
+    if (live || !krw || !fxPrev || !fxPrev.krw || !fxPrev.date) return false;
+    const gap = (Date.now() - new Date(fxPrev.date + "T00:00:00").getTime()) / 86400000;
+    return isFinite(gap) && gap <= FX_HIST_MAX_GAP_DAYS;
+  })();
+  const diff = live ? Number(fx.changePrice) : (histUsable ? krw - fxPrev.krw : null);
+  const pct = live
+    ? (isFinite(Number(fx.changeRate)) ? Number(fx.changeRate) : (fx.prevClose > 0 ? (diff / fx.prevClose) * 100 : null))
+    : (histUsable ? (diff / fxPrev.krw) * 100 : null);
   const flat = diff !== null && Math.abs(diff) < 0.005;
   const up = diff !== null && diff > 0;
+  // 등락의 기준이 무엇인지 한 줄로 — "8/28 대비" 같은 표기를 보고 값까지 낡은 줄 오해하지 않게
+  const basis = diff === null ? "" : (live ? "전일 대비" : `${fxPrev.date.slice(5).replace("-", "/")} 대비`);
   const updStr = fx ? (() => { const u = new Date(fx.updatedAt); return `${u.getMonth()+1}/${u.getDate()} ${String(u.getHours()).padStart(2,"0")}:${String(u.getMinutes()).padStart(2,"0")}`; })() : "";
-  return { fx, fxErr, fxPrev, krw, diff, pct, flat, up, updStr };
+  return { fx, fxErr, fxPrev, krw, diff, pct, flat, up, updStr, live, basis };
 }
 
 function DashboardTab({ products, setProducts, materials, setMaterials, laborItems, setLaborItems, orders, setOrders, monthlySales, setMonthlySales, darkMode, setTab, setActiveProdId, clients = [], ledgers = {}, clientAR = {}, accounts = [], fabricIntakes = [], scheduledExpenses = [], stock = null }) {
@@ -6762,7 +6787,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
     setOrders(prev => prev.map(x => x.id === editingOrderId ? { ...editOrderDraft } : x));
     setEditingOrderId(null); setEditOrderDraft(null);
   };
-  const { fx, fxErr, fxPrev, krw: fxKrw, diff: fxDiff, pct: fxPct, flat: fxFlat, up: fxUp, updStr: fxUpdStr } = useFxRate();
+  const { fx, fxErr, fxPrev, krw: fxKrw, diff: fxDiff, pct: fxPct, flat: fxFlat, up: fxUp, updStr: fxUpdStr, live: fxLive, basis: fxBasis } = useFxRate();
 
   const kpi = (key, label, val, sub, color) => {
     if (hiddenKPIs.includes(key)) return null;
@@ -6917,9 +6942,10 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
               // 환율 카드 — 값/등락/갱신시각. 로딩·오류도 카드 안에서 그대로 알린다.
               if (fxErr && !fx) return kpi("kpi_fx", "원/달러 환율", "—", `불러오지 못했습니다 · ${fxErr}`, "var(--negative-text)");
               if (!fx) return kpi("kpi_fx", "원/달러 환율", "…", "환율을 불러오는 중", null);
+              const tail = `${fxUpdStr} 기준${fxLive ? " · 실시간" : " · 하루 1회 갱신"}${fx.stale ? " · 최신값 아님" : ""}`;
               const sub = fxDiff === null
-                ? `1 USD 기준 · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`
-                : `${fxFlat ? "보합" : `${fxUp ? "▲" : "▼"} ${Math.abs(fxDiff).toFixed(2)}원 (${fxUp ? "+" : "−"}${Math.abs(fxPct).toFixed(2)}%)`} · ${fxPrev.date.slice(5).replace("-", "/")} 대비 · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`;
+                ? `1 USD 기준 · ${tail}`
+                : `${fxFlat ? "보합" : `${fxUp ? "▲" : "▼"} ${Math.abs(fxDiff).toFixed(2)}원 (${fxUp ? "+" : "−"}${Math.abs(fxPct).toFixed(2)}%)`} · ${fxBasis} · ${tail}`;
               // 값은 다른 KPI 카드와 같은 기본 글자색. 등락 방향은 ▲▼로 충분히 읽힌다.
               return kpi("kpi_fx", "원/달러 환율",
                 `${fxKrw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}원`,
@@ -6943,7 +6969,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
               </span>
             );
           })}
-          <span style={{ opacity: 0.7 }}>· 시장 환율(시간당 갱신) · 실제 결제 환율은 은행 고시 기준</span>
+          <span style={{ opacity: 0.7 }}>· {fxLive ? "장중 실시간 시세" : "시장 환율"} · 실제 결제 환율은 은행 고시 기준</span>
         </div>
       )}
       {/* ─── 시즌 발주 시그널: 작년 이맘때 매입량 vs 현재 재고 ─── */}
@@ -30751,13 +30777,13 @@ function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
   const productCount = (products || []).length;
 
   // 환율 — 경영 대시보드와 같은 훅을 써서 값·등락 규칙을 한 곳에서 관리
-  const { fx, fxErr, fxPrev, krw: fxKrw, diff: fxDiff, pct: fxPct, flat: fxFlat, up: fxUp, updStr: fxUpdStr } = useFxRate();
+  const { fx, fxErr, fxPrev, krw: fxKrw, diff: fxDiff, pct: fxPct, flat: fxFlat, up: fxUp, updStr: fxUpdStr, live: fxLive, basis: fxBasis } = useFxRate();
   const fxStat = (() => {
     if (fxErr && !fx) return { label: "원/달러 환율", value: "—", sub: "불러오지 못했습니다", accent: "#F04452" };
     if (!fx) return { label: "원/달러 환율", value: "…", sub: "불러오는 중" };
     const sub = fxDiff === null
-      ? `1 USD · ${fxUpdStr} 갱신${fx.stale ? " · 최신값 아님" : ""}`
-      : `${fxFlat ? "보합" : `${fxUp ? "▲" : "▼"} ${Math.abs(fxDiff).toFixed(2)} (${fxUp ? "+" : "−"}${Math.abs(fxPct).toFixed(2)}%)`} · ${fxPrev.date.slice(5).replace("-", "/")} 대비${fx.stale ? " · 최신값 아님" : ""}`;
+      ? `1 USD · ${fxUpdStr} 기준${fx.stale ? " · 최신값 아님" : ""}`
+      : `${fxFlat ? "보합" : `${fxUp ? "▲" : "▼"} ${Math.abs(fxDiff).toFixed(2)} (${fxUp ? "+" : "−"}${Math.abs(fxPct).toFixed(2)}%)`} · ${fxBasis} · ${fxUpdStr} 기준${fx.stale ? " · 최신값 아님" : ""}`;
     // 값·보조문구 모두 다른 통계 카드와 동일한 기본 색. 등락 방향은 ▲▼로 읽는다.
     return {
       label: "원/달러 환율",
