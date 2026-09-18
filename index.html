@@ -18060,16 +18060,16 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     return i;
   };
 
-  // 입고 내역 → 매입 현황: 입고 건마다 해당 날짜의 매입 행 1개를 유지(sourceRcptId 링크)
-  const syncReceiptsToIntake = (poId, itemIdx) => {
-    const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
-    if (!po) return;
+  // 한 품목의 입고 건들을 매입 배열(arr)에 반영한다. arr 를 그 자리에서 고치고 바뀌었는지만 알려준다.
+  // 여러 품목을 한꺼번에 처리할 때 같은 배열을 이어 써야 해서 따로 뺐다 — 품목마다
+  // setFabricIntakes 를 부르면 ref 가 아직 안 바뀌어서 앞 품목 결과가 지워진다.
+  const applyReceiptsToIntakeArr = (arr, po, itemIdx) => {
+    const poId = po.id;
     const it = (po.items || [])[itemIdx];
-    if (!it || !(it.name || "").trim()) return;
+    if (!it || !(it.name || "").trim()) return false;
     const itemKey = it.id != null ? String(it.id) : poId + "#" + itemIdx;
     const rcv = it.rcv || [];
     const supName = (po.supplier?.name || "").trim();
-    const arr = [...(fabricIntakesRef.current || [])];
     let changed = false;
     // 기존 단일 누계 행 처리 (입고 내역 전환 시 중복 방지): 자동행은 제거, 수기/전송행은 첫 입고 건에 연결
     const cumIdx = findIntakeIdxForItem(arr, po, it, itemKey);
@@ -18106,12 +18106,82 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         changed = true;
       }
     });
-    if (changed) {
-      setFabricIntakes(arr);
-      if (supName) setPurchaseSubTabs(p2 => (p2 || []).some(t => t.name === supName) ? p2 : [...(p2 || []), { id: uid(), name: supName }]);
-      const total = rcv.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
-      showToast(`매입 현황 반영: ${it.name} 입고 ${rcv.length}건 · 누계 ${total.toLocaleString()}${it.unit ? " " + it.unit : ""}`, "success");
-    }
+    return changed;
+  };
+  // 공급처 이름을 매입 현황 하위탭에 없으면 만들어 둔다
+  const ensurePurchaseSubTab = (supName) => {
+    if (!supName) return;
+    setPurchaseSubTabs(p2 => (p2 || []).some(t => t.name === supName) ? p2 : [...(p2 || []), { id: uid(), name: supName }]);
+  };
+  // 입고 내역 → 매입 현황: 입고 건마다 해당 날짜의 매입 행 1개를 유지(sourceRcptId 링크)
+  const syncReceiptsToIntake = (poId, itemIdx) => {
+    const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
+    if (!po) return;
+    const it = (po.items || [])[itemIdx];
+    if (!it || !(it.name || "").trim()) return;
+    const arr = [...(fabricIntakesRef.current || [])];
+    if (!applyReceiptsToIntakeArr(arr, po, itemIdx)) return;
+    setFabricIntakes(arr);
+    ensurePurchaseSubTab((po.supplier?.name || "").trim());
+    const rcv = it.rcv || [];
+    const total = rcv.reduce((s, r) => s + (parseFloat(r.qty) || 0), 0);
+    showToast(`매입 현황 반영: ${it.name} 입고 ${rcv.length}건 · 누계 ${total.toLocaleString()}${it.unit ? " " + it.unit : ""}`, "success");
+  };
+  // ── 전량 입고 처리 ──
+  // 품목이 여러 개인 발주를 다 받았을 때, 줄마다 수량·날짜를 찍어 넣는 대신 한 번에 끝낸다.
+  // 이미 일부 들어온 품목은 "남은 수량"만 새 입고 건으로 얹으므로 누계가 두 번 잡히지 않는다.
+  const [poRcvAllDate, setPoRcvAllDate] = useState(() => plistToday());
+  const poRemainOf = (it) => {
+    const ord = parseFloat(it.qty) || 0;
+    const got = (it.rcv || []).length
+      ? (it.rcv || []).reduce((s, r) => s + (parseFloat(r.qty) || 0), 0)
+      : (parseFloat(it.receivedQty) || 0);
+    return { ord, got, remain: ord - got };
+  };
+  // 예전 방식(누계 receivedQty 만 있던 품목)을 입고 건으로 옮길 때, 이미 적어 둔
+  // 매입 행의 날짜를 가져온다. 비워 두면 그 매입 기록 날짜가 오늘로 덮어써진다.
+  const legacyRcvDate = (po, it, idx) => {
+    const rows = fabricIntakesRef.current || [];
+    const key = it.id != null ? String(it.id) : po.id + "#" + idx;
+    const xi = findIntakeIdxForItem(rows, po, it, key);
+    return xi >= 0 ? (rows[xi].date || "") : "";
+  };
+  const receiveAllRemaining = (po, dateStr) => {
+    const date = dateStr || plistToday();
+    const targets = (po.items || []).map((it, i) => ({ i, it, ...poRemainOf(it) }))
+      .filter(t => (t.it.name || "").trim() && t.ord > 0 && t.remain > 0.0000001);
+    if (!targets.length) { showToast("이미 전량 입고된 발주입니다"); return; }
+    const lines = targets.map(t =>
+      `· ${t.it.name} ${t.remain.toLocaleString()}${t.it.unit ? " " + t.it.unit : ""}${t.got > 0 ? ` (이미 ${t.got.toLocaleString()} 입고됨)` : ""}`).join("\n");
+    if (!window.confirm(`남은 수량을 ${date} 자로 전량 입고 처리합니다.\n\n${lines}\n\n매입 현황에도 같이 기록됩니다. 계속할까요?`)) return;
+    setPurchaseOrders(prev => prev.map(pp => {
+      if (pp.id !== po.id) return pp;
+      const items = (pp.items || []).map((it, i) => {
+        const t = targets.find(x => x.i === i);
+        if (!t) return it;
+        // rcv 가 없고 누계만 있던 품목은, 기존 누계를 날짜 없는 입고 건 하나로 옮겨 담고 시작한다
+        const base = (it.rcv || []).length ? [...it.rcv]
+          : (t.got > 0 ? [{ id: uid(), date: legacyRcvDate(po, it, i), qty: String(t.got) }] : []);
+        const next = [...base, { id: uid(), date, qty: String(t.remain) }];
+        return { ...it, rcv: next, receivedQty: String(next.reduce((sum, r) => sum + (parseFloat(r.qty) || 0), 0)) };
+      });
+      return { ...pp, items };
+    }));
+    // 발주 상태가 반영된 뒤 매입 현황에 한 번에 반영한다
+    setTimeout(() => syncReceiptsToIntakeMany(po.id, targets.map(t => t.i)), 0);
+    showToast(`${targets.length}품목 전량 입고 처리했습니다 (${date}) — 매입 현황에 기록됩니다`, "success");
+  };
+
+  // 여러 품목을 한 번에 — 매입 배열을 한 번만 만들고 한 번만 저장한다
+  const syncReceiptsToIntakeMany = (poId, idxs) => {
+    const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
+    if (!po) return;
+    const arr = [...(fabricIntakesRef.current || [])];
+    let changed = false;
+    (idxs || []).forEach(i => { if (applyReceiptsToIntakeArr(arr, po, i)) changed = true; });
+    if (!changed) return;
+    setFabricIntakes(arr);
+    ensurePurchaseSubTab((po.supplier?.name || "").trim());
   };
   const syncReceivedToIntake = (poId, itemIdx) => {
     const po = (purchaseOrdersRef.current || []).find(p => p.id === poId);
@@ -23929,6 +23999,23 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
                                     <span style={{ fontSize: 13, fontWeight: 800, color: T.text }}>품목별 입고 현황 ({its.length}건)</span>
                                     <span style={{ fontSize: 10.5, color: T.text3, background: "var(--surface2)", padding: "3px 8px", borderRadius: 100 }}>날짜·수량을 적고 저장하면 매입 현황에 기록됩니다</span>
+                                    {/* 남은 품목을 한 번에 — 줄마다 수량·날짜를 찍어 넣지 않아도 되게 */}
+                                    {(() => {
+                                      const left = its.filter(it => (it.name || "").trim() && poRemainOf(it).remain > 0.0000001);
+                                      if (left.length === 0) return null;
+                                      return (
+                                        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                          <input type="date" value={poRcvAllDate} onChange={e => setPoRcvAllDate(e.target.value)}
+                                            title="입고일 — 이 날짜로 매입 현황에 기록됩니다"
+                                            style={{ height: 30, fontSize: 11.5, padding: "0 7px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: T.text, width: 138, minHeight: 30 }} />
+                                          <button onClick={(e) => { e.stopPropagation(); receiveAllRemaining(po, poRcvAllDate); }}
+                                            title={`남은 ${left.length}품목을 전량 입고 처리합니다`}
+                                            style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "none", background: "#00B493", color: "#fff", fontSize: 11.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", minHeight: 30 }}>
+                                            ✓ 전량 입고 처리 ({left.length})
+                                          </button>
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                       <div style={{ flex: 1, minHeight: 0, overflowX: "auto", overflowY: "auto", border: "1px solid var(--divider)", borderRadius: 12 }}>
                                         <table style={{ width: "100%", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
