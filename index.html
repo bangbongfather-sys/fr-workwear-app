@@ -949,6 +949,8 @@
     /* ─── 햄버거 메뉴 버튼 (모바일 전용) ─── */
     .mobile-menu-btn { display: none; }
     .mobile-bottomnav { display: none; }
+    .mobile-dock { display: none; }
+    .dock-fold, .dock-unfold { display: none; }
 
     /* ─── 모바일 사이드바 백드롭 ─── */
     .mobile-sidebar-backdrop {
@@ -1014,18 +1016,75 @@
       /* 햄버거 버튼 표시 */
       .mobile-menu-btn { display: flex !important; }
 
-      /* 하단 탭바 — iOS 플로팅 필 스타일 */
-      .mobile-bottomnav {
+      /* 하단 탭바 — iOS 플로팅 필 스타일.
+         바깥 .mobile-dock 이 위치를, 안쪽 .mobile-bottomnav 가 모양을 맡는다.
+         이렇게 나눠야 접기 손잡이를 필 위에 붙이고 통째로 내렸다 올릴 수 있다. */
+      .mobile-dock {
         display: flex !important;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
         position: fixed;
         bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
         left: 50%;
         transform: translateX(-50%);
+        z-index: 97;
+        max-width: calc(100vw - 16px);
+        transition: transform 0.24s cubic-bezier(0.4,0,0.2,1), opacity 0.16s ease;
+      }
+      /* 접었을 때·입력 중일 때 — 화면 밖으로 내려보낸다 */
+      .mobile-dock.dock-hidden {
+        transform: translateX(-50%) translateY(calc(100% + 24px));
+        opacity: 0;
+        pointer-events: none;
+      }
+      /* 필 위에 붙는 작은 접기 손잡이 */
+      .dock-fold {
+        display: flex !important;
+        align-items: center; justify-content: center;
+        width: 46px; height: 22px; min-height: 22px;
+        padding: 0; border: none; cursor: pointer;
+        border-radius: 12px;
+        background: rgba(0, 16, 25, 0.82);
+        -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.1);
+        color: #8B95A1;
+      }
+      /* 접어놨을 때 남는 손잡이 — 화면을 거의 가리지 않게 작게 */
+      .dock-unfold.show {
+        display: inline-flex !important;
+        align-items: center; gap: 4px;
+        position: fixed;
+        bottom: max(12px, calc(env(safe-area-inset-bottom) + 6px));
+        left: 50%; transform: translateX(-50%);
+        z-index: 97;
+        height: 30px; min-height: 30px; padding: 0 12px 0 10px;
+        border: none; cursor: pointer; font-family: inherit;
+        font-size: 11.5px; font-weight: 700; letter-spacing: -0.2px;
+        border-radius: 18px;
+        background: rgba(0, 16, 25, 0.9);
+        -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+        box-shadow: 0 6px 22px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.12);
+        color: #C2C9D2;
+        /* 가운데 정렬이 translateX(-50%) 로 걸려 있어서, 전역 frwRise/버튼 눌림 효과가
+           transform 을 통째로 덮어쓰면 왼쪽으로 튄다. 둘 다 -50% 를 품은 값으로 다시 쓴다. */
+        animation: frwDockRise 0.2s cubic-bezier(0,0,0.2,1);
+      }
+      .dock-unfold.show:active:not(:disabled) { transform: translateX(-50%) scale(0.95); }
+      @keyframes frwDockRise {
+        from { transform: translateX(-50%) translateY(18px); opacity: 0; }
+        to { transform: translateX(-50%) translateY(0); opacity: 1; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dock-unfold.show { animation: none; }
+        .mobile-dock { transition: none; }
+      }
+      .mobile-bottomnav {
+        display: flex !important;
         background: rgba(0, 16, 25, 0.92);
         backdrop-filter: blur(24px);
         -webkit-backdrop-filter: blur(24px);
         border-radius: 36px;
-        z-index: 97;
         padding: 5px;
         gap: 2px;
         box-shadow: 0 8px 40px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.1);
@@ -1040,6 +1099,9 @@
       .mobile-bottomnav > button { flex-shrink: 0; }
       /* 하단 탭바 공간 + 홈스크린 앱(standalone)에서 노치/상태바 아래로 파고들지 않게 */
       .app-main { padding-bottom: 96px !important; padding-top: max(12px, env(safe-area-inset-top)) !important; }
+      /* 필이 내려가 있으면 그만큼 아래 여백도 줄여 화면을 더 쓴다 */
+      body.dock-off .app-main { padding-bottom: 52px !important; }
+      body.dock-typing .app-main { padding-bottom: 16px !important; }
 
       /* 메인 콘텐츠 폭 활용 */
       .main-content { padding: 16px 14px !important; }
@@ -16981,6 +17043,29 @@ function App() {
   const [quickTabs, setQuickTabs] = useState(() => load("frw_quickmenu_tabs", DEFAULT_QUICK_TABS));
   const [editingQuickMenu, setEditingQuickMenu] = useState(false);
   useEffect(() => { save("frw_quickmenu_tabs", quickTabs); }, [quickTabs]);
+  // ── 하단 퀵메뉴 접기 ──
+  // ① 직접 접기: 화살표를 누르면 작은 손잡이만 남는다 (선택은 기기에 저장)
+  // ② 자동 숨김: 글자를 입력하는 동안에는 알아서 내려간다. 필이 화면 아래를 덮고 있어
+  //    입력칸·저장 버튼을 가리는 일이 잦아서, 키보드가 올라오면 비켜주는 게 맞다.
+  const [dockCollapsed, setDockCollapsed] = useState(() => load("frw_dock_collapsed", false));
+  const [dockTyping, setDockTyping] = useState(false);
+  useEffect(() => { save("frw_dock_collapsed", dockCollapsed); }, [dockCollapsed]);
+  // 필이 내려가 있으면 본문 아래 여백도 줄인다 (CSS가 body 클래스를 보고 처리)
+  useEffect(() => {
+    document.body.classList.toggle("dock-off", dockCollapsed && !dockTyping);
+    document.body.classList.toggle("dock-typing", dockTyping);
+  }, [dockCollapsed, dockTyping]);
+  useEffect(() => {
+    const isTypingTarget = (el) => !!el && (el.isContentEditable
+      || el.tagName === "TEXTAREA"
+      || (el.tagName === "INPUT" && !/^(button|submit|reset|checkbox|radio|file|range|color|image)$/i.test(el.type || "text")));
+    const onIn = (e) => { if (isTypingTarget(e.target)) setDockTyping(true); };
+    // 다음 포커스 대상이 또 입력칸이면(칸 사이 이동) 깜빡이지 않게 한 박자 뒤에 판단
+    const onOut = () => setTimeout(() => { if (!isTypingTarget(document.activeElement)) setDockTyping(false); }, 60);
+    document.addEventListener("focusin", onIn);
+    document.addEventListener("focusout", onOut);
+    return () => { document.removeEventListener("focusin", onIn); document.removeEventListener("focusout", onOut); };
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(load("frw_sidebar_collapsed", false));
   useEffect(() => { save("frw_sidebar_collapsed", sidebarCollapsed); }, [sidebarCollapsed]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -19603,8 +19688,13 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       <datalist id="frw-clients">{(clients || []).map((c, i) => <option key={i} value={c.name}/>)}</datalist>
       <datalist id="frw-suppliers">{(suppliers || []).map((s, i) => <option key={i} value={s.name}/>)}</datalist>
 
-      {/* ── 모바일 하단 탭바 (플로팅 필) ── */}
-      <nav className="mobile-bottomnav no-print">
+      {/* ── 모바일 하단 탭바 (플로팅 필) ──
+           입력 중이거나 사용자가 접어둔 동안에는 아래로 내려가 화면을 비켜준다. */}
+      <div className={`mobile-dock no-print${(dockCollapsed || dockTyping) ? " dock-hidden" : ""}`}>
+      <button className="dock-fold" onClick={() => setDockCollapsed(true)} title="퀵메뉴 접기" aria-label="퀵메뉴 접기">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <nav className="mobile-bottomnav">
         {quickTabs.map((id) => {
           const tabInfo = TABS.find(t => t[0] === id);
           if (!tabInfo) return null;
@@ -19647,6 +19737,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: -0.2 }}>편집</span>
         </button>
       </nav>
+      </div>
+
+      {/* 접어놨을 때 남는 손잡이 — 누르면 다시 펼쳐진다. 입력 중에는 이것도 비켜준다. */}
+      <button className={`dock-unfold no-print${(dockCollapsed && !dockTyping) ? " show" : ""}`}
+        onClick={() => setDockCollapsed(false)} title="퀵메뉴 펼치기" aria-label="퀵메뉴 펼치기">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+        <span>메뉴</span>
+      </button>
 
       {/* ── 퀵메뉴 편집 모달 ── */}
       {editingQuickMenu && (
