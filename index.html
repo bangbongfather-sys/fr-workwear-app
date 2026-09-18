@@ -9046,12 +9046,42 @@ function DepositProcessPanel({ dep, initialClient, initialLink, clientNames, unp
   );
 }
 
+// ── 입금내역 사업자 구분 ──
+// 같은 일을 해도 매출이 개인사업자로 잡히는 건과 법인으로 잡히는 건이 따로 있다.
+// 통장도 신고도 따로라 섞이면 안 되므로, 입금내역을 사업자별 하위탭으로 나눈다.
+// biz 가 없는 예전 데이터는 전부 개인사업자(나정엔터프라이즈) 것으로 본다.
+const DEP_BIZ = [
+  { id: "nj",   label: "나정엔터프라이즈", short: "나정" },
+  { id: "corp", label: "엔제이세이프티(법인)", short: "법인" },
+];
+const DEP_BIZ_DEFAULT = "nj";
+const depBizOf = (x) => {
+  const v = x && x.biz;
+  return DEP_BIZ.some(o => o.id === v) ? v : DEP_BIZ_DEFAULT;
+};
+const depBizLabel = (id) => (DEP_BIZ.find(o => o.id === id) || DEP_BIZ[0]).label;
+
 // 장부의 미입금 청구를 입금완료 처리하거나 미수금 원장에 입금으로 기록한다.
 // 한 번 지정한 입금자명→거래처 매핑은 기억해 다음 업로드부터 자동 추천.
 // (은행 인증정보는 어디에도 저장하지 않음 — 엑셀 파일만 사용)
 function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedgers, clientAR = {}, setClientAR, clients = [], darkMode, focusClient = null, clearFocus, onBackToLedger, onOpenAR }) {
-  const items = (bankDeposits && bankDeposits.items) || [];
+  const allItems = (bankDeposits && bankDeposits.items) || [];
   const nameMap = (bankDeposits && bankDeposits.nameMap) || {};
+  // 사업자 하위탭 — 아래 계산은 전부 "지금 보고 있는 사업자의 입금"만 다룬다
+  const [biz, setBiz] = useState(() => load("frw_bank_dep_biz", DEP_BIZ_DEFAULT));
+  useEffect(() => { save("frw_bank_dep_biz", biz); }, [biz]);
+  const items = React.useMemo(() => allItems.filter(x => depBizOf(x) === biz), [allItems, biz]);
+  const bizCounts = React.useMemo(() => {
+    const m = {};
+    DEP_BIZ.forEach(o => { m[o.id] = { total: 0, pending: 0 }; });
+    allItems.forEach(x => {
+      const k = depBizOf(x);
+      if (!m[k]) return;
+      m[k].total++;
+      if (x.status === "pending") m[k].pending++;
+    });
+    return m;
+  }, [allItems]);
   const [dragActive, setDragActive] = useState(false);
   // 필터·검색·선택은 서브탭을 오갈 때 컴포넌트가 언마운트되어도 유지되도록 localStorage에 저장
   const [filter, setFilter] = useState(() => load("frw_bank_dep_filter", "pending")); // pending | done | all
@@ -9070,6 +9100,12 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     setSearch(focusClient);
     setFilter("all");
     setFromLedger(focusClient);
+    // 그 거래처 입금이 지금 탭에 없고 반대쪽에 있으면 탭까지 맞춰 준다 —
+    // 안 그러면 "입금이 없다"는 빈 화면을 보게 된다
+    const hit = (b) => allItems.filter(x => depBizOf(x) === b &&
+      ((x.client || "").trim() === focusClient.trim() || payablesNameMatch(focusClient, x.name))).length;
+    const best = DEP_BIZ.map(o => ({ id: o.id, n: hit(o.id) })).sort((a, b) => b.n - a.n)[0];
+    if (best && best.n > 0 && hit(biz) === 0) setBiz(best.id);
     if (clearFocus) clearFocus();
   }, [focusClient]);
   useEffect(() => { if (fromLedger && search.trim() !== fromLedger) setFromLedger(null); }, [search]);
@@ -9208,7 +9244,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         parsed.forEach(x => {
           const k = keyOf(x); const seen = (seenCnt.get(k) || 0) + 1; seenCnt.set(k, seen);
           if (seen <= (existCnt.get(k) || 0)) { dup++; return; }
-          fresh.push({ id: ++base, ...x, status: "pending", client: "", link: null });
+          fresh.push({ id: ++base, ...x, biz, status: "pending", client: "", link: null });
         });
         if (!fresh.length) { showToast(`새 입금 내역이 없습니다. (이미 가져온 ${dup}건 제외)`); return; }
         setBankDeposits(prev => ({
@@ -9222,6 +9258,19 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   };
 
   // ── 처리/되돌리기 ──
+  // 엑셀을 반대쪽 탭에서 가져왔을 때를 위해 — 고른 건을 다른 사업자 앞으로 옮긴다
+  const moveSelectedToBiz = (targetBiz) => {
+    const ids = new Set(selectedItems.map(x => x.id));
+    if (ids.size === 0) return;
+    if (!window.confirm(`선택한 ${ids.size}건을 「${depBizLabel(targetBiz)}」 입금내역으로 옮길까요?\n\n거래처·처리 상태는 그대로 따라갑니다.`)) return;
+    setBankDeposits(prev => ({
+      items: (((prev || {}).items) || []).map(x => ids.has(x.id) ? { ...x, biz: targetBiz } : x),
+      nameMap: ((prev || {}).nameMap) || {},
+    }));
+    setSelectedIds(new Set());
+    showToast(`${ids.size}건을 「${depBizLabel(targetBiz)}」으로 옮겼습니다`, "success");
+  };
+
   const openProcess = (dep) => setOpenId(dep.id);
   // 고른 값은 DepositProcessPanel 이 들고 있다가 여기로 넘겨준다
   const completeDeposit = (dep, pickClient, pickLink) => {
@@ -9256,7 +9305,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     // 한 청구를 여러 입금으로 나눠 받은 경우(일괄 처리), 다른 입금이 아직 남아 있으면
     // 장부는 "입금완료"로 두어야 한다. 안 그러면 한 건만 되돌려도 청구 전체가 미입금이 된다.
     const siblings = link.kind === "ledger"
-      ? items.filter(x => x.id !== dep.id && x.status === "done" && x.link && x.link.kind === "ledger"
+      ? allItems.filter(x => x.id !== dep.id && x.status === "done" && x.link && x.link.kind === "ledger"
           && x.link.ym === link.ym && String(x.link.clientId) === String(link.clientId))
       : [];
     if (!silent && !window.confirm(
@@ -9291,9 +9340,9 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   // 추천은 이미 앱이 알고 있다. 사용자에게 '지정'을 시킬 게 아니라 '확인'을 받아야 한다.
   const sugMap = React.useMemo(() => {
     const m = {};
-    items.forEach(x => { if (x.status === "pending") m[x.id] = suggestClient(x.name); });
+    allItems.forEach(x => { if (x.status === "pending") m[x.id] = suggestClient(x.name); });
     return m;
-  }, [items, nameMap, clientNames]);
+  }, [allItems, nameMap, clientNames]);
 
   const pending = items.filter(x => x.status === "pending");
   const done = items.filter(x => x.status === "done");
@@ -9316,12 +9365,12 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   // 정규화가 지우지 않는 글자라 "앞 필드 끝 + 뒷 필드 앞"이 붙어 걸리는 일이 없다.
   const depIndex = React.useMemo(() => {
     const m = {};
-    items.forEach(x => {
+    allItems.forEach(x => {
       const joined = [x.client, x.name, x.memo, sugMap[x.id] || ""].filter(Boolean).join("\u0001");
       m[x.id] = { n: searchNorm(joined), b: searchBare(joined), c: toChosung(joined) };
     });
     return m;
-  }, [items, sugMap]);
+  }, [allItems, sugMap]);
   const qInfo = React.useMemo(() => {
     if (!q) return null;
     const bare = q.replace(/\u0001/g, "");
@@ -9350,6 +9399,15 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const justDoneShown = pendingView ? shown.filter(x => justDone.has(x.id)) : [];
   // 저장된 배열 순서를 믿지 않는다. 날짜는 최신순, 같은 날짜 안에서는 엑셀에 적힌 순서.
   // id 는 파싱할 때 파일 위→아래로 매겨지므로 오름차순이 곧 파일 순서다.
+  // 찾는 입금이 반대쪽 사업자 탭에 있을 수 있다 — 빈 화면만 보여주고 끝내면 안 된다
+  const otherBizHits = React.useMemo(() => {
+    if (!qInfo) return [];
+    return DEP_BIZ.filter(o => o.id !== biz).map(o => ({
+      biz: o,
+      n: allItems.filter(x => depBizOf(x) === o.id && qMatch(x)).length,
+    })).filter(r => r.n > 0);
+  }, [qInfo, depIndex, allItems, biz]);
+
   const shownSorted = React.useMemo(
     () => [...shown].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id)),
     [shown]);
@@ -9849,10 +9907,36 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         {importBtn}
       </div>
 
+      {/* ── 사업자 하위탭 — 개인사업자 / 법인 ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: 4, borderRadius: 12, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
+        {DEP_BIZ.map(o => {
+          const on = biz === o.id;
+          const c = bizCounts[o.id] || { total: 0, pending: 0 };
+          return (
+            <button key={o.id} onClick={() => { setBiz(o.id); setOpenId(null); setSelectedIds(new Set()); }}
+              title={`${o.label} 입금내역 ${c.total}건`}
+              style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 34, padding: "0 14px", borderRadius: 9, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: on ? 800 : 600, whiteSpace: "nowrap",
+                border: "none",
+                background: on ? "var(--surface)" : "transparent",
+                boxShadow: on ? "0 1px 3px rgba(0,0,0,0.10)" : "none",
+                color: on ? "#DB6B2E" : "var(--text3)" }}>
+              {o.label}
+              <span style={{ fontSize: 11, fontWeight: 700, color: on ? "var(--text3)" : "var(--text3)", opacity: 0.85, fontVariantNumeric: "tabular-nums" }}>{c.total}건</span>
+              {c.pending > 0 && (
+                <span style={{ minWidth: 18, height: 18, padding: "0 5px", borderRadius: 100, background: on ? "var(--warning-bg)" : "transparent", border: on ? "1px solid rgba(254,152,0,0.45)" : "1px solid var(--border)", color: "var(--warning-text)", fontSize: 10.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", fontVariantNumeric: "tabular-nums" }}>{c.pending}</span>
+              )}
+            </button>
+          );
+        })}
+        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text3)", padding: "0 8px" }}>
+          가져오기·처리·합계는 지금 고른 사업자 것만 다룹니다
+        </span>
+      </div>
+
       {/* 파일을 끌고 오면 그때만 큰 상자가 열린다 */}
       {dragActive && (
         <div style={{ border: "2px dashed var(--accent)", borderRadius: 14, background: "rgba(219,107,46,0.06)", padding: "26px 16px", textAlign: "center" }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--accent-strong)" }}>여기에 놓으면 가져옵니다</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--accent-strong)" }}>여기에 놓으면 「{depBizLabel(biz)}」 입금내역으로 가져옵니다</div>
           <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>거래일/입금액/입금자 헤더 자동 인식 · 입금 행만 가져오고 중복은 자동 제외</div>
         </div>
       )}
@@ -10012,6 +10096,23 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         </span>
       </div>
 
+      {/* 찾는 게 반대쪽 사업자에 있을 때 */}
+      {otherBizHits.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "9px 14px", borderRadius: 12, background: "var(--warning-bg)", border: "1px solid rgba(254,152,0,0.4)" }}>
+          <span style={{ fontSize: 12.5, color: "var(--text1)" }}>
+            같은 조건으로 {otherBizHits.map(r => `「${r.biz.label}」에 ${r.n}건`).join(", ")} 더 있습니다
+          </span>
+          <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+            {otherBizHits.map(r => (
+              <button key={r.biz.id} onClick={() => { setBiz(r.biz.id); setOpenId(null); }}
+                style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid rgba(254,152,0,0.5)", background: "var(--surface)", color: "var(--warning-text)", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                {r.biz.label} 보기
+              </button>
+            ))}
+          </span>
+        </div>
+      )}
+
       {/* 합계 바 */}
       {items.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 14px", borderRadius: 12, background: "var(--surface2)", border: "1px solid var(--divider)" }}>
@@ -10028,6 +10129,14 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                 style={{ border: "none", background: "transparent", color: "#DB6B2E", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>해제 ×</button>
             </span>
           )}
+          {/* 반대쪽 사업자 탭에서 가져왔을 때 — 골라서 옮긴다 */}
+          {selectedItems.length > 0 && DEP_BIZ.filter(o => o.id !== biz).map(o => (
+            <button key={o.id} onClick={() => moveSelectedToBiz(o.id)}
+              title={`선택한 ${selectedItems.length}건을 ${o.label} 입금내역으로 옮깁니다`}
+              style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              → {o.label}로 옮기기
+            </button>
+          ))}
           {selectedItems.length === 0 && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>체크박스를 클릭하거나 위아래로 드래그해 여러 건 선택 · 다른 탭에 다녀와도 선택은 유지됩니다</span>}
         </div>
       )}
@@ -10110,7 +10219,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {shown.length === 0 ? (
           <div style={{ padding: "36px 16px", textAlign: "center", fontSize: 13, color: "var(--text3)" }}>
-            {items.length === 0 ? <>아직 가져온 입금내역이 없습니다.<br/>오른쪽 위 「거래내역 엑셀 가져오기」를 누르거나 파일을 이 화면에 끌어다 놓으세요.</> : "조건에 맞는 내역이 없습니다."}
+            {items.length === 0 ? <><b>{depBizLabel(biz)}</b> 입금내역이 아직 없습니다.<br/>오른쪽 위 「거래내역 엑셀 가져오기」를 누르거나 파일을 이 화면에 끌어다 놓으면 이 사업자 앞으로 들어갑니다.</> : "조건에 맞는 내역이 없습니다."}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
