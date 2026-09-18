@@ -8959,6 +8959,93 @@ function ClientRankSection({ ledgers = {}, darkMode }) {
 
 // ─── 은행 입금내역 (장부 서브탭) ───
 // 은행 거래내역 엑셀을 업로드해 입금 행만 앱으로 가져오고, 항목별로 거래처를 지정해
+// 검색칸 — 글자는 이 안에서 바로 보이고, 부모(목록)에는 잠깐 쉰 뒤에만 넘긴다.
+// 부모가 매 타건마다 다시 그려지면 입금 수백 줄이 통째로 다시 그려져 입력이 밀린다.
+function DebouncedSearchInput({ value, onCommit, delay = 250, placeholder, style, clearStyle }) {
+  const [text, setText] = React.useState(value || "");
+  const committed = React.useRef(value || "");
+  // 바깥에서 검색어가 바뀐 경우(장부에서 거래처를 눌러 넘어오는 등)만 따라간다
+  React.useEffect(() => { if (value !== committed.current) { committed.current = value || ""; setText(value || ""); } }, [value]);
+  React.useEffect(() => {
+    if (text === committed.current) return;
+    const t = setTimeout(() => { committed.current = text; onCommit(text); }, delay);
+    return () => clearTimeout(t);
+  }, [text, delay]);
+  const flush = () => { if (text !== committed.current) { committed.current = text; onCommit(text); } };
+  return (
+    <>
+      <input value={text} onChange={e => setText(e.target.value)}
+        onBlur={flush}
+        onKeyDown={e => { if (e.key === "Enter") flush(); if (e.key === "Escape") { setText(""); committed.current = ""; onCommit(""); } }}
+        placeholder={placeholder} style={style} />
+      {text && (
+        <button onClick={() => { setText(""); committed.current = ""; onCommit(""); }} aria-label="검색 지우기" title="지우기" style={clearStyle}>×</button>
+      )}
+    </>
+  );
+}
+
+// 거래처 입력칸 — 후보가 수백 개면 브라우저가 datalist 전체를 매 타건마다 다시 추리느라
+// 입력이 눈에 띄게 밀린다(측정: 후보 200개 → 타건당 70ms, 떼면 25ms). 그래서 지금 친 글자에
+// 걸리는 것만 30개까지 넣어준다. 어차피 드롭다운에서 눈으로 고르는 개수는 그 정도다.
+const CLIENT_SUGGEST_MAX = 30;
+function ClientSuggestInput({ value, onChange, names, listId, placeholder, style }) {
+  const opts = React.useMemo(() => {
+    const q = (value || "").trim().toLowerCase();
+    const src = names || [];
+    return (q ? src.filter(n => String(n).toLowerCase().includes(q)) : src).slice(0, CLIENT_SUGGEST_MAX);
+  }, [value, names]);
+  return (
+    <>
+      <input list={listId} value={value} onChange={onChange} placeholder={placeholder} style={style} />
+      <datalist id={listId}>{opts.map(n => <option key={n} value={n} />)}</datalist>
+    </>
+  );
+}
+
+// 입금 한 건을 "어디에 붙일지" 고르는 줄 — 목록 안에서 펼쳐진다.
+// 고르는 값을 부모(BankDepositsView)가 들고 있으면 한 글자 칠 때마다 입금 수백 줄이
+// 통째로 다시 그려져 화면이 몇백 ms씩 멈춘다. 그래서 값은 이 컴포넌트가 자기 안에서만
+// 들고 있고, 부모에는 「입금완료 처리」를 누르는 순간에만 넘긴다.
+function DepositProcessPanel({ dep, initialClient, initialLink, clientNames, unpaidOf, defaultLinkFor, fmt, onComplete }) {
+  const [client, setClient] = React.useState(initialClient || "");
+  const [link, setLink] = React.useState(initialLink || "none");
+  const ups = unpaidOf(client);
+  return (
+    <td colSpan={6} style={{ padding: "12px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>거래처</label>
+          <ClientSuggestInput listId="frw-dep-clients" names={clientNames} value={client}
+            onChange={e => { const v = e.target.value; setClient(v); setLink(v.trim() ? defaultLinkFor(v, dep.amount) : "none"); }}
+            placeholder="거래처명 입력/선택"
+            style={{ height: 38, padding: "0 10px", fontSize: 13, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>연결할 항목</label>
+          <select value={link} onChange={e => setLink(e.target.value)}
+            style={{ height: 38, padding: "0 10px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", maxWidth: 300 }}>
+            {ups.map(u => (
+              <option key={`${u.ym}-${u.id}`} value={`led|${u.ym}|${u.id}`}>
+                {u.ym} 장부 청구 {fmt(u.total)}원 → 입금완료{Math.round(u.total) === Math.round(dep.amount) ? " (금액 일치)" : ""}
+              </option>
+            ))}
+            <option value="ar">미수금 원장에 입금으로 기록</option>
+            <option value="none">연결 없이 확인 처리만</option>
+          </select>
+        </div>
+        <button onClick={() => onComplete(dep, client, link)}
+          style={{ height: 38, padding: "0 18px", borderRadius: 9, border: "none", background: "#00B493", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+          ✓ 입금완료 처리
+        </button>
+      </div>
+      {client.trim() && ups.length === 0 && (
+        <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>이 거래처의 미입금 청구가 없어 미수금 원장 기록 또는 확인 처리만 가능합니다.</div>
+      )}
+    </td>
+  );
+}
+
 // 장부의 미입금 청구를 입금완료 처리하거나 미수금 원장에 입금으로 기록한다.
 // 한 번 지정한 입금자명→거래처 매핑은 기억해 다음 업로드부터 자동 추천.
 // (은행 인증정보는 어디에도 저장하지 않음 — 엑셀 파일만 사용)
@@ -8970,13 +9057,11 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const [filter, setFilter] = useState(() => load("frw_bank_dep_filter", "pending")); // pending | done | all
   const [search, setSearch] = useState(() => load("frw_bank_dep_search", ""));
   const [openId, setOpenId] = useState(null);     // 처리 패널이 열린 행 id
-  const [pickClient, setPickClient] = useState("");
-  const [pickLink, setPickLink] = useState("none");
   const [selectedIds, setSelectedIds] = useState(() => new Set(load("frw_bank_dep_selected", []))); // 합계 계산용 선택 (유지됨)
   const fileRef = useRef(null);
   const fmt = (n) => Math.round(parseFloat(n) || 0).toLocaleString();
   useEffect(() => { save("frw_bank_dep_filter", filter); }, [filter]);
-  useEffect(() => { save("frw_bank_dep_search", search); }, [search]);
+  useEffect(() => { const t = setTimeout(() => save("frw_bank_dep_search", search), 400); return () => clearTimeout(t); }, [search]);
   // 월별 장부에서 "이 거래처 입금내역 확인" 으로 넘어온 경우 — 거래처명으로 검색하고
   // 처리완료 건까지 다 보이도록 필터를 '전체'로 바꾼다 (미처리만 보이면 이미 들어온 돈을 놓친다)
   const [fromLedger, setFromLedger] = useState(null); // 장부에서 넘어온 거래처명 (안내 띠 표시용)
@@ -9137,17 +9222,13 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   };
 
   // ── 처리/되돌리기 ──
-  const openProcess = (dep) => {
-    const sug = suggestClient(dep.name);
-    setOpenId(dep.id);
-    setPickClient(sug);
-    setPickLink(sug ? defaultLinkFor(sug, dep.amount) : "none");
-  };
-  const completeDeposit = (dep) => {
+  const openProcess = (dep) => setOpenId(dep.id);
+  // 고른 값은 DepositProcessPanel 이 들고 있다가 여기로 넘겨준다
+  const completeDeposit = (dep, pickClient, pickLink) => {
     const name = (pickClient || "").trim();
     if (!name) { showToast("거래처를 선택하세요"); return; }
     let link = { kind: "none" };
-    if (pickLink.startsWith("led|")) {
+    if ((pickLink || "").startsWith("led|")) {
       const [, ym, idStr] = pickLink.split("|");
       setLedgers(prev => {
         const m = prev[ym]; if (!m) return prev;
@@ -9224,23 +9305,54 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const markJustDone = (ids) => setJustDone(prev => { const n = new Set(prev); ids.forEach(id => n.add(id)); return n; });
   useEffect(() => { setJustDone(new Set()); }, [filter, search]);
 
-  const q = search.trim();
+  // 검색어는 한 박자 늦게 목록에 반영한다 — 글자를 칠 때마다 수백 줄을 다시 거르면
+  // 입력이 밀린다. 입력칸 자체는 search 를 그대로 쓰므로 타이핑은 즉시 보인다.
+  const deferredSearch = React.useDeferredValue(search);
+  const q = deferredSearch.trim();
+  // ── 검색용 색인 ──
+  // searchHit 는 부를 때마다 글자를 정규화한다. 입금 1,500건을 매 타건마다 훑으면
+  // 그 정규화만으로 수백 ms가 통째로 막힌다. 정규화한 형태를 items 가 바뀔 때 한 번만
+  // 만들어 두고, 검색할 때는 문자열 포함 여부만 본다. \u0001 은 필드 경계 —
+  // 정규화가 지우지 않는 글자라 "앞 필드 끝 + 뒷 필드 앞"이 붙어 걸리는 일이 없다.
+  const depIndex = React.useMemo(() => {
+    const m = {};
+    items.forEach(x => {
+      const joined = [x.client, x.name, x.memo, sugMap[x.id] || ""].filter(Boolean).join("\u0001");
+      m[x.id] = { n: searchNorm(joined), b: searchBare(joined), c: toChosung(joined) };
+    });
+    return m;
+  }, [items, sugMap]);
+  const qInfo = React.useMemo(() => {
+    if (!q) return null;
+    const bare = q.replace(/\u0001/g, "");
+    if (/^[ㄱ-ㅎ\s]{2,}$/.test(bare)) return { cho: bare.replace(/\s+/g, "") };  // 초성 검색
+    const toks = bare.split(/\s+/).filter(Boolean);
+    return { n: toks.map(searchNorm), b: toks.map(searchBare) };
+  }, [q]);
+  // 지정된 거래처 · 입금자명 · 적요 · (미처리면) 추천 거래처까지 훑는다.
+  // 낱말 여러 개는 전부 들어 있어야 하고 순서는 상관없다 — 원래 규칙 그대로.
   const qMatch = (x) => {
-    if (!q) return true;
-    // 지정된 거래처 · 입금자명 · (미처리면) 추천 거래처까지 훑는다
-    return searchHit(q, x.client, x.name, x.memo, x.status === "pending" ? suggestClient(x.name) : "");
+    if (!qInfo) return true;
+    const ix = depIndex[x.id];
+    if (!ix) return false;
+    if (qInfo.cho) return ix.c.includes(qInfo.cho);
+    return qInfo.n.every((tn, i) => (tn && ix.n.includes(tn)) || (qInfo.b[i] && ix.b.includes(qInfo.b[i])));
   };
   const inFilter = (x) => filter === "all" ? true : filter === "nosug" ? (x.status === "pending" && !sugMap[x.id]) : x.status === filter;
   const pendingView = filter === "pending" || filter === "nosug";
   // 방금 처리한 건은 미처리 화면에서도 자리를 지킨다 — 잘못 눌렀는지 확인할 수 있게
   const justDoneInline = justDone.size > 0 && justDone.size <= JUST_DONE_SHOW_MAX;
-  const shown = items.filter(x => (inFilter(x) || (pendingView && justDoneInline && justDone.has(x.id))) && qMatch(x));
+  const shown = React.useMemo(
+    () => items.filter(x => (inFilter(x) || (pendingView && justDoneInline && justDone.has(x.id))) && qMatch(x)),
+    [items, filter, qInfo, depIndex, sugMap, justDone, justDoneInline, pendingView]);
   // 남겨 둔 건은 합계·전체선택에서 뺀다. 이미 처리된 돈이라 미처리 합계에 섞이면 안 된다.
   const shownActive = pendingView ? shown.filter(x => !justDone.has(x.id)) : shown;
   const justDoneShown = pendingView ? shown.filter(x => justDone.has(x.id)) : [];
   // 저장된 배열 순서를 믿지 않는다. 날짜는 최신순, 같은 날짜 안에서는 엑셀에 적힌 순서.
   // id 는 파싱할 때 파일 위→아래로 매겨지므로 오름차순이 곧 파일 순서다.
-  const shownSorted = [...shown].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id));
+  const shownSorted = React.useMemo(
+    () => [...shown].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id)),
+    [shown]);
   // 합계: 표시 중인 항목 / 체크 선택한 항목
   const shownTotal = shownActive.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
   const selectedItems = items.filter(x => selectedIds.has(x.id));
@@ -9551,15 +9663,28 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   }, [focusMode]);
   const enterFocus = () => { setFilter("pending"); setFocusIdx(0); setFocusMode(true); };
 
+  // ── 한 번에 그리는 줄 수 제한 ──
+  // 수백 건을 통째로 그려 두면, 어디 한 칸에 글자를 쳐도 그 표 전체가 다시 그려지고
+  // 브라우저가 표 폭을 다시 재느라 화면이 멈춘다. 합계·전체선택은 아래 목록이 아니라
+  // 거른 결과 전체(shownActive)로 계산하므로, 여기서 잘라도 숫자는 달라지지 않는다.
+  const DEP_PAGE = 120;
+  const [limit, setLimit] = useState(DEP_PAGE);
+  useEffect(() => { setLimit(DEP_PAGE); }, [filter, q]);
+  const pagedRows = shownSorted.length > limit ? shownSorted.slice(0, limit) : shownSorted;
+  const hiddenCount = shownSorted.length - pagedRows.length;
+
   // ── 날짜별로 묶기 — 같은 날짜를 줄마다 반복하지 않는다 ──
   const WD = ["일", "월", "화", "수", "목", "금", "토"];
   const dayLabel = (d) => { const [y, m, dd] = String(d).split("-").map(Number); return `${m}월 ${dd}일 (${WD[new Date(y, m - 1, dd).getDay()]})`; };
-  const dayGroups = [];
-  shownSorted.forEach(x => {
-    const last = dayGroups[dayGroups.length - 1];
-    if (last && last.date === x.date) { last.rows.push(x); last.sum += parseFloat(x.amount) || 0; }
-    else dayGroups.push({ date: x.date, rows: [x], sum: parseFloat(x.amount) || 0 });
-  });
+  const dayGroups = React.useMemo(() => {
+    const gs = [];
+    pagedRows.forEach(x => {
+      const last = gs[gs.length - 1];
+      if (last && last.date === x.date) { last.rows.push(x); last.sum += parseFloat(x.amount) || 0; }
+      else gs.push({ date: x.date, rows: [x], sum: parseFloat(x.amount) || 0 });
+    });
+    return gs;
+  }, [pagedRows]);
 
   const importBtn = (
     <button onClick={() => fileRef.current && fileRef.current.click()}
@@ -9630,7 +9755,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
               <div className="dep-focus-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
                 <div style={{ padding: "14px 16px", borderRadius: 13, background: "var(--accent-tonal)" }}>
                   <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: "var(--accent-strong)", opacity: 0.85 }}>붙일 거래처</div>
-                  <input list="frw-dep-clients" value={focusPick} onChange={e => setFocusPick(e.target.value)} placeholder="거래처명 입력/선택"
+                  <ClientSuggestInput listId="frw-dep-clients-focus" names={clientNames} value={focusPick} onChange={e => setFocusPick(e.target.value)} placeholder="거래처명 입력/선택"
                     style={{ width: "100%", height: 40, marginTop: 7, fontSize: 15, fontWeight: 700, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)" }} />
                   <div style={{ fontSize: 11.5, color: "var(--accent-strong)", opacity: 0.8, marginTop: 6 }}>
                     {sugMap[focusDep.id] ? "전에 지정했거나 이름이 일치해 자동으로 채웠습니다" : "추천이 없습니다 — 직접 골라주세요"}
@@ -9703,7 +9828,6 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
             )}
           </>
         )}
-        <datalist id="frw-dep-clients">{clientNames.map(n => <option key={n} value={n} />)}</datalist>
       </div>
     );
   }
@@ -9882,12 +10006,9 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         {filter === "nosug" && <span style={{ ...chipStyle(true), cursor: "default" }}>추천 없음 {pendingNoSug.length}건</span>}
         <span style={{ marginLeft: "auto", position: "relative", display: "inline-flex", alignItems: "center" }}>
           <span style={{ position: "absolute", left: 10, display: "inline-flex", color: "var(--text3)", pointerEvents: "none" }}><Icon name="search" size={13}/></span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="거래처명·입금자 검색"
-            style={{ height: 38, padding: "0 30px 0 30px", fontSize: 12.5, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }} />
-          {search && (
-            <button onClick={() => setSearch("")} aria-label="검색 지우기" title="지우기"
-              style={{ position: "absolute", right: 6, width: 20, height: 20, border: "none", borderRadius: 10, background: "var(--surface2)", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>×</button>
-          )}
+          <DebouncedSearchInput value={search} onCommit={setSearch} placeholder="거래처명·입금자 검색"
+            style={{ height: 38, padding: "0 30px 0 30px", fontSize: 12.5, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }}
+            clearStyle={{ position: "absolute", right: 6, width: 20, height: 20, border: "none", borderRadius: 10, background: "var(--surface2)", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", justifyContent: "center" }} />
         </span>
       </div>
 
@@ -10123,37 +10244,12 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                           </tr>
                           {isOpen && !isDone && (
                             <tr style={{ background: "rgba(219,107,46,0.05)" }}>
-                              <td colSpan={6} style={{ padding: "12px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
-                                <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
-                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>거래처</label>
-                                    <input list="frw-dep-clients" value={pickClient}
-                                      onChange={e => { const v = e.target.value; setPickClient(v); setPickLink(v.trim() ? defaultLinkFor(v, dep.amount) : "none"); }}
-                                      placeholder="거래처명 입력/선택"
-                                      style={{ height: 38, padding: "0 10px", fontSize: 13, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }} />
-                                  </div>
-                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                    <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>연결할 항목</label>
-                                    <select value={pickLink} onChange={e => setPickLink(e.target.value)}
-                                      style={{ height: 38, padding: "0 10px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", maxWidth: 300 }}>
-                                      {unpaidOf(pickClient).map(u => (
-                                        <option key={`${u.ym}-${u.id}`} value={`led|${u.ym}|${u.id}`}>
-                                          {u.ym} 장부 청구 {fmt(u.total)}원 → 입금완료{Math.round(u.total) === Math.round(dep.amount) ? " (금액 일치)" : ""}
-                                        </option>
-                                      ))}
-                                      <option value="ar">미수금 원장에 입금으로 기록</option>
-                                      <option value="none">연결 없이 확인 처리만</option>
-                                    </select>
-                                  </div>
-                                  <button onClick={() => completeDeposit(dep)}
-                                    style={{ height: 38, padding: "0 18px", borderRadius: 9, border: "none", background: "#00B493", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                                    ✓ 입금완료 처리
-                                  </button>
-                                </div>
-                                {pickClient.trim() && unpaidOf(pickClient).length === 0 && (
-                                  <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>이 거래처의 미입금 청구가 없어 미수금 원장 기록 또는 확인 처리만 가능합니다.</div>
-                                )}
-                              </td>
+                              <DepositProcessPanel key={dep.id} dep={dep}
+                                clientNames={clientNames}
+                                initialClient={sugMap[dep.id] || ""}
+                                initialLink={sugMap[dep.id] ? defaultLinkFor(sugMap[dep.id], dep.amount) : "none"}
+                                unpaidOf={unpaidOf} defaultLinkFor={defaultLinkFor} fmt={fmt}
+                                onComplete={completeDeposit} />
                             </tr>
                           )}
                         </React.Fragment>
@@ -10163,10 +10259,26 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                 ))}
               </tbody>
             </table>
+            {hiddenCount > 0 && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexWrap: "wrap", padding: "14px 12px", borderTop: "1px solid var(--divider)" }}>
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>
+                  {pagedRows.length}건 표시 중 · <b style={{ color: "var(--text2)" }}>{hiddenCount}건</b> 더 있습니다
+                  <span style={{ opacity: 0.75 }}> (합계·전체선택은 {shownSorted.length}건 전부 기준)</span>
+                </span>
+                <button onClick={() => setLimit(l => l + DEP_PAGE)}
+                  style={{ height: 32, padding: "0 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  {Math.min(DEP_PAGE, hiddenCount)}건 더 보기
+                </button>
+                <button onClick={() => setLimit(shownSorted.length)}
+                  title="건수가 많으면 화면이 느려질 수 있습니다"
+                  style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                  전체 {shownSorted.length}건 보기
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
-      <datalist id="frw-dep-clients">{clientNames.map(n => <option key={n} value={n} />)}</datalist>
 
       {/* ── 거래처 요약 — 입금내역에서 업체명을 누르면 뜨는 패널 ── */}
       {peekData && (
