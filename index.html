@@ -25943,7 +25943,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   const ghostRef = React.useRef(null);       // 커서를 따라다니는 카드 (transform만 직접 갱신)
   const calScrollRef = React.useRef(null);   // .sched-cal-scroll (가로 스크롤 영역)
   const railDateRef = React.useRef(null);    // 현재 타임테이블이 보여주는 날짜 (드롭 시 날짜 이동용)
-  const clearDrag = () => { setDragTodoId(null); setDragOverDate(null); setDragText(""); setDragOverMin(null); };
+  const clearDrag = () => { setDragTodoId(null); setDragOverDate(null); setDragText(""); setDragOverMin(null); setDragOverRailDate(null); };
 
   // 화면 좌표 → 그 자리의 날짜 (셀 위에 이벤트 카드가 겹쳐 있어 elementsFromPoint로 훑는다)
   const dateFromPoint = (x, y) => {
@@ -25957,7 +25957,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   const dayDiff = (from, to) => Math.round((new Date(to) - new Date(from)) / 86400000);
   // 화면 좌표 → 타임테이블 위의 시각 (15분 단위 스냅). 레일 밖이면 null
   const SNAP_MIN = 15;
-  const minFromPoint = (x, y) => {
+  const hitFromPoint = (x, y) => {
     const els = document.elementsFromPoint(x, y) || [];
     for (const el of els) {
       const rail = el.closest && el.closest("[data-sched-rail]");
@@ -25969,10 +25969,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       if (!hh) return null;
       const raw = sh * 60 + (y - r.top) / hh * 60;
       const snapped = Math.round(raw / SNAP_MIN) * SNAP_MIN;
-      return Math.max(sh * 60, Math.min(eh * 60 - SNAP_MIN, snapped));
+      const min = Math.max(sh * 60, Math.min(eh * 60 - SNAP_MIN, snapped));
+      // 주간 뷰는 요일 칸마다 레일이 따로라, 그 칸이 자기 날짜를 들고 있다
+      return { min, date: rail.getAttribute("data-rail-date") || railDateRef.current || null };
     }
     return null;
   };
+  const minFromPoint = (x, y) => { const h = hitFromPoint(x, y); return h ? h.min : null; };
   // 세로로 스크롤되는 조상 (앱은 .main-content가 스크롤을 맡는 경우가 있어 window로 단정하지 않는다)
   const scrollParentOf = (el) => {
     for (let n = el && el.parentElement; n; n = n.parentElement) {
@@ -26068,14 +26071,16 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       d.x = ev.clientX; d.y = ev.clientY;
       moveGhost(d.x, d.y);
       autoScrollOnMove(d);                 // 스크롤 후의 좌표 기준으로 대상 날짜 재계산
-      const nm2 = minFromPoint(d.x, d.y);
-      if (nm2 != null) {
+      const hit2 = hitFromPoint(d.x, d.y);
+      if (hit2 != null) {
         // 타임테이블 위 — 날짜 드롭 하이라이트는 끄고 시각만 표시
         if (d.targetDate !== null) { d.targetDate = null; setDragOverDate(null); }
-        d.railDate = railDateRef.current;
-        if (nm2 !== d.targetMin) { d.targetMin = nm2; setDragOverMin(nm2); }
+        d.railDate = hit2.date;
+        if (hit2.min !== d.targetMin) { d.targetMin = hit2.min; setDragOverMin(hit2.min); }
+        if (d.railDate !== dragOverRailDate) setDragOverRailDate(d.railDate);
         return;
       }
+      if (dragOverRailDate !== null) setDragOverRailDate(null);
       if (d.targetMin !== null) { d.targetMin = null; setDragOverMin(null); }
       const nd = dateFromPoint(d.x, d.y);
       if (nd !== d.targetDate) { d.targetDate = nd; setDragOverDate(nd); }
@@ -26103,6 +26108,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // ── 타임테이블: 드래그로 시간 배정 ──
   // 시간은 todo에 startMin(0~1439) / durMin 으로 저장한다. 제목의 "14:00" 표기보다 우선한다.
   const [dragOverMin, setDragOverMin] = React.useState(null); // 타임테이블 드롭 대상 시각
+  const [dragOverRailDate, setDragOverRailDate] = React.useState(null); // 주간 뷰에서 드롭 대상 요일
   const setTodoTime = (id, startMin, forceDate) => {
     if (id == null || startMin == null) return;
     let target = null;
@@ -26157,6 +26163,17 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     setQuickAdd(null); setQuickBar("");
     const hhmm = Number.isFinite(startMin) ? `${String(Math.floor(startMin / 60)).padStart(2, "0")}:${String(startMin % 60).padStart(2, "0")} · ` : "";
     showToast(`${hhmm}"${text.slice(0, 18)}" 시간표에 추가했습니다\n(달력에는 올라가지 않습니다)`, "success");
+  };
+
+  // 블록 제목 그 자리에서 고치기 — 모달까지 안 가도 되게
+  const [ttEdit, setTtEdit] = React.useState(null); // { id, text }
+  const saveTtEdit = () => {
+    setTtEdit(cur => {
+      if (!cur) return null;
+      const t = (cur.text || "").trim();
+      if (t) setTodos(prev => prev.map(x => x.id === cur.id ? { ...x, text: t } : x));
+      return null;
+    });
   };
 
   // 타임테이블 블록 아래 손잡이를 끌어 소요 시간 조절 (15분 스냅)
@@ -26553,14 +26570,20 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           const showNow = isToday && nowMin >= startH * 60 && nowMin <= endH * 60;
           railDateRef.current = selectedDate;
           const railEl = (
-              <div data-sched-rail="1" data-rail-starth={startH} data-rail-endh={endH} data-rail-hourh={HOUR_H}
+              <div data-sched-rail="1" data-rail-date={selectedDate} data-rail-starth={startH} data-rail-endh={endH} data-rail-hourh={HOUR_H}
                 onClick={(e) => {
-                  // 블록·입력칸을 누른 게 아니라 빈 곳을 눌렀을 때만 그 시각으로 빠른 등록
+                  // 블록·입력칸을 누른 게 아니라 빈 곳을 눌렀을 때만 그 시각으로 빠른 등록.
+                  // 좌표는 눌린 레일(currentTarget) 자신에게서 잰다 — 겹친 요소 때문에
+                  // elementsFromPoint 가 레일을 놓치면 아무 일도 일어나지 않았다.
                   if (e.target.closest("[data-tt-block]") || e.target.closest("[data-tt-quick]")) return;
                   if (dragTodoId != null || resizingId != null) return;
-                  const min = minFromPoint(e.clientX, e.clientY);
-                  if (min == null) return;
-                  setQuickAdd({ date: selectedDate, startMin: min, text: "" });
+                  if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+                  const rail = e.currentTarget;
+                  const r = rail.getBoundingClientRect();
+                  const raw = startH * 60 + (e.clientY - r.top) / HOUR_H * 60;
+                  const snapped = Math.round(raw / 15) * 15;
+                  const min = Math.max(startH * 60, Math.min(endH * 60 - 15, snapped));
+                  setQuickAdd({ date: rail.getAttribute("data-rail-date") || selectedDate, startMin: min, text: "" });
                 }}
                 title="빈 곳을 누르면 그 시각에 바로 일정을 적을 수 있습니다"
                 style={{ position: "relative", height: railH + 14, marginTop: 2, cursor: "copy", borderRadius: 10, outline: dragTodoId != null ? "2px dashed rgba(219,107,46,0.45)" : "none", outlineOffset: 4, transition: "outline-color .15s" }}>
@@ -26575,20 +26598,48 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   const h = Math.max(20, yOf(x.e) - yOf(x.s) - 2);
                   const done = x.t.done;
                   const fmtT = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+                  const fmtDur = (m) => { const hh = Math.floor(m / 60), mm = m % 60; return `${hh ? hh + "시간" : ""}${hh && mm ? " " : ""}${mm ? mm + "분" : (hh ? "" : "0분")}`; };
+                  const resizing = resizingId === x.t.id;
                   return (
-                    <div key={x.t.id} data-tt-block="1"
-                      onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(x.t); }}
+                    <React.Fragment key={x.t.id}>
+                    {/* 조절 중에는 끝나는 시각과 소요 시간을 블록 옆에 띄운다 — 손잡이를 잡은 손에 가리지 않게 */}
+                    {resizing && (
+                      <div style={{ position: "absolute", left: 46, top: yOf(x.e), transform: "translateY(-50%)", zIndex: 5, pointerEvents: "none",
+                        display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999,
+                        background: "#DB6B2E", color: "#fff", fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap",
+                        boxShadow: "0 2px 10px rgba(219,107,46,0.45)" }}>
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtT(x.s)} – {fmtT(x.e)}</span>
+                        <span style={{ opacity: 0.75 }}>{fmtDur(x.e - x.s)}</span>
+                      </div>
+                    )}
+                    <div data-tt-block="1"
+                      onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } setTtEdit({ id: x.t.id, text: x.t.text || "" }); }}
+                      onDoubleClick={(e) => { e.stopPropagation(); setTtEdit(null); openDetail(x.t); }}
                       onContextMenu={(e) => openCtx(e, { id: x.t.id })}
                       onPointerDown={(e) => beginDrag(e, x.t)} draggable={false}
-                      title="끌어서 시간을 옮길 수 있습니다"
+                      title="눌러서 제목 수정 · 두 번 누르면 자세히 · 끌어서 시간 이동"
                       style={{ position: "absolute", left: 46, right: 2, top, height: h, borderRadius: 8, boxSizing: "border-box", overflow: "hidden", cursor: dragTodoId === x.t.id ? "grabbing" : "grab", padding: "3px 9px", touchAction: "pan-y", userSelect: "none",
                         background: done ? "var(--surface2)" : "rgba(219,107,46,0.12)",
-                        borderLeft: `3px solid ${done ? "#64748B" : "#DB6B2E"}`, opacity: dragTodoId === x.t.id ? 0.3 : done ? 0.6 : 1, zIndex: 1 }}>
+                        borderLeft: `3px solid ${done ? "#64748B" : "#DB6B2E"}`, opacity: dragTodoId === x.t.id ? 0.3 : done ? 0.6 : 1,
+                        outline: resizing ? "2px solid #DB6B2E" : "none", outlineOffset: -1, zIndex: resizing ? 4 : 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(x.t.id); }} title={done ? "미완료로" : "완료로 표시"}
                           style={{ width: 14, height: 14, borderRadius: 4, flexShrink: 0, border: done ? "none" : "1.5px solid rgba(219,107,46,0.5)", background: done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 800 }}>{done ? "✓" : ""}</span>
                         {x.t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 8.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface)", border: "1px solid var(--divider)", padding: "0 4px", borderRadius: 999, flexShrink: 0, lineHeight: "13px" }}>시간표</span>}
-                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none" }}>{x.t.text}</span>
+                        {ttEdit && ttEdit.id === x.t.id ? (
+                          <input autoFocus value={ttEdit.text} data-tt-quick="1"
+                            onClick={(ev) => ev.stopPropagation()}
+                            onPointerDown={(ev) => ev.stopPropagation()}
+                            onChange={(ev) => setTtEdit(q => ({ ...q, text: ev.target.value }))}
+                            onKeyDown={(ev) => {
+                              if (ev.key === "Enter") { ev.preventDefault(); saveTtEdit(); }
+                              else if (ev.key === "Escape") { ev.preventDefault(); setTtEdit(null); }
+                            }}
+                            onBlur={saveTtEdit}
+                            style={{ flex: 1, minWidth: 0, height: 20, minHeight: 20, fontSize: 11.5, fontWeight: 700, padding: "0 5px", borderRadius: 5, border: "1px solid var(--accent)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit" }} />
+                        ) : (
+                          <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none" }}>{x.t.text}</span>
+                        )}
                       </div>
                       {h >= 38 && <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 1, marginLeft: 20 }}>{fmtT(x.s)} – {fmtT(x.e)}</div>}
                       {/* 아래 손잡이를 끌면 끝나는 시각(소요 시간)이 15분 단위로 조절된다 */}
@@ -26596,9 +26647,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                         onClick={(ev) => ev.stopPropagation()}
                         title="끌어서 소요 시간 조절 (15분 단위)"
                         style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 9, cursor: "ns-resize", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 1, touchAction: "none" }}>
-                        <span style={{ width: 26, height: 3, borderRadius: 2, background: resizingId === x.t.id ? "#DB6B2E" : "rgba(219,107,46,0.45)" }} />
+                        <span style={{ width: 26, height: 3, borderRadius: 2, background: resizing ? "#DB6B2E" : "rgba(219,107,46,0.45)" }} />
                       </span>
                     </div>
+                    </React.Fragment>
                   );
                 })}
                 {dragTodoId != null && dragOverMin != null && (
