@@ -26132,6 +26132,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // quickAdd = { date, startMin(null이면 시간 미지정), text }
   const [quickAdd, setQuickAdd] = React.useState(null);
   const [quickBar, setQuickBar] = React.useState("");   // 하단 한 줄 입력
+  const [ttOpen, setTtOpen] = React.useState(false); // 타임테이블 확대 보기
   // 타임테이블 시간 범위 — 기본 08~22시, '하루 전체'면 00~24시 (선택은 기기에 기억)
   const [ttFull, setTtFull] = React.useState(() => load("frw_tt_full", false));
   React.useEffect(() => { save("frw_tt_full", ttFull); }, [ttFull]);
@@ -26512,6 +26513,220 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
   const monthLabel = `${year}년 ${month+1}월`;
   const weekdays = ["일","월","화","수","목","금","토"];
+
+  // ── 타임테이블 ──────────────────────────────────────────────
+  // 한 벌의 코드로 두 가지 크기를 그린다.
+  //   compact : 페이지 옆에 붙는 요약판. 제목을 누르면 큰 화면이 열린다.
+  //   확대판  : 모달 전체를 써서 실제로 시간표를 짜는 화면.
+  // 드래그는 포인터 아래 요소에서 [data-sched-rail] 을 closest 로 찾으므로
+  // 레일이 둘 있어도 모달이 위에 있는 한 그쪽이 잡힌다.
+  React.useEffect(() => {
+    if (!ttOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setTtOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ttOpen]);
+
+  const renderTimetable = (opts) => {
+    const compact = !!(opts && opts.compact);
+          const selD = (() => { const [y, m, d] = selectedDate.split("-").map(Number); return new Date(y, m - 1, d); })();
+          const WD2 = ["일", "월", "화", "수", "목", "금", "토"];
+          const isToday = selectedDate === todayKey;
+          // 일정 텍스트에서 "14:00" 또는 "14:00-15:30" 형태의 시간을 인식
+          const parseTime = (t) => {
+            // 드래그로 배정한 시간(startMin)이 제목의 "14:00" 표기보다 우선
+            if (Number.isFinite(t.startMin)) {
+              const s = Number(t.startMin);
+              const dur = Number(t.durMin) > 0 ? Number(t.durMin) : 60;
+              return { s, e: s + dur };
+            }
+            const m = /([01]?\d|2[0-3]):([0-5]\d)(?:\s*[-~–]\s*([01]?\d|2[0-3]):([0-5]\d))?/.exec(t.text || "");
+            if (!m) return null;
+            const s = Number(m[1]) * 60 + Number(m[2]);
+            const e = m[3] != null ? Number(m[3]) * 60 + Number(m[4]) : s + 60;
+            return { s, e: Math.max(e, s + 30) };
+          };
+          const timed = [], untimed = [];
+          dayTodos.forEach(t => { const tm = parseTime(t); if (tm) timed.push({ t, ...tm }); else untimed.push(t); });
+          const HOUR_H = compact ? 26 : 52;   // 한 시간 칸 높이
+          // 기본은 업무 시간대(08~22시). '하루 전체'를 켜면 00~24시 전부 보여준다.
+          // 어느 쪽이든 그 범위 밖에 일정이 있으면 자동으로 늘려서 잘리지 않게 한다.
+          let startH = ttFull ? 0 : 8, endH = ttFull ? 24 : 22;
+          timed.forEach(x => { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(x.e / 60))); });
+          const hours = []; for (let h = startH; h <= endH; h++) hours.push(h);
+          const railH = (endH - startH) * HOUR_H;
+          const yOf = (min) => (min - startH * 60) / 60 * HOUR_H;
+          const doneCnt = dayTodos.filter(t => t.done).length;
+          const showNow = isToday && nowMin >= startH * 60 && nowMin <= endH * 60;
+          railDateRef.current = selectedDate;
+          return (
+            <div className={compact ? "card sched-timetable" : ""}
+              style={compact
+                ? { padding: "16px 16px 14px", display: "flex", flexDirection: "column", gap: 10 }
+                : { padding: "0 4px 4px", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                {compact ? (
+                  <button onClick={() => setTtOpen(true)} title="크게 열어서 시간표 짜기"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit",
+                      fontSize: 15, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>
+                    {isToday ? "오늘 타임테이블" : "타임테이블"}
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "2px 7px", borderRadius: 999 }}>크게 보기</span>
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{isToday ? "오늘 타임테이블" : "타임테이블"}</span>
+                )}
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>{selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}</span>
+                <span style={{ flex: 1 }} />
+                {dayTodos.length > 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>{dayTodos.length}건 · 완료 {doneCnt}</span>}
+                <button onClick={() => setTtFull(v => !v)}
+                  title={ttFull ? "업무 시간대(08~22시)만 보기" : "새벽·심야까지 하루 전체(00~24시) 보기"}
+                  style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
+                    border: ttFull ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
+                    background: ttFull ? "rgba(219,107,46,0.10)" : "var(--surface2)",
+                    color: ttFull ? "#DB6B2E" : "var(--text3)" }}>
+                  {ttFull ? "하루 전체 00~24시" : "08~22시"}
+                </button>
+                {!compact && (
+                  <button onClick={() => setTtOpen(false)} title="닫기 (Esc)"
+                    style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text3)", fontSize: 15, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>×</button>
+                )}
+              </div>
+
+              {untimed.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>
+                    시간 미지정{compact && untimed.length > 3 ? ` ${untimed.length}건` : ""}
+                  </span>
+                  {(compact ? untimed.slice(0, 3) : untimed).map(t => (
+                    <div key={t.id}
+                      onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(t); }}
+                      onContextMenu={(e) => openCtx(e, { id: t.id })}
+                      onPointerDown={(e) => beginDrag(e, t)} draggable={false}
+                      title="끌어서 아래 시간표에 놓으면 그 시각으로 배치됩니다"
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 9, border: "1px solid var(--border)", cursor: dragTodoId === t.id ? "grabbing" : "grab", opacity: dragTodoId === t.id ? 0.3 : t.done ? 0.55 : 1, touchAction: "pan-y", userSelect: "none" }}>
+                      <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(t.id); }} title={t.done ? "미완료로" : "완료로 표시"}
+                        style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 800 }}>{t.done ? "✓" : ""}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: t.done ? "line-through" : "none" }}>{t.text}</span>
+                      {t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", border: "1px solid var(--divider)", padding: "1px 5px", borderRadius: 999, flexShrink: 0 }}>시간표</span>}
+                      {t.endDate && t.endDate !== t.date && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "1px 6px", borderRadius: 999, flexShrink: 0 }}>기간</span>}
+                    </div>
+                  ))}
+                  {compact && untimed.length > 3 && (
+                    <button onClick={() => setTtOpen(true)}
+                      style={{ border: "none", background: "transparent", color: "var(--text3)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "3px 0", textAlign: "left" }}>
+                      외 {untimed.length - 3}건 — 크게 보기
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div data-sched-rail="1" data-rail-starth={startH} data-rail-endh={endH} data-rail-hourh={HOUR_H}
+                onClick={(e) => {
+                  // 블록·입력칸을 누른 게 아니라 빈 곳을 눌렀을 때만 그 시각으로 빠른 등록
+                  if (e.target.closest("[data-tt-block]") || e.target.closest("[data-tt-quick]")) return;
+                  if (dragTodoId != null || resizingId != null) return;
+                  const min = minFromPoint(e.clientX, e.clientY);
+                  if (min == null) return;
+                  setQuickAdd({ date: selectedDate, startMin: min, text: "" });
+                }}
+                title="빈 곳을 누르면 그 시각에 바로 일정을 적을 수 있습니다"
+                style={{ position: "relative", height: railH + 14, marginTop: 2, cursor: "copy", borderRadius: 10, outline: dragTodoId != null ? "2px dashed rgba(219,107,46,0.45)" : "none", outlineOffset: 4, transition: "outline-color .15s" }}>
+                {hours.map(h => (
+                  <div key={h} style={{ position: "absolute", left: 0, right: 0, top: (h - startH) * HOUR_H, display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ width: 36, fontSize: 9.5, color: h === 24 ? "var(--text3)" : (h < 8 || h >= 19 ? "var(--text3)" : "var(--text2)"), textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: (h < 8 || h > 19) ? 0.75 : 1 }}>{String(h).padStart(2, "0")}:00</span>
+                    <span style={{ flex: 1, height: 1, background: "var(--divider)" }} />
+                  </div>
+                ))}
+                {timed.map(x => {
+                  const top = yOf(x.s) + 6;
+                  const h = Math.max(20, yOf(x.e) - yOf(x.s) - 2);
+                  const done = x.t.done;
+                  const fmtT = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+                  return (
+                    <div key={x.t.id} data-tt-block="1"
+                      onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(x.t); }}
+                      onContextMenu={(e) => openCtx(e, { id: x.t.id })}
+                      onPointerDown={(e) => beginDrag(e, x.t)} draggable={false}
+                      title="끌어서 시간을 옮길 수 있습니다"
+                      style={{ position: "absolute", left: 46, right: 2, top, height: h, borderRadius: 8, boxSizing: "border-box", overflow: "hidden", cursor: dragTodoId === x.t.id ? "grabbing" : "grab", padding: "3px 9px", touchAction: "pan-y", userSelect: "none",
+                        background: done ? "var(--surface2)" : "rgba(219,107,46,0.12)",
+                        borderLeft: `3px solid ${done ? "#64748B" : "#DB6B2E"}`, opacity: dragTodoId === x.t.id ? 0.3 : done ? 0.6 : 1, zIndex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(x.t.id); }} title={done ? "미완료로" : "완료로 표시"}
+                          style={{ width: 14, height: 14, borderRadius: 4, flexShrink: 0, border: done ? "none" : "1.5px solid rgba(219,107,46,0.5)", background: done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 800 }}>{done ? "✓" : ""}</span>
+                        {x.t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 8.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface)", border: "1px solid var(--divider)", padding: "0 4px", borderRadius: 999, flexShrink: 0, lineHeight: "13px" }}>시간표</span>}
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none" }}>{x.t.text}</span>
+                      </div>
+                      {h >= 38 && <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 1, marginLeft: 20 }}>{fmtT(x.s)} – {fmtT(x.e)}</div>}
+                      {/* 아래 손잡이를 끌면 끝나는 시각(소요 시간)이 15분 단위로 조절된다 */}
+                      <span className="sched-tt-resize" onPointerDown={(ev) => beginResizeTime(ev, x.t, HOUR_H)}
+                        onClick={(ev) => ev.stopPropagation()}
+                        title="끌어서 소요 시간 조절 (15분 단위)"
+                        style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 9, cursor: "ns-resize", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 1, touchAction: "none" }}>
+                        <span style={{ width: 26, height: 3, borderRadius: 2, background: resizingId === x.t.id ? "#DB6B2E" : "rgba(219,107,46,0.45)" }} />
+                      </span>
+                    </div>
+                  );
+                })}
+                {dragTodoId != null && dragOverMin != null && (
+                  <div style={{ position: "absolute", left: 0, right: 0, top: yOf(dragOverMin), display: "flex", alignItems: "center", gap: 5, zIndex: 3, pointerEvents: "none" }}>
+                    <span style={{ width: 36, textAlign: "right", fontSize: 10, fontWeight: 800, color: "#DB6B2E", fontVariantNumeric: "tabular-nums" }}>{String(Math.floor(dragOverMin / 60)).padStart(2, "0")}:{String(dragOverMin % 60).padStart(2, "0")}</span>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: "#DB6B2E", flexShrink: 0 }} />
+                    <span style={{ flex: 1, height: 2, background: "#DB6B2E", borderRadius: 2 }} />
+                  </div>
+                )}
+                {quickAdd && quickAdd.date === selectedDate && Number.isFinite(quickAdd.startMin) && (
+                  <div data-tt-quick="1" onClick={(e) => e.stopPropagation()}
+                    style={{ position: "absolute", left: 46, right: 2, top: yOf(quickAdd.startMin) + 6, height: Math.max(34, HOUR_H - 4), zIndex: 5,
+                      borderRadius: 8, border: "1.5px solid #DB6B2E", background: "var(--surface)", boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+                      display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 800, color: "#DB6B2E", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                      {String(Math.floor(quickAdd.startMin / 60)).padStart(2, "0")}:{String(quickAdd.startMin % 60).padStart(2, "0")}
+                    </span>
+                    <input autoFocus value={quickAdd.text}
+                      onChange={(e) => setQuickAdd(q => ({ ...q, text: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); quickAddSave(); } else if (e.key === "Escape") { e.preventDefault(); setQuickAdd(null); } }}
+                      onBlur={() => { if ((quickAdd.text || "").trim()) quickAddSave(); else setQuickAdd(null); }}
+                      placeholder="할 일 입력 후 Enter"
+                      style={{ flex: 1, minWidth: 0, height: 26, minHeight: 26, fontSize: 12, border: "none", background: "transparent", padding: 0, outline: "none", color: "var(--text1)" }} />
+                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => setQuickAdd(null)} title="취소"
+                      style={{ width: 20, height: 20, borderRadius: 6, border: "none", background: "var(--surface2)", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>×</button>
+                  </div>
+                )}
+                {showNow && (
+                  <div style={{ position: "absolute", left: 0, right: 0, top: yOf(nowMin), display: "flex", alignItems: "center", gap: 5, zIndex: 2, pointerEvents: "none" }}>
+                    <span style={{ width: 36, textAlign: "right", fontSize: 9.5, fontWeight: 800, color: "#F04452", fontVariantNumeric: "tabular-nums" }}>{String(Math.floor(nowMin / 60)).padStart(2, "0")}:{String(nowMin % 60).padStart(2, "0")}</span>
+                    <span style={{ width: 7, height: 7, borderRadius: 999, background: "#F04452", flexShrink: 0 }} />
+                    <span style={{ flex: 1, height: 1.5, background: "#F04452" }} />
+                  </div>
+                )}
+              </div>
+
+              {compact ? (
+                <button onClick={() => setTtOpen(true)}
+                  style={{ height: 38, borderRadius: 10, border: "1px dashed var(--border)", background: "var(--input-bg)", color: "var(--text3)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+                  + 크게 열어서 시간표 짜기
+                </button>
+              ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input value={quickBar}
+                  onChange={(e) => setQuickBar(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && quickBar.trim()) { e.preventDefault(); quickAddSave({ date: selectedDate, startMin: null, text: quickBar }); } }}
+                  placeholder='여기에 바로 입력 — 시간표에만 기록 ("14:00 미팅" 처럼 시각 포함 가능)'
+                  style={{ flex: 1, minWidth: 0, height: 38, minHeight: 38, fontSize: 12.5, borderRadius: 10, padding: "0 12px" }} />
+                <button onClick={() => quickBar.trim() ? quickAddSave({ date: selectedDate, startMin: null, text: quickBar }) : openAdd(selectedDate)}
+                  className={quickBar.trim() ? "btn-orange" : ""}
+                  title={quickBar.trim() ? "이 내용으로 추가" : "자세히 입력 (메모·첨부·기간)"}
+                  style={{ height: 38, padding: "0 13px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+                    border: quickBar.trim() ? "none" : "1px solid var(--border)", background: quickBar.trim() ? undefined : "var(--surface2)", color: quickBar.trim() ? undefined : "var(--text2)" }}>
+                  {quickBar.trim() ? "추가" : "자세히"}
+                </button>
+              </div>
+              )}
+              
+            </div>
+    );
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -26898,176 +27113,24 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           </div>
         )}
         </div>
-        {/* ── 오늘 타임테이블 (시안 D): 선택한 날짜의 하루 시간표 ── */}
-        {(() => {
-          const selD = (() => { const [y, m, d] = selectedDate.split("-").map(Number); return new Date(y, m - 1, d); })();
-          const WD2 = ["일", "월", "화", "수", "목", "금", "토"];
-          const isToday = selectedDate === todayKey;
-          // 일정 텍스트에서 "14:00" 또는 "14:00-15:30" 형태의 시간을 인식
-          const parseTime = (t) => {
-            // 드래그로 배정한 시간(startMin)이 제목의 "14:00" 표기보다 우선
-            if (Number.isFinite(t.startMin)) {
-              const s = Number(t.startMin);
-              const dur = Number(t.durMin) > 0 ? Number(t.durMin) : 60;
-              return { s, e: s + dur };
-            }
-            const m = /([01]?\d|2[0-3]):([0-5]\d)(?:\s*[-~–]\s*([01]?\d|2[0-3]):([0-5]\d))?/.exec(t.text || "");
-            if (!m) return null;
-            const s = Number(m[1]) * 60 + Number(m[2]);
-            const e = m[3] != null ? Number(m[3]) * 60 + Number(m[4]) : s + 60;
-            return { s, e: Math.max(e, s + 30) };
-          };
-          const timed = [], untimed = [];
-          dayTodos.forEach(t => { const tm = parseTime(t); if (tm) timed.push({ t, ...tm }); else untimed.push(t); });
-          const HOUR_H = 44;
-          // 기본은 업무 시간대(08~22시). '하루 전체'를 켜면 00~24시 전부 보여준다.
-          // 어느 쪽이든 그 범위 밖에 일정이 있으면 자동으로 늘려서 잘리지 않게 한다.
-          let startH = ttFull ? 0 : 8, endH = ttFull ? 24 : 22;
-          timed.forEach(x => { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(x.e / 60))); });
-          const hours = []; for (let h = startH; h <= endH; h++) hours.push(h);
-          const railH = (endH - startH) * HOUR_H;
-          const yOf = (min) => (min - startH * 60) / 60 * HOUR_H;
-          const doneCnt = dayTodos.filter(t => t.done).length;
-          const showNow = isToday && nowMin >= startH * 60 && nowMin <= endH * 60;
-          railDateRef.current = selectedDate;
-          return (
-            <div className="card sched-timetable" style={{ padding: "16px 16px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{isToday ? "오늘 타임테이블" : "타임테이블"}</span>
-                <span style={{ fontSize: 12, color: "var(--text3)" }}>{selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}</span>
-                <span style={{ flex: 1 }} />
-                {dayTodos.length > 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>{dayTodos.length}건 · 완료 {doneCnt}</span>}
-                <button onClick={() => setTtFull(v => !v)}
-                  title={ttFull ? "업무 시간대(08~22시)만 보기" : "새벽·심야까지 하루 전체(00~24시) 보기"}
-                  style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
-                    border: ttFull ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
-                    background: ttFull ? "rgba(219,107,46,0.10)" : "var(--surface2)",
-                    color: ttFull ? "#DB6B2E" : "var(--text3)" }}>
-                  {ttFull ? "하루 전체 00~24시" : "08~22시"}
-                </button>
-              </div>
-
-              {untimed.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>시간 미지정</span>
-                  {untimed.map(t => (
-                    <div key={t.id}
-                      onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(t); }}
-                      onContextMenu={(e) => openCtx(e, { id: t.id })}
-                      onPointerDown={(e) => beginDrag(e, t)} draggable={false}
-                      title="끌어서 아래 시간표에 놓으면 그 시각으로 배치됩니다"
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 9, border: "1px solid var(--border)", cursor: dragTodoId === t.id ? "grabbing" : "grab", opacity: dragTodoId === t.id ? 0.3 : t.done ? 0.55 : 1, touchAction: "pan-y", userSelect: "none" }}>
-                      <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(t.id); }} title={t.done ? "미완료로" : "완료로 표시"}
-                        style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 800 }}>{t.done ? "✓" : ""}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: t.done ? "line-through" : "none" }}>{t.text}</span>
-                      {t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", border: "1px solid var(--divider)", padding: "1px 5px", borderRadius: 999, flexShrink: 0 }}>시간표</span>}
-                      {t.endDate && t.endDate !== t.date && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "1px 6px", borderRadius: 999, flexShrink: 0 }}>기간</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div data-sched-rail="1" data-rail-starth={startH} data-rail-endh={endH} data-rail-hourh={HOUR_H}
-                onClick={(e) => {
-                  // 블록·입력칸을 누른 게 아니라 빈 곳을 눌렀을 때만 그 시각으로 빠른 등록
-                  if (e.target.closest("[data-tt-block]") || e.target.closest("[data-tt-quick]")) return;
-                  if (dragTodoId != null || resizingId != null) return;
-                  const min = minFromPoint(e.clientX, e.clientY);
-                  if (min == null) return;
-                  setQuickAdd({ date: selectedDate, startMin: min, text: "" });
-                }}
-                title="빈 곳을 누르면 그 시각에 바로 일정을 적을 수 있습니다"
-                style={{ position: "relative", height: railH, marginTop: 2, cursor: "copy", borderRadius: 10, outline: dragTodoId != null ? "2px dashed rgba(219,107,46,0.45)" : "none", outlineOffset: 4, transition: "outline-color .15s" }}>
-                {hours.map(h => (
-                  <div key={h} style={{ position: "absolute", left: 0, right: 0, top: (h - startH) * HOUR_H, display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ width: 36, fontSize: 9.5, color: h === 24 ? "var(--text3)" : (h < 8 || h >= 19 ? "var(--text3)" : "var(--text2)"), textAlign: "right", fontVariantNumeric: "tabular-nums", opacity: (h < 8 || h > 19) ? 0.75 : 1 }}>{String(h).padStart(2, "0")}:00</span>
-                    <span style={{ flex: 1, height: 1, background: "var(--divider)" }} />
-                  </div>
-                ))}
-                {timed.map(x => {
-                  const top = yOf(x.s) + 6;
-                  const h = Math.max(20, yOf(x.e) - yOf(x.s) - 2);
-                  const done = x.t.done;
-                  const fmtT = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-                  return (
-                    <div key={x.t.id} data-tt-block="1"
-                      onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(x.t); }}
-                      onContextMenu={(e) => openCtx(e, { id: x.t.id })}
-                      onPointerDown={(e) => beginDrag(e, x.t)} draggable={false}
-                      title="끌어서 시간을 옮길 수 있습니다"
-                      style={{ position: "absolute", left: 46, right: 2, top, height: h, borderRadius: 8, boxSizing: "border-box", overflow: "hidden", cursor: dragTodoId === x.t.id ? "grabbing" : "grab", padding: "3px 9px", touchAction: "pan-y", userSelect: "none",
-                        background: done ? "var(--surface2)" : "rgba(219,107,46,0.12)",
-                        borderLeft: `3px solid ${done ? "#64748B" : "#DB6B2E"}`, opacity: dragTodoId === x.t.id ? 0.3 : done ? 0.6 : 1, zIndex: 1 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(x.t.id); }} title={done ? "미완료로" : "완료로 표시"}
-                          style={{ width: 14, height: 14, borderRadius: 4, flexShrink: 0, border: done ? "none" : "1.5px solid rgba(219,107,46,0.5)", background: done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 9, fontWeight: 800 }}>{done ? "✓" : ""}</span>
-                        {x.t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 8.5, fontWeight: 800, color: "var(--text3)", background: "var(--surface)", border: "1px solid var(--divider)", padding: "0 4px", borderRadius: 999, flexShrink: 0, lineHeight: "13px" }}>시간표</span>}
-                        <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none" }}>{x.t.text}</span>
-                      </div>
-                      {h >= 38 && <div style={{ fontSize: 9.5, color: "var(--text3)", marginTop: 1, marginLeft: 20 }}>{fmtT(x.s)} – {fmtT(x.e)}</div>}
-                      {/* 아래 손잡이를 끌면 끝나는 시각(소요 시간)이 15분 단위로 조절된다 */}
-                      <span className="sched-tt-resize" onPointerDown={(ev) => beginResizeTime(ev, x.t, HOUR_H)}
-                        onClick={(ev) => ev.stopPropagation()}
-                        title="끌어서 소요 시간 조절 (15분 단위)"
-                        style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 9, cursor: "ns-resize", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 1, touchAction: "none" }}>
-                        <span style={{ width: 26, height: 3, borderRadius: 2, background: resizingId === x.t.id ? "#DB6B2E" : "rgba(219,107,46,0.45)" }} />
-                      </span>
-                    </div>
-                  );
-                })}
-                {dragTodoId != null && dragOverMin != null && (
-                  <div style={{ position: "absolute", left: 0, right: 0, top: yOf(dragOverMin), display: "flex", alignItems: "center", gap: 5, zIndex: 3, pointerEvents: "none" }}>
-                    <span style={{ width: 36, textAlign: "right", fontSize: 10, fontWeight: 800, color: "#DB6B2E", fontVariantNumeric: "tabular-nums" }}>{String(Math.floor(dragOverMin / 60)).padStart(2, "0")}:{String(dragOverMin % 60).padStart(2, "0")}</span>
-                    <span style={{ width: 8, height: 8, borderRadius: 999, background: "#DB6B2E", flexShrink: 0 }} />
-                    <span style={{ flex: 1, height: 2, background: "#DB6B2E", borderRadius: 2 }} />
-                  </div>
-                )}
-                {quickAdd && quickAdd.date === selectedDate && Number.isFinite(quickAdd.startMin) && (
-                  <div data-tt-quick="1" onClick={(e) => e.stopPropagation()}
-                    style={{ position: "absolute", left: 46, right: 2, top: yOf(quickAdd.startMin) + 6, height: Math.max(34, HOUR_H - 4), zIndex: 5,
-                      borderRadius: 8, border: "1.5px solid #DB6B2E", background: "var(--surface)", boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
-                      display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
-                    <span style={{ fontSize: 10.5, fontWeight: 800, color: "#DB6B2E", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
-                      {String(Math.floor(quickAdd.startMin / 60)).padStart(2, "0")}:{String(quickAdd.startMin % 60).padStart(2, "0")}
-                    </span>
-                    <input autoFocus value={quickAdd.text}
-                      onChange={(e) => setQuickAdd(q => ({ ...q, text: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); quickAddSave(); } else if (e.key === "Escape") { e.preventDefault(); setQuickAdd(null); } }}
-                      onBlur={() => { if ((quickAdd.text || "").trim()) quickAddSave(); else setQuickAdd(null); }}
-                      placeholder="할 일 입력 후 Enter"
-                      style={{ flex: 1, minWidth: 0, height: 26, minHeight: 26, fontSize: 12, border: "none", background: "transparent", padding: 0, outline: "none", color: "var(--text1)" }} />
-                    <button onMouseDown={(e) => e.preventDefault()} onClick={() => setQuickAdd(null)} title="취소"
-                      style={{ width: 20, height: 20, borderRadius: 6, border: "none", background: "var(--surface2)", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>×</button>
-                  </div>
-                )}
-                {showNow && (
-                  <div style={{ position: "absolute", left: 0, right: 0, top: yOf(nowMin), display: "flex", alignItems: "center", gap: 5, zIndex: 2, pointerEvents: "none" }}>
-                    <span style={{ width: 36, textAlign: "right", fontSize: 9.5, fontWeight: 800, color: "#F04452", fontVariantNumeric: "tabular-nums" }}>{String(Math.floor(nowMin / 60)).padStart(2, "0")}:{String(nowMin % 60).padStart(2, "0")}</span>
-                    <span style={{ width: 7, height: 7, borderRadius: 999, background: "#F04452", flexShrink: 0 }} />
-                    <span style={{ flex: 1, height: 1.5, background: "#F04452" }} />
-                  </div>
-                )}
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input value={quickBar}
-                  onChange={(e) => setQuickBar(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && quickBar.trim()) { e.preventDefault(); quickAddSave({ date: selectedDate, startMin: null, text: quickBar }); } }}
-                  placeholder='여기에 바로 입력 — 시간표에만 기록 ("14:00 미팅" 처럼 시각 포함 가능)'
-                  style={{ flex: 1, minWidth: 0, height: 38, minHeight: 38, fontSize: 12.5, borderRadius: 10, padding: "0 12px" }} />
-                <button onClick={() => quickBar.trim() ? quickAddSave({ date: selectedDate, startMin: null, text: quickBar }) : openAdd(selectedDate)}
-                  className={quickBar.trim() ? "btn-orange" : ""}
-                  title={quickBar.trim() ? "이 내용으로 추가" : "자세히 입력 (메모·첨부·기간)"}
-                  style={{ height: 38, padding: "0 13px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
-                    border: quickBar.trim() ? "none" : "1px solid var(--border)", background: quickBar.trim() ? undefined : "var(--surface2)", color: quickBar.trim() ? undefined : "var(--text2)" }}>
-                  {quickBar.trim() ? "추가" : "자세히"}
-                </button>
-              </div>
-              
-            </div>
-          );
-        })()}
+        {renderTimetable({ compact: true })}
       </div>
+
+      {/* ── 타임테이블 확대 보기 — 실제로 시간표를 짜는 화면 ── */}
+      {ttOpen && (
+        <div onClick={() => setTtOpen(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9997, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, animation: "fadeIn 0.18s ease" }}>
+          <div onClick={(e) => e.stopPropagation()} className="frw-rise sched-tt-modal"
+            style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 760, maxHeight: "92vh",
+              display: "flex", flexDirection: "column", overflow: "hidden", padding: "18px 18px 16px",
+              border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
+              animation: "frwRise 0.25s cubic-bezier(0,0,0.2,1)" }}>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
+              {renderTimetable({ compact: false })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 일정 추가 모달 (노션 '새 페이지' 스타일) ── */}
       {addModal && (
