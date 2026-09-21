@@ -26467,24 +26467,27 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   const [dailyModal, setDailyModal] = React.useState(null); // { date, text, star }
   const openDaily = (dateStr) => {
     const e = (dailyNotes || {})[dateStr] || {};
-    setDailyModal({ date: dateStr, text: e.text || "", star: !!e.star });
+    setDailyModal({ date: dateStr, text: e.text || "", star: !!e.star, atts: Array.isArray(e.atts) ? e.atts : [] });
   };
   const saveDaily = (close = true) => {
     if (!dailyModal || !setDailyNotes) { setDailyModal(null); return; }
     const { date, text, star } = dailyModal;
+    const atts = Array.isArray(dailyModal.atts) ? dailyModal.atts : [];
     const had = !!(dailyNotes || {})[date];
     setDailyNotes(prev => {
       const next = { ...(prev || {}) };
-      if (!String(text || "").trim() && !star) delete next[date];
-      else next[date] = { ...(next[date] || {}), text, star, updatedAt: Date.now() };
+      // 사진만 있고 글이 없는 날도 기록이다 — 예전엔 여기서 통째로 지워졌다
+      if (!String(text || "").trim() && !star && atts.length === 0) delete next[date];
+      else next[date] = { ...(next[date] || {}), text, star, atts, updatedAt: Date.now() };
       return next;
     });
     if (close) setDailyModal(null);
     const body = String(text || "").trim();
-    showToast(body || star
+    const kept = body || star || atts.length > 0;
+    showToast(kept
       ? `${date.replace(/-/g, ".")} 하루 기록을 저장했습니다`
       : (had ? `${date.replace(/-/g, ".")} 하루 기록을 지웠습니다` : "내용이 비어 저장하지 않았습니다"),
-      body || star ? "success" : undefined);
+      kept ? "success" : undefined);
   };
 
   // ── 일정 추가 모달 (노션 '새 페이지' 스타일) — 캘린더 셀 + 버튼/더블클릭으로 열림 ──
@@ -27756,9 +27759,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 <textarea autoFocus value={dailyModal.text} onChange={e => setDailyModal(d => ({ ...d, text: e.target.value }))}
                   placeholder={"오늘 있었던 일, 결정한 것, 기억할 것을 적어두세요."}
                   style={{ width: "100%", minHeight: 260, fontSize: 14, lineHeight: 1.75, borderRadius: 12, padding: "13px 15px", resize: "vertical", background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text1)", fontFamily: "inherit" }} />
+                <div style={{ marginTop: 12 }}>
+                  <AttachmentField value={Array.isArray(dailyModal.atts) ? dailyModal.atts : []}
+                    onChange={(next) => setDailyModal(d => d ? { ...d, atts: next } : d)} />
+                </div>
               </div>
               <div style={{ padding: "10px 18px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11, color: "var(--text3)" }}>{(dailyModal.text || "").length.toLocaleString()}자 · '하루 기록' 탭에서 모아볼 수 있습니다</span>
+                <span style={{ fontSize: 11, color: "var(--text3)" }}>{(dailyModal.text || "").length.toLocaleString()}자{(dailyModal.atts || []).length ? ` · 사진·파일 ${(dailyModal.atts || []).length}개` : ""} · '하루 기록' 탭에서 모아볼 수 있습니다</span>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button onClick={() => setDailyModal(null)} style={{ height: 38, padding: "0 14px", background: "var(--surface2)", color: "var(--text1)", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
                   <button className="btn-orange" onClick={() => saveDaily(true)} style={{ height: 38, padding: "0 18px" }}>저장</button>
@@ -28150,18 +28157,23 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], setTodos,
   const taRef = React.useRef(null);
   const searchRef = React.useRef(null);
 
-  const entryOf = (k) => dailyNotes[k] || { text: "", star: false };
+  const entryOf = (k) => dailyNotes[k] || { text: "", star: false, atts: [] };
   const cur = entryOf(sel);
+  const curAtts = Array.isArray(cur.atts) ? cur.atts : [];
   const patchEntry = (patch) => {
     if (!setDailyNotes) return;
     setDailyNotes(prev => {
       const next = { ...(prev || {}) };
       const merged = { ...(next[sel] || { text: "", star: false }), ...patch, updatedAt: Date.now() };
-      if (!String(merged.text || "").trim() && !merged.star) delete next[sel];
+      // 글도 별표도 사진도 없으면 그 날 기록을 지운다 (빈 껍데기가 쌓이지 않게)
+      const hasAtts = Array.isArray(merged.atts) && merged.atts.length > 0;
+      if (!String(merged.text || "").trim() && !merged.star && !hasAtts) delete next[sel];
       else next[sel] = merged;
       return next;
     });
   };
+  // 카드 어디에 끌어다 놓아도, 글 쓰다 Ctrl+V 해도 사진이 붙는다
+  const noteInbox = useAttachInbox(curAtts, (next) => patchEntry({ atts: next }));
   const shift = (days) => {
     const [y, m, d] = sel.split("-").map(Number);
     setSel(ymd(new Date(y, m - 1, d + days)));
@@ -28177,7 +28189,7 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], setTodos,
 
   // 기록이 있는 날 (내용 또는 별표)
   const written = Object.keys(dailyNotes || {})
-    .filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && ((dailyNotes[k].text || "").trim() || dailyNotes[k].star))
+    .filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k) && ((dailyNotes[k].text || "").trim() || dailyNotes[k].star || (Array.isArray(dailyNotes[k].atts) && dailyNotes[k].atts.length > 0)))
     .sort((a, b) => b.localeCompare(a));
   const q = search.trim().toLowerCase();
   const shown = q ? written.filter(k => (dailyNotes[k].text || "").toLowerCase().includes(q) || k.includes(q)) : written;
@@ -28192,7 +28204,7 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], setTodos,
   })();
 
   // ── 잔디: 그 달의 날짜별 기록 밀도 ──
-  const lenOf = (k) => { const e = dailyNotes[k]; if (!e) return 0; const t = (e.text || "").trim().length; return t || (e.star ? 1 : 0); };
+  const lenOf = (k) => { const e = dailyNotes[k]; if (!e) return 0; const t = (e.text || "").trim().length; const a = Array.isArray(e.atts) ? e.atts.length : 0; return t || (a ? 1 : 0) || (e.star ? 1 : 0); };
   const heatOf = (n) => n <= 0 ? 0 : n < 100 ? 0.28 : n < 300 ? 0.5 : n < 800 ? 0.75 : 1;
   const [mY, mM] = month.split("-").map(Number);
   const monthDays = new Date(mY, mM, 0).getDate();
@@ -28265,13 +28277,21 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], setTodos,
       <div className="daily-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 372px", gridTemplateRows: "minmax(720px, auto)", gap: 16, alignItems: "stretch" }}>
 
         {/* ── 왼쪽: 그날의 기록 — 카드 자체가 원고지 ── */}
-        <div className="card" style={{ padding: "22px 26px 0", display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div className="card" style={{ padding: "22px 26px 0", display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}
+          onPaste={noteInbox.onPaste} {...noteInbox.dropProps}>
+          {noteInbox.overlay}
           <textarea ref={taRef} value={cur.text || ""} onChange={e => patchEntry({ text: e.target.value })}
             placeholder={"오늘 있었던 일, 결정한 것, 기억할 것을 적어두세요.\n\n예) 한울기획 반사전사 단가 200원으로 확정 — 다음 발주부터 적용\n    성목실업 어음 5,000,000원 8/15 입금 예정"}
             style={{ flex: 1, width: "100%", minHeight: 240, fontSize: 15.5, lineHeight: 1.82, border: "none", outline: "none", background: "transparent", color: "var(--text1)", fontFamily: "inherit", resize: "none", padding: 0 }} />
 
+          {/* 사진은 글 바로 아래에 — 같은 장 안에서 함께 읽히도록 */}
+          <div style={{ marginTop: 12 }}>
+            <AttachmentField value={curAtts} onChange={(next) => patchEntry({ atts: next })} />
+          </div>
+
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "16px -26px 0", padding: "12px 20px", borderTop: "1px solid var(--divider)", fontSize: 11.5, color: "var(--text3)" }}>
             <span style={{ fontVariantNumeric: "tabular-nums" }}>{(cur.text || "").length.toLocaleString()}자</span>
+            {curAtts.length > 0 && <span>· 사진·파일 {curAtts.length}개</span>}
             {cur.updatedAt
               ? <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                   <span style={{ width: 5, height: 5, borderRadius: 100, background: "var(--positive)" }} />
@@ -28279,8 +28299,8 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], setTodos,
                 </span>
               : <span>쓰는 즉시 자동 저장됩니다</span>}
             <div style={{ flex: 1 }} />
-            {((cur.text || "").trim() || cur.star) && (
-              <button onClick={() => { if (window.confirm(`${fmtLong(sel)} 기록을 지울까요?`)) patchEntry({ text: "", star: false }); }}
+            {((cur.text || "").trim() || cur.star || curAtts.length > 0) && (
+              <button onClick={() => { if (window.confirm(`${fmtLong(sel)} 기록을 지울까요?${curAtts.length ? `\n사진·파일 ${curAtts.length}개도 함께 지워집니다.` : ""}`)) patchEntry({ text: "", star: false, atts: [] }); }}
                 style={{ border: "none", background: "transparent", color: "var(--negative-text)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>이 날 기록 삭제</button>
             )}
           </div>
@@ -28388,6 +28408,11 @@ function DailyNotesPanel({ dailyNotes = {}, setDailyNotes, todos = [], setTodos,
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontSize: 12, fontWeight: 800, color: on ? "var(--accent-strong)" : "var(--text2)" }}>{fmtShort(k)}</span>
                       {e.star && <span style={{ fontSize: 10.5, color: "var(--accent)" }}>★</span>}
+                      {Array.isArray(e.atts) && e.atts.length > 0 && (
+                        <span title={`사진·파일 ${e.atts.length}개`} style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 9.5, fontWeight: 800, color: "var(--text3)" }}>
+                          <Icon name="camera" size={10} />{e.atts.length}
+                        </span>
+                      )}
                       {k === todayKey && <span style={{ fontSize: 9.5, fontWeight: 800, color: "var(--accent)" }}>오늘</span>}
                       <span style={{ marginLeft: "auto", fontSize: 10, color: "var(--text3)" }}>{(e.text || "").length}자</span>
                     </div>
