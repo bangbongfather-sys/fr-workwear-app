@@ -2545,16 +2545,19 @@ function PhonePushCard() {
     } finally { setBusy(false); }
   };
 
-  const test = async () => {
+  // path 가 /api/push/test 면 고정 문구, /api/push/briefing 이면 오늘 실제 일정이 온다
+  const send = (path) => async () => {
     setBusy(true);
     try {
-      const r = await fetch("/api/push/test", { method: "POST" }).then(r => r.json());
+      const r = await fetch(path, { method: "POST" }).then(r => r.json());
       if (r.skip) showToast(r.skip);
       else if (r.sent) showToast(`${r.sent}대에 보냈습니다 — 폰 알림을 확인해 보세요`, "success");
       else showToast("발송 실패: " + ((r.errors && r.errors[0]) || r.error || ""));
     } catch (e) { showToast("발송 실패: " + e.message); }
     finally { setBusy(false); }
   };
+  const test = send("/api/push/test");
+  const briefNow = send("/api/push/briefing");
 
   const btn = (label, onClick, primary) => (
     <button onClick={onClick} disabled={busy}
@@ -2584,7 +2587,7 @@ function PhonePushCard() {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {state === "off" && btn("알림 켜기", enable, true)}
         {state === "denied" && btn("다시 시도", enable, true)}
-        {state === "on" && (<>{btn("테스트 발송", test)}{btn("끄기", disable)}</>)}
+        {state === "on" && (<>{btn("오늘 브리핑 보내기", briefNow, true)}{btn("테스트 발송", test)}{btn("끄기", disable)}</>)}
       </div>
     </div>
   );
