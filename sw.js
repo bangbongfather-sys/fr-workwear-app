@@ -7,7 +7,7 @@
 //    (버전 고정 URL이라 불변 — 한 번 받으면 재다운로드 불필요. 이게 없으면 오프라인에서 앱이 아예 안 뜸)
 //  - /api/* (Notion·입찰·동기화 프록시): 캐시 안 함 — 오프라인이면 실패하고 앱이 자체 처리
 //  - Firebase·Google 인증 등 그 외 외부 도메인: 개입하지 않음 (조용히 실패하도록)
-const VERSION = 'nj-safety-v4'; // v4: React 프로덕션 빌드 전환 + JSX 컴파일 캐시 도입
+const VERSION = 'nj-safety-v5'; // v5: 웹 푸시(push·notificationclick) 추가
 
 const SHELL = [
   '/',
@@ -94,4 +94,36 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 그 외 외부 도메인 (Firebase, accounts.google.com, googleapis 등) — 개입하지 않음
+});
+
+// ── 웹 푸시 수신 ──────────────────────────────────────────────────
+// 워커가 보낸 알림을 폰 알림창에 띄운다. 본문은 {title, body, url} JSON.
+self.addEventListener('push', (event) => {
+  let d = { title: 'NJ SAFETY', body: '', url: '/' };
+  try { if (event.data) d = Object.assign(d, event.data.json()); }
+  catch { if (event.data) d.body = event.data.text(); }
+  event.waitUntil(
+    self.registration.showNotification(d.title, {
+      body: d.body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: d.tag || 'nj-brief',
+      renotify: true,
+      data: { url: d.url || '/' },
+    })
+  );
+});
+
+// 알림을 누르면 이미 열린 앱 창을 앞으로, 없으면 새로 연다
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ('focus' in c) { c.navigate(target).catch(() => {}); return c.focus(); }
+      }
+      return self.clients.openWindow(target);
+    })
+  );
 });

@@ -21,6 +21,7 @@ import { runDailyPoll } from "./worker-src/tenders/poll.js";
 import { sendTenderNotification } from "./worker-src/tenders/notify.js";
 import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
+import { sendWebPush } from "./worker-src/webpush.js";
 import { handleMcp } from "./worker-src/mcp.js";
 import { handleFxApi } from "./worker-src/fx.js";
 
@@ -160,6 +161,11 @@ export default {
       return handleFirebaseSync(request, env, url);
     }
 
+    // 휴대폰 웹 푸시 (구독 등록·해제·테스트)
+    if (url.pathname.startsWith("/api/push/")) {
+      return handlePushApi(request, env, url);
+    }
+
     // 카카오톡 일정 알림 (나에게 보내기)
     if (url.pathname.startsWith("/api/kakao/")) {
       return handleKakaoApi(request, env, url);
@@ -214,6 +220,12 @@ export default {
         sendKakaoDailyBriefing(env)
           .then((r) => console.log(`[scheduled] 카카오 브리핑:`, r))
           .catch((err) => console.error(`[scheduled] 카카오 브리핑 실패:`, err?.message ?? err))
+      );
+      // 카카오 '나와의 채팅'은 푸시가 오지 않는다(메모 취급). 폰 알림은 웹 푸시로 따로 보낸다.
+      ctx.waitUntil(
+        sendPushDailyBriefing(env)
+          .then((r) => console.log(`[scheduled] 웹 푸시 브리핑:`, r))
+          .catch((err) => console.error(`[scheduled] 웹 푸시 브리핑 실패:`, err?.message ?? err))
       );
       return;
     }
@@ -795,6 +807,87 @@ async function sendKakaoDailyBriefing(env) {
   if (!text) return { skip: "오늘·내일 일정 없음" };
   await kakaoSendMemo(env, text);
   return { sent: true };
+}
+
+// ── 휴대폰 웹 푸시 ────────────────────────────────────────────────
+// 구독은 Firebase /frw_push 에 { <id>: {endpoint, keys, label, at} } 로 둔다.
+// id 는 엔드포인트의 해시라 같은 기기가 다시 구독해도 늘어나지 않는다.
+const PUSH_PATH = "/frw_push.json";
+
+async function pushSubId(endpoint) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(endpoint));
+  return [...new Uint8Array(d)].slice(0, 12).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// 모든 구독에 같은 글을 보내고, 만료된 구독은 지운다.
+async function pushBroadcast(env, title, body, url) {
+  const subs = (await fbGet(env, PUSH_PATH)) || {};
+  const ids = Object.keys(subs);
+  if (!ids.length) return { skip: "등록된 기기 없음" };
+  const payload = JSON.stringify({ title, body, url: url || "/" });
+  let sent = 0, gone = 0; const errors = [];
+  for (const id of ids) {
+    const r = await sendWebPush(subs[id], payload, env);
+    if (r.ok) sent++;
+    else if (r.gone) { gone++; delete subs[id]; }
+    else errors.push(`${(subs[id].label || id)}: ${r.status || ""} ${r.error || ""}`.trim());
+  }
+  if (gone) await fbPut(env, PUSH_PATH, subs); // 만료분 정리
+  return { sent, gone, total: ids.length, errors };
+}
+
+async function sendPushDailyBriefing(env) {
+  const text = await buildKakaoBriefing(env);
+  if (!text) return { skip: "오늘·내일 일정 없음" };
+  const lines = text.split("\n").filter(Boolean);
+  return pushBroadcast(env, lines[0] || "NJ SAFETY 아침 브리핑", lines.slice(1).join("\n").trim(), "/?tab=schedule");
+}
+
+async function handlePushApi(request, env, url) {
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: corsHeaders });
+
+  if (url.pathname === "/api/push/key") {
+    if (!env.VAPID_PUBLIC) return json({ error: "VAPID_PUBLIC 미설정" }, 500);
+    return json({ key: env.VAPID_PUBLIC });
+  }
+
+  if (url.pathname === "/api/push/subscribe" && request.method === "POST") {
+    let b; try { b = await request.json(); } catch { return json({ error: "잘못된 요청" }, 400); }
+    const sub = b && b.subscription;
+    if (!sub || !sub.endpoint || !sub.keys) return json({ error: "구독 정보가 없습니다" }, 400);
+    const subs = (await fbGet(env, PUSH_PATH)) || {};
+    const id = await pushSubId(sub.endpoint);
+    subs[id] = { endpoint: sub.endpoint, keys: sub.keys, label: (b.label || "").slice(0, 40), at: new Date().toISOString() };
+    await fbPut(env, PUSH_PATH, subs);
+    return json({ ok: true, id, devices: Object.keys(subs).length });
+  }
+
+  if (url.pathname === "/api/push/unsubscribe" && request.method === "POST") {
+    let b; try { b = await request.json(); } catch { return json({ error: "잘못된 요청" }, 400); }
+    if (!b || !b.endpoint) return json({ error: "endpoint 가 없습니다" }, 400);
+    const subs = (await fbGet(env, PUSH_PATH)) || {};
+    delete subs[await pushSubId(b.endpoint)];
+    await fbPut(env, PUSH_PATH, subs);
+    return json({ ok: true, devices: Object.keys(subs).length });
+  }
+
+  if (url.pathname === "/api/push/status") {
+    const subs = (await fbGet(env, PUSH_PATH)) || {};
+    return json({ devices: Object.values(subs).map(s => ({ label: s.label || "", at: s.at || "" })) });
+  }
+
+  // 지금 바로 한 통 — 제대로 오는지 확인용
+  if (url.pathname === "/api/push/test" && request.method === "POST") {
+    const r = await pushBroadcast(env, "NJ SAFETY 알림 테스트", "이렇게 아침 브리핑이 옵니다.", "/?tab=schedule");
+    return json(r);
+  }
+
+  // 오늘 브리핑을 지금 보내보기 (내용 확인용)
+  if (url.pathname === "/api/push/briefing" && request.method === "POST") {
+    return json(await sendPushDailyBriefing(env));
+  }
+
+  return json({ error: "Not found", path: url.pathname }, 404);
 }
 
 async function handleKakaoApi(request, env, url) {
