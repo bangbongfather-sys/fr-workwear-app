@@ -25283,6 +25283,7 @@ function NewsTab({ darkMode }) {
 // ─── 일정 / To-do List ───
 const SCHEDULE_SUBTABS = {
   calendar:  { label: "캘린더",   icon: "calendar" },
+  timetable: { label: "타임테이블", icon: "clock" },
   daily:     { label: "하루 기록", icon: "edit" },
   notes:     { label: "중요 메모", icon: "clipboard" },
   recurring: { label: "정기 일정", icon: "refresh" },
@@ -25672,7 +25673,7 @@ function DataSafetyPanel({ onClose, darkMode }) {
 }
 
 function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab }) {
-  const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","daily","notes","recurring"], "data-schedule-sub");
+  const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","timetable","daily","notes","recurring"], "data-schedule-sub");
   const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
   const today = new Date();
@@ -26132,7 +26133,6 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // quickAdd = { date, startMin(null이면 시간 미지정), text }
   const [quickAdd, setQuickAdd] = React.useState(null);
   const [quickBar, setQuickBar] = React.useState("");   // 하단 한 줄 입력
-  const [ttOpen, setTtOpen] = React.useState(false); // 타임테이블 확대 보기
   // 타임테이블 시간 범위 — 기본 08~22시, '하루 전체'면 00~24시 (선택은 기기에 기억)
   const [ttFull, setTtFull] = React.useState(() => load("frw_tt_full", false));
   React.useEffect(() => { save("frw_tt_full", ttFull); }, [ttFull]);
@@ -26520,13 +26520,6 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   //   확대판  : 모달 전체를 써서 실제로 시간표를 짜는 화면.
   // 드래그는 포인터 아래 요소에서 [data-sched-rail] 을 closest 로 찾으므로
   // 레일이 둘 있어도 모달이 위에 있는 한 그쪽이 잡힌다.
-  React.useEffect(() => {
-    if (!ttOpen) return;
-    const onKey = (e) => { if (e.key === "Escape") setTtOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [ttOpen]);
-
   const renderTimetable = (opts) => {
     const compact = !!(opts && opts.compact);
           const selD = (() => { const [y, m, d] = selectedDate.split("-").map(Number); return new Date(y, m - 1, d); })();
@@ -26548,7 +26541,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           };
           const timed = [], untimed = [];
           dayTodos.forEach(t => { const tm = parseTime(t); if (tm) timed.push({ t, ...tm }); else untimed.push(t); });
-          const HOUR_H = compact ? 26 : 52;   // 한 시간 칸 높이
+          const HOUR_H = compact ? 40 : 56;   // 한 시간 칸 높이 (간략판도 손가락·커서가 닿을 만큼)
           // 기본은 업무 시간대(08~22시). '하루 전체'를 켜면 00~24시 전부 보여준다.
           // 어느 쪽이든 그 범위 밖에 일정이 있으면 자동으로 늘려서 잘리지 않게 한다.
           let startH = ttFull ? 0 : 8, endH = ttFull ? 24 : 22;
@@ -26559,67 +26552,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           const doneCnt = dayTodos.filter(t => t.done).length;
           const showNow = isToday && nowMin >= startH * 60 && nowMin <= endH * 60;
           railDateRef.current = selectedDate;
-          return (
-            <div className={compact ? "card sched-timetable" : ""}
-              style={compact
-                ? { padding: "16px 16px 14px", display: "flex", flexDirection: "column", gap: 10 }
-                : { padding: "0 4px 4px", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                {compact ? (
-                  <button onClick={() => setTtOpen(true)} title="크게 열어서 시간표 짜기"
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit",
-                      fontSize: 15, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>
-                    {isToday ? "오늘 타임테이블" : "타임테이블"}
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "2px 7px", borderRadius: 999 }}>크게 보기</span>
-                  </button>
-                ) : (
-                  <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{isToday ? "오늘 타임테이블" : "타임테이블"}</span>
-                )}
-                <span style={{ fontSize: 12, color: "var(--text3)" }}>{selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}</span>
-                <span style={{ flex: 1 }} />
-                {dayTodos.length > 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>{dayTodos.length}건 · 완료 {doneCnt}</span>}
-                <button onClick={() => setTtFull(v => !v)}
-                  title={ttFull ? "업무 시간대(08~22시)만 보기" : "새벽·심야까지 하루 전체(00~24시) 보기"}
-                  style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
-                    border: ttFull ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
-                    background: ttFull ? "rgba(219,107,46,0.10)" : "var(--surface2)",
-                    color: ttFull ? "#DB6B2E" : "var(--text3)" }}>
-                  {ttFull ? "하루 전체 00~24시" : "08~22시"}
-                </button>
-                {!compact && (
-                  <button onClick={() => setTtOpen(false)} title="닫기 (Esc)"
-                    style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text3)", fontSize: 15, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>×</button>
-                )}
-              </div>
-
-              {untimed.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>
-                    시간 미지정{compact && untimed.length > 3 ? ` ${untimed.length}건` : ""}
-                  </span>
-                  {(compact ? untimed.slice(0, 3) : untimed).map(t => (
-                    <div key={t.id}
-                      onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(t); }}
-                      onContextMenu={(e) => openCtx(e, { id: t.id })}
-                      onPointerDown={(e) => beginDrag(e, t)} draggable={false}
-                      title="끌어서 아래 시간표에 놓으면 그 시각으로 배치됩니다"
-                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 9, border: "1px solid var(--border)", cursor: dragTodoId === t.id ? "grabbing" : "grab", opacity: dragTodoId === t.id ? 0.3 : t.done ? 0.55 : 1, touchAction: "pan-y", userSelect: "none" }}>
-                      <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(t.id); }} title={t.done ? "미완료로" : "완료로 표시"}
-                        style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 800 }}>{t.done ? "✓" : ""}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: t.done ? "line-through" : "none" }}>{t.text}</span>
-                      {t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", border: "1px solid var(--divider)", padding: "1px 5px", borderRadius: 999, flexShrink: 0 }}>시간표</span>}
-                      {t.endDate && t.endDate !== t.date && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "1px 6px", borderRadius: 999, flexShrink: 0 }}>기간</span>}
-                    </div>
-                  ))}
-                  {compact && untimed.length > 3 && (
-                    <button onClick={() => setTtOpen(true)}
-                      style={{ border: "none", background: "transparent", color: "var(--text3)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "3px 0", textAlign: "left" }}>
-                      외 {untimed.length - 3}건 — 크게 보기
-                    </button>
-                  )}
-                </div>
-              )}
-
+          const railEl = (
               <div data-sched-rail="1" data-rail-starth={startH} data-rail-endh={endH} data-rail-hourh={HOUR_H}
                 onClick={(e) => {
                   // 블록·입력칸을 누른 게 아니라 빈 곳을 눌렀을 때만 그 시각으로 빠른 등록
@@ -26693,22 +26626,96 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                       style={{ width: 20, height: 20, borderRadius: 6, border: "none", background: "var(--surface2)", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", flexShrink: 0 }}>×</button>
                   </div>
                 )}
+                {/* 지금 시각 — 가로줄을 그으면 시간표를 가린다. 왼쪽 끝 화살표로만 짚는다. */}
                 {showNow && (
-                  <div style={{ position: "absolute", left: 0, right: 0, top: yOf(nowMin), display: "flex", alignItems: "center", gap: 5, zIndex: 2, pointerEvents: "none" }}>
-                    <span style={{ width: 36, textAlign: "right", fontSize: 9.5, fontWeight: 800, color: "#F04452", fontVariantNumeric: "tabular-nums" }}>{String(Math.floor(nowMin / 60)).padStart(2, "0")}:{String(nowMin % 60).padStart(2, "0")}</span>
-                    <span style={{ width: 7, height: 7, borderRadius: 999, background: "#F04452", flexShrink: 0 }} />
-                    <span style={{ flex: 1, height: 1.5, background: "#F04452" }} />
+                  <div style={{ position: "absolute", left: 0, top: yOf(nowMin), transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 3, zIndex: 3, pointerEvents: "none" }}>
+                    <span style={{ width: 36, textAlign: "right", fontSize: 9.5, fontWeight: 800, color: "#F04452", fontVariantNumeric: "tabular-nums", background: "var(--surface)", borderRadius: 4 }}>
+                      {String(Math.floor(nowMin / 60)).padStart(2, "0")}:{String(nowMin % 60).padStart(2, "0")}
+                    </span>
+                    <span aria-hidden="true" style={{ width: 0, height: 0, borderTop: "5px solid transparent", borderBottom: "5px solid transparent", borderLeft: "7px solid #F04452", flexShrink: 0 }} />
                   </div>
                 )}
               </div>
+          );
+
+          return (
+            <div className={compact ? "card sched-timetable" : "sched-tt-full"}
+              style={compact
+                ? { padding: "16px 16px 14px", display: "flex", flexDirection: "column", gap: 10 }
+                : { display: "grid", gridTemplateColumns: "312px minmax(0, 1fr)", gridTemplateRows: "auto 1fr auto",
+                    gridTemplateAreas: '"head head" "untimed rail" "quick rail"', gap: "12px 16px", alignItems: "start" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", gridArea: "head" }}>
+                {compact ? (
+                  <button onClick={() => setScheduleSub("timetable")} title="타임테이블 탭에서 크게 짜기"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit",
+                      fontSize: 15, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>
+                    {isToday ? "오늘 타임테이블" : "타임테이블"}
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "2px 7px", borderRadius: 999 }}>크게 보기</span>
+                  </button>
+                ) : (
+                  <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{isToday ? "오늘 타임테이블" : "타임테이블"}</span>
+                )}
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>{selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}</span>
+                <span style={{ flex: 1 }} />
+                {dayTodos.length > 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>{dayTodos.length}건 · 완료 {doneCnt}</span>}
+                <button onClick={() => setTtFull(v => !v)}
+                  title={ttFull ? "업무 시간대(08~22시)만 보기" : "새벽·심야까지 하루 전체(00~24시) 보기"}
+                  style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
+                    border: ttFull ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
+                    background: ttFull ? "rgba(219,107,46,0.10)" : "var(--surface2)",
+                    color: ttFull ? "#DB6B2E" : "var(--text3)" }}>
+                  {ttFull ? "하루 전체 00~24시" : "08~22시"}
+                </button>
+                {!compact && (
+                  <button onClick={() => setScheduleSub("calendar")} title="캘린더로 돌아가기"
+                    style={{ height: 28, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}>캘린더로</button>
+                )}
+              </div>
+
+              {untimed.length > 0 && (
+                <div style={compact
+                  ? { display: "flex", flexDirection: "column", gap: 4 }
+                  : { gridArea: "untimed", display: "flex", flexDirection: "column", gap: 6,
+                      background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 16 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text3)" }}>
+                    시간 미지정{compact && untimed.length > 3 ? ` ${untimed.length}건` : ""}
+                  </span>
+                  {(compact ? untimed.slice(0, 3) : untimed).map(t => (
+                    <div key={t.id}
+                      onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(t); }}
+                      onContextMenu={(e) => openCtx(e, { id: t.id })}
+                      onPointerDown={(e) => beginDrag(e, t)} draggable={false}
+                      title="끌어서 아래 시간표에 놓으면 그 시각으로 배치됩니다"
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 9, border: "1px solid var(--border)", cursor: dragTodoId === t.id ? "grabbing" : "grab", opacity: dragTodoId === t.id ? 0.3 : t.done ? 0.55 : 1, touchAction: "pan-y", userSelect: "none" }}>
+                      <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(t.id); }} title={t.done ? "미완료로" : "완료로 표시"}
+                        style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 800 }}>{t.done ? "✓" : ""}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: t.done ? "line-through" : "none" }}>{t.text}</span>
+                      {t.ttOnly && <span title="시간표에만 있는 항목 — 달력에는 표시되지 않습니다" style={{ fontSize: 9, fontWeight: 800, color: "var(--text3)", background: "var(--surface2)", border: "1px solid var(--divider)", padding: "1px 5px", borderRadius: 999, flexShrink: 0 }}>시간표</span>}
+                      {t.endDate && t.endDate !== t.date && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#DB6B2E", background: "rgba(219,107,46,0.10)", padding: "1px 6px", borderRadius: 999, flexShrink: 0 }}>기간</span>}
+                    </div>
+                  ))}
+                  {compact && untimed.length > 3 && (
+                    <button onClick={() => setScheduleSub("timetable")}
+                      style={{ border: "none", background: "transparent", color: "var(--text3)", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "3px 0", textAlign: "left" }}>
+                      외 {untimed.length - 3}건 — 크게 보기
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {compact ? railEl : (
+                <div style={{ gridArea: "rail", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: "14px 16px" }}>
+                  {railEl}
+                </div>
+              )}
 
               {compact ? (
-                <button onClick={() => setTtOpen(true)}
+                <button onClick={() => setScheduleSub("timetable")}
                   style={{ height: 38, borderRadius: 10, border: "1px dashed var(--border)", background: "var(--input-bg)", color: "var(--text3)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                  + 크게 열어서 시간표 짜기
+                  + 타임테이블 탭에서 크게 짜기
                 </button>
               ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, gridArea: "quick" }}>
                 <input value={quickBar}
                   onChange={(e) => setQuickBar(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && quickBar.trim()) { e.preventDefault(); quickAddSave({ date: selectedDate, startMin: null, text: quickBar }); } }}
@@ -27116,22 +27123,6 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
         {renderTimetable({ compact: true })}
       </div>
 
-      {/* ── 타임테이블 확대 보기 — 실제로 시간표를 짜는 화면 ── */}
-      {ttOpen && (
-        <div onClick={() => setTtOpen(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9997, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, animation: "fadeIn 0.18s ease" }}>
-          <div onClick={(e) => e.stopPropagation()} className="frw-rise sched-tt-modal"
-            style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 760, maxHeight: "92vh",
-              display: "flex", flexDirection: "column", overflow: "hidden", padding: "18px 18px 16px",
-              border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,0.45)",
-              animation: "frwRise 0.25s cubic-bezier(0,0,0.2,1)" }}>
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
-              {renderTimetable({ compact: false })}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── 일정 추가 모달 (노션 '새 페이지' 스타일) ── */}
       {addModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center", padding: 16, animation: "fadeIn 0.18s ease" }}
@@ -27524,6 +27515,11 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
         .schedule-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
         /* 페이지를 내려도 타임테이블이 따라오도록 고정 (화면보다 길면 자체 스크롤) */
         .sched-timetable { position: sticky; top: 96px; max-height: calc(100vh - 108px); overflow-y: auto; }
+        /* 타임테이블 탭(확대판) — 좁은 화면에서는 미지정 목록이 레일 위로 */
+        @media (max-width: 900px) {
+          .sched-tt-full { grid-template-columns: minmax(0, 1fr) !important;
+            grid-template-areas: "head" "untimed" "quick" "rail" !important; }
+        }
         @media (max-width: 1100px) { .sched-timetable { position: static; max-height: none; overflow-y: visible; } }
         @media (max-width: 1100px) { .schedule-grid { grid-template-columns: 1fr !important; } }
         @media (max-width: 768px) { .schedule-grid { grid-template-columns: 1fr !important; } }
@@ -27686,6 +27682,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
         }
       `}</style>
       </>)}
+
+      {scheduleSub === "timetable" && renderTimetable({ compact: false })}
 
       {scheduleSub === "daily" && (
         <DailyNotesPanel dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} todos={todos} setTodos={setTodos} darkMode={darkMode} startDate={selectedDate} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} />
