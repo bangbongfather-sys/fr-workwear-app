@@ -2386,6 +2386,94 @@ function computeProduct(p, materials, laborItems) {
 // 카카오톡 '나와의 채팅'은 카카오가 푸시를 주지 않는다(메모 취급). 폰에서 알림을
 // 받으려면 앱이 직접 보내야 해서 표준 웹 푸시를 쓴다.
 // 아이폰은 사파리에서 '홈 화면에 추가'로 설치해야만 권한을 줄 수 있다(애플 정책).
+// ── 아이폰 캘린더 구독 ────────────────────────────────────────────
+// 아이폰은 웹앱에 위젯을 허용하지 않는다(WidgetKit 은 네이티브 전용). 대신 일정을
+// 기본 '캘린더' 앱에 흘려 넣으면 잠금화면 위젯에 상시 뜬다.
+// 캘린더 앱은 헤더에 토큰을 못 붙여서 주소 안에 비밀 토큰을 둔다.
+function CalendarFeedCard() {
+  const [cfg, setCfg] = useState(null); // { enabled, token, private }
+  const [busy, setBusy] = useState(false);
+  const load = () => fetch("/api/calfeed/status").then(r => r.json()).then(setCfg).catch(() => setCfg({ enabled: false }));
+  useEffect(() => { load(); }, []);
+
+  const feedUrl = cfg && cfg.token ? `${location.origin}/api/ics/${cfg.token}.ics` : "";
+  const webcalUrl = feedUrl.replace(/^https?:/, "webcal:");
+
+  const issue = async (isPrivate) => {
+    if (cfg && cfg.token && !window.confirm("새 주소를 발급하면 지금 주소는 바로 막힙니다.\n아이폰에서도 다시 등록해야 합니다. 계속할까요?")) return;
+    setBusy(true);
+    try { const r = await fetch("/api/calfeed/issue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ private: !!isPrivate }) }).then(r => r.json());
+      if (r.ok) { await load(); showToast("구독 주소를 만들었습니다", "success"); } else showToast("발급 실패");
+    } finally { setBusy(false); }
+  };
+  const disable = async () => {
+    if (!window.confirm("구독을 끄면 아이폰 캘린더에서 일정이 사라집니다. 계속할까요?")) return;
+    setBusy(true);
+    try { await fetch("/api/calfeed/disable", { method: "POST" }); await load(); showToast("구독을 껐습니다"); }
+    finally { setBusy(false); }
+  };
+  const togglePrivate = async () => {
+    setBusy(true);
+    try { await fetch("/api/calfeed/private", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ private: !(cfg && cfg.private) }) }); await load(); }
+    finally { setBusy(false); }
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(feedUrl); showToast("주소를 복사했습니다 — 아이폰에 붙여넣으세요", "success"); }
+    catch { showToast(feedUrl); }
+  };
+
+  const btn = (label, onClick, primary) => (
+    <button onClick={onClick} disabled={busy}
+      style={{ height: 34, padding: "0 13px", borderRadius: 9, cursor: busy ? "default" : "pointer", fontFamily: "inherit",
+        fontSize: 12.5, fontWeight: 800, opacity: busy ? 0.5 : 1, whiteSpace: "nowrap",
+        border: primary ? "none" : "1px solid var(--border)",
+        background: primary ? "var(--accent)" : "var(--surface2)", color: primary ? "#fff" : "var(--text2)" }}>{label}</button>
+  );
+
+  return (
+    <div className="card no-print" style={{ marginBottom: 16, borderLeft: "3px solid #5856D6" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", marginBottom: 3 }}>
+            아이폰 잠금화면에 일정 띄우기
+            {cfg && cfg.token && <span style={{ fontSize: 11, fontWeight: 700, color: "#00B493", background: "rgba(0,180,147,0.12)", padding: "2px 8px", borderRadius: 100, marginLeft: 8 }}>켜짐</span>}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.6 }}>
+            {cfg && cfg.token
+              ? "아이폰 기본 「캘린더」에 일정이 들어갑니다. 잠금화면·홈화면 캘린더 위젯에 오늘 일정이 상시 표시됩니다."
+              : "일정을 아이폰 기본 「캘린더」 앱으로 보냅니다. 그러면 잠금화면 위젯에 계속 떠 있습니다. 알림과 달리 사라지지 않습니다."}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {!(cfg && cfg.token) && btn("구독 주소 만들기", () => issue(false), true)}
+          {cfg && cfg.token && (<>{btn("주소 복사", copy, true)}{btn("새 주소", () => issue(cfg.private))}{btn("끄기", disable)}</>)}
+        </div>
+      </div>
+
+      {cfg && cfg.token && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--divider)", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <code style={{ flex: 1, minWidth: 220, fontSize: 11, color: "var(--text2)", background: "var(--surface2)", padding: "8px 10px", borderRadius: 8, wordBreak: "break-all", fontFamily: "var(--font-mono, monospace)" }}>{feedUrl}</code>
+            <a href={webcalUrl} style={{ fontSize: 12, fontWeight: 800, color: "var(--accent-strong)", whiteSpace: "nowrap", textDecoration: "none" }}>이 기기에서 바로 열기 →</a>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text2)", lineHeight: 1.75 }}>
+            <b style={{ color: "var(--text1)" }}>아이폰에서 한 번만</b> — 설정 → 앱 → 캘린더 → 계정 → 계정 추가 → 기타 → <b>구독 캘린더 추가</b> → 위 주소 붙여넣기.
+            <br />그다음 잠금화면을 길게 눌러 → 사용자화 → 위젯 추가 → <b>캘린더</b>.
+          </div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 11.5, color: "var(--text2)", cursor: "pointer" }}>
+            <input type="checkbox" checked={!!cfg.private} onChange={togglePrivate} disabled={busy} style={{ width: 15, height: 15, accentColor: "#DB6B2E", cursor: "pointer" }} />
+            제목을 가리고 「NJ 일정」으로만 표시 (주소가 새어도 내용은 안 보입니다)
+          </label>
+          <div style={{ fontSize: 11, color: "var(--text3)", lineHeight: 1.65 }}>
+            이 주소를 아는 사람은 로그인 없이 일정을 볼 수 있습니다. 읽기 전용이고, 「새 주소」를 누르면 이전 주소는 즉시 막힙니다.
+            아이폰은 보통 한 시간에 한 번쯤 새로 받아갑니다.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PhonePushCard() {
   const [state, setState] = useState("checking"); // checking | on | off | denied | unsupported | needInstall
   const [busy, setBusy] = useState(false);
@@ -23076,6 +23164,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "schedule" && (
           <>
           <PhonePushCard/>
+          <CalendarFeedCard/>
           <KakaoAlertCard/>
           <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} />
           </>

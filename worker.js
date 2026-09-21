@@ -22,6 +22,7 @@ import { sendTenderNotification } from "./worker-src/tenders/notify.js";
 import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
+import { buildIcs } from "./worker-src/ics.js";
 import { handleMcp } from "./worker-src/mcp.js";
 import { handleFxApi } from "./worker-src/fx.js";
 
@@ -135,7 +136,9 @@ export default {
       return handleAuthApi(request, env, url);
     }
     const isProtected = path.startsWith("/api/") || path === "/mcp" || path === "/mcp/";
-    const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback";
+    //  - /api/ics/<토큰>.ics : 캘린더 구독 — 캘린더 앱이 헤더를 못 붙여 주소의 토큰으로 검증
+    const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback"
+      || path.startsWith("/api/ics/");
     if (isProtected && !isPublic) {
       if (path === "/mcp" || path === "/mcp/") {
         // /mcp 는 handleMcp 안의 자체 잠금(MCP_TOKEN, ?k=)이 검증한다 — 기존 커넥터 URL 유지.
@@ -159,6 +162,16 @@ export default {
     // Firebase RTDB 프록시 (클라이언트가 Firebase URL/시크릿을 직접 보지 않게 우회)
     if (url.pathname === "/api/sync" || url.pathname.startsWith("/api/sync/")) {
       return handleFirebaseSync(request, env, url);
+    }
+
+    // 캘린더 구독 관리 (발급·해제 — 로그인 필요)
+    if (url.pathname.startsWith("/api/calfeed/")) {
+      return handleIcsAdminApi(request, env, url);
+    }
+
+    // 캘린더 구독 (.ics) — 토큰이 맞을 때만 내준다
+    if (url.pathname.startsWith("/api/ics/")) {
+      return handleIcsFeed(request, env, url);
     }
 
     // 휴대폰 웹 푸시 (구독 등록·해제·테스트)
@@ -807,6 +820,64 @@ async function sendKakaoDailyBriefing(env) {
   if (!text) return { skip: "오늘·내일 일정 없음" };
   await kakaoSendMemo(env, text);
   return { sent: true };
+}
+
+// ── 캘린더 구독 (.ics) ────────────────────────────────────────────
+// 설정은 Firebase /frw_ics 에 { token, private, at } 로 둔다.
+// 토큰을 새로 내면 이전 주소는 그 즉시 404 가 된다.
+const ICS_PATH = "/frw_ics.json";
+
+async function handleIcsFeed(request, env, url) {
+  const m = /^\/api\/ics\/([A-Za-z0-9_-]{16,64})\.ics$/.exec(url.pathname);
+  if (!m) return new Response("Not found", { status: 404 });
+  const cfg = await fbGet(env, ICS_PATH);
+  // 토큰 비교는 길이·내용이 모두 맞아야 통과 (타이밍 차이를 줄이려 한 번에 비교)
+  if (!cfg || !cfg.token || cfg.token !== m[1]) return new Response("Not found", { status: 404 });
+
+  // 섹션만 읽는다 — 애플이 기기마다 한 시간에 한 번꼴로 당겨가므로 전체 DB를 받으면 낭비다
+  const todos = (await fbGet(env, "/frw/todos.json")) || [];
+  const { text } = buildIcs(Array.isArray(todos) ? todos : [], {
+    name: cfg.private ? "NJ SAFETY 일정(비공개)" : "NJ SAFETY 일정",
+    private: !!cfg.private,
+  });
+  return new Response(text, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/calendar; charset=utf-8",
+      "Content-Disposition": 'inline; filename="njsafety.ics"',
+      "Cache-Control": "no-cache, max-age=0",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
+// 앱에서 쓰는 관리 API (여긴 로그인 필요 — /api/push 와 같은 게이트 뒤)
+async function handleIcsAdminApi(request, env, url) {
+  const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: corsHeaders });
+  const cfg = (await fbGet(env, ICS_PATH)) || {};
+
+  if (url.pathname === "/api/calfeed/status") {
+    return json({ enabled: !!cfg.token, token: cfg.token || null, private: !!cfg.private, at: cfg.at || null });
+  }
+  // 새 주소 발급 (기존 주소는 즉시 막힌다)
+  if (url.pathname === "/api/calfeed/issue" && request.method === "POST") {
+    let b = {}; try { b = await request.json(); } catch {}
+    const bytes = crypto.getRandomValues(new Uint8Array(24));
+    const token = [...bytes].map(x => x.toString(16).padStart(2, "0")).join("").slice(0, 40);
+    const next = { token, private: !!b.private, at: new Date().toISOString() };
+    await fbPut(env, ICS_PATH, next);
+    return json({ ok: true, ...next });
+  }
+  if (url.pathname === "/api/calfeed/disable" && request.method === "POST") {
+    await fbPut(env, ICS_PATH, { token: "", private: !!cfg.private, at: new Date().toISOString() });
+    return json({ ok: true, enabled: false });
+  }
+  if (url.pathname === "/api/calfeed/private" && request.method === "POST") {
+    let b = {}; try { b = await request.json(); } catch {}
+    await fbPut(env, ICS_PATH, { ...cfg, private: !!b.private, at: new Date().toISOString() });
+    return json({ ok: true, private: !!b.private });
+  }
+  return json({ error: "Not found", path: url.pathname }, 404);
 }
 
 // ── 휴대폰 웹 푸시 ────────────────────────────────────────────────
