@@ -26140,6 +26140,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   const [quickAdd, setQuickAdd] = React.useState(null);
   const [quickBar, setQuickBar] = React.useState("");   // 하단 한 줄 입력
   // 타임테이블 시간 범위 — 기본 08~22시, '하루 전체'면 00~24시 (선택은 기기에 기억)
+  const [ttView, setTtView] = React.useState(() => load("frw_tt_view", "day")); // "day" | "week"
+  React.useEffect(() => { save("frw_tt_view", ttView); }, [ttView]);
   const [ttFull, setTtFull] = React.useState(() => load("frw_tt_full", false));
   React.useEffect(() => { save("frw_tt_full", ttFull); }, [ttFull]);
   const quickAddSave = (payload) => {
@@ -26523,6 +26525,16 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     if (t.endDate && t.endDate >= selectedDate && t.date <= selectedDate) return true;
     return false;
   }).sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
+  // 아무 날짜나 — 주간 뷰가 요일마다 부른다
+  const todosOn = (ds) => todos.filter(t => t.date === ds || (t.endDate && t.endDate >= ds && t.date <= ds))
+    .sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
+  // 그 날이 낀 주의 월요일
+  const weekStartOf = (ds) => {
+    const [y, m, d] = ds.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() - ((dt.getDay() + 6) % 7));
+    return ymd(dt);
+  };
   // 다가오는 일정: 종료일이 오늘 이후인 미완료 todo
   const allUpcoming = calTodos
     .filter(t => !t.done && (t.endDate || t.date) >= todayKey)
@@ -26569,6 +26581,206 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           const doneCnt = dayTodos.filter(t => t.done).length;
           const showNow = isToday && nowMin >= startH * 60 && nowMin <= endH * 60;
           railDateRef.current = selectedDate;
+          // ── 주간 뷰 ──────────────────────────────────────────────
+          // 요일마다 레일을 하나씩 둔다. 각 칸이 자기 날짜(data-rail-date)를 들고 있어
+          // 드래그·클릭 판정 코드가 하루 뷰와 똑같이 동작한다.
+          if (!compact && ttView === "week") {
+            const wkStart = weekStartOf(selectedDate);
+            const wkDays = [0, 1, 2, 3, 4, 5, 6].map(i => shiftDate(wkStart, i));
+            const wkEnd = wkDays[6];
+            const perDay = wkDays.map(ds => {
+              const ti = [], un = [];
+              todosOn(ds).forEach(t => { const tm = parseTime(t); if (tm) ti.push({ t, ...tm }); else un.push(t); });
+              return { date: ds, timed: ti, untimed: un };
+            });
+            const WHOUR = 46;
+            let ws = ttFull ? 0 : 8, we = ttFull ? 24 : 22;
+            perDay.forEach(d => d.timed.forEach(x => { ws = Math.min(ws, Math.floor(x.s / 60)); we = Math.max(we, Math.min(24, Math.ceil(x.e / 60))); }));
+            const wHours = []; for (let h = ws; h <= we; h++) wHours.push(h);
+            const wRailH = (we - ws) * WHOUR;
+            const wY = (min) => (min - ws * 60) / 60 * WHOUR;
+            const weekUntimed = [];
+            perDay.forEach(d => d.untimed.forEach(t => { if (!weekUntimed.some(u => u.id === t.id)) weekUntimed.push(t); }));
+            const wkCount = perDay.reduce((n, d) => n + d.timed.length + d.untimed.length, 0);
+            const wkDone = perDay.reduce((n, d) => n + d.timed.filter(x => x.t.done).length + d.untimed.filter(t => t.done).length, 0);
+            const fmtT = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+            const mdOf = (ds) => { const [, m, d] = ds.split("-").map(Number); return `${m}/${d}`; };
+            const wdOf = (ds) => { const [y, m, d] = ds.split("-").map(Number); return WD2[new Date(y, m - 1, d).getDay()]; };
+            const showNowWeek = wkDays.includes(todayKey) && nowMin >= ws * 60 && nowMin <= we * 60;
+
+            return (
+              <div className="sched-tt-full"
+                style={{ display: "grid", gridTemplateColumns: "312px minmax(0, 1fr)", gridTemplateRows: "auto 1fr auto",
+                  gridTemplateAreas: '"head head" "untimed rail" "quick rail"', gap: "12px 16px", alignItems: "start" }}>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", gridArea: "head" }}>
+                  <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>주간 타임테이블</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 2 }}>
+                    <button onClick={() => setSelectedDate(shiftDate(selectedDate, -7))} aria-label="지난 주"
+                      style={{ width: 26, height: 26, border: "none", background: "transparent", borderRadius: 7, color: "var(--text2)", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>‹</button>
+                    <span style={{ padding: "0 8px", fontSize: 12.5, fontWeight: 700, color: "var(--text1)", whiteSpace: "nowrap" }}>{mdOf(wkStart)} – {mdOf(wkEnd)}</span>
+                    <button onClick={() => setSelectedDate(shiftDate(selectedDate, 7))} aria-label="다음 주"
+                      style={{ width: 26, height: 26, border: "none", background: "transparent", borderRadius: 7, color: "var(--text2)", fontSize: 14, cursor: "pointer", fontFamily: "inherit" }}>›</button>
+                  </div>
+                  <div style={{ display: "inline-flex", gap: 3, padding: 3, background: "var(--surface2)", borderRadius: 100 }}>
+                    <button onClick={() => setTtView("day")} style={{ padding: "5px 13px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: "transparent", color: "var(--text2)" }}>하루</button>
+                    <button onClick={() => setTtView("week")} style={{ padding: "5px 13px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 800, background: "var(--surface)", color: "var(--accent-strong)", boxShadow: "0 1px 3px rgba(0,0,0,0.09)" }}>주간</button>
+                  </div>
+                  <span style={{ flex: 1 }} />
+                  <span style={{ fontSize: 11, color: "var(--text3)" }}>{wkCount}건 · 완료 {wkDone}</span>
+                  <button onClick={() => setTtFull(v => !v)} title={ttFull ? "업무 시간대만 보기" : "하루 전체 보기"}
+                    style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
+                      border: ttFull ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
+                      background: ttFull ? "rgba(219,107,46,0.10)" : "var(--surface2)",
+                      color: ttFull ? "#DB6B2E" : "var(--text3)" }}>{ttFull ? "하루 전체 00~24시" : "08~22시"}</button>
+                  <button onClick={() => setScheduleSub("calendar")} title="캘린더로 돌아가기"
+                    style={{ height: 28, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>캘린더로</button>
+                </div>
+
+                <div style={{ gridArea: "untimed", display: "flex", flexDirection: "column", gap: 6, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 16 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>이번 주 시간 미지정</span>
+                    <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{weekUntimed.length}건</span>
+                  </div>
+                  {weekUntimed.length === 0 && <div style={{ fontSize: 12, color: "var(--text3)", padding: "6px 2px" }}>시간을 안 정한 일정이 없습니다.</div>}
+                  {weekUntimed.map(t => (
+                    <div key={t.id}
+                      onClick={() => { if (suppressClickRef.current) { suppressClickRef.current = false; return; } openDetail(t); }}
+                      onContextMenu={(e) => openCtx(e, { id: t.id })}
+                      onPointerDown={(e) => beginDrag(e, t)} draggable={false}
+                      title="끌어서 오른쪽 요일·시각에 놓으면 그때로 배치됩니다"
+                      style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", borderRadius: 10, border: "1px solid var(--border)", cursor: dragTodoId === t.id ? "grabbing" : "grab", opacity: dragTodoId === t.id ? 0.3 : t.done ? 0.55 : 1, touchAction: "pan-y", userSelect: "none" }}>
+                      <span className="sched-evcheck" onClick={(e) => { e.stopPropagation(); toggleTodo(t.id); }}
+                        style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, border: t.done ? "none" : "1.5px solid var(--border)", background: t.done ? "#00B493" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 800 }}>{t.done ? "✓" : ""}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: t.done ? "line-through" : "none" }}>{t.text}</span>
+                      <span style={{ fontSize: 10, color: "var(--text3)", flexShrink: 0 }}>{mdOf(t.date)}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 6, gridArea: "quick" }}>
+                  <input value={quickBar} onChange={(e) => setQuickBar(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && quickBar.trim()) { e.preventDefault(); quickAddSave({ date: selectedDate, startMin: null, text: quickBar }); } }}
+                    placeholder='여기에 바로 입력 — 시간표에만 기록'
+                    style={{ flex: 1, minWidth: 0, height: 38, minHeight: 38, fontSize: 12.5, borderRadius: 10, padding: "0 12px" }} />
+                  <button onClick={() => quickBar.trim() ? quickAddSave({ date: selectedDate, startMin: null, text: quickBar }) : openAdd(selectedDate)}
+                    className={quickBar.trim() ? "btn-orange" : ""}
+                    style={{ height: 38, padding: "0 13px", borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", flexShrink: 0,
+                      border: quickBar.trim() ? "none" : "1px solid var(--border)", background: quickBar.trim() ? undefined : "var(--surface2)", color: quickBar.trim() ? undefined : "var(--text2)" }}>
+                    {quickBar.trim() ? "추가" : "자세히"}
+                  </button>
+                </div>
+
+                <div style={{ gridArea: "rail", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: "14px 16px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "44px repeat(7, minmax(0, 1fr))", gap: 4, marginBottom: 6 }}>
+                    <div />
+                    {wkDays.map(ds => {
+                      const isT = ds === todayKey, isSel = ds === selectedDate;
+                      return (
+                        <button key={ds} onClick={() => { setSelectedDate(ds); setTtView("day"); }}
+                          title="이 날 하루 시간표로 보기"
+                          style={{ border: "none", borderRadius: 9, padding: "5px 0", cursor: "pointer", fontFamily: "inherit",
+                            background: isSel ? "var(--accent-tonal)" : "transparent" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: isT ? "#DB6B2E" : "var(--text3)" }}>{wdOf(ds)}</div>
+                          <div style={{ fontSize: 15, fontWeight: 800, marginTop: 1, color: isT ? "#DB6B2E" : "var(--text1)" }}>{ds.split("-")[2].replace(/^0/, "")}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ position: "relative", height: wRailH + 14 }}>
+                    {wHours.map(h => (
+                      <div key={h} style={{ position: "absolute", left: 0, right: 0, top: (h - ws) * WHOUR, display: "flex", alignItems: "center", gap: 6, pointerEvents: "none" }}>
+                        <span style={{ width: 38, fontSize: 9.5, color: "var(--text3)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{String(h).padStart(2, "0")}:00</span>
+                        <span style={{ flex: 1, height: 1, background: "var(--divider)" }} />
+                      </div>
+                    ))}
+                    {showNowWeek && (
+                      <div style={{ position: "absolute", left: 0, top: wY(nowMin), transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 3, zIndex: 4, pointerEvents: "none" }}>
+                        <span style={{ width: 38, textAlign: "right", fontSize: 9.5, fontWeight: 800, color: "#F04452", fontVariantNumeric: "tabular-nums", background: "var(--surface)", borderRadius: 4 }}>{fmtT(nowMin)}</span>
+                        <span aria-hidden="true" style={{ width: 0, height: 0, borderTop: "5px solid transparent", borderBottom: "5px solid transparent", borderLeft: "7px solid #F04452", flexShrink: 0 }} />
+                      </div>
+                    )}
+
+                    <div style={{ position: "absolute", left: 44, right: 0, top: 0, display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
+                      {perDay.map(day => {
+                        const isT = day.date === todayKey;
+                        const overHere = dragTodoId != null && dragOverRailDate === day.date;
+                        return (
+                          <div key={day.date} data-sched-rail="1" data-rail-date={day.date}
+                            data-rail-starth={ws} data-rail-endh={we} data-rail-hourh={WHOUR}
+                            onClick={(e) => {
+                              if (e.target.closest("[data-tt-block]") || e.target.closest("[data-tt-quick]")) return;
+                              if (dragTodoId != null || resizingId != null) return;
+                              if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+                              const r = e.currentTarget.getBoundingClientRect();
+                              const raw = ws * 60 + (e.clientY - r.top) / WHOUR * 60;
+                              const min = Math.max(ws * 60, Math.min(we * 60 - 15, Math.round(raw / 15) * 15));
+                              setQuickAdd({ date: day.date, startMin: min, text: "" });
+                            }}
+                            title="빈 곳을 누르면 그 요일·시각에 바로 적을 수 있습니다"
+                            style={{ position: "relative", height: wRailH + 14, borderRadius: 9, cursor: "copy",
+                              background: isT ? "rgba(219,107,46,0.05)" : "transparent",
+                              outline: overHere ? "2px dashed rgba(219,107,46,0.55)" : "none", outlineOffset: -1 }}>
+                            {day.timed.map(x => {
+                              const top = wY(x.s) + 2;
+                              const hh = Math.max(20, wY(x.e) - wY(x.s) - 3);
+                              const done = x.t.done;
+                              const editing = ttEdit && ttEdit.id === x.t.id;
+                              return (
+                                <div key={x.t.id} data-tt-block="1"
+                                  onClick={(e) => { e.stopPropagation(); if (suppressClickRef.current) { suppressClickRef.current = false; return; } setTtEdit({ id: x.t.id, text: x.t.text || "" }); }}
+                                  onDoubleClick={(e) => { e.stopPropagation(); setTtEdit(null); openDetail(x.t); }}
+                                  onContextMenu={(e) => openCtx(e, { id: x.t.id })}
+                                  onPointerDown={(e) => beginDrag(e, x.t)} draggable={false}
+                                  title="눌러서 제목 수정 · 두 번 누르면 자세히 · 끌어서 이동"
+                                  style={{ position: "absolute", left: 2, right: 2, top, height: hh, borderRadius: 7, boxSizing: "border-box", overflow: "hidden",
+                                    cursor: dragTodoId === x.t.id ? "grabbing" : "grab", padding: "3px 6px", touchAction: "pan-y", userSelect: "none",
+                                    background: done ? "var(--surface2)" : "rgba(219,107,46,0.14)",
+                                    borderLeft: `3px solid ${done ? "#64748B" : "#DB6B2E"}`,
+                                    opacity: dragTodoId === x.t.id ? 0.3 : done ? 0.6 : 1, zIndex: 1 }}>
+                                  {editing ? (
+                                    <input autoFocus value={ttEdit.text} data-tt-quick="1"
+                                      onClick={(ev) => ev.stopPropagation()} onPointerDown={(ev) => ev.stopPropagation()}
+                                      onChange={(ev) => setTtEdit(q => ({ ...q, text: ev.target.value }))}
+                                      onKeyDown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); saveTtEdit(); } else if (ev.key === "Escape") { ev.preventDefault(); setTtEdit(null); } }}
+                                      onBlur={saveTtEdit}
+                                      style={{ width: "100%", height: 18, minHeight: 18, fontSize: 10.5, fontWeight: 700, padding: "0 4px", borderRadius: 4, border: "1px solid var(--accent)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", boxSizing: "border-box" }} />
+                                  ) : (
+                                    <>
+                                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: done ? "line-through" : "none" }}>{x.t.text}</div>
+                                      {hh >= 34 && <div style={{ fontSize: 9, color: "var(--text3)", marginTop: 1 }}>{fmtT(x.s)}</div>}
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {quickAdd && quickAdd.date === day.date && Number.isFinite(quickAdd.startMin) && (
+                              <div data-tt-quick="1" onClick={(e) => e.stopPropagation()}
+                                style={{ position: "absolute", left: 2, right: 2, top: wY(quickAdd.startMin) + 2, zIndex: 5,
+                                  background: "var(--surface)", border: "1.5px solid var(--accent)", borderRadius: 7, padding: "4px 5px" }}>
+                                <div style={{ fontSize: 9, fontWeight: 800, color: "#DB6B2E", marginBottom: 2 }}>{fmtT(quickAdd.startMin)}</div>
+                                <input autoFocus value={quickAdd.text}
+                                  onChange={(e) => setQuickAdd(q => ({ ...q, text: e.target.value }))}
+                                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); quickAddSave(); } else if (e.key === "Escape") { e.preventDefault(); setQuickAdd(null); } }}
+                                  onBlur={() => { if ((quickAdd.text || "").trim()) quickAddSave(); else setQuickAdd(null); }}
+                                  placeholder="입력 후 Enter"
+                                  style={{ width: "100%", height: 20, minHeight: 20, fontSize: 10.5, border: "none", background: "transparent", padding: 0, outline: "none", color: "var(--text1)", fontFamily: "inherit", boxSizing: "border-box" }} />
+                              </div>
+                            )}
+                            {overHere && dragOverMin != null && (
+                              <div style={{ position: "absolute", left: 0, right: 0, top: wY(dragOverMin), height: 2, background: "#DB6B2E", borderRadius: 2, zIndex: 3, pointerEvents: "none" }} />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
           const railEl = (
               <div data-sched-rail="1" data-rail-date={selectedDate} data-rail-starth={startH} data-rail-endh={endH} data-rail-hourh={HOUR_H}
                 onClick={(e) => {
@@ -26719,6 +26931,12 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   {ttFull ? "하루 전체 00~24시" : "08~22시"}
                 </button>
                 {!compact && (
+                  <div style={{ display: "inline-flex", gap: 3, padding: 3, background: "var(--surface2)", borderRadius: 100 }}>
+                    <button onClick={() => setTtView("day")} style={{ padding: "5px 13px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 800, background: "var(--surface)", color: "var(--accent-strong)", boxShadow: "0 1px 3px rgba(0,0,0,0.09)" }}>하루</button>
+                    <button onClick={() => setTtView("week")} style={{ padding: "5px 13px", borderRadius: 100, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: "transparent", color: "var(--text2)" }}>주간</button>
+                  </div>
+                )}
+                {!compact && (
                   <button onClick={() => setScheduleSub("calendar")} title="캘린더로 돌아가기"
                     style={{ height: 28, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}>캘린더로</button>
                 )}
@@ -26761,12 +26979,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 </div>
               )}
 
-              {compact ? (
-                <button onClick={() => setScheduleSub("timetable")}
-                  style={{ height: 38, borderRadius: 10, border: "1px dashed var(--border)", background: "var(--input-bg)", color: "var(--text3)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-                  + 타임테이블 탭에서 크게 짜기
-                </button>
-              ) : (
+              {!compact && (
               <div style={{ display: "flex", alignItems: "center", gap: 6, gridArea: "quick" }}>
                 <input value={quickBar}
                   onChange={(e) => setQuickBar(e.target.value)}
