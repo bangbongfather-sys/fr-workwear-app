@@ -820,11 +820,11 @@ async function pushSubId(endpoint) {
 }
 
 // 모든 구독에 같은 글을 보내고, 만료된 구독은 지운다.
-async function pushBroadcast(env, title, body, url) {
+async function pushBroadcast(env, title, body, url, badge) {
   const subs = (await fbGet(env, PUSH_PATH)) || {};
   const ids = Object.keys(subs);
   if (!ids.length) return { skip: "등록된 기기 없음" };
-  const payload = JSON.stringify({ title, body, url: url || "/" });
+  const payload = JSON.stringify({ title, body, url: url || "/", ...(typeof badge === "number" ? { badge } : {}) });
   let sent = 0, gone = 0; const errors = [];
   for (const id of ids) {
     const r = await sendWebPush(subs[id], payload, env);
@@ -840,7 +840,11 @@ async function sendPushDailyBriefing(env) {
   const text = await buildKakaoBriefing(env);
   if (!text) return { skip: "오늘·내일 일정 없음" };
   const lines = text.split("\n").filter(Boolean);
-  return pushBroadcast(env, lines[0] || "NJ SAFETY 아침 브리핑", lines.slice(1).join("\n").trim(), "/?tab=schedule");
+  // 홈화면 아이콘 배지도 같이 맞춘다 — 앱을 안 열어도 오늘 남은 건수가 보이게
+  const data = (await fbGet(env, "/frw.json")) || {};
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  const badge = (data.todos || []).filter(t => !t.done && (t.date || "").slice(0, 10) <= today && today <= ((t.endDate || t.date || "").slice(0, 10))).length;
+  return pushBroadcast(env, lines[0] || "NJ SAFETY 아침 브리핑", lines.slice(1).join("\n").trim(), "/?tab=schedule", badge);
 }
 
 async function handlePushApi(request, env, url) {

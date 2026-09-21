@@ -20028,6 +20028,19 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     </svg>
   );
 
+  // 홈화면 아이콘 배지 — 오늘 남은 일정 수. 알림과 달리 지우지 않는 한 계속 보인다.
+  // iOS 는 홈 화면에 설치된 PWA 에서만 동작한다(16.4+). 안 되는 환경은 조용히 넘어간다.
+  useEffect(() => {
+    try {
+      if (!navigator.setAppBadge) return;
+      const n = new Date();
+      const t = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+      const left = (todos || []).filter(x => !x.done && (x.date === t || (x.endDate && x.date <= t && x.endDate >= t))).length;
+      if (left > 0) navigator.setAppBadge(left).catch(() => {});
+      else if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {});
+    } catch {}
+  }, [todos]);
+
   // 화면별 페이지 헤더 부제 (토스 핸드오프 — 제목은 TABS label, 부제는 아래 맵)
   const PAGE_SUBTITLES = {
     pricedb: "원단·부자재 단가 기준 관리",

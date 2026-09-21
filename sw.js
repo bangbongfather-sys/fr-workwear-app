@@ -7,7 +7,7 @@
 //    (버전 고정 URL이라 불변 — 한 번 받으면 재다운로드 불필요. 이게 없으면 오프라인에서 앱이 아예 안 뜸)
 //  - /api/* (Notion·입찰·동기화 프록시): 캐시 안 함 — 오프라인이면 실패하고 앱이 자체 처리
 //  - Firebase·Google 인증 등 그 외 외부 도메인: 개입하지 않음 (조용히 실패하도록)
-const VERSION = 'nj-safety-v5'; // v5: 웹 푸시(push·notificationclick) 추가
+const VERSION = 'nj-safety-v6'; // v6: 푸시 수신 시 홈화면 배지 갱신
 
 const SHELL = [
   '/',
@@ -102,6 +102,10 @@ self.addEventListener('push', (event) => {
   let d = { title: 'NJ SAFETY', body: '', url: '/' };
   try { if (event.data) d = Object.assign(d, event.data.json()); }
   catch { if (event.data) d.body = event.data.text(); }
+  if (typeof d.badge === 'number' && self.navigator && self.navigator.setAppBadge) {
+    if (d.badge > 0) self.navigator.setAppBadge(d.badge).catch(() => {});
+    else if (self.navigator.clearAppBadge) self.navigator.clearAppBadge().catch(() => {});
+  }
   event.waitUntil(
     self.registration.showNotification(d.title, {
       body: d.body,
