@@ -1935,15 +1935,20 @@ async function cloudBackupDaily(data) {
 // products 면 n=제품 수, m=요척서 총합. ledgers 면 n=월 수, m=거래처 행 총합.
 // 요척서만 사라진 사고에서는 n(14)이 그대로였고 m(23→15)만 줄었다 — 그래서 m 을 본다.
 function sectionSignature(v) {
-  const recs = Array.isArray(v) ? v : (v && typeof v === "object" ? Object.values(v) : []);
-  let n = 0, m = 0;
+  // gone(입금내역의 지운 자동수집 표시)은 늘기만 하는 목록이라 개수 비교에서 뺀다
+  const recs = Array.isArray(v) ? v : (v && typeof v === "object" ? Object.keys(v).filter(k => k !== "gone").map(k => v[k]) : []);
+  let n = 0, m = 0, a = 0;
   for (const r of recs) {
     n++;
     if (r && typeof r === "object" && !Array.isArray(r)) {
       for (const k of Object.keys(r)) if (Array.isArray(r[k])) m += r[k].length;
     }
+    // { items:[…], nameMap:{…} } 처럼 값이 곧 배열인 섹션(입금내역) — n·m 으로는 항상 {2,0}이라
+    // 통째로 날아가도 못 잡았다. 배열 길이를 따로 a 에 센다.
+    // (n·m 을 바꾸면 옛 버전 앱이 새 지문과 비교해 헛경고를 띄우므로 새 칸으로 둔다)
+    if (Array.isArray(r)) a += r.length;
   }
-  return { n, m };
+  return { n, m, a };
 }
 
 // 지금 올리려는 값이 서버보다 "많이" 줄었는지. 한두 개 지운 건 정상 작업이므로
@@ -1954,7 +1959,11 @@ function isBigShrink(mySig, srvSig) {
   const lostM = (srvSig.m || 0) - (mySig.m || 0);
   const bigN = lostN >= 3 && lostN / Math.max(srvSig.n || 1, 1) >= 0.2;
   const bigM = lostM >= 3 && lostM / Math.max(srvSig.m || 1, 1) >= 0.2;
-  return bigN || bigM;
+  // a 는 새로 생긴 칸 — 양쪽 지문에 다 있을 때만 비교 (옛 지문엔 없다)
+  const hasA = typeof mySig.a === "number" && typeof srvSig.a === "number";
+  const lostA = hasA ? srvSig.a - mySig.a : 0;
+  const bigA = hasA && lostA >= 3 && lostA / Math.max(srvSig.a || 1, 1) >= 0.2;
+  return bigN || bigM || bigA;
 }
 
 // 어떤 섹션을 올려도 되는지 판정.
@@ -9304,6 +9313,135 @@ const depBizOf = (x) => {
 };
 const depBizLabel = (id) => (DEP_BIZ.find(o => o.id === id) || DEP_BIZ[0]).label;
 
+// ── 은행 자동수집(팝빌) 수집함 → 입금내역 병합 ──
+// Worker 가 /frw_bank_inbox 에 쌓은 입금을 앱이 받아 여기서 합친다. 같은 수집함을 몇 번,
+// 몇 대의 기기에서 합쳐도 결과가 같아야 한다(멱등) — 그래서 ext(계좌|거래일시|금액|잔액)로만 판단한다.
+//  - 이미 같은 ext 가 있거나, 사용자가 지운 ext(gone) 면 건너뜀
+//  - 같은 사업자·같은 날·같은 금액의 엑셀 건이 있고 시간(분까지)이나 입금자명이 맞으면
+//    새로 넣지 않고 그 엑셀 건에 ext·시간·계좌만 덧붙인다 (처리 상태는 그대로)
+//  - 날짜·금액만 같은 엑셀 건이 딱 1건이면 새로 넣되 dupSuspect 로 표시 → 사용자가 합치기/유지 선택
+// 돌려주는 값: { next, added, merged, suspects } — 바뀐 게 없으면 next === prev
+function mergeBankInbox(prev, inbox) {
+  const p = prev || {};
+  const items = Array.isArray(p.items) ? p.items : [];
+  const gone = new Set(Array.isArray(p.gone) ? p.gone : []);
+  const have = new Set();
+  items.forEach(x => { if (x && x.ext) have.add(x.ext); });
+  const list = (Array.isArray(inbox) ? inbox : [])
+    .filter(it => it && it.ext && /^\d{4}-\d{2}-\d{2}$/.test(it.date || "") && Number(it.amount) > 0 && !have.has(it.ext) && !gone.has(it.ext))
+    .sort((a, b) => String(a.date + (a.time || "")).localeCompare(String(b.date + (b.time || ""))));
+  if (!list.length) return { next: prev, added: 0, merged: 0, suspects: 0 };
+  const next = items.slice();
+  const claimed = new Set();
+  const hm = (t) => String(t || "").slice(0, 5);
+  let base = Date.now(), added = 0, merged = 0, suspects = 0;
+  list.forEach(it => {
+    if (have.has(it.ext)) return;               // 같은 수집함 안의 중복
+    const biz = DEP_BIZ.some(o => o.id === it.biz) ? it.biz : DEP_BIZ_DEFAULT;
+    const amt = Math.round(Number(it.amount));
+    const name = String(it.name || "").trim();
+    const cands = next.filter(x => x && !x.ext && !claimed.has(x.id) && depBizOf(x) === biz
+      && x.date === it.date && Math.round(Number(x.amount)) === amt);
+    const same = cands.find(x => (x.time && it.time && hm(x.time) === hm(it.time)) || (name && payablesNameMatch(x.name, name)));
+    have.add(it.ext);
+    if (same) {
+      claimed.add(same.id);
+      const i = next.indexOf(same);
+      next[i] = { ...same, ext: it.ext, acct: it.acct || "", time: same.time || it.time || "",
+        ...(it.bal != null && it.bal !== "" ? { bal: Number(it.bal) } : {}),
+        ...((!same.name || same.name === "(입금자명 없음)") && name ? { name } : {}) };
+      merged++;
+      return;
+    }
+    const row = {
+      id: ++base, date: it.date, time: it.time || "", amount: amt,
+      name: name || "(입금자명 없음)", memo: String(it.memo || "").trim(),
+      biz, status: "pending", client: "", link: null,
+      src: "api", ext: it.ext, acct: it.acct || "",
+      ...(it.bal != null && it.bal !== "" ? { bal: Number(it.bal) } : {}),
+    };
+    if (cands.length === 1) { row.dupSuspect = cands[0].id; claimed.add(cands[0].id); suspects++; }
+    next.push(row);
+    added++;
+  });
+  if (!added && !merged) return { next: prev, added: 0, merged: 0, suspects: 0 };
+  next.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id));
+  return { next: { ...p, items: next, nameMap: p.nameMap || {} }, added, merged, suspects };
+}
+
+// ── 자동 수집 띠 ── 팝빌 연동이 설정된 사업자 탭에만 보인다 (설정 전에는 아무것도 안 그림)
+// 계좌별 마지막 수집 시각·오류와 「지금 수집」 버튼. 수집이 끝나면 앱 전역의 수집함 병합을 깨운다.
+function BankAutoCollectBar({ biz }) {
+  const [info, setInfo] = useState(null);     // /api/bank/status 응답
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const loadStatus = React.useCallback(async () => {
+    try {
+      const r = await fetch("/api/bank/status", { cache: "no-store" });
+      if (!r.ok) { setInfo(null); return null; }
+      const j = await r.json();
+      setInfo(j && typeof j === "object" ? j : null);
+      return j;
+    } catch { setInfo(null); return null; }
+  }, []);
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+  if (!info || !info.configured) return null;
+  const accts = (info.accounts || []).filter(a => (a.biz || "nj") === biz);
+  if (!accts.length) return null;
+  const st = (info.status && info.status.accounts) || {};
+  const ago = (t) => {
+    if (!t) return "아직 없음";
+    const m = Math.round((Date.now() - t) / 60000);
+    if (m < 1) return "방금";
+    if (m < 60) return `${m}분 전`;
+    const d = new Date(t);
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return `${sameDay ? "오늘" : `${d.getMonth() + 1}/${d.getDate()}`} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  const collect = async () => {
+    setBusy(true); setMsg("은행에서 가져오는 중… (보통 30초~1분)");
+    const before = (info.status && info.status.lastRunAt) || 0;
+    try {
+      const r = await fetch("/api/bank/collect", { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg(j.message || "수집을 시작하지 못했습니다"); setBusy(false); return; }
+      // 수집이 끝날 때까지 상태를 몇 번 확인 (최대 2분)
+      for (let i = 0; i < 24; i++) {
+        await new Promise(res => setTimeout(res, 5000));
+        const s2 = await loadStatus();
+        if (s2 && s2.status && (s2.status.lastRunAt || 0) > before) break;
+      }
+      window.dispatchEvent(new Event("frw-bank-inbox-refresh"));
+      setMsg("");
+    } catch { setMsg("네트워크 오류로 수집하지 못했습니다"); }
+    setBusy(false);
+  };
+  const anyErr = accts.some(a => st[a.id] && st[a.id].lastError && (st[a.id].errorAt || 0) >= (st[a.id].lastOkAt || 0));
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "9px 14px", borderRadius: 12,
+      background: anyErr ? "var(--negative-bg)" : "var(--surface2)", border: `1px solid ${anyErr ? "rgba(240,68,82,0.35)" : "var(--border)"}` }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 800, color: "var(--text1)" }}>
+        <span style={{ width: 8, height: 8, borderRadius: 4, background: anyErr ? "var(--negative)" : "var(--positive)" }} />
+        은행 자동 수집{info.test ? " (테스트)" : ""}
+      </span>
+      {accts.map(a => {
+        const s1 = st[a.id] || {};
+        const err = s1.lastError && (s1.errorAt || 0) >= (s1.lastOkAt || 0);
+        return (
+          <span key={a.id} title={err ? s1.lastError : ""} style={{ fontSize: 12, color: err ? "var(--negative-text)" : "var(--text2)" }}>
+            {a.alias || "국민"} ···{a.last4} · {err ? `수집 실패: ${s1.lastError}` : `마지막 ${ago(s1.lastOkAt)}`}
+          </span>
+        );
+      })}
+      {msg && <span style={{ fontSize: 12, color: "var(--text3)" }}>{msg}</span>}
+      <button type="button" onClick={collect} disabled={busy}
+        style={{ marginLeft: "auto", height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 800, cursor: busy ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: busy ? 0.6 : 1 }}>
+        {busy ? "수집 중…" : "지금 수집"}
+      </button>
+    </div>
+  );
+}
+
 // 장부의 미입금 청구를 입금완료 처리하거나 미수금 원장에 입금으로 기록한다.
 // 한 번 지정한 입금자명→거래처 매핑은 기억해 다음 업로드부터 자동 추천.
 // (은행 인증정보는 어디에도 저장하지 않음 — 엑셀 파일만 사용)
@@ -9436,6 +9574,20 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
     return "";
   };
+  // 거래 시각 — "2026.09.24 10:35:12" 같은 일시 칸이나 별도 시간 칸에서. 없으면 "".
+  // 자동수집분과 같은 거래인지 맞춰 볼 때 쓴다.
+  const parseTimeCell = (v) => {
+    if (v == null || v === "") return "";
+    const two = (n) => String(n).padStart(2, "0");
+    if (typeof v === "number") {
+      const f = v >= 1 ? v - Math.floor(v) : v;          // 날짜 시리얼의 소수부 또는 시간만 있는 칸
+      if (!(f > 0)) return "";
+      const sec = Math.round(f * 86400) % 86400;
+      return `${two(Math.floor(sec / 3600))}:${two(Math.floor(sec / 60) % 60)}:${two(sec % 60)}`;
+    }
+    const m = String(v).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    return m ? `${two(m[1])}:${m[2]}:${m[3] || "00"}` : "";
+  };
   const handleFile = (file) => {
     if (!file) return;
     if (typeof XLSX === "undefined") { showToast("엑셀 라이브러리 로딩 중입니다. 잠시 후 다시 시도하세요."); return; }
@@ -9446,9 +9598,10 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
         // 헤더 자동 감지 — 은행별 명칭 다양성 흡수 (기업/국민/신한/우리/하나 등)
+        // 입금액 칸은 「입금」으로 찾되 「입금자명」은 빼야 한다 (예전엔 입금자명 칸을 금액으로 잡았다)
         const TARGETS = [
           { key: "date",  re: /거래일|이체일|입금일|날짜|일시|일자/ },
-          { key: "inAmt", re: /입금|맡기신|받은\s*금액|credit/i },
+          { key: "inAmt", re: /입금(?!자)|맡기신|받은\s*금액|credit/i },
           { key: "name",  re: /입금자|보낸\s*분|의뢰인|거래자명|적요|내용|기재사항/ },
           { key: "memo",  re: /적요|내용|비고|메모|거래점|취급점|송금메모/ },
         ];
@@ -9467,6 +9620,22 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         if (bestRow < 0 || bestCols.date == null || bestCols.inAmt == null) {
           showToast("거래일/입금액 헤더를 찾을 수 없습니다.\n은행 인터넷뱅킹에서 내려받은 거래내역 엑셀인지 확인하세요."); return;
         }
+        // 입금자 칸 다시 고르기 — 왼쪽부터 처음 맞는 칸을 잡다 보니 국민은행
+        // (거래일시 | 적요 | 보낸분/받는분 | …) 에서는 「적요」(타행이체·전자금융…)가 입금자명이 됐다.
+        // 「보낸분·입금자·의뢰인」처럼 사람·회사 이름이 확실한 칸이 있으면 그 칸을 쓴다.
+        const hdr = (rows[bestRow] || []).map(v => String(v || "").trim());
+        const taken = () => [bestCols.date, bestCols.inAmt, bestCols.name, bestCols.memo, bestCols.time].filter(j => j != null);
+        const findCol = (re, not) => hdr.findIndex((v, j) => v && re.test(v) && !(not || []).includes(j));
+        const oldNameCol = bestCols.name ?? -1;      // 예전 규칙이 고른 칸 — 이미 가져온 건과 맞춰 보는 데 쓴다
+        const strongName = findCol(/입금자|보낸\s*분|의뢰인|거래자명|기재사항|받는\s*분/, [bestCols.date, bestCols.inAmt]);
+        if (strongName >= 0 && strongName !== bestCols.name) {
+          bestCols.name = strongName;
+          // 메모: 송금메모 > 메모·비고 > 적요·내용 (입금자 칸이 아닌 것)
+          const not = [bestCols.date, bestCols.inAmt, bestCols.name];
+          const memoCol = [/송금\s*메모/, /메모|비고/, /적요|내용/].map(re => findCol(re, not)).find(j => j >= 0);
+          bestCols.memo = memoCol != null ? memoCol : undefined;
+        }
+        const timeCol = findCol(/^(거래)?\s*시간$|시각/, taken());
         const dateCol = bestCols.date, inCol = bestCols.inAmt, nameCol = bestCols.name ?? -1, memoCol = bestCols.memo ?? -1;
         const parsed = [];
         for (let i = bestRow + 1; i < rows.length; i++) {
@@ -9476,25 +9645,62 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
           if (!date || amt <= 0) continue; // 출금·빈 행 스킵 (입금액이 있는 행만)
           const nm = String(nameCol >= 0 ? row[nameCol] : "").trim();
           const memo = String(memoCol >= 0 && memoCol !== nameCol ? row[memoCol] : "").trim();
-          parsed.push({ date, amount: amt, name: nm || "(입금자명 없음)", memo });
+          const time = parseTimeCell(timeCol >= 0 ? row[timeCol] : row[dateCol]);
+          const alt = oldNameCol >= 0 && oldNameCol !== nameCol ? String(row[oldNameCol] ?? "").trim() : "";
+          parsed.push({ date, amount: amt, name: nm || "(입금자명 없음)", memo, ...(time ? { time } : {}), ...(alt ? { alt } : {}) });
         }
         if (!parsed.length) { showToast("가져올 입금 내역이 없습니다. (입금액이 있는 행 기준)"); return; }
-        // 중복 방지: 같은 (날짜·금액·입금자) 조합은 기존 개수를 초과하는 만큼만 추가
-        const keyOf = (x) => `${x.date}|${Math.round(x.amount)}|${payablesNameNorm(x.name)}`;
-        const existCnt = new Map();
-        items.forEach(x => { const k = keyOf(x); existCnt.set(k, (existCnt.get(k) || 0) + 1); });
-        const seenCnt = new Map(); const fresh = []; let dup = 0; let base = Date.now();
+        // ── 중복 방지 ──
+        // ① 같은 (날짜·금액·입금자) 조합은 이미 있는 개수만큼 건너뛴다 (현행 규칙)
+        // ② 예전 규칙으로 올린 건(입금자명 = 적요 값)과 같은 줄이면 건너뛰고, 그 건의 입금자명을 바로잡는다
+        // ③ 자동수집(팝빌)으로 이미 들어온 날짜·금액이면 같은 입금으로 보고 건너뛴다 — 확인을 받는다
+        const keyOf = (x, nm) => `${x.date}|${Math.round(x.amount)}|${payablesNameNorm(nm ?? x.name)}`;
+        const poolOf = (keyFn, pred) => {
+          const m = new Map();
+          items.forEach(x => { if (pred && !pred(x)) return; const k = keyFn(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); });
+          return m;
+        };
+        const byKey = poolOf(x => keyOf(x));
+        const byApi = poolOf(x => `${x.date}|${Math.round(x.amount)}`, x => !!x.ext);
+        const used = new Set();
+        const take = (m, k) => { const arr = m.get(k); if (!arr) return null; const hit = arr.find(x => !used.has(x.id)); if (!hit) return null; used.add(hit.id); return hit; };
+        const fresh = [], apiSkipped = [], rename = new Map(); let dup = 0; let base = Date.now();
+        const strip = ({ alt, ...rest }) => rest;
         parsed.forEach(x => {
-          const k = keyOf(x); const seen = (seenCnt.get(k) || 0) + 1; seenCnt.set(k, seen);
-          if (seen <= (existCnt.get(k) || 0)) { dup++; return; }
-          fresh.push({ id: ++base, ...x, biz, status: "pending", client: "", link: null });
+          if (take(byKey, keyOf(x))) { dup++; return; }
+          if (x.alt && payablesNameNorm(x.alt) !== payablesNameNorm(x.name)) {
+            const old = take(byKey, keyOf(x, x.alt));
+            if (old) { dup++; if (x.name !== "(입금자명 없음)") rename.set(old.id, { name: x.name, alt: x.alt }); return; }
+          }
+          if (take(byApi, `${x.date}|${Math.round(x.amount)}`)) { apiSkipped.push(x); return; }
+          fresh.push({ id: ++base, ...strip(x), biz, status: "pending", client: "", link: null });
         });
-        if (!fresh.length) { showToast(`새 입금 내역이 없습니다. (이미 가져온 ${dup}건 제외)`); return; }
+        if (apiSkipped.length) {
+          const ex = apiSkipped.slice(0, 6).map(x => `· ${x.date} ${fmt(x.amount)}원 ${x.name}`).join("\n");
+          const skip = window.confirm(
+            `자동수집(은행 연동)으로 이미 들어온 입금과 날짜·금액이 같은 ${apiSkipped.length}건이 있습니다.\n${ex}${apiSkipped.length > 6 ? "\n…" : ""}\n\n` +
+            `[확인] 같은 입금으로 보고 건너뛰기 (권장)\n[취소] 별개 입금이니 그래도 추가`);
+          if (!skip) apiSkipped.forEach(x => fresh.push({ id: ++base, ...strip(x), biz, status: "pending", client: "", link: null }));
+          else dup += apiSkipped.length;
+        }
+        if (!fresh.length && !rename.size) { showToast(`새 입금 내역이 없습니다. (이미 가져온 ${dup}건 제외)`); return; }
+        // 다른 사업자 탭에 같은 입금이 있으면 — 탭을 잘못 고르고 올린 경우가 많다
+        const otherKeys = new Set(allItems.filter(x => depBizOf(x) !== biz).map(x => keyOf(x)));
+        const otherHit = fresh.filter(x => otherKeys.has(keyOf(x))).length;
         setBankDeposits(prev => ({
-          items: [...(((prev || {}).items) || []), ...fresh].sort((a, b) => String(b.date||"").localeCompare(String(a.date||"")) || (a.id - b.id)),
+          ...(prev || {}),
+          items: [
+            ...((((prev || {}).items) || []).map(x => rename.has(x.id)
+              ? { ...x, name: rename.get(x.id).name, memo: x.memo || rename.get(x.id).alt } : x)),
+            ...fresh,
+          ].sort((a, b) => String(b.date||"").localeCompare(String(a.date||"")) || (a.id - b.id)),
           nameMap: ((prev || {}).nameMap) || {},
         }));
-        showToast(`✅ 입금 ${fresh.length}건 가져왔습니다${dup ? ` (중복 ${dup}건 제외)` : ""}`, "success");
+        const parts = [];
+        if (fresh.length) parts.push(`입금 ${fresh.length}건 가져왔습니다`);
+        if (dup) parts.push(`중복 ${dup}건 제외`);
+        if (rename.size) parts.push(`예전에 올린 ${rename.size}건의 입금자명을 바로잡았습니다`);
+        showToast(`✅ ${parts.join(" · ")}` + (otherHit ? `\n⚠️ 「${depBizLabel(DEP_BIZ.find(o => o.id !== biz).id)}」 탭에 같은 입금 ${otherHit}건이 있습니다 — 사업자 탭을 잘못 고르지 않았는지 확인하세요` : ""), otherHit ? "info" : "success");
       } catch (err) { showToast("엑셀 처리 실패: " + err.message); }
     };
     reader.readAsArrayBuffer(file);
@@ -9507,6 +9713,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     if (ids.size === 0) return;
     if (!window.confirm(`선택한 ${ids.size}건을 「${depBizLabel(targetBiz)}」 입금내역으로 옮길까요?\n\n거래처·처리 상태는 그대로 따라갑니다.`)) return;
     setBankDeposits(prev => ({
+      ...(prev || {}),
       items: (((prev || {}).items) || []).map(x => ids.has(x.id) ? { ...x, biz: targetBiz } : x),
       nameMap: ((prev || {}).nameMap) || {},
     }));
@@ -9536,6 +9743,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       link = { kind: "ar", entryId };
     }
     setBankDeposits(prev => ({
+      ...(prev || {}),
       items: (((prev || {}).items) || []).map(x => x.id === dep.id ? { ...x, status: "done", client: name, link, doneAt: Date.now() } : x),
       nameMap: { ...(((prev || {}).nameMap) || {}), [payablesNameNorm(dep.name)]: name },
     }));
@@ -9569,6 +9777,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       });
     }
     setBankDeposits(prev => ({
+      ...(prev || {}),
       items: (((prev || {}).items) || []).map(x => x.id === dep.id ? { ...x, status: "pending", client: "", link: null } : x),
       nameMap: ((prev || {}).nameMap) || {},
     }));
@@ -9576,7 +9785,38 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   };
   const removeDeposit = (dep, silent) => {
     if (!silent && !window.confirm("이 입금 행을 삭제할까요?")) return;
-    setBankDeposits(prev => ({ items: (((prev || {}).items) || []).filter(x => x.id !== dep.id), nameMap: ((prev || {}).nameMap) || {} }));
+    // 자동수집 건을 지우면 수집함에서 다시 들어오지 않도록 ext 를 gone 에 남긴다
+    setBankDeposits(prev => {
+      const p = prev || {};
+      const gone = Array.isArray(p.gone) ? p.gone : [];
+      return { ...p, items: ((p.items) || []).filter(x => x.id !== dep.id), nameMap: p.nameMap || {},
+        ...(dep.ext ? { gone: [...gone.filter(e => e !== dep.ext), dep.ext].slice(-3000) } : {}) };
+    });
+  };
+
+  // ── 자동수집 건이 엑셀 건과 중복 의심일 때 ──
+  // 합치기: 자동수집 건을 지우고 그 ext·시간·계좌를 엑셀 건에 옮긴다 (ext 가 남으니 다시 들어오지 않음)
+  // 유지: 별개 입금으로 보고 표시만 지운다
+  const suspects = React.useMemo(() => items.filter(x => x.dupSuspect != null), [items]);
+  const resolveSuspect = (dep, mergeIt) => {
+    const target = allItems.find(x => x.id === dep.dupSuspect);
+    if (mergeIt && target && dep.status === "done" && target.status === "done") {
+      showToast("두 건이 모두 처리돼 있어 합칠 수 없습니다 — 한쪽 처리를 되돌린 뒤 합치세요"); return;
+    }
+    setBankDeposits(prev => {
+      const p = prev || {}; const list = p.items || [];
+      const cur = list.find(x => x.id === dep.id); if (!cur) return prev;
+      const tg = list.find(x => x.id === cur.dupSuspect);
+      if (!mergeIt || !tg || tg.ext) {
+        return { ...p, items: list.map(x => { if (x.id !== cur.id) return x; const { dupSuspect, ...rest } = x; return rest; }) };
+      }
+      // 자동수집 건만 처리돼 있었다면 그 처리를 엑셀 건으로 옮긴다
+      const carry = cur.status === "done" && tg.status !== "done" ? { status: cur.status, client: cur.client, link: cur.link, doneAt: cur.doneAt } : {};
+      return { ...p, items: list.filter(x => x.id !== cur.id).map(x => x.id === tg.id
+        ? { ...x, ext: cur.ext, acct: cur.acct, time: x.time || cur.time || "", ...(cur.bal != null ? { bal: cur.bal } : {}), ...carry } : x) };
+    });
+    if (mergeIt) setSelectedIds(prev => { if (!prev.has(dep.id)) return prev; const n = new Set(prev); n.delete(dep.id); return n; });
+    showToast(mergeIt ? "같은 입금으로 합쳤습니다" : "별개 입금으로 두었습니다", "success");
   };
 
   // ── 미처리 행마다 "어디에 붙을지"를 미리 정해둔다 ──
@@ -9761,6 +10001,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       const nm = { ...(((prev || {}).nameMap) || {}) };
       rows.forEach(r => { nm[payablesNameNorm(r.name)] = name; });
       return {
+        ...(prev || {}),
         items: (((prev || {}).items) || []).map(x => linkOf[x.id] ? { ...x, status: "done", client: name, link: linkOf[x.id], doneAt: Date.now() } : x),
         nameMap: nm,
       };
@@ -9835,6 +10076,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       const nm = { ...(((prev || {}).nameMap) || {}) };
       plan.forEach(p => { nm[payablesNameNorm(p.row.name)] = p.client; });
       return {
+        ...(prev || {}),
         items: (((prev || {}).items) || []).map(x => linkOf[x.id] ? { ...x, status: "done", client: clientOf[x.id], link: linkOf[x.id], doneAt: Date.now() } : x),
         nameMap: nm,
       };
@@ -9924,6 +10166,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     });
     // 원장에 걸려 있던 입금 행들을 그 달 청구로 옮겨 단다 — 되돌리기가 제대로 동작하게
     setBankDeposits(prev => ({
+      ...(prev || {}),
       items: (((prev || {}).items) || []).map(x =>
         (x.link && x.link.kind === "ar" && ids.has(x.link.entryId))
           ? { ...x, link: { kind: "ledger", ym: u.ym, clientId: String(u.id) } } : x),
@@ -10038,7 +10281,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
             <div className="card" style={{ padding: "28px 30px" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{focusDep.date.replace(/-/g, ".")} {dayLabel(focusDep.date).replace(/^\d+월 \d+일 /, "")}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{focusDep.date.replace(/-/g, ".")} {dayLabel(focusDep.date).replace(/^\d+월 \d+일 /, "")}{focusDep.time ? ` ${focusDep.time.slice(0, 5)}` : ""}{focusDep.src === "api" ? " · 자동수집" : ""}</div>
                   <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.9, color: "var(--text1)", marginTop: 6, wordBreak: "break-all" }}>{focusDep.name}</div>
                   {focusDep.memo && focusDep.memo !== focusDep.name && <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>{focusDep.memo}</div>}
                 </div>
@@ -10339,6 +10582,34 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         </span>
       </div>
 
+      {/* 은행 자동 수집 (팝빌 연동이 설정된 탭에만) */}
+      <BankAutoCollectBar biz={biz} />
+
+      {/* 자동수집 건 중 엑셀로 이미 올린 것과 겹쳐 보이는 것 */}
+      {suspects.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 14px", borderRadius: 12, background: "var(--warning-bg)", border: "1px solid rgba(254,152,0,0.4)" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text1)" }}>엑셀로 올린 입금과 겹쳐 보이는 자동수집 {suspects.length}건 — 같은 입금이면 합쳐 주세요</span>
+          {suspects.slice(0, 8).map(d => {
+            const tg = allItems.find(x => x.id === d.dupSuspect);
+            return (
+              <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--text2)" }}>
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>{d.date.slice(5).replace("-", ".")} {fmt(d.amount)}원</span>
+                <span>자동 <b style={{ color: "var(--text1)" }}>{d.name}</b>{d.time ? ` ${d.time.slice(0, 5)}` : ""}</span>
+                <span style={{ color: "var(--text3)" }}>↔</span>
+                <span>엑셀 <b style={{ color: "var(--text1)" }}>{tg ? tg.name : "(지워진 건)"}</b>{tg && tg.status === "done" ? " · 처리됨" : ""}</span>
+                <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
+                  <button type="button" onClick={() => resolveSuspect(d, true)} disabled={!tg}
+                    style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid rgba(254,152,0,0.5)", background: "var(--surface)", color: "var(--warning-text)", fontSize: 11.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>같은 입금 · 합치기</button>
+                  <button type="button" onClick={() => resolveSuspect(d, false)}
+                    style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>별개 입금</button>
+                </span>
+              </div>
+            );
+          })}
+          {suspects.length > 8 && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>… 외 {suspects.length - 8}건</span>}
+        </div>
+      )}
+
       {/* 찾는 게 반대쪽 사업자에 있을 때 */}
       {otherBizHits.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "9px 14px", borderRadius: 12, background: "var(--warning-bg)", border: "1px solid rgba(254,152,0,0.4)" }}>
@@ -10521,6 +10792,14 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                                 );
                               })()}
                               {dep.memo && dep.memo !== dep.name && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 2 }}>{dep.memo}</div>}
+                              {(dep.time || dep.ext || dep.dupSuspect != null) && (
+                                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, flexWrap: "wrap" }}>
+                                  {dep.time && <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{dep.time.slice(0, 5)}</span>}
+                                  {dep.ext && <span title={dep.src === "api" ? "은행 자동수집으로 들어온 입금" : "엑셀로 올린 입금 — 은행 자동수집과 확인됨"}
+                                    style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--accent-tonal)", color: "var(--accent-strong)" }}>{dep.src === "api" ? "자동" : "엑셀·확인"}</span>}
+                                  {dep.dupSuspect != null && <span style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--warning-bg)", color: "var(--warning-text)" }}>중복 의심</span>}
+                                </div>
+                              )}
                               {isDone && (
                                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                                   {fresh && (
@@ -19528,7 +19807,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.purchaseOrders !== undefined) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
     if (d.fabricIntakes !== undefined) setFabricIntakes(d.fabricIntakes);
     if (d.payables !== undefined && d.payables && typeof d.payables === "object") setPayables(d.payables);
-    if (d.bankDeposits !== undefined && d.bankDeposits && typeof d.bankDeposits === "object") setBankDeposits({ items: d.bankDeposits.items || [], nameMap: d.bankDeposits.nameMap || {} });
+    if (d.bankDeposits !== undefined && d.bankDeposits && typeof d.bankDeposits === "object") setBankDeposits({ ...d.bankDeposits, items: d.bankDeposits.items || [], nameMap: d.bankDeposits.nameMap || {} });
     if (d.prodTrash !== undefined && Array.isArray(d.prodTrash)) setProdTrash(d.prodTrash);
     if (d.companySeal !== undefined && typeof d.companySeal === "string") setCompanySeal(d.companySeal);
     if (d.monthlySales !== undefined) setMonthlySales(d.monthlySales);
@@ -19596,6 +19875,42 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         // 미동기화 변경이 있으면 저장 effect를 깨워 로컬 → 클라우드 푸시
         if (hasUnsynced) setOnlineRetryTick(t => t + 1);
       });
+  }, []);
+
+  // ── 은행 자동수집 수집함 → 입금내역 병합 ──
+  // 첫 클라우드 로드가 끝난 뒤에만 합친다 (옛 로컬 상태에 합쳐 올리면 서버 것과 부딪힌다).
+  // 시작할 때 · 화면으로 돌아올 때 · 10분마다 · 「지금 수집」이 끝났을 때. 연동 전에는 404 → 조용히 넘어감.
+  useEffect(() => {
+    let stop = false, busy = false, waitT = null;
+    const run = async () => {
+      if (stop || busy) return;
+      if (!initialized.current) { clearTimeout(waitT); waitT = setTimeout(run, 3000); return; }
+      if (document.visibilityState !== "visible") return;
+      busy = true;
+      try {
+        const r = await fetch("/api/bank/inbox", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json().catch(() => null);
+        const list = j && Array.isArray(j.items) ? j.items : [];
+        if (!list.length || stop) return;
+        let res = null;
+        setBankDeposits(prev => { res = mergeBankInbox(prev, list); return res.next; });
+        setTimeout(() => {
+          if (!res || !(res.added || res.merged)) return;
+          const parts = [];
+          if (res.added) parts.push(`새 입금 ${res.added}건`);
+          if (res.merged) parts.push(`엑셀로 올린 ${res.merged}건 확인`);
+          showToast(`🏦 은행 자동수집 — ${parts.join(" · ")}${res.suspects ? ` · 중복 의심 ${res.suspects}건` : ""}`, "success");
+        }, 0);
+      } catch { /* 연동 전·오프라인 */ } finally { busy = false; }
+    };
+    run();
+    const iv = setInterval(run, 10 * 60 * 1000);
+    const onVis = () => { if (document.visibilityState === "visible") run(); };
+    const onRefresh = () => run();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("frw-bank-inbox-refresh", onRefresh);
+    return () => { stop = true; clearTimeout(waitT); clearInterval(iv); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("frw-bank-inbox-refresh", onRefresh); };
   }, []);
 
   // visibility 핸들러: 백그라운드 → 포그라운드 복귀 시 cloud 재로드
