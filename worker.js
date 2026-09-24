@@ -25,6 +25,7 @@ import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
 import { handleMcp } from "./worker-src/mcp.js";
 import { handleFxApi } from "./worker-src/fx.js";
+import { handleBankApi } from "./worker-src/bank.js";
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
@@ -192,6 +193,11 @@ export default {
     // 환율 (USD/KRW 등) — 외부 제공처 프록시 + 캐시
     if (url.pathname === "/api/fx" || url.pathname === "/api/fx/") {
       return handleFxApi(request, env, url);
+    }
+
+    // 은행 입금 자동수집 (팝빌 계좌조회) — 수집함·상태·지금 수집
+    if (url.pathname.startsWith("/api/bank/")) {
+      return handleBankApi(request, env, url);
     }
 
     // Claude 커스텀 커넥터용 MCP 서버 (Streamable HTTP, authless)
