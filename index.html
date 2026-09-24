@@ -12925,6 +12925,203 @@ function TreasuryMapDashboard({ accounts, investments, arList, ledgers, clientAR
   );
 }
 
+// ─── 투자 현황 공용 ───
+// 유형별 색 — 비중 막대·카드 뱃지·추이 그래프가 같은 색을 쓴다
+const INV_TYPE_STYLE = {
+  예금:     { bar: "#3B82F6", bg: "rgba(59,130,246,0.14)",  fg: "#2458BE" },
+  적금:     { bar: "#6FA3F8", bg: "rgba(111,163,248,0.16)", fg: "#2F5FD8" },
+  채권:     { bar: "#00A383", bg: "rgba(0,163,131,0.14)",   fg: "#00875F" },
+  펀드:     { bar: "#F08C00", bg: "rgba(240,140,0,0.15)",   fg: "#B86A00" },
+  주식:     { bar: "#DB6B2E", bg: "rgba(219,107,46,0.15)",  fg: "#B8552A" },
+  부동산:   { bar: "#7C6FD6", bg: "rgba(124,111,214,0.15)", fg: "#5B4FB8" },
+  가상자산: { bar: "#C2410C", bg: "rgba(194,65,12,0.13)",   fg: "#9A3412" },
+  기타:     { bar: "#8B95A1", bg: "rgba(139,149,161,0.16)", fg: "#4E5968" },
+};
+const INV_TYPES = ["예금", "적금", "주식", "펀드", "채권", "부동산", "가상자산", "기타"];
+const invStyle = (t) => INV_TYPE_STYLE[t] || INV_TYPE_STYLE["기타"];
+const INV_SAFE = new Set(["예금", "적금", "채권"]);        // 원금 보장
+const INV_RISKY = new Set(["주식", "펀드", "가상자산"]);   // 값이 오르내림
+
+// 평가액 기록 — 평가액을 저장할 때마다 {date, value} 한 점을 남긴다.
+// 은행·증권 앱을 보고 손으로 적는 값이라, 기록이 곧 추이 그래프의 재료다.
+function invHistory(inv) {
+  const h = Array.isArray(inv && inv.valueHistory)
+    ? inv.valueHistory.filter(p => p && p.date && isFinite(parseFloat(p.value)))
+    : [];
+  if (h.length) return [...h].sort((a, b) => a.date.localeCompare(b.date));
+  // 기록이 생기기 전 데이터 — 아는 것만 쓴다: 시작일의 원금, 그리고 지금 값(오늘로 본다)
+  const pr = parseFloat(inv.principal) || 0;
+  const cur = parseFloat(inv.currentValue) || pr;
+  const out = [];
+  const today = plistToday();
+  if (inv.startDate && inv.startDate < today && pr > 0) out.push({ date: inv.startDate, value: pr });
+  out.push({ date: today, value: cur, legacy: true });
+  return out;
+}
+// 새 평가액을 기록한 투자 객체를 돌려준다 (같은 날 두 번 적으면 나중 값만 남긴다)
+function invWithValue(inv, value, date) {
+  const d = date || plistToday();
+  const v = parseFloat(value) || 0;
+  let base = Array.isArray(inv.valueHistory) && inv.valueHistory.length ? inv.valueHistory : [];
+  if (!base.length && inv.startDate && inv.startDate < d && parseFloat(inv.principal) > 0) {
+    base = [{ date: inv.startDate, value: parseFloat(inv.principal) }];
+  }
+  const next = base.filter(p => p.date !== d).concat([{ date: d, value: v }]).sort((a, b) => a.date.localeCompare(b.date));
+  return { ...inv, currentValue: v, valueHistory: next, valueUpdatedAt: d };
+}
+// 마지막으로 평가액을 적은 날 (기록 전 데이터는 모름)
+const invUpdatedAt = (inv) => inv.valueUpdatedAt
+  || (Array.isArray(inv.valueHistory) && inv.valueHistory.length ? [...inv.valueHistory].sort((a, b) => a.date.localeCompare(b.date)).slice(-1)[0].date : null);
+
+// ─── 투자 자산 추이 (월별 막대, 유형별로 쌓음) ───
+// 각 달 막대 = 그 달 말일 기준으로 투자마다 "그날까지 마지막으로 적은 평가액"을 더한 값.
+// 기록 사이를 이어 그리지 않는다 — 적지 않은 값은 지어내지 않고 직전 값을 그대로 둔다.
+function InvestmentTrendChart({ investments }) {
+  const [range, setRange] = React.useState(() => load("frw_inv_trend_range", 12));
+  React.useEffect(() => { save("frw_inv_trend_range", range); }, [range]);
+  const boxRef = React.useRef(null);
+  const [w, setW] = React.useState(900);
+  React.useEffect(() => {
+    const el = boxRef.current; if (!el) return;
+    const m = () => setW(el.clientWidth || 900);
+    m();
+    if (typeof ResizeObserver === "undefined") { window.addEventListener("resize", m); return () => window.removeEventListener("resize", m); }
+    const ro = new ResizeObserver(m); ro.observe(el); return () => ro.disconnect();
+  }, []);
+  const [hover, setHover] = React.useState(null);
+
+  const today = plistToday();
+  const buckets = React.useMemo(() => {
+    const out = [];
+    const now = new Date();
+    for (let i = range - 1; i >= 0; i--) {
+      const first = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const last = new Date(first.getFullYear(), first.getMonth() + 1, 0);
+      const d = i === 0 ? today : `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`;
+      out.push({ date: d, label: `${first.getMonth() + 1}월`, year: first.getFullYear(), month: first.getMonth() + 1 });
+    }
+    return out;
+  }, [range, today]);
+
+  const series = React.useMemo(() => {
+    const hs = investments.map(inv => ({ inv, h: invHistory(inv) }));
+    return buckets.map(b => {
+      const byType = {};
+      let principal = 0, total = 0;
+      hs.forEach(({ inv, h }) => {
+        const start = inv.startDate || (h[0] && h[0].date);
+        if (!start || start > b.date) return;
+        let v = null;
+        for (const p of h) { if (p.date <= b.date) v = parseFloat(p.value); else break; }
+        if (v == null) v = parseFloat(inv.principal) || 0;   // 시작일은 지났는데 기록이 그 뒤에만 있으면 원금으로 본다
+        const t = INV_TYPE_STYLE[inv.type] ? inv.type : "기타";
+        byType[t] = (byType[t] || 0) + v;
+        total += v;
+        principal += parseFloat(inv.principal) || 0;
+      });
+      return { ...b, byType, total, principal };
+    });
+  }, [investments, buckets]);
+
+  const typesUsed = INV_TYPES.filter(t => series.some(s => s.byType[t] > 0));
+  const maxV = Math.max(1, ...series.map(s => Math.max(s.total, s.principal)));
+  const niceMax = (() => { const p = Math.pow(10, Math.floor(Math.log10(maxV))); return Math.ceil(maxV * 1.08 / p) * p; })();
+  const H = 260, padL = 58, padR = 12, padT = 12, padB = 30;
+  const plotW = Math.max(120, w - padL - padR), plotH = H - padT - padB;
+  const slot = plotW / series.length;
+  const barW = Math.min(46, slot * 0.62);
+  const labelEvery = Math.max(1, Math.ceil(38 / slot)); // 좁은 화면에선 달 이름을 건너뛰며 (지금에서부터 거꾸로)
+  const y = (v) => padT + plotH - (v / niceMax) * plotH;
+  const short = (n) => n >= 1e8 ? `${(n / 1e8).toFixed(n % 1e8 === 0 ? 0 : 1)}억` : n >= 1e4 ? `${Math.round(n / 1e4).toLocaleString()}만` : `${Math.round(n)}`;
+  const legacyNoStart = investments.filter(inv => !inv.startDate && !(Array.isArray(inv.valueHistory) && inv.valueHistory.length)).length;
+  const first = series.find(s => s.total > 0), last = series[series.length - 1];
+  const change = first && last ? last.total - first.total : 0;
+  const added = first && last ? last.principal - first.principal : 0;   // 그 사이 새로 넣은(뺀) 원금
+  const gainChange = change - added;                                      // 나머지가 값이 오르내린 몫
+  const hv = hover != null ? series[hover] : null;
+
+  return (
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>투자 자산 추이</div>
+          {first && first !== last && (
+            <span style={{ fontSize: 12.5, color: "var(--text3)" }}>
+              {first.year !== last.year ? `${first.year % 100}년 ` : ""}{first.label}보다 <b style={{ color: "var(--text1)" }}>{change >= 0 ? "+" : "−"}{Math.round(Math.abs(change)).toLocaleString()}원</b>
+              {added !== 0 && <> · 넣은 돈 {added > 0 ? "+" : "−"}{Math.round(Math.abs(added)).toLocaleString()}</>}
+              {" · "}수익 <b style={{ color: gainChange >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{gainChange >= 0 ? "+" : "−"}{Math.round(Math.abs(gainChange)).toLocaleString()}</b>
+            </span>
+          )}
+        </div>
+        <div style={{ display: "inline-flex", gap: 4, padding: 3, borderRadius: 10, background: "var(--surface2)" }}>
+          {[[6, "6개월"], [12, "1년"], [24, "2년"]].map(([n, l]) => (
+            <button key={n} type="button" onClick={() => setRange(n)} aria-pressed={range === n}
+              style={{ height: 28, minHeight: 28, padding: "0 11px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: range === n ? 800 : 600,
+                background: range === n ? "var(--surface)" : "transparent", color: range === n ? "var(--accent-strong)" : "var(--text3)", boxShadow: range === n ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>{l}</button>
+          ))}
+        </div>
+      </div>
+
+      <div ref={boxRef} style={{ position: "relative", width: "100%" }} onMouseLeave={() => setHover(null)}>
+        <svg width={w} height={H} viewBox={`0 0 ${w} ${H}`} role="img" aria-label={`월별 투자 평가액, 최근 ${range}개월`} style={{ display: "block" }}>
+          {[0, 0.25, 0.5, 0.75, 1].map(f => (
+            <g key={f}>
+              <line x1={padL} x2={w - padR} y1={y(niceMax * f)} y2={y(niceMax * f)} style={{ stroke: "var(--divider)" }} strokeWidth="1" />
+              <text x={padL - 8} y={y(niceMax * f) + 4} textAnchor="end" fontSize="11" style={{ fill: "var(--text3)" }}>{f === 0 ? "0" : short(niceMax * f)}</text>
+            </g>
+          ))}
+          {series.map((s, i) => {
+            const cx = padL + slot * i + slot / 2;
+            let acc = 0;
+            return (
+              <g key={s.date} onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} style={{ cursor: "pointer" }}>
+                <rect x={padL + slot * i} y={padT} width={slot} height={plotH} style={{ fill: hover === i ? "var(--surface2)" : "transparent" }} />
+                {typesUsed.map(t => {
+                  const v = s.byType[t] || 0; if (v <= 0) return null;
+                  const y0 = y(acc), y1 = y(acc + v); acc += v;
+                  return <rect key={t} x={cx - barW / 2} y={y1} width={barW} height={Math.max(0, y0 - y1 - 1)} fill={invStyle(t).bar} rx="2" />;
+                })}
+                {(i === series.length - 1 || (series.length - 1 - i) % labelEvery === 0) && <text x={cx} y={H - 10} textAnchor="middle" fontSize="11" fontWeight={i === series.length - 1 ? 800 : 600} style={{ fill: i === series.length - 1 ? "var(--text1)" : "var(--text3)" }}>{i === series.length - 1 ? "지금" : (s.month === 1 && range > 6 ? `${s.year % 100}.1월` : s.label)}</text>}
+              </g>
+            );
+          })}
+          {series.some(s => s.principal > 0) && (
+            <polyline fill="none" style={{ stroke: "var(--text1)" }} strokeWidth="1.8" strokeDasharray="5 4" strokeLinejoin="round" pointerEvents="none"
+              points={series.map((s, i) => `${padL + slot * i + slot / 2},${y(s.principal)}`).join(" ")} />
+          )}
+        </svg>
+        {hv && (
+          <div style={{ position: "absolute", top: 8, left: Math.min(Math.max(8, padL + slot * hover + slot / 2 - 110), w - 228), width: 220, pointerEvents: "none",
+            padding: "10px 12px", borderRadius: 10, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 8px 24px rgba(0,0,0,0.14)", fontSize: 12, color: "var(--text2)" }}>
+            <div style={{ fontWeight: 800, color: "var(--text1)", marginBottom: 6 }}>{hover === series.length - 1 ? `지금 (${hv.date})` : `${hv.year}년 ${hv.month}월 말`}</div>
+            {typesUsed.filter(t => hv.byType[t] > 0).map(t => (
+              <div key={t} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: invStyle(t).bar }} />{t}</span>
+                <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{Math.round(hv.byType[t]).toLocaleString()}</b>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--divider)" }}><span>평가액</span><b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{Math.round(hv.total).toLocaleString()}</b></div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}><span>원금</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{Math.round(hv.principal).toLocaleString()}</span></div>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", fontSize: 12, color: "var(--text2)" }}>
+        {typesUsed.map(t => (
+          <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: invStyle(t).bar }} />{t}</span>
+        ))}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <svg width="22" height="8" aria-hidden="true"><line x1="0" y1="4" x2="22" y2="4" style={{ stroke: "var(--text1)" }} strokeWidth="1.8" strokeDasharray="5 4" /></svg>원금
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text3)" }}>
+          막대 = 그 달 말일까지 마지막으로 적은 평가액 · 평가액을 저장할 때마다 기록이 쌓입니다
+          {legacyNoStart > 0 ? ` · 시작일 없는 ${legacyNoStart}건은 '지금'에만 들어갑니다` : ""}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashFlows, setCashFlows, scheduledExpenses, setScheduledExpenses, ledgers, clientAR, orders, clients = [], suppliers = [], darkMode, setTab, setLedgerFocusClient }) {
   const [subTab, setSubTab] = useState(() => load("frw_treasury_subtab", "dashboard")); // dashboard | accounts | investments | ar | schedule — 탭 이탈 후 복귀 시 유지
   useEffect(() => { save("frw_treasury_subtab", subTab); }, [subTab]);
@@ -12936,6 +13133,10 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const [invDraft, setInvDraft] = useState({ type:"예금", name:"", principal:"", currentValue:"", startDate:"", maturityDate:"", expectedRate:"", memo:"" });
   const [editInvId, setEditInvId] = useState(null);
   const [editInvDraft, setEditInvDraft] = useState(null);
+  // 투자 현황 화면 상태
+  const [invFilter, setInvFilter] = useState("all"); // all | term(만기 있는 것) | open(만기 없는 것)
+  const [invQuick, setInvQuick] = useState(null);    // { id, val } — 카드에서 평가액만 바로 고치기
+  const [invBulk, setInvBulk] = useState(null);      // { [id]: 새 평가액 } — 한 번에 업데이트 패널
   const [showCfForm, setShowCfForm] = useState(false);
   const [cfDraft, setCfDraft] = useState({ accountId:"", client:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
   const [cfClientFilter, setCfClientFilter] = useState(""); // 거래처별 합산 보기 — 선택된 거래처
@@ -13116,13 +13317,21 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
 
   const addInv = () => {
     if (!invDraft.name.trim()) { showToast("투자명 필수"); return; }
-    setInvestments(prev => [...prev, { id: uid(), ...invDraft, principal: parseFloat(invDraft.principal)||0, currentValue: parseFloat(invDraft.currentValue)||parseFloat(invDraft.principal)||0, expectedRate: parseFloat(invDraft.expectedRate)||0 }]);
+    const principal = parseFloat(invDraft.principal)||0;
+    const base = { id: uid(), ...invDraft, principal, expectedRate: parseFloat(invDraft.expectedRate)||0, valueHistory: [] };
+    setInvestments(prev => [...prev, invWithValue(base, parseFloat(invDraft.currentValue)||principal)]);
     setInvDraft({ type:"예금", name:"", principal:"", currentValue:"", startDate:"", maturityDate:"", expectedRate:"", memo:"" });
     setShowInvForm(false);
   };
   const startEditInv = (i) => { setEditInvId(i.id); setEditInvDraft({...i, principal: String(i.principal), currentValue: String(i.currentValue), expectedRate: String(i.expectedRate)}); };
   const saveEditInv = () => {
-    setInvestments(prev => prev.map(i => i.id === editInvId ? { ...editInvDraft, principal: parseFloat(editInvDraft.principal)||0, currentValue: parseFloat(editInvDraft.currentValue)||0, expectedRate: parseFloat(editInvDraft.expectedRate)||0 } : i));
+    setInvestments(prev => prev.map(i => {
+      if (i.id !== editInvId) return i;
+      const next = { ...editInvDraft, principal: parseFloat(editInvDraft.principal)||0, currentValue: parseFloat(i.currentValue)||0, expectedRate: parseFloat(editInvDraft.expectedRate)||0 };
+      const v = parseFloat(editInvDraft.currentValue)||0;
+      // 평가액이 바뀌었을 때만 오늘 기록을 남긴다 (이름·메모만 고친 건 추이에 안 찍힘)
+      return v !== (parseFloat(i.currentValue)||0) ? invWithValue(next, v) : next;
+    }));
     setEditInvId(null); setEditInvDraft(null);
   };
   const deleteInv = (id) => { if (window.confirm("삭제할까요?")) setInvestments(prev => prev.filter(i => i.id !== id)); };
@@ -13634,119 +13843,344 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
         </>);
       })()}
 
-      {/* 3) 투자 현황 */}
-      {subTab === "investments" && (<>
-        <div className="card">
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="trendingUp" size={14}/>투자 포트폴리오</span></div>
-            <button onClick={()=>setShowInvForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showInvForm?"닫기":"+ 투자 추가"}</button>
-          </div>
+      {/* 3) 투자 현황 — 포트폴리오 카드 (디자인 제안 1) + 투자 자산 추이 */}
+      {subTab === "investments" && (() => {
+        const today = plistToday();
+        const dayDiff = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+        const rows = investments.map(inv => {
+          const pr = parseFloat(inv.principal) || 0;
+          const cur = parseFloat(inv.currentValue) || pr;
+          const rate = parseFloat(inv.expectedRate) || 0;
+          const hasTerm = !!inv.maturityDate;
+          const left = hasTerm ? dayDiff(today, inv.maturityDate) : null;
+          const termTotal = hasTerm && inv.startDate ? Math.max(1, dayDiff(inv.startDate, inv.maturityDate)) : null;
+          const termPct = termTotal ? Math.min(100, Math.max(0, dayDiff(inv.startDate, today) / termTotal * 100)) : null;
+          // 약정 이자 — 금액을 한 번에 넣는 예금·채권만 (적금은 매달 넣어 원금 기준 계산이 안 맞는다)
+          const interest = hasTerm && inv.startDate && rate > 0 && (inv.type === "예금" || inv.type === "채권")
+            ? Math.round(pr * rate / 100 * (termTotal / 365)) : null;
+          const upd = invUpdatedAt(inv);
+          const stale = upd ? dayDiff(upd, today) > 30 : false;
+          return { inv, pr, cur, diff: cur - pr, roi: pr > 0 ? (cur - pr) / pr * 100 : 0, rate, hasTerm, left, termPct, interest, upd, stale };
+        });
+        const shownRows = rows
+          .filter(r => invFilter === "all" || (invFilter === "term" ? r.hasTerm : !r.hasTerm))
+          .sort((a, b) => b.cur - a.cur);
+        const termCount = rows.filter(r => r.hasTerm).length;
+        const totalInterest = rows.reduce((s, r) => s + (r.interest || 0), 0);
+        const nextMat = rows.filter(r => r.hasTerm && r.left >= 0).sort((a, b) => a.left - b.left)[0];
+        const lastUpd = rows.map(r => r.upd).filter(Boolean).sort().slice(-1)[0];
+        const byType = {};
+        rows.forEach(r => { const t = INV_TYPE_STYLE[r.inv.type] ? r.inv.type : "기타"; byType[t] = (byType[t] || 0) + r.cur; });
+        const typeList = INV_TYPES.filter(t => byType[t] > 0).sort((a, b) => byType[b] - byType[a]);
+        const share = (v) => totalInvestment > 0 ? Math.round(v / totalInvestment * 100) : 0;
+        const safeV = rows.filter(r => INV_SAFE.has(r.inv.type)).reduce((s, r) => s + r.cur, 0);
+        const riskyV = rows.filter(r => INV_RISKY.has(r.inv.type)).reduce((s, r) => s + r.cur, 0);
+        const md = (d) => { const [, m, dd] = d.split("-"); return `${Number(m)}월 ${Number(dd)}일`; };
+        const sign = (n) => n >= 0 ? "+" : "−";
 
-          {/* KPI */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(150px, 1fr))",gap:12,marginBottom:14}}>
-            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>총 평가액</div>
-              <div style={{fontSize:20,fontWeight:800,color:"#DB6B2E"}}>{fmt(totalInvestment)}<span style={{fontSize:11,marginLeft:2}}>원</span></div>
-            </div>
-            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>원금 합계</div>
-              <div style={{fontSize:20,fontWeight:800,color:"var(--text1)"}}>{fmt(totalInvestmentPrincipal)}<span style={{fontSize:11,marginLeft:2}}>원</span></div>
-            </div>
-            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>평가손익</div>
-              <div style={{fontSize:20,fontWeight:800,color:investmentReturn>=0?"#00B493":"#F04452"}}>{investmentReturn>=0?"+":""}{fmt(investmentReturn)}원</div>
-            </div>
-            <div style={{padding:"12px 14px",background:"var(--surface2)",borderRadius:10}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",marginBottom:4}}>수익률</div>
-              <div style={{fontSize:20,fontWeight:800,color:investmentRoi>=0?"#00B493":"#F04452"}}>{investmentRoi>=0?"+":""}{investmentRoi.toFixed(2)}%</div>
-            </div>
-          </div>
+        const saveQuick = () => {
+          const v = parseFloat(String(invQuick.val).replace(/[^\d.]/g, ""));
+          if (!(v >= 0)) { showToast("평가액을 숫자로 넣어 주세요"); return; }
+          setInvestments(prev => prev.map(i => i.id === invQuick.id ? invWithValue(i, v) : i));
+          setInvQuick(null);
+        };
+        const saveBulk = () => {
+          const changes = Object.entries(invBulk || {})
+            .map(([id, raw]) => [id, parseFloat(String(raw).replace(/[^\d.]/g, ""))])
+            .filter(([id, v]) => v >= 0 && String(invBulk[id]).trim() !== "");
+          if (!changes.length) { setInvBulk(null); return; }
+          const m = new Map(changes);
+          setInvestments(prev => prev.map(i => m.has(i.id) ? invWithValue(i, m.get(i.id)) : i));
+          setInvBulk(null);
+          showToast(`${changes.length}건 평가액을 저장했습니다`, "success");
+        };
+        const bulkChanged = invBulk ? Object.entries(invBulk).filter(([id, raw]) => {
+          const r = rows.find(x => x.inv.id === id); const v = parseFloat(String(raw).replace(/[^\d.]/g, ""));
+          return r && String(raw).trim() !== "" && v >= 0 && v !== r.cur;
+        }) : [];
+        const bulkDelta = bulkChanged.reduce((s, [id, raw]) => s + (parseFloat(String(raw).replace(/[^\d.]/g, "")) - rows.find(x => x.inv.id === id).cur), 0);
 
-          {/* 추가 폼 */}
-          {showInvForm && (
-            <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"100px 1fr 200px 200px",gap:8,marginBottom:8}}>
-                <select value={invDraft.type} onChange={e=>setInvDraft(d=>({...d,type:e.target.value}))} style={{height:44}}>
-                  <option>예금</option><option>적금</option><option>주식</option><option>펀드</option><option>채권</option><option>부동산</option><option>가상자산</option><option>기타</option>
-                </select>
-                <input placeholder="투자명 * (예: 신한정기예금)" value={invDraft.name} onChange={e=>setInvDraft(d=>({...d,name:e.target.value}))}/>
-                <input type="number" placeholder="원금 (원)" value={invDraft.principal} onChange={e=>setInvDraft(d=>({...d,principal:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
-                <input type="number" placeholder="현재 평가액 (원)" value={invDraft.currentValue} onChange={e=>setInvDraft(d=>({...d,currentValue:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
+        const chip = (on, label, onClick) => (
+          <button type="button" onClick={onClick} aria-pressed={on}
+            style={{ height: 32, padding: "0 13px", borderRadius: 100, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, whiteSpace: "nowrap",
+              fontWeight: on ? 800 : 700, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
+              background: on ? "var(--accent-tonal)" : "var(--surface)", color: on ? "var(--accent-strong)" : "var(--text2)" }}>{label}</button>
+        );
+        const ghostBtn = { height: 38, padding: "0 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
+        const smallBtn = { height: 30, minHeight: 30, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
+        const typeSelect = (value, onChange, h) => (
+          <select value={value} onChange={onChange} aria-label="유형" style={{ height: h || 44 }}>
+            {INV_TYPES.map(t => <option key={t}>{t}</option>)}
+          </select>
+        );
+
+        return (<>
+          {/* ── 요약 + 비중 ── */}
+          <div className="inv-top">
+            <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>투자 {investments.length}건 · 지금 평가액</div>
+                {lastUpd && <div style={{ fontSize: 12, color: "var(--text3)" }}>마지막 업데이트 <b style={{ color: "var(--text2)" }}>{md(lastUpd)}</b></div>}
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"130px 130px 100px 1fr auto",gap:8}}>
-                <input type="date" value={invDraft.startDate} onChange={e=>setInvDraft(d=>({...d,startDate:e.target.value}))} title="시작일"/>
-                <input type="date" value={invDraft.maturityDate} onChange={e=>setInvDraft(d=>({...d,maturityDate:e.target.value}))} title="만기일"/>
-                <input type="number" placeholder="기대수익률%" value={invDraft.expectedRate} onChange={e=>setInvDraft(d=>({...d,expectedRate:e.target.value}))}/>
-                <input placeholder="메모" value={invDraft.memo} onChange={e=>setInvDraft(d=>({...d,memo:e.target.value}))}/>
-                <button onClick={addInv} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>등록</button>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 34, fontWeight: 800, letterSpacing: -1.1, lineHeight: 1, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(totalInvestment)}</span>
+                {totalInvestmentPrincipal > 0 && (
+                  <span style={{ display: "inline-flex", alignItems: "center", height: 28, padding: "0 12px", borderRadius: 14, fontSize: 13.5, fontWeight: 800,
+                    background: investmentReturn >= 0 ? "rgba(0,180,147,0.13)" : "rgba(240,68,82,0.12)", color: investmentReturn >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>
+                    {sign(investmentReturn)}{fmt(Math.abs(investmentReturn))} · {sign(investmentRoi)}{Math.abs(investmentRoi).toFixed(2)}%
+                  </span>
+                )}
+              </div>
+              <div className="inv-kpis">
+                <div><span>넣은 돈 (원금)</span><b>{fmt(totalInvestmentPrincipal)}</b></div>
+                <div><span>만기 때 받을 이자 <small>예금·채권 약정</small></span><b style={{ color: totalInterest > 0 ? "var(--positive-text)" : "var(--text3)" }}>{totalInterest > 0 ? `+${fmt(totalInterest)}` : "—"}</b></div>
+                <div><span>다음 만기</span><b>{nextMat ? <>{nextMat.inv.maturityDate.replace(/-/g, ".")} <span style={{ fontSize: 13, color: "var(--accent-strong)" }}>D-{nextMat.left}</span></> : "—"}</b></div>
+              </div>
+            </div>
+
+            <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>어디에 넣어 두었나</div>
+                <div style={{ fontSize: 12, color: "var(--text3)" }}>평가액 기준</div>
+              </div>
+              {typeList.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>투자를 등록하면 유형별 비중이 나옵니다</div> : (<>
+                <div style={{ display: "flex", height: 16, borderRadius: 8, overflow: "hidden", gap: 2 }}>
+                  {typeList.map(t => <div key={t} title={`${t} ${share(byType[t])}%`} style={{ flexGrow: byType[t], background: invStyle(t).bar }} />)}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "7px 18px", fontSize: 13 }}>
+                  {typeList.map(t => (
+                    <div key={t} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: invStyle(t).bar, flexShrink: 0 }} />
+                      <span style={{ flex: 1, fontWeight: 700, color: "var(--text1)" }}>{t}</span>
+                      <span style={{ color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{share(byType[t])}%</span>
+                    </div>
+                  ))}
+                </div>
+                {(safeV > 0 || riskyV > 0) && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", background: "var(--surface2)", borderRadius: 12, fontSize: 12.5, color: "var(--text2)" }}>
+                    <span><b style={{ color: "var(--text1)" }}>원금 보장</b> 예금·적금·채권 <b style={{ color: "var(--text1)" }}>{share(safeV)}%</b></span>
+                    <span style={{ width: 1, height: 14, background: "var(--border)" }} />
+                    <span><b style={{ color: "var(--text1)" }}>변동</b> 주식·펀드·가상자산 <b style={{ color: "var(--text1)" }}>{share(riskyV)}%</b></span>
+                  </div>
+                )}
+              </>)}
+            </div>
+          </div>
+
+          {/* ── 투자 자산 추이 ── */}
+          {investments.length > 0 && <InvestmentTrendChart investments={investments} />}
+
+          {/* ── 목록 머리 ── */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "0 2px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", marginRight: 4 }}>투자 {investments.length}건</div>
+              {chip(invFilter === "all", "전체", () => setInvFilter("all"))}
+              {chip(invFilter === "term", `만기 있는 것 ${termCount}`, () => setInvFilter("term"))}
+              {chip(invFilter === "open", `만기 없는 것 ${investments.length - termCount}`, () => setInvFilter("open"))}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {investments.length > 0 && (
+                <button type="button" style={ghostBtn} onClick={() => setInvBulk(v => v ? null : {})}>{invBulk ? "한 번에 업데이트 닫기" : "평가액 한 번에 업데이트"}</button>
+              )}
+              <button type="button" className="btn-primary" onClick={() => setShowInvForm(v => !v)} style={{ height: 38, padding: "0 16px", fontSize: 13 }}>{showInvForm ? "닫기" : "+ 투자 추가"}</button>
+            </div>
+          </div>
+
+          {/* ── 투자 추가 ── */}
+          {showInvForm && (
+            <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>새 투자</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+                {typeSelect(invDraft.type, e => setInvDraft(d => ({ ...d, type: e.target.value })))}
+                <input placeholder="투자명 * (예: 신한정기예금)" value={invDraft.name} onChange={e => setInvDraft(d => ({ ...d, name: e.target.value }))} style={{ gridColumn: "span 2" }} />
+                <input type="number" placeholder="원금 (원)" value={invDraft.principal} onChange={e => setInvDraft(d => ({ ...d, principal: e.target.value }))} style={{ textAlign: "right", fontSize: 15, fontWeight: 600 }} />
+                <input type="number" placeholder="현재 평가액 (원)" value={invDraft.currentValue} onChange={e => setInvDraft(d => ({ ...d, currentValue: e.target.value }))} style={{ textAlign: "right", fontSize: 15, fontWeight: 600 }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr)) auto", gap: 8, alignItems: "end" }}>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11.5, color: "var(--text3)", fontWeight: 700 }}>시작일<input type="date" value={invDraft.startDate} onChange={e => setInvDraft(d => ({ ...d, startDate: e.target.value }))} /></label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11.5, color: "var(--text3)", fontWeight: 700 }}>만기일 (없으면 비움)<input type="date" value={invDraft.maturityDate} onChange={e => setInvDraft(d => ({ ...d, maturityDate: e.target.value }))} /></label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11.5, color: "var(--text3)", fontWeight: 700 }}>연 금리·기대수익률 %<input type="number" value={invDraft.expectedRate} onChange={e => setInvDraft(d => ({ ...d, expectedRate: e.target.value }))} /></label>
+                <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11.5, color: "var(--text3)", fontWeight: 700 }}>메모 (은행·증권사 등)<input value={invDraft.memo} onChange={e => setInvDraft(d => ({ ...d, memo: e.target.value }))} /></label>
+                <button onClick={addInv} className="btn-primary" style={{ padding: "0 22px", height: 44, fontSize: 13 }}>등록</button>
               </div>
             </div>
           )}
 
-          {/* 투자 테이블 */}
-          {investments.length === 0 ? (
-            <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>등록된 투자가 없습니다.<br/>+ 투자 추가 버튼으로 시작하세요</div>
-          ) : (
-            <div style={{overflowX:"auto"}}>
-              <table>
-                <thead><tr>
-                  <th style={{width:80}}>유형</th><th>투자명</th>
-                  <th style={{textAlign:"right"}}>원금</th>
-                  <th style={{textAlign:"right"}}>평가액</th>
-                  <th style={{textAlign:"right"}}>손익</th>
-                  <th style={{textAlign:"right",width:80}}>수익률</th>
-                  <th>만기</th>
-                  <th>메모</th>
-                  <th style={{textAlign:"center",width:80}}>관리</th>
-                </tr></thead>
-                <tbody>
-                  {investments.map(inv => {
-                    const isEditing = editInvId === inv.id;
-                    if (isEditing && editInvDraft) {
+          {/* ── 평가액 한 번에 업데이트 ── */}
+          {invBulk && (
+            <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>평가액 한 번에 업데이트</div>
+                <div style={{ fontSize: 12, color: "var(--text3)" }}>은행·증권 앱을 보며 바뀐 것만 적고 저장 · 빈 칸은 그대로 둡니다</div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table className="table-plain" style={{ width: "100%", minWidth: 620, borderCollapse: "collapse" }}>
+                  <thead><tr>
+                    <th style={{ width: 70 }}>유형</th><th>투자</th>
+                    <th style={{ textAlign: "right", width: 150 }}>지금 평가액</th>
+                    <th style={{ textAlign: "right", width: 180 }}>새 평가액</th>
+                    <th style={{ textAlign: "right", width: 130 }}>변동</th>
+                  </tr></thead>
+                  <tbody>
+                    {rows.map(r => {
+                      const raw = (invBulk || {})[r.inv.id] ?? "";
+                      const v = parseFloat(String(raw).replace(/[^\d.]/g, ""));
+                      const ch = String(raw).trim() !== "" && v >= 0 && v !== r.cur;
                       return (
-                        <tr key={inv.id} style={{background:"var(--surface2)"}}>
-                          <td><select value={editInvDraft.type} onChange={e=>setEditInvDraft(d=>({...d,type:e.target.value}))} style={{height:32,fontSize:12,padding:"0 6px"}}>
-                            <option>예금</option><option>적금</option><option>주식</option><option>펀드</option><option>채권</option><option>부동산</option><option>가상자산</option><option>기타</option>
-                          </select></td>
-                          <td><input value={editInvDraft.name} onChange={e=>setEditInvDraft(d=>({...d,name:e.target.value}))} style={{height:32,fontSize:13,padding:"0 8px"}}/></td>
-                          <td><input type="number" value={editInvDraft.principal} onChange={e=>setEditInvDraft(d=>({...d,principal:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",textAlign:"right",width:110}}/></td>
-                          <td><input type="number" value={editInvDraft.currentValue} onChange={e=>setEditInvDraft(d=>({...d,currentValue:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",textAlign:"right",width:110}}/></td>
-                          <td/><td/><td><input type="date" value={editInvDraft.maturityDate||""} onChange={e=>setEditInvDraft(d=>({...d,maturityDate:e.target.value}))} style={{height:32,fontSize:11,padding:"0 6px"}}/></td>
-                          <td><input value={editInvDraft.memo||""} onChange={e=>setEditInvDraft(d=>({...d,memo:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px"}}/></td>
-                          <td style={{textAlign:"center"}}>
-                            <button onClick={saveEditInv} style={{background:"#DB6B2E",border:"none",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,borderRadius:6,padding:"4px 8px",marginRight:4,fontFamily:"inherit"}}>저장</button>
-                            <button onClick={()=>{setEditInvId(null);setEditInvDraft(null);}} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:11,borderRadius:6,padding:"3px 7px",fontFamily:"inherit"}}>취소</button>
+                        <tr key={r.inv.id} style={{ background: ch ? "var(--accent-tonal)" : undefined }}>
+                          <td><span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11.5, fontWeight: 800, background: invStyle(r.inv.type).bg, color: invStyle(r.inv.type).fg }}>{r.inv.type}</span></td>
+                          <td style={{ fontWeight: 700 }}>{r.inv.name}{r.upd && <span style={{ fontSize: 11.5, fontWeight: 600, color: r.stale ? "var(--warning-text)" : "var(--text3)", marginLeft: 6 }}>{md(r.upd)}</span>}</td>
+                          <td style={{ textAlign: "right", color: "var(--text2)" }}>{fmt(r.cur)}</td>
+                          <td style={{ textAlign: "right" }}>
+                            <input type="number" inputMode="numeric" aria-label={`${r.inv.name} 새 평가액`} placeholder={String(Math.round(r.cur))} value={raw}
+                              onChange={e => setInvBulk(b => ({ ...(b || {}), [r.inv.id]: e.target.value }))}
+                              style={{ width: "100%", height: 36, minHeight: 36, textAlign: "right", fontWeight: 800, fontSize: 14, border: ch ? "2px solid #DB6B2E" : undefined }} />
                           </td>
+                          <td style={{ textAlign: "right", fontWeight: 800, color: !ch ? "var(--text3)" : v - r.cur >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{ch ? `${sign(v - r.cur)}${fmt(Math.abs(v - r.cur))}` : "—"}</td>
                         </tr>
                       );
-                    }
-                    const principal = parseFloat(inv.principal)||0;
-                    const cv = parseFloat(inv.currentValue)||principal;
-                    const ret = cv - principal;
-                    const roi = principal>0?(ret/principal*100):0;
-                    return (
-                      <tr key={inv.id}>
-                        <td><span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(219,107,46,0.15)",color:"#DB6B2E"}}>{inv.type}</span></td>
-                        <td style={{fontSize:13,fontWeight:600}}>{inv.name}</td>
-                        <td style={{textAlign:"right",fontSize:13}}>{fmt(principal)}원</td>
-                        <td style={{textAlign:"right",fontSize:13,fontWeight:700}}>{fmt(cv)}원</td>
-                        <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:ret>=0?"#00B493":"#F04452"}}>{ret>=0?"+":""}{fmt(ret)}원</td>
-                        <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:ret>=0?"#00B493":"#F04452"}}>{ret>=0?"+":""}{roi.toFixed(2)}%</td>
-                        <td style={{fontSize:12,color:"var(--text2)"}}>{inv.maturityDate||"—"}</td>
-                        <td style={{fontSize:12,color:"var(--text2)"}}>{inv.memo}</td>
-                        <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
-                          <button onClick={()=>startEditInv(inv)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#DB6B2E",fontSize:14,marginRight:4}}><Icon name="edit" size={14}/></button>
-                          <button onClick={()=>deleteInv(inv.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:14}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 14px", background: "var(--surface2)", borderRadius: 12 }}>
+                <span style={{ flex: 1, minWidth: 200, fontSize: 13, color: "var(--text2)" }}>
+                  {bulkChanged.length ? <><b style={{ color: "var(--text1)" }}>{bulkChanged.length}건</b> 바뀜 · 합계 <b style={{ color: bulkDelta >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{sign(bulkDelta)}{fmt(Math.abs(bulkDelta))}</b> · 저장하면 <b style={{ color: "var(--text1)" }}>{md(today)}</b> 기록으로 남습니다</> : "바뀐 평가액만 적어 주세요"}
+                </span>
+                <button type="button" style={ghostBtn} onClick={() => setInvBulk(null)}>취소</button>
+                <button type="button" className="btn-primary" disabled={!bulkChanged.length} onClick={saveBulk} style={{ height: 38, padding: "0 18px", fontSize: 13, opacity: bulkChanged.length ? 1 : 0.5 }}>한 번에 저장</button>
+              </div>
             </div>
           )}
-        </div>
-      </>)}
+
+          {/* ── 투자 카드 ── */}
+          {investments.length === 0 ? (
+            <div className="card" style={{ textAlign: "center", padding: "40px 24px", color: "var(--text3)", fontSize: 14, lineHeight: 1.8 }}>등록된 투자가 없습니다.<br/>「+ 투자 추가」로 시작하세요</div>
+          ) : (
+            <div className="inv-grid">
+              {shownRows.map(r => {
+                const inv = r.inv;
+                const st = invStyle(inv.type);
+                if (editInvId === inv.id && editInvDraft) {
+                  return (
+                    <div key={inv.id} className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "110px minmax(0, 1fr)", gap: 6 }}>
+                        {typeSelect(editInvDraft.type, e => setEditInvDraft(d => ({ ...d, type: e.target.value })), 36)}
+                        <input placeholder="투자명" value={editInvDraft.name} onChange={e => setEditInvDraft(d => ({ ...d, name: e.target.value }))} style={{ height: 36, minHeight: 36, fontSize: 13 }} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6 }}>
+                        <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>원금<input type="number" value={editInvDraft.principal} onChange={e => setEditInvDraft(d => ({ ...d, principal: e.target.value }))} style={{ height: 34, minHeight: 34, textAlign: "right", fontSize: 13 }} /></label>
+                        <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>평가액<input type="number" value={editInvDraft.currentValue} onChange={e => setEditInvDraft(d => ({ ...d, currentValue: e.target.value }))} style={{ height: 34, minHeight: 34, textAlign: "right", fontSize: 13 }} /></label>
+                        <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>시작일<input type="date" value={editInvDraft.startDate || ""} onChange={e => setEditInvDraft(d => ({ ...d, startDate: e.target.value }))} style={{ height: 34, minHeight: 34, fontSize: 12 }} /></label>
+                        <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>만기일<input type="date" value={editInvDraft.maturityDate || ""} onChange={e => setEditInvDraft(d => ({ ...d, maturityDate: e.target.value }))} style={{ height: 34, minHeight: 34, fontSize: 12 }} /></label>
+                        <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>연 %<input type="number" value={editInvDraft.expectedRate} onChange={e => setEditInvDraft(d => ({ ...d, expectedRate: e.target.value }))} style={{ height: 34, minHeight: 34, fontSize: 13 }} /></label>
+                        <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 11, color: "var(--text3)", fontWeight: 700 }}>메모<input value={editInvDraft.memo || ""} onChange={e => setEditInvDraft(d => ({ ...d, memo: e.target.value }))} style={{ height: 34, minHeight: 34, fontSize: 12 }} /></label>
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                        <button onClick={saveEditInv} className="btn-primary" style={{ flex: 1, height: 36, fontSize: 12.5 }}>저장</button>
+                        <button onClick={() => { setEditInvId(null); setEditInvDraft(null); }} style={{ ...smallBtn, flex: 1, height: 36 }}>취소</button>
+                      </div>
+                    </div>
+                  );
+                }
+                const up = r.diff >= 0;
+                const quickOn = invQuick && invQuick.id === inv.id;
+                return (
+                  <div key={inv.id} className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                        <span style={{ display: "inline-flex", flexShrink: 0, alignItems: "center", height: 26, padding: "0 9px", borderRadius: 8, fontSize: 12, fontWeight: 800, background: st.bg, color: st.fg }}>{inv.type}</span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+                          <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inv.name}</span>
+                          <span style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[inv.memo, r.rate ? `연 ${r.rate}%` : ""].filter(Boolean).join(" · ") || "—"}</span>
+                        </div>
+                      </div>
+                      {r.pr > 0 && (
+                        <span style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", height: 24, padding: "0 9px", borderRadius: 12, fontSize: 12, fontWeight: 800,
+                          background: up ? "rgba(0,180,147,0.13)" : "rgba(240,68,82,0.12)", color: up ? "var(--positive-text)" : "var(--negative-text)" }}>{sign(r.roi)}{Math.abs(r.roi).toFixed(1)}%</span>
+                      )}
+                    </div>
+
+                    {quickOn ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input type="number" inputMode="numeric" autoFocus aria-label={`${inv.name} 새 평가액`} value={invQuick.val}
+                          onChange={e => setInvQuick(q => ({ ...q, val: e.target.value }))}
+                          onKeyDown={e => { if (e.key === "Enter") saveQuick(); if (e.key === "Escape") setInvQuick(null); }}
+                          style={{ flex: 1, minWidth: 0, height: 42, fontSize: 18, fontWeight: 800, textAlign: "right" }} />
+                        <button type="button" className="btn-primary" onClick={saveQuick} style={{ height: 42, padding: "0 14px", fontSize: 13 }}>저장</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                        <span style={{ fontSize: 23, fontWeight: 800, letterSpacing: -0.6, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(r.cur)}</span>
+                        {r.pr > 0 && <span style={{ fontSize: 13, fontWeight: 800, color: up ? "var(--positive-text)" : "var(--negative-text)", fontVariantNumeric: "tabular-nums" }}>{sign(r.diff)}{fmt(Math.abs(r.diff))}</span>}
+                      </div>
+                    )}
+
+                    {r.hasTerm ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ height: 8, borderRadius: 4, background: "var(--surface2)", overflow: "hidden" }}>
+                          <div style={{ height: "100%", borderRadius: 4, background: st.bar, width: `${r.termPct ?? 0}%` }} />
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11.5, color: "var(--text3)" }}>
+                          <span>{inv.startDate ? inv.startDate.slice(2).replace(/-/g, ".") : "시작일 없음"}</span>
+                          <b style={{ color: r.left < 0 ? "var(--negative-text)" : "var(--text1)", textAlign: "center" }}>
+                            {r.left < 0 ? "만기 지남" : r.left === 0 ? "오늘 만기" : `${r.left}일 남음`}{r.interest ? ` · 이자 +${fmt(r.interest)}` : ""}
+                          </b>
+                          <span>{inv.maturityDate.slice(2).replace(/-/g, ".")}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ height: 8, borderRadius: 4, background: "var(--surface2)", overflow: "hidden" }}>
+                          <div style={{ height: "100%", borderRadius: 4, background: up ? "#00B493" : "#F04452", width: `${Math.min(100, Math.abs(r.roi) * 5)}%` }} />
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--text3)" }}>
+                          <span>원금 {fmt(r.pr)}</span><span>만기 없음</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, paddingTop: 10, borderTop: "1px solid var(--divider)" }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600, color: r.stale ? "var(--warning-text)" : "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {r.upd ? `${md(r.upd)} 업데이트${r.stale ? ` · ${dayDiff(r.upd, today)}일 전` : ""}` : "업데이트 기록 없음"}
+                      </span>
+                      {quickOn
+                        ? <button type="button" style={smallBtn} onClick={() => setInvQuick(null)}>취소</button>
+                        : <button type="button" style={smallBtn} onClick={() => setInvQuick({ id: inv.id, val: String(Math.round(r.cur)) })}>평가액 수정</button>}
+                      <button type="button" onClick={() => startEditInv(inv)} title="투자 정보 수정" aria-label="투자 정보 수정"
+                        style={{ width: 30, height: 30, minHeight: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 8, background: "transparent", color: "var(--text3)", cursor: "pointer" }}><Icon name="edit" size={14}/></button>
+                      <button type="button" onClick={() => deleteInv(inv.id)} title="투자 삭제" aria-label="투자 삭제"
+                        style={{ width: 30, height: 30, minHeight: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 8, background: "transparent", color: "var(--negative-text)", cursor: "pointer" }}><Icon name="trash" size={14}/></button>
+                    </div>
+                  </div>
+                );
+              })}
+              {!showInvForm && (
+                <button type="button" onClick={() => setShowInvForm(true)}
+                  style={{ minHeight: 200, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, border: "1.5px dashed var(--border)", borderRadius: 18, background: "transparent", color: "var(--text2)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  <span style={{ fontSize: 26, lineHeight: 1 }}>+</span>투자 추가
+                </button>
+              )}
+            </div>
+          )}
+          <style>{`
+            .inv-top { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; }
+            .inv-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding-top: 14px; border-top: 1px solid var(--divider); }
+            .inv-kpis > div { display: flex; flex-direction: column; gap: 3px; padding: 0 18px; border-left: 1px solid var(--divider); min-width: 0; }
+            .inv-kpis > div:first-child { padding-left: 0; border-left: none; }
+            .inv-kpis span { font-size: 11.5px; font-weight: 700; color: var(--text3); }
+            .inv-kpis small { font-weight: 600; opacity: 0.8; }
+            .inv-kpis b { font-size: 17px; font-weight: 800; color: var(--text1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+            .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+            @media (max-width: 1000px) { .inv-top { grid-template-columns: minmax(0, 1fr); } }
+            @media (max-width: 520px) {
+              .inv-kpis { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+              .inv-kpis > div { padding: 0; border-left: none; }
+              .inv-grid { grid-template-columns: minmax(0, 1fr); }
+            }
+          `}</style>
+        </>);
+      })()}
 
       {/* 4) 미수금 회수 (장부 자동 연동) */}
       {subTab === "ar" && (<>
