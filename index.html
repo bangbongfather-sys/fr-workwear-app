@@ -12939,6 +12939,16 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const [showCfForm, setShowCfForm] = useState(false);
   const [cfDraft, setCfDraft] = useState({ accountId:"", client:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
   const [cfClientFilter, setCfClientFilter] = useState(""); // 거래처별 합산 보기 — 선택된 거래처
+  // ── 통장 관리 화면 상태 ──
+  // 고른 통장·기간은 다음에 들어와도 그대로 (탭을 오가며 보는 화면이라)
+  const [acctFocus, setAcctFocus] = useState(() => load("frw_acct_focus", "all")); // "all" | 계좌 id
+  const [cfPeriod, setCfPeriod] = useState(() => load("frw_cf_period", "month"));  // month | 3m | all
+  const [cfKind, setCfKind] = useState("all");                                      // all | in | out
+  const [cfSearch, setCfSearch] = useState("");
+  const [cfLimit, setCfLimit] = useState(60);                                       // 피드에 그리는 건수 (더 보기로 늘림)
+  const [showCfTable, setShowCfTable] = useState(false);                            // 거래처별 전체 합산 표
+  useEffect(() => { save("frw_acct_focus", acctFocus); }, [acctFocus]);
+  useEffect(() => { save("frw_cf_period", cfPeriod); }, [cfPeriod]);
   // 거래처 검색 후보 — 거래처(clients)+공급처(suppliers)+기존 현금흐름 거래처명 통합
   const cfClientOptions = React.useMemo(() => Array.from(new Set([
     ...clients.map(c => c.name),
@@ -13197,348 +13207,432 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
       )}
 
       {/* 2) 통장 관리 */}
-      {subTab === "accounts" && (<>
-        <div className="card">
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-              <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>통장/계좌 관리</span></div>
-              {accounts.length > 0 && (
-                <span style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 10px",borderRadius:100,background:"rgba(16,185,129,0.12)",color:"#00B493",fontSize:11,fontWeight:700}}>
-                  <span style={{width:6,height:6,borderRadius:"50%",background:"currentColor"}}/>
-                  {accounts.length}개 계좌 · 총 {Math.round(totalBank).toLocaleString()}원
+      {subTab === "accounts" && (() => {
+        // ── 통장 관리: 통장 카드 + 날짜별 거래 피드 (디자인 제안 2) ──
+        const focusAcc = acctFocus !== "all" ? accounts.find(a => a.id === acctFocus) : null;
+        const focusId = focusAcc ? focusAcc.id : "all";
+        const now = new Date();
+        const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+        const thisYM = ymd(now).slice(0, 7);
+        const since90 = ymd(new Date(now.getTime() - 89 * 86400000));
+        const amtOf = (cf) => parseFloat(cf.amount) || 0;
+        const signed = (cf) => cf.type === "입금" ? amtOf(cf) : -amtOf(cf);
+        const tracksAccounts = cashFlows.some(c => c.accountId);
+        const shortWon = (n) => { const a = Math.abs(n); return a >= 1e8 ? `${(a/1e8).toFixed(a >= 1e9 ? 0 : 1)}억` : a >= 1e4 ? `${Math.round(a/1e4).toLocaleString()}만` : Math.round(a).toLocaleString(); };
+        const hexOk = (c) => /^#[0-9a-fA-F]{6}$/.test(c || "") ? c : "#DB6B2E";
+
+        // 잔액 흐름 — 지금 잔액에서 기록한 거래를 하루씩 되돌려 최근 30일 곡선을 만든다
+        // (통장을 골라 기록한 거래만 잔액을 움직이므로 그 거래만 쓴다)
+        const balanceSeries = (ids, current) => {
+          const idSet = new Set(ids);
+          const byDay = {};
+          cashFlows.forEach(cf => { if (cf.accountId && idSet.has(cf.accountId) && cf.date) byDay[cf.date] = (byDay[cf.date] || 0) + signed(cf); });
+          const pts = []; let bal = current;
+          for (let i = 0; i < 30; i++) {
+            const d = ymd(new Date(now.getTime() - i * 86400000));
+            pts.unshift(bal);
+            bal -= (byDay[d] || 0);
+          }
+          return pts;
+        };
+        const spark = (pts, stroke) => {
+          const mn = Math.min(...pts), mx = Math.max(...pts), span = mx - mn || 1;
+          const flat = mx === mn;
+          const p = pts.map((v, i) => `${(i / (pts.length - 1) * 240).toFixed(1)},${flat ? 18 : (32 - (v - mn) / span * 28).toFixed(1)}`).join(" ");
+          return (
+            <svg width="100%" height="34" viewBox="0 0 240 36" preserveAspectRatio="none" aria-hidden="true" style={{ display: "block" }}>
+              <polyline points={p} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"/>
+            </svg>
+          );
+        };
+        const monthNet = (ids) => cashFlows.filter(cf => cf.accountId && ids.includes(cf.accountId) && (cf.date || "").startsWith(thisYM)).reduce((s, cf) => s + signed(cf), 0);
+        const lastTx = (id) => cashFlows.filter(cf => cf.accountId === id && cf.date).reduce((m, cf) => cf.date > m ? cf.date : m, "");
+
+        // ── 피드 범위: 통장 → 기간 → 입출금 → 거래처 필터 → 검색 ──
+        const periodOk = (cf) => cfPeriod === "all" ? true : cfPeriod === "month" ? (cf.date || "").startsWith(thisYM) : (cf.date || "") >= since90;
+        const periodLabel = cfPeriod === "month" ? `${now.getMonth()+1}월` : cfPeriod === "3m" ? "최근 3개월" : "전체 기간";
+        const scoped = cashFlows.filter(cf => (focusId === "all" || cf.accountId === focusId) && periodOk(cf));
+        const q = cfSearch.trim().toLowerCase();
+        const feed = scoped
+          .filter(cf => cfKind === "all" || (cfKind === "in" ? cf.type === "입금" : cf.type !== "입금"))
+          .filter(cf => !cfClientFilter || ((cf.client || "(미지정)").trim() || "(미지정)") === cfClientFilter)
+          .filter(cf => !q || [cf.client, cf.category, cf.memo].some(x => String(x || "").toLowerCase().includes(q)))
+          .sort((a, b) => (b.date || "").localeCompare(a.date || "") || String(b.id).localeCompare(String(a.id)));
+        const shown = feed.slice(0, cfLimit);
+        const days = [];
+        shown.forEach(cf => {
+          const last = days[days.length - 1];
+          if (last && last.date === (cf.date || "")) { last.items.push(cf); last.net += signed(cf); }
+          else days.push({ date: cf.date || "", items: [cf], net: signed(cf) });
+        });
+        const dayLabel = (d) => { if (!d) return "날짜 없음"; const [, m, dd] = d.split("-"); const w = weekdayOf(d); return `${Number(m)}월 ${Number(dd)}일${w ? ` (${w.label})` : ""}`; };
+
+        // ── 오른쪽 요약 (통장·기간 범위, 거래처 필터·검색과는 무관) ──
+        const inSum = scoped.filter(cf => cf.type === "입금").reduce((s, cf) => s + amtOf(cf), 0);
+        const outSum = scoped.filter(cf => cf.type !== "입금").reduce((s, cf) => s + amtOf(cf), 0);
+        const byClient = {};
+        scoped.forEach(cf => {
+          const k = ((cf.client || "(미지정)").trim() || "(미지정)");
+          const r = byClient[k] || (byClient[k] = { client: k, in: 0, out: 0, count: 0, lastDate: "", cats: new Set() });
+          if (cf.type === "입금") r.in += amtOf(cf); else r.out += amtOf(cf);
+          r.count++; if ((cf.date || "") > r.lastDate) r.lastDate = cf.date || "";
+          if (cf.category) r.cats.add(cf.category);
+        });
+        const clientRows = Object.values(byClient);
+        const topIn = clientRows.filter(r => r.in > 0).sort((a, b) => b.in - a.in).slice(0, 5);
+        const topOut = clientRows.filter(r => r.out > 0).sort((a, b) => b.out - a.out).slice(0, 5);
+
+        const chip = (on, label, onClick, key) => (
+          <button key={key || label} type="button" onClick={onClick}
+            style={{ height: 32, padding: "0 13px", borderRadius: 100, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, whiteSpace: "nowrap",
+              fontWeight: on ? 800 : 700, border: on ? "1.5px solid #DB6B2E" : "1px solid var(--border)",
+              background: on ? "var(--accent-tonal)" : "var(--surface)", color: on ? "var(--accent-strong)" : "var(--text2)" }}>{label}</button>
+        );
+        const iconBtn = (title, icon, onClick, danger, fg) => (
+          <button type="button" onClick={onClick} title={title} aria-label={title}
+            style={{ width: 30, height: 30, minHeight: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 8, cursor: "pointer",
+              background: fg ? "rgba(255,255,255,0.18)" : "transparent", color: fg || (danger ? "var(--negative-text)" : "var(--text3)"), fontFamily: "inherit" }}>
+            <Icon name={icon} size={14}/>
+          </button>
+        );
+        const rankList = (title, rows, key, color, barColor) => (
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{title}</div>
+              <span style={{ fontSize: 12, color: "var(--text3)" }}>{periodLabel}</span>
+            </div>
+            {rows.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "6px 0" }}>없음</div> : rows.map(r => {
+              const max = rows[0][key] || 1;
+              const on = cfClientFilter === r.client;
+              return (
+                <button key={r.client} type="button" onClick={() => { setCfClientFilter(on ? "" : r.client); setCfLimit(60); }}
+                  title={on ? "거래처 필터 해제" : "이 거래처 거래만 보기"}
+                  style={{ display: "flex", flexDirection: "column", gap: 4, border: "none", background: on ? "var(--accent-tonal)" : "transparent", borderRadius: 8, padding: "4px 6px", margin: "0 -6px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", minHeight: 0 }}>
+                  <span style={{ display: "flex", justifyContent: "space-between", gap: 8, width: "100%", fontSize: 13 }}>
+                    <span style={{ fontWeight: 700, color: "var(--text1)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {r.client}{r.cats.size > 0 && <span style={{ fontWeight: 600, color: "var(--text3)", marginLeft: 6 }}>{[...r.cats][0]}</span>}
+                    </span>
+                    <b style={{ color, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmt(r[key])}</b>
+                  </span>
+                  <span style={{ display: "block", height: 8, borderRadius: 4, background: "var(--surface2)", width: "100%" }}>
+                    <span style={{ display: "block", width: `${Math.max(2, r[key] / max * 100)}%`, height: "100%", borderRadius: 4, background: barColor }} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        );
+
+        const totalCardOn = focusId === "all";
+        const allNet = monthNet(accounts.map(a => a.id));
+        const allIn = cashFlows.filter(cf => cf.accountId && (cf.date || "").startsWith(thisYM) && cf.type === "입금").reduce((s, cf) => s + amtOf(cf), 0);
+        const allOut = cashFlows.filter(cf => cf.accountId && (cf.date || "").startsWith(thisYM) && cf.type !== "입금").reduce((s, cf) => s + amtOf(cf), 0);
+
+        return (<>
+          {/* ── 통장 카드 ── */}
+          <div className="acct-cards">
+            <button type="button" onClick={() => { setAcctFocus("all"); setCfLimit(60); }} aria-pressed={totalCardOn}
+              style={{ display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 16, padding: "18px 20px", minHeight: 176, border: "none", borderRadius: 18, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                background: "#191F28", color: "#FFFFFF", boxShadow: totalCardOn ? "0 0 0 3px #DB6B2E" : "none" }}>
+              <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#A8B0BB" }}>전체 통장 {accounts.length}개</span>
+                {totalCardOn && <span className="acct-seeing" style={{ fontSize: 11.5, fontWeight: 800, padding: "3px 9px", borderRadius: 10, background: "rgba(255,255,255,0.14)", whiteSpace: "nowrap" }}>보는 중</span>}
+              </span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span className="acct-total-num" style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.8, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{fmt(totalBank)}</span>
+                <span style={{ fontSize: 12.5, color: "#C7CDD5" }}>
+                  {tracksAccounts ? <>{now.getMonth()+1}월 <b style={{ color: "#6EE7C8" }}>+{fmt(allIn)}</b> · <b style={{ color: "#FF9AA4" }}>−{fmt(allOut)}</b></> : "통장별 거래를 기록하면 이번 달 증감이 보입니다"}
                 </span>
-              )}
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              <button onClick={()=>setShowCfForm(v=>!v)} style={{padding:"8px 14px",fontSize:12,fontWeight:600,color:"var(--text2)",background:"none",border:"1px solid var(--border)",borderRadius:8,cursor:"pointer",fontFamily:"inherit"}}>{showCfForm?"닫기":"+ 거래 입력"}</button>
-              <button onClick={()=>setShowAcctForm(v=>!v)} className="btn-primary" style={{padding:"8px 16px",fontSize:13}}>{showAcctForm?"닫기":"+ 계좌 추가"}</button>
-            </div>
+              </span>
+            </button>
+
+            {accounts.map(a => {
+              const bal = parseFloat(a.balance) || 0;
+              if (editAcctId === a.id && editAcctDraft) {
+                return (
+                  <div key={a.id} className="card" style={{ display: "flex", flexDirection: "column", gap: 6, minHeight: 176, padding: 14 }}>
+                    <input placeholder="계좌명" value={editAcctDraft.name} onChange={e=>setEditAcctDraft(d=>({...d,name:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px"}}/>
+                    <input placeholder="은행" value={editAcctDraft.bank} onChange={e=>setEditAcctDraft(d=>({...d,bank:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px"}}/>
+                    <input type="number" placeholder="잔액" value={editAcctDraft.balance} onChange={e=>setEditAcctDraft(d=>({...d,balance:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input type="color" aria-label="카드 색" value={hexOk(editAcctDraft.color)} onChange={e=>setEditAcctDraft(d=>({...d,color:e.target.value}))} style={{width:44,height:34,padding:2}}/>
+                      <input placeholder="메모" value={editAcctDraft.memo||""} onChange={e=>setEditAcctDraft(d=>({...d,memo:e.target.value}))} style={{flex:1,height:34,fontSize:12,padding:"0 8px"}}/>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={saveEditAcct} className="btn-primary" style={{ flex: 1, padding: 6, fontSize: 12 }}>저장</button>
+                      <button onClick={() => { setEditAcctId(null); setEditAcctDraft(null); }} style={{ flex: 1, padding: 6, fontSize: 12, border: "1px solid var(--border)", background: "none", borderRadius: 8, fontFamily: "inherit", color: "var(--text2)", cursor: "pointer" }}>취소</button>
+                    </div>
+                  </div>
+                );
+              }
+              const bg = hexOk(a.color);
+              const fg = tmTextOn(bg);
+              const on = focusId === a.id;
+              const net = monthNet([a.id]);
+              const lt = lastTx(a.id);
+              const idle = tracksAccounts && (!lt || lt < since90);
+              const foot = net !== 0 ? `${now.getMonth()+1}월 ${net > 0 ? "+" : "−"}${shortWon(net)}` : idle ? "90일째 변동 없음" : (a.memo || "");
+              return (
+                <div key={a.id} style={{ position: "relative", minHeight: 176, borderRadius: 18, boxShadow: on ? "0 0 0 3px #191F28" : "none" }}>
+                  <button type="button" onClick={() => { setAcctFocus(on ? "all" : a.id); setCfLimit(60); }} aria-pressed={on}
+                    title={on ? "전체 통장 보기로" : `${a.name} 거래만 보기`}
+                    style={{ width: "100%", height: "100%", minHeight: 176, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 10, padding: "18px 20px", border: "none", borderRadius: 18, cursor: "pointer", fontFamily: "inherit", textAlign: "left", background: bg, color: fg }}>
+                    <span style={{ display: "flex", flexDirection: "column", gap: 2, paddingRight: 64, minWidth: 0 }}>
+                      <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.85 }}>{a.bank || "—"}{totalBank > 0 && bal > 0 ? ` · ${Math.round(bal / totalBank * 100)}%` : ""}</span>
+                    </span>
+                    {spark(balanceSeries([a.id], bal), fg === "#FFFFFF" ? "rgba(255,255,255,0.85)" : "rgba(25,31,40,0.6)")}
+                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                      <span style={{ fontSize: 21, fontWeight: 800, letterSpacing: -0.5, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(bal)}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.92, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{foot}</span>
+                    </span>
+                  </button>
+                  <span style={{ position: "absolute", top: 12, right: 10, display: "inline-flex", gap: 2 }}>
+                    {iconBtn("계좌 수정", "edit", () => startEditAcct(a), false, fg)}
+                    {iconBtn("계좌 삭제", "close", () => deleteAcct(a.id), false, fg)}
+                  </span>
+                </div>
+              );
+            })}
+
+            <button type="button" className="acct-add" onClick={() => setShowAcctForm(v => !v)}
+              style={{ minHeight: 176, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, border: "1.5px dashed var(--border)", borderRadius: 18, background: showAcctForm ? "var(--surface2)" : "transparent", color: "var(--text2)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              <span style={{ fontSize: 26, lineHeight: 1 }}>{showAcctForm ? "×" : "+"}</span>{showAcctForm ? "닫기" : "계좌 추가"}
+            </button>
           </div>
 
-          {/* 총 잔액 강조 카드 */}
-          {accounts.length > 0 && (
-            <div style={{
-              background: "var(--positive-bg)",
-              border: "1px solid rgba(16,185,129,0.2)",
-              borderRadius: 14,
-              padding: "16px 20px",
-              marginBottom: 14,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: 12,
-            }}>
-              <div>
-                <div style={{fontSize:11,fontWeight:700,color:"#00B493",letterSpacing:0.4,textTransform:"uppercase",marginBottom:4}}>전 계좌 총 잔액</div>
-                <div className="kpi-num" style={{color:"var(--text1)",letterSpacing:-0.5,lineHeight:1}}>
-                  {Math.round(totalBank).toLocaleString()}<span style={{fontSize:14,marginLeft:4,color:"var(--text2)",fontWeight:600}}>원</span>
-                </div>
-              </div>
-              <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-                {(() => {
-                  const positive = accounts.filter(a => (parseFloat(a.balance)||0) > 0);
-                  const zeroOrNeg = accounts.filter(a => (parseFloat(a.balance)||0) <= 0);
-                  const maxAcc = positive.length > 0 ? positive.reduce((m, a) => (parseFloat(a.balance)||0) > (parseFloat(m.balance)||0) ? a : m) : null;
-                  return (
-                    <>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,marginBottom:2}}>활성 계좌</div>
-                        <div style={{fontSize:15,fontWeight:700,color:"var(--text1)"}}>{positive.length}<span style={{fontSize:11,color:"var(--text2)",marginLeft:2,fontWeight:500}}>/ {accounts.length}개</span></div>
-                      </div>
-                      {maxAcc && (
-                        <div style={{textAlign:"right",borderLeft:"1px solid var(--border)",paddingLeft:14}}>
-                          <div style={{fontSize:10,color:"var(--text3)",fontWeight:600,marginBottom:2}}>최대 잔액 계좌</div>
-                          <div style={{fontSize:13,fontWeight:700,color:maxAcc.color||"#00B493"}}>{maxAcc.name} · {Math.round(parseFloat(maxAcc.balance)||0).toLocaleString()}원</div>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
-
-          {/* 계좌 추가 폼 */}
           {showAcctForm && (
-            <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 220px 60px",gap:8,marginBottom:8}}>
+            <div className="card" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>새 계좌</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
                 <input placeholder="계좌명 * (예: 주거래통장)" value={acctDraft.name} onChange={e=>setAcctDraft(d=>({...d,name:e.target.value}))}/>
                 <input placeholder="은행명 (예: 국민)" value={acctDraft.bank} onChange={e=>setAcctDraft(d=>({...d,bank:e.target.value}))}/>
                 <input type="number" placeholder="현재 잔액 (원)" value={acctDraft.balance} onChange={e=>setAcctDraft(d=>({...d,balance:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
-                <input type="color" value={acctDraft.color} onChange={e=>setAcctDraft(d=>({...d,color:e.target.value}))} style={{height:44,padding:4,cursor:"pointer"}}/>
               </div>
-              <div style={{display:"flex",gap:8}}>
-                <input placeholder="메모" value={acctDraft.memo} onChange={e=>setAcctDraft(d=>({...d,memo:e.target.value}))} style={{flex:1}}/>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text2)" }}>카드 색
+                  <input type="color" value={hexOk(acctDraft.color)} onChange={e=>setAcctDraft(d=>({...d,color:e.target.value}))} style={{width:48,height:44,padding:4,cursor:"pointer"}}/>
+                </label>
+                <input placeholder="메모" value={acctDraft.memo} onChange={e=>setAcctDraft(d=>({...d,memo:e.target.value}))} style={{flex:1,minWidth:160}}/>
                 <button onClick={addAcct} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>등록</button>
               </div>
             </div>
           )}
 
-          {/* 거래 입력 폼 */}
-          {showCfForm && (
-            <div style={{background:"var(--surface2)",borderRadius:12,padding:16,marginBottom:14}}>
-              <div style={{display:"grid",gridTemplateColumns:"1.6fr 100px 180px 140px 1fr auto",gap:8}}>
-                <ComboBox
-                  value={cfDraft.client}
-                  placeholder="거래처명 검색·선택 *"
-                  inputStyle={{fontWeight:600}}
-                  groups={[{ label:"거래처", options: cfClientOptions.map(n=>({ value:n, label:n })) }]}
-                  onChange={text=>setCfDraft(d=>({...d,client:text}))}
-                  onPick={o=>setCfDraft(d=>({...d,client:o.value}))}
-                  emptyText="목록에 없음 — 입력값으로 새 거래처 저장"
-                />
-                <select value={cfDraft.type} onChange={e=>setCfDraft(d=>({...d,type:e.target.value}))} style={{height:44}}>
-                  <option value="입금">입금</option><option value="출금">출금</option>
+          {/* ── 거래 피드 + 오른쪽 요약 ── */}
+          <div className="acct-2col">
+            <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)", marginRight: 4 }}>거래 내역</div>
+                {chip(cfKind === "all", "전체", () => { setCfKind("all"); setCfLimit(60); })}
+                {chip(cfKind === "in", "들어온 돈", () => { setCfKind("in"); setCfLimit(60); })}
+                {chip(cfKind === "out", "나간 돈", () => { setCfKind("out"); setCfLimit(60); })}
+                <select value={cfPeriod} onChange={e => { setCfPeriod(e.target.value); setCfLimit(60); }} aria-label="기간"
+                  style={{ width: "auto", flex: "0 0 auto", height: 32, minHeight: 32, padding: "0 10px", borderRadius: 100, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>
+                  <option value="month">이번 달</option>
+                  <option value="3m">최근 3개월</option>
+                  <option value="all">전체 기간</option>
                 </select>
-                <input type="number" placeholder="금액 (원) *" value={cfDraft.amount} onChange={e=>setCfDraft(d=>({...d,amount:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
-                <input type="date" value={cfDraft.date} onChange={e=>setCfDraft(d=>({...d,date:e.target.value}))}/>
-                <input placeholder="분류/메모" value={cfDraft.category} onChange={e=>setCfDraft(d=>({...d,category:e.target.value}))}/>
-                <button onClick={addCf} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>저장</button>
+                {/* 검색과 입력 버튼은 한 덩어리로 — 좁아져도 버튼만 따로 떨어지지 않게 */}
+                <span style={{ marginLeft: "auto", display: "inline-flex", gap: 8, flex: "1 1 260px", justifyContent: "flex-end", minWidth: 0 }}>
+                  <input value={cfSearch} onChange={e => { setCfSearch(e.target.value); setCfLimit(60); }} placeholder="거래처·분류 검색" aria-label="거래처·분류 검색"
+                    style={{ flex: "1 1 120px", width: "auto", maxWidth: 220, minWidth: 0, height: 36, minHeight: 36, fontSize: 13, padding: "0 12px", borderRadius: 10 }} />
+                  <button type="button" className="btn-primary"
+                    onClick={() => { if (!showCfForm && focusAcc) setCfDraft(d => ({ ...d, accountId: focusAcc.id })); setShowCfForm(v => !v); }}
+                    style={{ height: 36, padding: "0 14px", fontSize: 13, whiteSpace: "nowrap", flexShrink: 0 }}>{showCfForm ? "닫기" : "+ 거래 입력"}</button>
+                </span>
               </div>
-              {/* 두 번째 줄: 계좌 (선택 사항) */}
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
-                <select value={cfDraft.accountId} onChange={e=>setCfDraft(d=>({...d,accountId:e.target.value}))} style={{height:40,fontSize:12}}>
-                  <option value="">계좌 (선택) — 비워두면 잔액 변동 없음</option>
-                  {accounts.map(a=><option key={a.id} value={a.id}>{a.name}{a.bank?` (${a.bank})`:""}</option>)}
-                </select>
-                <input placeholder="비고 (선택)" value={cfDraft.memo} onChange={e=>setCfDraft(d=>({...d,memo:e.target.value}))} style={{height:40,fontSize:12}}/>
-              </div>
-              <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>거래처명 입력 후 저장 → 계좌가 선택돼 있으면 잔액도 자동 가감됩니다.</div>
-            </div>
-          )}
 
-          {/* 통장 카드 그리드 */}
-          {accounts.length === 0 ? (
-            <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,lineHeight:1.8}}>등록된 통장이 없습니다.<br/>+ 계좌 추가 버튼으로 시작하세요</div>
-          ) : (
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(260px, 1fr))",gap:12,marginBottom:14}}>
-              {accounts.map(a => {
-                const isEditing = editAcctId === a.id;
-                if (isEditing && editAcctDraft) {
-                  return (
-                    <div key={a.id} className="card" style={{borderLeft:`4px solid ${editAcctDraft.color||"#DB6B2E"}`}}>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr",gap:6}}>
-                        <input placeholder="계좌명" value={editAcctDraft.name} onChange={e=>setEditAcctDraft(d=>({...d,name:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px"}}/>
-                        <input placeholder="은행" value={editAcctDraft.bank} onChange={e=>setEditAcctDraft(d=>({...d,bank:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px"}}/>
-                        <input type="number" value={editAcctDraft.balance} onChange={e=>setEditAcctDraft(d=>({...d,balance:e.target.value}))} style={{height:34,fontSize:13,padding:"0 8px",textAlign:"right"}}/>
-                        <input type="color" value={editAcctDraft.color} onChange={e=>setEditAcctDraft(d=>({...d,color:e.target.value}))} style={{height:34,padding:2}}/>
-                        <input placeholder="메모" value={editAcctDraft.memo||""} onChange={e=>setEditAcctDraft(d=>({...d,memo:e.target.value}))} style={{height:34,fontSize:12,padding:"0 8px"}}/>
-                        <div style={{display:"flex",gap:4}}>
-                          <button onClick={saveEditAcct} className="btn-primary" style={{flex:1,padding:"6px",fontSize:12}}>저장</button>
-                          <button onClick={()=>{setEditAcctId(null);setEditAcctDraft(null);}} style={{flex:1,padding:"6px",fontSize:12,border:"1px solid var(--border)",background:"none",borderRadius:8,fontFamily:"inherit"}}>취소</button>
-                        </div>
-                      </div>
+              {(focusAcc || cfClientFilter) && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {focusAcc && <button type="button" onClick={() => setAcctFocus("all")} style={{ height: 28, padding: "0 10px", borderRadius: 100, border: "none", background: "var(--surface2)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>통장: {focusAcc.name} ×</button>}
+                  {cfClientFilter && <button type="button" onClick={() => setCfClientFilter("")} style={{ height: 28, padding: "0 10px", borderRadius: 100, border: "none", background: "var(--surface2)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>거래처: {cfClientFilter} ×</button>}
+                </div>
+              )}
+
+              {showCfForm && (
+                <div style={{ background: "var(--surface2)", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+                    <div style={{ gridColumn: "span 2", minWidth: 0 }}>
+                      <ComboBox
+                        value={cfDraft.client}
+                        placeholder="거래처명 검색·선택 *"
+                        inputStyle={{fontWeight:600}}
+                        groups={[{ label:"거래처", options: cfClientOptions.map(n=>({ value:n, label:n })) }]}
+                        onChange={text=>setCfDraft(d=>({...d,client:text}))}
+                        onPick={o=>setCfDraft(d=>({...d,client:o.value}))}
+                        emptyText="목록에 없음 — 입력값으로 새 거래처 저장"
+                      />
                     </div>
-                  );
-                }
-                return (
-                  <div key={a.id} className="card" style={{borderLeft:`4px solid ${a.color||"#DB6B2E"}`,position:"relative"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
-                      <div>
-                        <div style={{fontSize:11,color:"var(--text3)",fontWeight:600}}>{a.bank||"—"}</div>
-                        <div style={{fontSize:14,fontWeight:700,color:"var(--text1)"}}>{a.name}</div>
-                      </div>
-                      <div style={{display:"flex",gap:4}}>
-                        <button onClick={()=>startEditAcct(a)} title="수정" style={{background:"none",border:"none",cursor:"pointer",color:"#DB6B2E",fontSize:13}}><Icon name="edit" size={14}/></button>
-                        <button onClick={()=>deleteAcct(a.id)} title="삭제" style={{background:"none",border:"none",cursor:"pointer",color:"#F04452",fontSize:13}}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
-                      </div>
-                    </div>
-                    <div style={{fontSize:22,fontWeight:800,color:a.color||"#DB6B2E",letterSpacing:-0.3}}>{fmt(a.balance)}<span style={{fontSize:12,marginLeft:2,color:"var(--text2)"}}>원</span></div>
-                    {a.memo && <div style={{fontSize:11,color:"var(--text3)",marginTop:6}}>{a.memo}</div>}
+                    <select value={cfDraft.type} onChange={e=>setCfDraft(d=>({...d,type:e.target.value}))} style={{height:44}} aria-label="구분">
+                      <option value="입금">입금</option><option value="출금">출금</option>
+                    </select>
+                    <input type="number" placeholder="금액 (원) *" value={cfDraft.amount} onChange={e=>setCfDraft(d=>({...d,amount:e.target.value}))} style={{textAlign:"right",fontSize:15,fontWeight:600}}/>
+                    <input type="date" value={cfDraft.date} onChange={e=>setCfDraft(d=>({...d,date:e.target.value}))} aria-label="날짜"/>
+                    <input placeholder="분류 (예: 원단)" value={cfDraft.category} onChange={e=>setCfDraft(d=>({...d,category:e.target.value}))}/>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* 그래프 */}
-          {accounts.length > 0 && (
-            <div style={{height:Math.max(140, accounts.length*40),position:"relative",marginTop:8}}>
-              <canvas ref={accBarRef}/>
-            </div>
-          )}
-        </div>
-
-        {/* 거래처별 합산 */}
-        {cashFlows.length > 0 && (() => {
-          const byClient = {};
-          cashFlows.forEach(cf => {
-            const key = (cf.client || "(미지정)").trim() || "(미지정)";
-            if (!byClient[key]) byClient[key] = { client: key, in: 0, out: 0, count: 0, lastDate: "" };
-            const amt = parseFloat(cf.amount) || 0;
-            if (cf.type === "입금") byClient[key].in += amt;
-            else byClient[key].out += amt;
-            byClient[key].count++;
-            if (!byClient[key].lastDate || (cf.date || "") > byClient[key].lastDate) byClient[key].lastDate = cf.date || "";
-          });
-          const rows = Object.values(byClient).sort((a,b) => (b.in + b.out) - (a.in + a.out));
-          const totalIn = rows.reduce((s,r) => s + r.in, 0);
-          const totalOut = rows.reduce((s,r) => s + r.out, 0);
-          return (
-            <div className="card">
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
-                <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="clients" size={14}/>거래처별 합산 ({rows.length}곳)</span></div>
-                  {cfClientFilter && (
-                    <button onClick={()=>setCfClientFilter("")} style={{padding:"3px 10px",borderRadius:100,border:"1px solid var(--border)",background:"var(--surface2)",color:"var(--text2)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>↺ 필터 해제 ({cfClientFilter})</button>
-                  )}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr)) auto", gap: 8 }}>
+                    <select value={cfDraft.accountId} onChange={e=>setCfDraft(d=>({...d,accountId:e.target.value}))} style={{height:44,fontSize:12.5}} aria-label="계좌">
+                      <option value="">계좌 (선택) — 비워두면 잔액 변동 없음</option>
+                      {accounts.map(a=><option key={a.id} value={a.id}>{a.name}{a.bank?` (${a.bank})`:""}</option>)}
+                    </select>
+                    <input placeholder="비고 (선택)" value={cfDraft.memo} onChange={e=>setCfDraft(d=>({...d,memo:e.target.value}))} style={{height:44,fontSize:12.5}}/>
+                    <button onClick={addCf} className="btn-primary" style={{padding:"0 22px",height:44,fontSize:13}}>저장</button>
+                  </div>
+                  <div style={{fontSize:11.5,color:"var(--text3)"}}>계좌를 고르고 저장하면 그 통장 잔액도 자동으로 더하고 뺍니다.</div>
                 </div>
-                <div style={{display:"flex",gap:14,fontSize:12}}>
-                  <span style={{color:"var(--text2)"}}>입금 합계 <strong style={{color:"#00B493",marginLeft:4,fontSize:13}}>+{Math.round(totalIn).toLocaleString()}원</strong></span>
-                  <span style={{color:"var(--text2)"}}>출금 합계 <strong style={{color:"#EF4444",marginLeft:4,fontSize:13}}>-{Math.round(totalOut).toLocaleString()}원</strong></span>
-                  <span style={{color:"var(--text2)"}}>순잔 <strong style={{color: totalIn-totalOut>=0?"#00B493":"#EF4444",marginLeft:4,fontSize:13}}>{(totalIn-totalOut>=0?"+":"")}{Math.round(totalIn-totalOut).toLocaleString()}원</strong></span>
+              )}
+
+              {/* 편집용 거래처 목록 */}
+              <datalist id="cf-edit-client-list">
+                {cfClientOptions.map(n => <option key={n} value={n}/>)}
+              </datalist>
+
+              {feed.length === 0 ? (
+                <div style={{ padding: "34px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7, border: "1.5px dashed var(--border)", borderRadius: 12 }}>
+                  {cashFlows.length === 0 ? <>아직 기록한 거래가 없습니다.<br/>「+ 거래 입력」으로 첫 거래를 적어 보세요.</>
+                    : <>{periodLabel}에 조건에 맞는 거래가 없습니다.
+                      {cfPeriod !== "all" && <><br/><button type="button" onClick={() => setCfPeriod("all")} style={{ marginTop: 8, height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>전체 기간 보기</button></>}</>}
+                </div>
+              ) : days.map(d => (
+                <div key={d.date} style={{ display: "flex", flexDirection: "column" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "8px 4px 6px", borderBottom: "1px solid var(--divider)" }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text2)" }}>{dayLabel(d.date)}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: d.net >= 0 ? "var(--positive-text)" : "var(--negative-text)", fontVariantNumeric: "tabular-nums" }}>{d.net >= 0 ? "+" : "−"}{fmt(Math.abs(d.net))}</span>
+                  </div>
+                  {d.items.map(cf => {
+                    const isIn = cf.type === "입금";
+                    const acc = accounts.find(a => a.id === cf.accountId);
+                    if (editCfId === cf.id && editCfDraft) {
+                      return (
+                        <div key={cf.id} style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", padding: "10px 4px", borderBottom: "1px solid var(--divider)", background: "var(--accent-tonal)", borderRadius: 8 }}>
+                          <input type="date" value={editCfDraft.date||""} onChange={e=>setEditCfDraft(x=>({...x,date:e.target.value}))} aria-label="날짜" style={{height:34,minHeight:34,fontSize:12,padding:"0 6px",width:140}}/>
+                          <select value={editCfDraft.type} onChange={e=>setEditCfDraft(x=>({...x,type:e.target.value}))} aria-label="구분" style={{height:34,minHeight:34,fontSize:12,padding:"0 6px",fontWeight:700}}>
+                            <option value="입금">입금</option><option value="출금">출금</option>
+                          </select>
+                          <input list="cf-edit-client-list" placeholder="거래처명 *" value={editCfDraft.client||""} onChange={e=>setEditCfDraft(x=>({...x,client:e.target.value}))} style={{height:34,minHeight:34,fontSize:13,padding:"0 8px",fontWeight:600,flex:"1 1 140px"}}/>
+                          <input placeholder="분류" value={editCfDraft.category||""} onChange={e=>setEditCfDraft(x=>({...x,category:e.target.value}))} style={{height:34,minHeight:34,fontSize:12,padding:"0 8px",width:110}}/>
+                          <input placeholder="메모" value={editCfDraft.memo||""} onChange={e=>setEditCfDraft(x=>({...x,memo:e.target.value}))} style={{height:34,minHeight:34,fontSize:12,padding:"0 8px",width:120}}/>
+                          <input type="number" value={editCfDraft.amount} onChange={e=>setEditCfDraft(x=>({...x,amount:e.target.value}))} aria-label="금액" style={{height:34,minHeight:34,fontSize:13,padding:"0 8px",textAlign:"right",fontWeight:700,width:130}}/>
+                          <select value={editCfDraft.accountId||""} onChange={e=>setEditCfDraft(x=>({...x,accountId:e.target.value}))} aria-label="계좌" style={{height:34,minHeight:34,fontSize:12,padding:"0 6px"}}>
+                            <option value="">— 계좌 —</option>
+                            {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                          </select>
+                          <button onClick={saveEditCf} className="btn-primary" style={{height:34,padding:"0 14px",fontSize:12.5}}>저장</button>
+                          <button onClick={cancelEditCf} style={{height:34,padding:"0 12px",fontSize:12.5,border:"1px solid var(--border)",background:"var(--surface)",borderRadius:8,color:"var(--text2)",cursor:"pointer",fontFamily:"inherit"}}>취소</button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={cf.id} className="cf-feed-row" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 4px", borderBottom: "1px solid var(--divider)" }}>
+                        <span aria-hidden="true" style={{ display: "inline-flex", width: 36, height: 36, flexShrink: 0, alignItems: "center", justifyContent: "center", borderRadius: 11, fontSize: 15, fontWeight: 800,
+                          background: isIn ? "rgba(0,180,147,0.12)" : "rgba(240,68,82,0.10)", color: isIn ? "var(--positive-text)" : "var(--negative-text)" }}>{isIn ? "↓" : "↑"}</span>
+                        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cf.client || <span style={{ color: "var(--text3)", fontWeight: 500 }}>(미지정)</span>}</span>
+                          <span style={{ fontSize: 12, color: "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {[cf.category, cf.memo, acc ? acc.name : cf.accountId ? "(삭제된 통장)" : "통장 미지정"].filter(Boolean).join(" · ")}
+                          </span>
+                        </span>
+                        <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", color: isIn ? "var(--positive-text)" : "var(--text1)" }}>{isIn ? "+" : "−"}{fmt(cf.amount)}</span>
+                        <span className="cf-feed-actions" style={{ display: "inline-flex", gap: 0 }}>
+                          {iconBtn("거래 수정", "edit", () => startEditCf(cf))}
+                          {iconBtn("거래 삭제", "trash", () => deleteCf(cf.id), true)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+              {feed.length > shown.length && (
+                <button type="button" onClick={() => setCfLimit(n => n + 60)}
+                  style={{ alignSelf: "center", height: 36, padding: "0 16px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  더 보기 ({shown.length} / {feed.length}건)
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+              <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{periodLabel} 들어오고 나간 돈{focusAcc ? <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 6 }}>{focusAcc.name}</span> : null}</div>
+                {[["들어옴", inSum, "#00B493", "var(--positive-text)", "+"], ["나감", outSum, "#F04452", "var(--negative-text)", "−"]].map(([label, v, bar, color, sign]) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ width: 44, fontSize: 12, fontWeight: 700, color: "var(--text3)" }}>{label}</span>
+                    <span style={{ flex: 1, height: 14, borderRadius: 7, background: "var(--surface2)", overflow: "hidden" }}>
+                      <span style={{ display: "block", width: `${Math.max(inSum, outSum) > 0 ? v / Math.max(inSum, outSum) * 100 : 0}%`, height: "100%", borderRadius: 7, background: bar }} />
+                    </span>
+                    <span style={{ minWidth: 104, textAlign: "right", fontSize: 13, fontWeight: 800, color, fontVariantNumeric: "tabular-nums" }}>{sign}{fmt(v)}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 10, borderTop: "1px solid var(--divider)", fontSize: 13 }}>
+                  <span style={{ color: "var(--text3)", fontWeight: 700 }}>남은 돈</span>
+                  <b style={{ color: inSum - outSum >= 0 ? "var(--text1)" : "var(--negative-text)", fontVariantNumeric: "tabular-nums" }}>{inSum - outSum >= 0 ? "+" : "−"}{fmt(Math.abs(inSum - outSum))}</b>
                 </div>
               </div>
-              <div style={{overflowX:"auto"}}>
-                <table>
+              {rankList("많이 받은 곳", topIn, "in", "var(--positive-text)", "#00B493")}
+              {rankList("많이 나간 곳", topOut, "out", "var(--negative-text)", "#F04452")}
+              {clientRows.length > 0 && (
+                <button type="button" onClick={() => setShowCfTable(v => !v)}
+                  style={{ height: 40, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--accent-strong)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  {showCfTable ? "거래처별 전체 합산 닫기" : `거래처별 전체 합산 보기 (${clientRows.length}곳)`}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* ── 거래처별 전체 합산 (필요할 때만 펼침) ── */}
+          {showCfTable && clientRows.length > 0 && (
+            <div className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>거래처별 전체 합산 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)" }}>{periodLabel}{focusAcc ? ` · ${focusAcc.name}` : ""} · {clientRows.length}곳</span></div>
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>행을 누르면 위 거래 내역이 그 거래처로 걸러집니다</span>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table className="table-plain" style={{ width: "100%", minWidth: 620, borderCollapse: "collapse" }}>
                   <thead><tr>
                     <th>거래처</th>
-                    <th style={{textAlign:"center",width:60}}>건수</th>
-                    <th style={{textAlign:"right",width:140}}>입금 합계</th>
-                    <th style={{textAlign:"right",width:140}}>출금 합계</th>
-                    <th style={{textAlign:"right",width:140}}>순잔</th>
-                    <th style={{width:100}}>최근 거래</th>
+                    <th style={{ textAlign: "center", width: 70 }}>건수</th>
+                    <th style={{ textAlign: "right", width: 150 }}>입금 합계</th>
+                    <th style={{ textAlign: "right", width: 150 }}>출금 합계</th>
+                    <th style={{ textAlign: "right", width: 150 }}>순잔</th>
+                    <th style={{ width: 110 }}>최근 거래</th>
                   </tr></thead>
                   <tbody>
-                    {rows.map(r => {
+                    {[...clientRows].sort((a, b) => (b.in + b.out) - (a.in + a.out)).map(r => {
                       const net = r.in - r.out;
-                      const isSelected = cfClientFilter === r.client;
+                      const sel = cfClientFilter === r.client;
                       return (
-                        <tr key={r.client} onClick={()=>setCfClientFilter(isSelected ? "" : r.client)} style={{cursor:"pointer", background: isSelected ? "rgba(99,102,241,0.06)" : undefined}}>
-                          <td style={{fontWeight:700,fontSize:13}}>{r.client}</td>
-                          <td style={{textAlign:"center",fontSize:12,color:"var(--text2)"}}>{r.count}건</td>
-                          <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:r.in>0?"#00B493":"var(--text3)"}}>{r.in>0?`+${Math.round(r.in).toLocaleString()}원`:"—"}</td>
-                          <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:r.out>0?"#EF4444":"var(--text3)"}}>{r.out>0?`-${Math.round(r.out).toLocaleString()}원`:"—"}</td>
-                          <td style={{textAlign:"right",fontSize:13,fontWeight:800,color:net>=0?"#00B493":"#EF4444"}}>{net>=0?"+":""}{Math.round(net).toLocaleString()}원</td>
-                          <td style={{fontSize:11,color:"var(--text3)"}}>{r.lastDate||"—"}</td>
+                        <tr key={r.client} onClick={() => { setCfClientFilter(sel ? "" : r.client); setCfLimit(60); }} style={{ cursor: "pointer", background: sel ? "var(--accent-tonal)" : undefined }}>
+                          <td style={{ fontWeight: 700, fontSize: 13 }}>{r.client}</td>
+                          <td style={{ textAlign: "center", fontSize: 12, color: "var(--text2)" }}>{r.count}건</td>
+                          <td style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: r.in > 0 ? "var(--positive-text)" : "var(--text3)" }}>{r.in > 0 ? `+${fmt(r.in)}` : "—"}</td>
+                          <td style={{ textAlign: "right", fontSize: 13, fontWeight: 600, color: r.out > 0 ? "var(--negative-text)" : "var(--text3)" }}>{r.out > 0 ? `−${fmt(r.out)}` : "—"}</td>
+                          <td style={{ textAlign: "right", fontSize: 13, fontWeight: 800, color: net >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{net >= 0 ? "+" : "−"}{fmt(Math.abs(net))}</td>
+                          <td style={{ fontSize: 12, color: "var(--text3)" }}>{r.lastDate || "—"}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
-              <div style={{fontSize:11,color:"var(--text3)",marginTop:8}}><Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/>행을 클릭하면 아래 거래내역이 해당 거래처로 필터링됩니다.</div>
             </div>
-          );
-        })()}
-
-        {/* 거래내역 */}
-        {cashFlows.length > 0 && (() => {
-          const filtered = cfClientFilter
-            ? cashFlows.filter(cf => (cf.client || "(미지정)") === cfClientFilter)
-            : cashFlows;
-          return (
-          <div className="card">
-            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-              <span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="ledger" size={14}/>거래 내역 {cfClientFilter ? `— ${cfClientFilter} (${filtered.length}건)` : `(최근 30건)`}</span>
-              {cfClientFilter && <button onClick={()=>setCfClientFilter("")} style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border)",background:"none",color:"var(--text2)",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>전체 보기</button>}
-            </div>
-            <div style={{overflowX:"auto"}}>
-              {/* 편집용 datalist (재사용) */}
-              <datalist id="cf-edit-client-list">
-                {Array.from(new Set([
-                  ...clients.map(c => c.name),
-                  ...suppliers.map(s => s.name),
-                  ...cashFlows.map(c => c.client).filter(Boolean),
-                ])).filter(Boolean).sort().map(n => <option key={n} value={n}/>)}
-              </datalist>
-              <table>
-                <thead><tr>
-                  <th style={{width:110}}>날짜</th><th style={{width:60,textAlign:"center"}}>구분</th>
-                  <th>거래처</th><th>분류/메모</th>
-                  <th style={{textAlign:"right",width:140}}>금액</th>
-                  <th style={{width:130,fontSize:10,color:"var(--text3)"}}>계좌(참고)</th>
-                  <th style={{width:80,textAlign:"center"}}>관리</th>
-                </tr></thead>
-                <tbody>
-                  {[...filtered].sort((a,b)=>(b.date||"").localeCompare(a.date||"")).slice(0, cfClientFilter ? 1000 : 30).map(cf => {
-                    const acc = accounts.find(a=>a.id===cf.accountId);
-                    const isIn = cf.type === "입금";
-                    const isEditing = editCfId === cf.id;
-
-                    if (isEditing && editCfDraft) {
-                      const editIsIn = editCfDraft.type === "입금";
-                      return (
-                        <tr key={cf.id} style={{background:"rgba(99,102,241,0.04)"}}>
-                          <td style={{padding:"8px 6px"}}>
-                            <input type="date" value={editCfDraft.date||""} onChange={e=>setEditCfDraft(d=>({...d,date:e.target.value}))} style={{height:32,fontSize:12,padding:"0 6px"}}/>
-                          </td>
-                          <td style={{textAlign:"center",padding:"8px 4px"}}>
-                            <select value={editCfDraft.type} onChange={e=>setEditCfDraft(d=>({...d,type:e.target.value}))} style={{height:32,fontSize:12,padding:"0 4px",fontWeight:700,color:editIsIn?"#00B493":"#EF4444"}}>
-                              <option value="입금">입금</option><option value="출금">출금</option>
-                            </select>
-                          </td>
-                          <td style={{padding:"8px 6px"}}>
-                            <input list="cf-edit-client-list" placeholder="거래처명 *" value={editCfDraft.client||""} onChange={e=>setEditCfDraft(d=>({...d,client:e.target.value}))} style={{height:32,fontSize:13,padding:"0 8px",fontWeight:600}}/>
-                          </td>
-                          <td style={{padding:"8px 6px"}}>
-                            <div style={{display:"flex",gap:4}}>
-                              <input placeholder="분류" value={editCfDraft.category||""} onChange={e=>setEditCfDraft(d=>({...d,category:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",flex:1}}/>
-                              <input placeholder="메모" value={editCfDraft.memo||""} onChange={e=>setEditCfDraft(d=>({...d,memo:e.target.value}))} style={{height:32,fontSize:12,padding:"0 8px",flex:1}}/>
-                            </div>
-                          </td>
-                          <td style={{padding:"8px 6px"}}>
-                            <input type="number" value={editCfDraft.amount} onChange={e=>setEditCfDraft(d=>({...d,amount:e.target.value}))} style={{height:32,fontSize:13,padding:"0 8px",textAlign:"right",fontWeight:700,color:editIsIn?"#00B493":"#EF4444"}}/>
-                          </td>
-                          <td style={{padding:"8px 6px"}}>
-                            <select value={editCfDraft.accountId||""} onChange={e=>setEditCfDraft(d=>({...d,accountId:e.target.value}))} style={{height:32,fontSize:11,padding:"0 6px"}}>
-                              <option value="">— 계좌 —</option>
-                              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-                            </select>
-                          </td>
-                          <td style={{textAlign:"center",padding:"8px 4px"}}>
-                            <div style={{display:"inline-flex",gap:2}}>
-                              <button onClick={saveEditCf} title="저장" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"rgba(16,185,129,0.12)",color:"#00B493",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
-                                onMouseEnter={e=>e.currentTarget.style.background="rgba(16,185,129,0.22)"}
-                                onMouseLeave={e=>e.currentTarget.style.background="rgba(16,185,129,0.12)"}>
-                                <Icon name="check" size={14}/>
-                              </button>
-                              <button onClick={cancelEditCf} title="취소" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"var(--surface2)",color:"var(--text2)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
-                                onMouseEnter={e=>e.currentTarget.style.background="var(--chip-hover-bg)"}
-                                onMouseLeave={e=>e.currentTarget.style.background="var(--surface2)"}>
-                                <Icon name="close" size={14}/>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    }
-
-                    return (
-                      <tr key={cf.id} className="cf-row">
-                        <td style={{fontSize:12,color:"var(--text2)"}}>{cf.date}</td>
-                        <td style={{textAlign:"center"}}>
-                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isIn?"rgba(16,185,129,0.15)":"rgba(239,68,68,0.15)",color:isIn?"#00B493":"#EF4444"}}>{cf.type}</span>
-                        </td>
-                        <td style={{fontSize:13,fontWeight:700}}>{cf.client || <span style={{color:"var(--text3)",fontWeight:400}}>(미지정)</span>}</td>
-                        <td style={{fontSize:12,color:"var(--text2)"}}>{cf.category}{cf.memo?` · ${cf.memo}`:""}</td>
-                        <td style={{textAlign:"right",fontSize:13,fontWeight:700,color:isIn?"#00B493":"#EF4444"}}>{isIn?"+":"-"}{fmt(cf.amount)}원</td>
-                        <td style={{fontSize:11,color:"var(--text3)"}}>{acc?acc.name:cf.accountId?"(삭제됨)":"—"}</td>
-                        <td style={{textAlign:"center"}}>
-                          <div style={{display:"inline-flex",gap:2}}>
-                            <button onClick={()=>startEditCf(cf)} title="수정" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
-                              onMouseEnter={e=>{e.currentTarget.style.background="rgba(99,102,241,0.12)";e.currentTarget.style.color="#6366F1";}}
-                              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}>
-                              <Icon name="edit" size={14}/>
-                            </button>
-                            <button onClick={()=>deleteCf(cf.id)} title="삭제" style={{width:28,height:28,display:"inline-flex",alignItems:"center",justifyContent:"center",border:"none",borderRadius:6,background:"transparent",color:"var(--text3)",cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s"}}
-                              onMouseEnter={e=>{e.currentTarget.style.background="rgba(239,68,68,0.12)";e.currentTarget.style.color="#EF4444";}}
-                              onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="var(--text3)";}}>
-                              <Icon name="trash" size={14}/>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          );
-        })()}
-      </>)}
+          )}
+          <style>{`
+            .acct-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+            .acct-2col { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
+            @media (max-width: 1100px) { .acct-2col { grid-template-columns: minmax(0, 1fr); } }
+            @media (max-width: 520px) {
+              .acct-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+              /* 폰에서는 「계좌 추가」를 얇은 가로 막대로 — 빈 네모 칸이 화면을 먹지 않게 */
+              .acct-cards .acct-add { min-height: 52px !important; grid-column: 1 / -1; flex-direction: row !important; }
+              .acct-cards .acct-total-num { font-size: 21px !important; }
+              .acct-cards .acct-seeing { display: none; }
+            }
+            .cf-feed-row .cf-feed-actions { opacity: 0.35; transition: opacity .15s; }
+            .cf-feed-row:hover .cf-feed-actions, .cf-feed-row:focus-within .cf-feed-actions { opacity: 1; }
+            @media (hover: none) { .cf-feed-row .cf-feed-actions { opacity: 1; } }
+          `}</style>
+        </>);
+      })()}
 
       {/* 3) 투자 현황 */}
       {subTab === "investments" && (<>
