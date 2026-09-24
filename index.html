@@ -12519,6 +12519,380 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
   );
 }
 
+// ─── 자금 대시보드 · 돈의 지도 (트리맵) ───
+// 칸 크기가 곧 금액이다. 숫자 표를 읽지 않아도 "돈이 어디에 얼마나 있는지"가 비율로 보인다.
+// 두 단계로 나눈다 — 먼저 현금/투자/받을 돈을 한 칸씩, 그 안에서 통장·상품·거래처를 다시 나눈다.
+
+// squarified treemap: 값이 큰 것부터 채우며 칸이 되도록 정사각형에 가깝게 나눈다.
+// items 는 value 내림차순, 반환하는 rect 는 x·y·w·h (입력과 같은 단위).
+function treemapLayout(items, x, y, w, h) {
+  const out = [];
+  const total = items.reduce((s, it) => s + it.value, 0);
+  if (!(total > 0) || w <= 0 || h <= 0) return out;
+  const scale = (w * h) / total;
+  let rest = items.map(it => ({ it, area: it.value * scale }));
+  let rx = x, ry = y, rw = w, rh = h;
+  const worst = (row, side) => {
+    const s = row.reduce((a, b) => a + b.area, 0);
+    let mx = 0, mn = Infinity;
+    row.forEach(r => { if (r.area > mx) mx = r.area; if (r.area < mn) mn = r.area; });
+    return Math.max((side * side * mx) / (s * s), (s * s) / (side * side * mn));
+  };
+  while (rest.length) {
+    const side = Math.min(rw, rh);
+    const row = [rest[0]];
+    let i = 1;
+    while (i < rest.length && worst([...row, rest[i]], side) <= worst(row, side)) { row.push(rest[i]); i++; }
+    const rowArea = row.reduce((a, b) => a + b.area, 0);
+    if (rw >= rh) {                       // 왼쪽에 세로 한 줄
+      const cw = rowArea / rh; let cy = ry;
+      row.forEach(r => { const ch = r.area / cw; out.push({ ...r.it, x: rx, y: cy, w: cw, h: ch }); cy += ch; });
+      rx += cw; rw -= cw;
+    } else {                              // 위에 가로 한 줄
+      const ch = rowArea / rw; let cx = rx;
+      row.forEach(r => { const cw = r.area / ch; out.push({ ...r.it, x: cx, y: ry, w: cw, h: ch }); cx += cw; });
+      ry += ch; rh -= ch;
+    }
+    rest = rest.slice(i);
+  }
+  return out;
+}
+
+// 칸 배경이 밝으면 글자를 어둡게 — 흰 글씨가 연한 주황·하늘색 위에서 안 읽힌다
+const tmTextOn = (hex) => {
+  const h = hex.replace("#", "");
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+    .map(c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.42 ? "#191F28" : "#FFFFFF";
+};
+// 억/만 단위로 짧게 (칸이 작을 때)
+const tmShort = (n) => {
+  const v = Math.round(n || 0), a = Math.abs(v);
+  if (a >= 1e8) { const eok = Math.floor(a / 1e8), man = Math.round((a % 1e8) / 1e4); return `${v < 0 ? "−" : ""}${eok}억${man ? ` ${man.toLocaleString()}만` : ""}`; }
+  if (a >= 1e4) return `${v < 0 ? "−" : ""}${Math.round(a / 1e4).toLocaleString()}만`;
+  return v.toLocaleString();
+};
+
+const TM_GROUPS = {
+  cash: { label: "현금", shades: ["#DB6B2E", "#E8763E", "#C85A20", "#F19A6C", "#B4501C", "#F5B08E"], tab: "accounts" },
+  inv:  { label: "투자", shades: ["#3B82F6", "#2F6BD8", "#6FA3F8", "#2458BE", "#93BBFA"], tab: "investments" },
+  ar:   { label: "받을 돈", shades: ["#F08C00", "#FE9800", "#D97B00", "#FFB74D", "#C06E00"], tab: "ar" },
+};
+const TM_MAX_ITEMS = 7; // 그룹마다 이보다 많으면 작은 것들을 「기타 N곳」 한 칸으로 묶는다
+
+function TreasuryMapDashboard({ accounts, investments, arList, ledgers, clientAR, cashFlows, totalBank, totalInvestment, totalInvestmentPrincipal, totalAR, monthlyAvgExpense, setSubTab, onDeposit }) {
+  const boxRef = React.useRef(null);
+  const [boxW, setBoxW] = React.useState(1100);
+  React.useEffect(() => {
+    const el = boxRef.current; if (!el) return;
+    const measure = () => setBoxW(el.clientWidth || 1100);
+    measure();
+    if (typeof ResizeObserver === "undefined") { window.addEventListener("resize", measure); return () => window.removeEventListener("resize", measure); }
+    const ro = new ResizeObserver(measure); ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const narrow = boxW < 640;
+  const boxH = narrow ? 360 : 480;
+
+  const totalAssets = totalBank + totalInvestment + totalAR;
+  const pct = (v) => totalAssets > 0 ? (v / totalAssets) * 100 : 0;
+  const pctTxt = (v) => { const p = pct(v); return p > 0 && p < 1 ? "<1%" : `${Math.round(p)}%`; };
+  const now = new Date();
+
+  // 통장별 마지막 거래일 — 통장을 골라 기록한 거래가 하나라도 있을 때만 쓴다.
+  // (거래를 안 적는 통장에 "90일 넘게 거래 없음"이라고 붙이면 사실이 아니다)
+  const tracksAccounts = (cashFlows || []).some(c => c.accountId);
+  const lastTxDays = React.useMemo(() => {
+    const m = {};
+    (cashFlows || []).forEach(c => {
+      if (!c.accountId || !c.date) return;
+      const d = Math.floor((now - new Date(c.date)) / 86400000);
+      if (m[c.accountId] == null || d < m[c.accountId]) m[c.accountId] = d;
+    });
+    return m;
+  }, [cashFlows]);
+
+  // ── 그룹별 칸 목록 ──
+  const capGroup = (items, groupKey, etcLabel) => {
+    const sorted = items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+    if (sorted.length <= TM_MAX_ITEMS) return sorted;
+    const head = sorted.slice(0, TM_MAX_ITEMS - 1);
+    const tail = sorted.slice(TM_MAX_ITEMS - 1);
+    return [...head, { key: groupKey + "-etc", name: `${etcLabel} ${tail.length}곳`, value: tail.reduce((s, t) => s + t.value, 0), etc: true, sub: tail.map(t => t.name).slice(0, 4).join(" · ") + (tail.length > 4 ? " …" : "") }];
+  };
+  const cashItems = capGroup(accounts.map(a => {
+    const d = lastTxDays[a.id];
+    return {
+      key: "a-" + a.id, name: a.name || "(이름 없음)", sub: a.bank || "", value: parseFloat(a.balance) || 0,
+      note: !tracksAccounts ? "" : d == null || d > 90 ? "90일 넘게 거래 없음" : d === 0 ? "오늘 거래" : `최근 거래 ${d}일 전`,
+      idle: tracksAccounts && (d == null || d > 90),
+    };
+  }), "cash", "기타 통장");
+  const invItems = capGroup(investments.map(i => {
+    const cur = parseFloat(i.currentValue) || parseFloat(i.principal) || 0;
+    const pr = parseFloat(i.principal) || 0;
+    const roi = pr > 0 ? ((cur - pr) / pr) * 100 : null;
+    const mat = i.maturityDate ? Math.ceil((new Date(i.maturityDate) - now) / 86400000) : null;
+    return {
+      key: "i-" + i.id, name: i.name || "(이름 없음)", value: cur, roi, principal: pr,
+      sub: [i.type, i.expectedRate ? `${i.expectedRate}%` : ""].filter(Boolean).join(" · "),
+      note: mat == null ? "" : mat < 0 ? `만기 지남 (${i.maturityDate})` : `만기 ${i.maturityDate} · ${mat}일`,
+    };
+  }), "inv", "기타 투자");
+  const arItems = capGroup(arList.map(a => {
+    let oldest = 0;
+    try { oldest = computeClientAging(a.name, ledgers, clientAR, now).oldestDays || 0; } catch {}
+    return { key: "r-" + a.name, name: a.name, value: a.balance, note: oldest ? `${oldest}일 경과` : "", late: oldest > 30 };
+  }), "ar", "기타 거래처");
+
+  // ── 두 단계 배치 ──
+  const tiles = React.useMemo(() => {
+    const groups = [
+      { g: "cash", value: cashItems.reduce((s, i) => s + i.value, 0), items: cashItems },
+      { g: "inv", value: invItems.reduce((s, i) => s + i.value, 0), items: invItems },
+      { g: "ar", value: arItems.reduce((s, i) => s + i.value, 0), items: arItems },
+    ].filter(g => g.value > 0).sort((a, b) => b.value - a.value);
+    const outer = treemapLayout(groups, 0, 0, boxW, boxH);
+    const all = [];
+    outer.forEach(G => {
+      const inner = treemapLayout(G.items, G.x, G.y, G.w, G.h);
+      inner.forEach((t, idx) => all.push({ ...t, g: G.g, shade: TM_GROUPS[G.g].shades[idx % TM_GROUPS[G.g].shades.length] }));
+    });
+    return all;
+  }, [boxW, boxH, accounts, investments, arList, cashFlows]);
+
+  // ── 투자 현황 ──
+  const invReturn = totalInvestment - totalInvestmentPrincipal;
+  const invRoi = totalInvestmentPrincipal > 0 ? (invReturn / totalInvestmentPrincipal) * 100 : 0;
+  const invRows = [...investments].sort((a, b) => (parseFloat(b.currentValue) || parseFloat(b.principal) || 0) - (parseFloat(a.currentValue) || parseFloat(a.principal) || 0));
+
+  // ── 여유 자금 ──
+  // 3개월 운영비(월 평균 지출 × 3)를 통장에 남겨 두고, 그 위로 쌓인 현금을 "놀고 있는 돈"으로 본다.
+  // 이자율은 등록된 예금의 평균 금리, 예금이 없으면 3.0%로 가정하고 화면에 가정이라고 적는다.
+  const reserve = monthlyAvgExpense * 3;
+  const idle = monthlyAvgExpense > 0 ? Math.max(0, totalBank - reserve) : 0;
+  const deposits = investments.filter(i => i.type === "예금" && parseFloat(i.expectedRate) > 0);
+  const depRate = deposits.length
+    ? deposits.reduce((s, i) => s + (parseFloat(i.expectedRate) || 0) * (parseFloat(i.principal) || 1), 0) / deposits.reduce((s, i) => s + (parseFloat(i.principal) || 1), 0)
+    : 3.0;
+  const rateAssumed = deposits.length === 0;
+  const idleMonthly = idle * depRate / 100 / 12;
+  const idleRounded = Math.floor(idle / 1e6) * 1e6; // 백만원 단위로 내림 — 예치 금액 제안용
+
+  const fmtWon = (n) => Math.round(n || 0).toLocaleString();
+  const cardTitle = { fontSize: 15, fontWeight: 800, color: "var(--text1)" };
+  const miniTile = (label, value, sub, color) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, padding: "12px 14px", background: "var(--surface2)", borderRadius: 12, minWidth: 0 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: color || "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: "var(--text3)" }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <>
+      {/* ── 돈의 지도 ── */}
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>우리 돈이 어디에 있나</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: narrow ? 26 : 32, fontWeight: 800, letterSpacing: -1, lineHeight: 1, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmtWon(totalAssets)}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text3)" }}>원 · 칸 크기 = 금액</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5, color: "var(--text2)" }}>
+            {[["cash", totalBank], ["inv", totalInvestment], ["ar", totalAR]].map(([g, v]) => (
+              <button key={g} type="button" onClick={() => setSubTab(TM_GROUPS[g].tab)} title={`${TM_GROUPS[g].label} 자세히`}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, color: "var(--text2)", minHeight: 0 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: TM_GROUPS[g].shades[0] }} />
+                {TM_GROUPS[g].label} <b style={{ color: "var(--text1)" }}>{pctTxt(v)}</b>
+                <span style={{ color: "var(--text3)" }}>{tmShort(v)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div ref={boxRef} style={{ position: "relative", width: "100%", height: boxH }}>
+          {totalAssets <= 0 ? (
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, borderRadius: 14, border: "1.5px dashed var(--border)", color: "var(--text3)", fontSize: 13, textAlign: "center", padding: 16 }}>
+              통장·투자·미수금을 등록하면 여기에 돈의 지도가 그려집니다
+              <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                <button type="button" className="btn-primary" onClick={() => setSubTab("accounts")} style={{ padding: "8px 14px", fontSize: 12.5 }}>통장 등록</button>
+                <button type="button" onClick={() => setSubTab("investments")} style={{ padding: "8px 14px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>투자 등록</button>
+              </span>
+            </div>
+          ) : tiles.map(t => {
+            const fg = tmTextOn(t.shade);
+            const big = t.w >= 230 && t.h >= 130;
+            const mid = !big && t.w >= 118 && t.h >= 62;
+            const small = !big && !mid && t.w >= 64 && t.h >= 30;
+            // 비중이 작아 좁고 긴 칸 — 가로 글씨가 안 들어가니 세로로 세워 쓴다
+            const tall = !big && !mid && !small && t.w >= 28 && t.h >= 90;
+            const label = `${TM_GROUPS[t.g].label} · ${t.name} ${fmtWon(t.value)}원 (${pctTxt(t.value)})${t.note ? " · " + t.note : ""}`;
+            const roiBadge = t.roi != null && (
+              <span style={{ display: "inline-flex", alignItems: "center", height: big ? 24 : 20, padding: "0 8px", borderRadius: 12, background: "#FFFFFF", color: t.roi >= 0 ? "#00875F" : "#D6353F", fontSize: big ? 12 : 11, fontWeight: 800, flexShrink: 0 }}>
+                {t.roi >= 0 ? "+" : "−"}{Math.abs(t.roi).toFixed(1)}%
+              </span>
+            );
+            return (
+              <button key={t.key} type="button" onClick={() => setSubTab(TM_GROUPS[t.g].tab)} title={label} aria-label={label}
+                className="tm-tile"
+                style={{ position: "absolute", left: t.x, top: t.y, width: t.w, height: t.h, padding: 3, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", minHeight: 0, textAlign: "left" }}>
+                <span style={{ position: "absolute", inset: 3, borderRadius: 12, background: t.shade, color: fg, overflow: "hidden",
+                  display: "flex", flexDirection: "column", justifyContent: small ? "center" : "space-between",
+                  alignItems: tall ? "center" : "stretch",
+                  padding: big ? "16px 18px" : mid ? "11px 13px" : small ? "4px 9px" : tall ? "10px 0" : 0, boxSizing: "border-box" }}>
+                  {big && (<>
+                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                      <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                        <span style={{ fontSize: 15, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
+                        {t.sub && <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.85, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.sub}</span>}
+                      </span>
+                      {roiBadge}
+                    </span>
+                    <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <span style={{ fontSize: t.w >= 360 && t.h >= 200 ? 32 : 24, fontWeight: 800, letterSpacing: -0.8, lineHeight: 1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtWon(t.value)}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 700, opacity: 0.92, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        전체의 {pctTxt(t.value)}{t.note ? ` · ${t.note}` : ""}
+                      </span>
+                    </span>
+                  </>)}
+                  {mid && (<>
+                    <span style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{t.name}</span>
+                      {t.w >= 170 && roiBadge}
+                    </span>
+                    <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{t.w >= 150 ? fmtWon(t.value) : tmShort(t.value)}</span>
+                      <span style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.9, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pctTxt(t.value)}{t.note && t.h >= 80 ? ` · ${t.note}` : ""}</span>
+                    </span>
+                  </>)}
+                  {small && (
+                    <span style={{ fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {t.w >= 120 ? `${t.name} ${tmShort(t.value)}` : t.name}
+                    </span>
+                  )}
+                  {tall && (
+                    <span style={{ writingMode: "vertical-rl", fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxHeight: "100%" }}>
+                      {t.name}{t.h >= 170 ? ` · ${tmShort(t.value)}` : ""}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {tracksAccounts && cashItems.some(i => i.idle) && (
+          <div style={{ fontSize: 11.5, color: "var(--text3)" }}>
+            「90일 넘게 거래 없음」은 통장 관리에 기록한 입출금 기준입니다.
+          </div>
+        )}
+      </div>
+
+      {/* ── 투자 현황 · 놀고 있는 돈 ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 16 }}>
+
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div style={cardTitle}>투자 현황</div>
+            {investments.length > 0 && (
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>원금 {tmShort(totalInvestmentPrincipal)} →</span>
+                <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>{tmShort(totalInvestment)}</span>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: invReturn >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>
+                  {invReturn >= 0 ? "+" : "−"}{tmShort(Math.abs(invReturn))} ({invRoi >= 0 ? "+" : "−"}{Math.abs(invRoi).toFixed(1)}%)
+                </span>
+              </div>
+            )}
+          </div>
+          {investments.length === 0 ? (
+            <div style={{ padding: "22px 12px", textAlign: "center", color: "var(--text3)", fontSize: 13, border: "1.5px dashed var(--border)", borderRadius: 12 }}>
+              등록된 투자가 없습니다
+              <div style={{ marginTop: 10 }}><button type="button" className="btn-primary" onClick={() => setSubTab("investments")} style={{ padding: "7px 14px", fontSize: 12.5 }}>+ 투자 등록</button></div>
+            </div>
+          ) : invRows.slice(0, 5).map(i => {
+            const pr = parseFloat(i.principal) || 0;
+            const cur = parseFloat(i.currentValue) || pr;
+            const diff = cur - pr;
+            const roi = pr > 0 ? (diff / pr) * 100 : 0;
+            const mat = i.maturityDate ? Math.ceil((new Date(i.maturityDate) - now) / 86400000) : null;
+            const gainPct = pr > 0 && diff > 0 ? Math.min(100, (diff / cur) * 100) : 0;
+            return (
+              <button key={i.id} type="button" onClick={() => setSubTab("investments")}
+                style={{ display: "flex", flexDirection: "column", gap: 7, padding: "12px 0 4px", border: "none", borderTop: "1px solid var(--divider)", background: "transparent", cursor: "pointer", fontFamily: "inherit", textAlign: "left", minHeight: 0, width: "100%" }}>
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, width: "100%" }}>
+                  <span style={{ minWidth: 0, fontSize: 14, fontWeight: 700, color: "var(--text1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {i.name}<span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 6 }}>{[i.type, i.expectedRate ? `${i.expectedRate}%` : ""].filter(Boolean).join(" · ")}</span>
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                    {fmtWon(cur)} <span style={{ color: diff >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{diff >= 0 ? "+" : "−"}{fmtWon(Math.abs(diff))}</span>
+                  </span>
+                </span>
+                <span style={{ display: "flex", height: 9, borderRadius: 5, overflow: "hidden", width: "100%", background: diff < 0 ? "rgba(240,68,82,0.18)" : "var(--surface2)" }}>
+                  <span style={{ width: `${diff < 0 ? (cur / pr) * 100 : 100 - gainPct}%`, background: "#3B82F6" }} />
+                  {gainPct > 0 && <span style={{ width: `${gainPct}%`, background: "#00B493" }} />}
+                </span>
+                <span style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12, color: "var(--text3)", width: "100%", flexWrap: "wrap" }}>
+                  <span>원금 {fmtWon(pr)}</span>
+                  <span>
+                    {mat == null ? "만기 없음" : mat < 0 ? <b style={{ color: "var(--negative-text)" }}>만기 지남 · {i.maturityDate}</b> : <><b style={{ color: "var(--text1)" }}>만기 {i.maturityDate}</b> · {mat}일 남음</>}
+                    {pr > 0 && <> · {roi >= 0 ? "+" : "−"}{Math.abs(roi).toFixed(1)}%</>}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+          {invRows.length > 5 && <div style={{ fontSize: 12, color: "var(--text3)" }}>외 {invRows.length - 5}건</div>}
+          {investments.length > 0 && (
+            <button type="button" onClick={() => setSubTab("investments")}
+              style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: "var(--accent-strong)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0, minHeight: 0 }}>
+              투자 현황 자세히 <Icon name="chevronRight" size={14}/>
+            </button>
+          )}
+        </div>
+
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={cardTitle}>놀고 있는 돈</div>
+          {monthlyAvgExpense <= 0 ? (
+            <div style={{ padding: "18px 14px", borderRadius: 12, background: "var(--surface2)", fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>
+              운영비를 아직 계산할 수 없습니다. <b>정기 지출</b>이나 통장 <b>출금 내역</b>을 넣으면, 통장에 남겨 둘 돈(3개월 운영비)과 그 위로 쌓인 여유 자금을 계산해 드립니다.
+              <div style={{ marginTop: 10 }}><button type="button" onClick={() => setSubTab("schedule")} style={{ padding: "7px 14px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>정기 지출 등록</button></div>
+            </div>
+          ) : idle <= 0 ? (
+            <div style={{ padding: "18px 16px", borderRadius: 12, background: "var(--surface2)", fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>
+              여유 자금이 없습니다 — 통장 잔액 <b style={{ color: "var(--text1)" }}>{tmShort(totalBank)}</b>이 3개월 운영비 <b style={{ color: "var(--text1)" }}>{tmShort(reserve)}</b>보다 적거나 같습니다.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "16px 18px", background: "var(--accent-tonal)", border: "1px solid rgba(219,107,46,0.22)", borderRadius: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--accent-strong)" }}>3개월 운영비를 빼고 통장에 남는 돈</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.8, lineHeight: 1, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmtWon(idle)}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text3)" }}>원</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.6 }}>
+                연 {depRate.toFixed(1)}%{rateAssumed ? " (가정)" : " (등록된 예금 평균)"}로 예치하면 <b style={{ color: "var(--text1)" }}>월 약 {tmShort(idleMonthly)}원, 1년 {tmShort(idleMonthly * 12)}원</b>이 더 생깁니다.
+              </div>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+            {miniTile("현금 비율", `${Math.round(pct(totalBank))}%`, "총자산 중 통장")}
+            {miniTile("3개월 운영비", monthlyAvgExpense > 0 ? tmShort(reserve) : "—", monthlyAvgExpense > 0 ? `월 ${tmShort(monthlyAvgExpense)} × 3` : "지출 데이터 없음")}
+            {miniTile("투자 수익", totalInvestmentPrincipal > 0 ? `${invRoi >= 0 ? "+" : "−"}${Math.abs(invRoi).toFixed(1)}%` : "—", totalInvestmentPrincipal > 0 ? `${invReturn >= 0 ? "+" : "−"}${tmShort(Math.abs(invReturn))}` : "투자 없음", totalInvestmentPrincipal > 0 ? (invRoi >= 0 ? "var(--positive-text)" : "var(--negative-text)") : null)}
+          </div>
+          {idleRounded > 0 && (
+            <button type="button" className="btn-primary" onClick={() => onDeposit(idleRounded, depRate)}
+              style={{ height: 40, fontSize: 13.5, fontWeight: 800 }}>
+              {tmShort(idleRounded)}원 예금으로 등록하기
+            </button>
+          )}
+        </div>
+      </div>
+      <style>{`.tm-tile > span { transition: filter .15s ease, transform .15s ease; } .tm-tile:hover > span { filter: brightness(1.06); } .tm-tile:focus-visible > span { outline: 3px solid var(--text1); outline-offset: -3px; }`}</style>
+    </>
+  );
+}
+
 function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashFlows, setCashFlows, scheduledExpenses, setScheduledExpenses, ledgers, clientAR, orders, clients = [], suppliers = [], darkMode, setTab, setLedgerFocusClient }) {
   const [subTab, setSubTab] = useState(() => load("frw_treasury_subtab", "dashboard")); // dashboard | accounts | investments | ar | schedule — 탭 이탈 후 복귀 시 유지
   useEffect(() => { save("frw_treasury_subtab", subTab); }, [subTab]);
@@ -12776,273 +13150,19 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
       </div>
 
       {/* 1) 대시보드 */}
-      {subTab === "dashboard" && (<>
-        {/* KPI */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
-          <div className="card">
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 자산</div>
-            <div className="kpi-num" style={{color:"var(--text1)"}}>{fmt(totalAssets)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
-            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>현금+투자+미수</div>
-          </div>
-          <div className="card" onClick={()=>setSubTab("accounts")} style={{cursor:"pointer"}} title="통장 관리 탭으로 이동">
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>가용 현금</span></div>
-            <div className="kpi-num" style={{color:"#00B493"}}>{fmt(totalBank)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
-            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>{accounts.length}개 통장</div>
-          </div>
-          <div className="card" onClick={()=>setSubTab("investments")} style={{cursor:"pointer"}} title="투자 현황 탭으로 이동">
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="trendingUp" size={14}/>투자자산</span></div>
-            <div className="kpi-num" style={{color:"#DB6B2E"}}>{fmt(totalInvestment)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
-            <div style={{fontSize:10,color:investmentRoi>=0?"#00B493":"#F04452",marginTop:3,fontWeight:700}}>{investmentRoi>=0?"+":""}{investmentRoi.toFixed(1)}% ({investmentReturn>=0?"+":""}{fmt(investmentReturn)}원)</div>
-          </div>
-          <div className="card" onClick={()=>setSubTab("ar")} style={{cursor:"pointer"}} title="미수금 회수 탭으로 이동">
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="clipboard" size={14}/>미수금</span></div>
-            <div className="kpi-num" style={{color:"#F59E0B"}}>{fmt(totalAR)}<span style={{fontSize:13,marginLeft:2}}>원</span></div>
-            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>{arList.length}개 거래처 (장부 자동연동)</div>
-          </div>
-          <div className="card" onClick={()=>setSubTab("schedule")} style={{cursor:"pointer"}} title="정기 지출 탭으로 이동">
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>⏱ Runway (현금가용)</div>
-            <div className="kpi-num" style={{color:runwayDays>180?"#00B493":runwayDays>60?"#FF9500":"#F04452"}}>{runwayDays>=999?"∞":runwayDays}<span style={{fontSize:13,marginLeft:2}}>일</span></div>
-            <div style={{fontSize:10,color:"var(--text3)",marginTop:3}}>월평균 지출 {fmt(monthlyAvgExpense)}원</div>
-          </div>
-        </div>
-
-        {/* 재무 건전성 스코어 */}
-        <div className="card" style={{display:"flex",alignItems:"center",gap:24,flexWrap:"wrap"}}>
-          <div style={{position:"relative",width:120,height:120,flexShrink:0}}>
-            <svg viewBox="0 0 100 100" style={{width:"100%",height:"100%"}}>
-              <circle cx="50" cy="50" r="42" fill="none" stroke={darkMode?"#2C2C2E":"#E5E8EB"} strokeWidth="8"/>
-              <circle cx="50" cy="50" r="42" fill="none" stroke={scoreColor} strokeWidth="8" strokeDasharray={`${score*2.64} 264`} strokeDashoffset="0" transform="rotate(-90 50 50)" strokeLinecap="round"/>
-              <text x="50" y="50" textAnchor="middle" dominantBaseline="middle" fontSize="22" fontWeight="800" fill="var(--text1)">{score}</text>
-              <text x="50" y="68" textAnchor="middle" fontSize="10" fill="var(--text3)" fontWeight="600">점</text>
-            </svg>
-          </div>
-          <div style={{flex:1,minWidth:200}}>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>재무 건전성 스코어</div>
-            <div style={{fontSize:22,fontWeight:800,color:scoreColor,marginBottom:6}}>{scoreLabel}</div>
-            <div style={{fontSize:12,color:"var(--text2)",lineHeight:1.6}}>
-              현금비율 {totalAssets>0?Math.round(totalBank/totalAssets*100):0}% · Runway {runwayDays>=999?"∞":runwayDays+"일"} · 미수/현금 {totalBank>0?(totalAR/totalBank).toFixed(1)+"배":"—"}
-            </div>
-          </div>
-          {/* 알림 */}
-          {alerts.length > 0 && (
-            <div style={{flex:1.5,minWidth:280}}>
-              <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8,display:"inline-flex",alignItems:"center",gap:4}}><Icon name="alert" size={11}/>위험 알림 / 인사이트</div>
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                {alerts.slice(0,5).map((a,i) => (
-                  <div key={i} style={{padding:"8px 12px",borderRadius:8,fontSize:12,
-                    background: a.level==="danger"?"rgba(240,68,82,0.1)":a.level==="warn"?"rgba(255,149,0,0.1)":"rgba(219, 107, 46,0.08)",
-                    color: a.level==="danger"?"#F04452":a.level==="warn"?"#FF9500":"#007AFF",
-                    border:`1px solid ${a.level==="danger"?"rgba(240,68,82,0.3)":a.level==="warn"?"rgba(255,149,0,0.3)":"rgba(219, 107, 46,0.2)"}`,
-                    fontWeight:600,
-                  }}><Icon name={a.level==="danger"?"alert":a.level==="warn"?"alert":"lightbulb"} size={12} style={{marginRight:5, verticalAlign:"-2px"}}/>{a.msg}</div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 그래프 */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:16}}>
-          <div className="card" onClick={()=>setSubTab("accounts")} style={{cursor:"pointer"}} title="통장 관리 탭으로 이동">
-            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14,fontFamily:"var(--font-display)"}}><Icon name="pieChart" size={14} style={{marginRight:6}}/>자산 구성</div>
-            <div style={{height:240,position:"relative"}}>
-              {totalAssets>0?<canvas ref={pieRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>통장/투자/미수금<br/>데이터를 추가하세요</div>}
-            </div>
-          </div>
-          <div className="card" onClick={()=>setSubTab("accounts")} style={{cursor:"pointer"}} title="통장 관리 탭으로 이동">
-            <div style={{fontSize:13,fontWeight:700,color:"var(--text1)",marginBottom:14}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="barChart" size={14}/>최근 6개월 현금흐름</span></div>
-            <div style={{height:240,position:"relative"}}>
-              {cashFlows.length>0?<canvas ref={flowRef}/>:<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:"var(--text3)",fontSize:13,textAlign:"center"}}>통장 거래내역을 추가하세요<br/>(통장 관리 탭에서)</div>}
-            </div>
-          </div>
-        </div>
-
-        {/* ━━━━━━━━━━ 엔터프라이즈 재무 분석 ━━━━━━━━━━ */}
-        {(() => {
-          const now = new Date();
-          const ymd365 = new Date(now.getTime() - 365*86400000);
-          let annualSales = 0;
-          if (Array.isArray(orders)) {
-            annualSales += orders.filter(o => o.date && new Date(o.date) >= ymd365)
-              .reduce((s,o) => s + (parseFloat(o.unitPrice||0) * parseInt(o.qty||1)), 0);
-          }
-          Object.values(ledgers || {}).forEach(m => {
-            (m.clients || []).forEach(c => {
-              const amt = parseFloat(c.total) || ((parseFloat(c.supply)||0) + (parseFloat(c.tax)||0));
-              if (amt > 0) annualSales += amt;
-            });
-          });
-          const dailySales = annualSales / 365;
-          const dso = dailySales > 0 ? Math.round(totalAR / dailySales) : 0;
-          const annualPurchase = cashFlows.filter(cf => cf.type === "출금" && cf.date && new Date(cf.date) >= ymd365)
-            .reduce((s,cf) => s + (parseFloat(cf.amount)||0), 0);
-          const dailyPurchase = annualPurchase / 365;
-          const recentPurchase30 = cashFlows.filter(cf => cf.type === "출금" && cf.date && new Date(cf.date) >= new Date(now.getTime() - 30*86400000))
-            .reduce((s,cf) => s + (parseFloat(cf.amount)||0), 0);
-          const dpo = dailyPurchase > 0 ? Math.round(recentPurchase30 / dailyPurchase) : 0;
-          const ccc = dso - dpo;
-          const currentAssets = totalBank + totalAR;
-          const currentLiabilities = monthlyFixedExpense;
-          const workingCapital = currentAssets - currentLiabilities;
-          const quickRatio = currentLiabilities > 0 ? (totalBank + totalAR) / currentLiabilities : null;
-          const cashRatio = currentLiabilities > 0 ? totalBank / currentLiabilities : null;
-
-          // AR Aging — 거래처별 FIFO 정산(computeClientAging) 합산. 수동 입금을 차감해 총미수금 공식·수금 패턴 탭과 숫자 일치.
-          // (기존: clientAR 청구만 합산하고 입금을 안 빼서 완납 거래처도 연체로 잡히던 버그)
-          const aging = { d30: 0, d60: 0, d90: 0, d90p: 0 };
-          {
-            const agingNames = new Set(Object.keys(clientAR || {}));
-            Object.values(ledgers || {}).forEach(m => ((m && m.clients) || []).forEach(c => { if (c.name) agingNames.add(c.name.trim()); }));
-            agingNames.forEach(nm => {
-              if (!nm) return;
-              const ag = computeClientAging(nm, ledgers, clientAR, now);
-              aging.d30 += ag.d30; aging.d60 += ag.d60; aging.d90 += ag.d90; aging.d90p += ag.d90p;
-            });
-          }
-          const agingTotal = aging.d30 + aging.d60 + aging.d90 + aging.d90p;
-
-          // 13주 현금 예측
-          const weeks = [];
-          let runningBalance = totalBank;
-          for (let w = 0; w < 13; w++) {
-            const weekStart = new Date(now.getTime() + w*7*86400000);
-            const weekEnd = new Date(weekStart.getTime() + 7*86400000);
-            const weeklyFixed = monthlyFixedExpense / 4.33;
-            let weeklyScheduled = 0;
-            scheduledExpenses.forEach(e => {
-              const day = parseInt(e.dueDay) || 0;
-              const dueThisMonth = new Date(weekStart.getFullYear(), weekStart.getMonth(), day);
-              if (dueThisMonth >= weekStart && dueThisMonth < weekEnd) {
-                weeklyScheduled += parseFloat(e.amount) || 0;
-              }
-            });
-            let inflow = 0;
-            if (w === 0) inflow += aging.d30 * 0.4;
-            else if (w <= 4) inflow += (aging.d30 * 0.4 / 4) + (aging.d60 * 0.5 / 4);
-            else if (w <= 8) inflow += (aging.d60 * 0.3 / 4) + (aging.d90 * 0.4 / 4);
-            else inflow += aging.d90p * 0.1 / 4;
-            inflow += dailySales * 7 * 0.7;
-            const outflow = weeklyFixed + weeklyScheduled + (recentPurchase30 / 4.33);
-            const net = inflow - outflow;
-            runningBalance += net;
-            weeks.push({ w: w+1, label: `W${w+1}`, date: weekStart, inflow: Math.round(inflow), outflow: Math.round(outflow), net: Math.round(net), balance: Math.round(runningBalance) });
-          }
-
-          const fmtCompact = (n) => {
-            const v = Math.abs(n);
-            if (v >= 1e8) return (n/1e8).toFixed(1) + "억";
-            if (v >= 1e7) return (n/1e7).toFixed(1) + "천만";
-            if (v >= 1e4) return (n/1e4).toFixed(0) + "만";
-            return Math.round(n).toLocaleString();
-          };
-
-          const exportCSV = () => {
-            const rows = [
-              ["주차", "날짜", "입금 예상", "출금 예상", "순현금", "누적 잔액"],
-              ...weeks.map(w => [w.label, w.date.toISOString().slice(0,10), w.inflow, w.outflow, w.net, w.balance]),
-            ];
-            const csv = "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url; a.download = `13주현금흐름_${new Date().toISOString().slice(0,10)}.csv`;
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          };
-
-          const tile = (label, value, sub, color) => (
-            <div style={{padding:"14px 16px", background:"var(--surface)", border:"1px solid var(--border)", borderRadius:12}}>
-              <div style={{fontSize:10,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.6,marginBottom:4}}>{label}</div>
-              <div style={{fontSize:22,fontWeight:800,color:color||"var(--text1)",lineHeight:1.05,fontVariantNumeric:"tabular-nums"}}>{value}</div>
-              {sub && <div style={{fontSize:11,color:"var(--text2)",marginTop:3}}>{sub}</div>}
-            </div>
-          );
-
-          return <>
-          {/* 운전자본 KPI */}
-          <div className="card" style={{padding:"18px 20px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,gap:8,flexWrap:"wrap"}}>
-              <div>
-                <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",letterSpacing:-0.2,fontFamily:"var(--font-display)"}}>운전자본 분석 <span style={{fontSize:11,fontWeight:500,color:"var(--text3)",fontFamily:"var(--font-body, inherit)",marginLeft:6}}>Working Capital Metrics</span></div>
-                <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>업계 표준 재무 지표 · 자동 계산</div>
-              </div>
-              <button onClick={exportCSV} style={{padding:"8px 14px",fontSize:12,fontWeight:600,color:"#fff",background:"var(--positive)",border:"none",borderRadius:8,cursor:"pointer",fontFamily:"inherit",boxShadow:"var(--elev-2)",display:"inline-flex",alignItems:"center",gap:6}}>
-                <Icon name="fileSheet" size={14} style={{marginRight:5}}/><span>CSV 내보내기</span>
-              </button>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
-              {tile("DSO 매출채권회전일", `${dso}`+"일", dailySales > 0 ? `일평균 매출 ${fmtCompact(dailySales)}원` : "데이터 부족", dso < 60 ? "#10B981" : dso < 90 ? "#F59E0B" : "#EF4444")}
-              {tile("DPO 매입채무회전일", `${dpo}`+"일", dailyPurchase > 0 ? `일평균 매입 ${fmtCompact(dailyPurchase)}원` : "데이터 부족", dpo > 30 ? "#00B493" : "#F59E0B")}
-              {tile("CCC 현금전환주기", `${ccc}`+"일", ccc < 0 ? "역운전자본 (선수금)" : "수금-지급 격차", ccc < 30 ? "#10B981" : ccc < 60 ? "#F59E0B" : "#EF4444")}
-              {tile("운전자본", fmtCompact(workingCapital)+"원", `유동자산 ${fmtCompact(currentAssets)} − 단기부채 ${fmtCompact(currentLiabilities)}`, workingCapital > 0 ? "#00B493" : "#EF4444")}
-              {tile("당좌비율 Quick Ratio", quickRatio !== null ? quickRatio.toFixed(2)+"x" : "—", quickRatio !== null ? (quickRatio >= 1 ? "건전 (≥1)" : "부족") : "단기부채 데이터 필요", quickRatio !== null && quickRatio >= 1.5 ? "#10B981" : quickRatio !== null && quickRatio >= 1 ? "#F59E0B" : "#EF4444")}
-              {tile("현금비율 Cash Ratio", cashRatio !== null ? cashRatio.toFixed(2)+"x" : "—", cashRatio !== null ? `${(cashRatio*100).toFixed(0)}% 즉시 결제 가능` : "단기부채 데이터 필요", cashRatio !== null && cashRatio >= 0.5 ? "#10B981" : cashRatio !== null && cashRatio >= 0.2 ? "#F59E0B" : "#EF4444")}
-            </div>
-          </div>
-
-          {/* AR Aging */}
-          {agingTotal > 0 && (
-            <div className="card" style={{padding:"18px 20px"}}>
-              <div style={{marginBottom:14}}>
-                <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",letterSpacing:-0.2}}>미수금 연령 분석 <span style={{fontSize:11,fontWeight:500,color:"var(--text3)",marginLeft:6}}>AR Aging</span></div>
-                <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>경과일별 미수금 분포 · 90일 이상은 회수 어려움</div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10,marginBottom:14}}>
-                {tile("0–30일 (정상)", fmtCompact(aging.d30)+"원", `${(aging.d30/agingTotal*100).toFixed(0)}%`, "#00B493")}
-                {tile("31–60일 (주의)", fmtCompact(aging.d60)+"원", `${(aging.d60/agingTotal*100).toFixed(0)}%`, "#F59E0B")}
-                {tile("61–90일 (경고)", fmtCompact(aging.d90)+"원", `${(aging.d90/agingTotal*100).toFixed(0)}%`, "#DB6B2E")}
-                {tile("90일+ (위험)", fmtCompact(aging.d90p)+"원", `${(aging.d90p/agingTotal*100).toFixed(0)}%`, "#EF4444")}
-              </div>
-              <div style={{display:"flex",height:14,borderRadius:7,overflow:"hidden",border:"1px solid var(--divider)"}}>
-                {[["#10B981",aging.d30],["#F59E0B",aging.d60],["#DB6B2E",aging.d90],["#EF4444",aging.d90p]].map(([c,v],i) => {
-                  const pct = (v/agingTotal*100);
-                  return pct > 0 ? <div key={i} style={{width:pct+"%",background:c}} title={`${pct.toFixed(1)}%`}/> : null;
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* 13주 현금 예측 */}
-          <div className="card" style={{padding:"18px 20px"}}>
-            <div style={{marginBottom:14}}>
-              <div style={{fontSize:14,fontWeight:800,color:"var(--text1)",letterSpacing:-0.2}}>13주 롤링 현금흐름 예측 <span style={{fontSize:11,fontWeight:500,color:"var(--text3)",marginLeft:6}}>13-Week Rolling Cash Forecast</span></div>
-              <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>현재 잔액 {fmtCompact(totalBank)}원 기준 · 미수금 회수율/평균 매출/정기지출 자동 반영</div>
-            </div>
-            <div style={{overflowX:"auto"}}>
-              <table style={{minWidth:780,fontVariantNumeric:"tabular-nums"}}>
-                <thead><tr>
-                  <th style={{textAlign:"left",fontSize:10}}>주차</th>
-                  <th style={{textAlign:"left",fontSize:10}}>날짜</th>
-                  <th style={{textAlign:"right",fontSize:10,color:"#00B493"}}>입금 예상</th>
-                  <th style={{textAlign:"right",fontSize:10,color:"#EF4444"}}>출금 예상</th>
-                  <th style={{textAlign:"right",fontSize:10}}>순현금</th>
-                  <th style={{textAlign:"right",fontSize:10}}>누적 잔액</th>
-                  <th style={{textAlign:"left",fontSize:10,width:90}}>상태</th>
-                </tr></thead>
-                <tbody>
-                  {weeks.map(w => {
-                    const status = w.balance < 0 ? {color:"#EF4444",text:"적자",warn:true,bg:"rgba(239,68,68,0.08)"} : w.balance < monthlyFixedExpense ? {color:"#F59E0B",text:"부족",warn:true,bg:"rgba(245,158,11,0.06)"} : {color:"#10B981",text:"정상",warn:false,bg:"transparent"};
-                    return <tr key={w.w} style={{background:status.bg}}>
-                      <td style={{fontWeight:700,fontSize:13,color:"var(--text1)"}}>{w.label}</td>
-                      <td style={{fontSize:12,color:"var(--text2)"}}>{w.date.toISOString().slice(5,10).replace("-",".")}</td>
-                      <td style={{textAlign:"right",fontSize:12,color:"#00B493",fontWeight:600}}>+{fmtCompact(w.inflow)}</td>
-                      <td style={{textAlign:"right",fontSize:12,color:"#EF4444",fontWeight:600}}>−{fmtCompact(w.outflow)}</td>
-                      <td style={{textAlign:"right",fontSize:12,fontWeight:700,color:w.net>=0?"#00B493":"#EF4444"}}>{w.net>=0?"+":""}{fmtCompact(w.net)}</td>
-                      <td style={{textAlign:"right",fontSize:13,fontWeight:800,color:status.color,fontVariantNumeric:"tabular-nums"}}>{fmtCompact(w.balance)}</td>
-                      <td style={{fontSize:11,fontWeight:600,color:status.color}}>{status.warn && <Icon name="alert" size={11} style={{marginRight:3, verticalAlign:"-1px"}}/>}{status.text}</td>
-                    </tr>;
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div style={{marginTop:12,padding:"10px 12px",background:"var(--surface2)",borderRadius:8,fontSize:11,color:"var(--text2)",lineHeight:1.6}}>
-              <Icon name="lightbulb" size={12} style={{marginRight:4, verticalAlign:"-2px"}}/><strong>가정:</strong> 미수금 회수율 (30일내 80%, 60일내 50%, 90일내 30%, 90일+ 10%) · 신규 매출 70% 회수 · 정기 지출은 dueDay에 발생.
-              실제 수금/지급 일정은 통장 거래내역으로 보정됩니다.
-            </div>
-          </div>
-          </>;
-        })()}
-      </>)}
+      {subTab === "dashboard" && (
+        <TreasuryMapDashboard accounts={accounts} investments={investments} arList={arList}
+          ledgers={ledgers} clientAR={clientAR} cashFlows={cashFlows}
+          totalBank={totalBank} totalInvestment={totalInvestment} totalInvestmentPrincipal={totalInvestmentPrincipal} totalAR={totalAR}
+          monthlyAvgExpense={monthlyAvgExpense} setSubTab={setSubTab}
+          onDeposit={(amount, rate) => {
+            // 여유 자금을 예금으로 — 투자 현황의 등록 폼을 채워서 연다 (저장은 사용자가 확인 후)
+            const d = new Date(); const ymd = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+            setInvDraft({ type:"예금", name:"정기예금", principal:String(amount), currentValue:"", startDate: ymd, maturityDate:"", expectedRate:String(Math.round(rate*10)/10), memo:"자금 대시보드 여유 자금" });
+            setShowInvForm(true);
+            setSubTab("investments");
+          }} />
+      )}
 
       {/* 2) 통장 관리 */}
       {subTab === "accounts" && (<>
