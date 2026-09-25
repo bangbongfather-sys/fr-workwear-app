@@ -7113,7 +7113,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
     const valFontSize = (opt.hero || opt.big) ? (w >= 300 || !layout ? 30 : 24) : (w >= 360 ? 32 : w >= 240 ? 26 : w >= 180 ? 22 : 18);
     const ringPct = opt.ring != null ? Math.max(0, Math.min(100, opt.ring)) : null;
     return (
-      <div className={"card rcard kpi-card dash-kpi" + (opt.hero ? " dash-kpi-hero" : "")} data-card-key={key} style={{ ...cardLayoutStyle(key), position: "relative", minWidth: 140, flex: layout ? "0 0 auto" : `${opt.grow || 1} 1 200px`, overflow: "hidden" }}>
+      <div className={"card rcard kpi-card dash-kpi" + (opt.hero ? " dash-kpi-hero" : "") + (opt.hero || opt.big || opt.wideMobile ? " dash-kpi-full-m" : "")} data-card-key={key} style={{ ...cardLayoutStyle(key), position: "relative", minWidth: 140, flex: layout ? "0 0 auto" : `${opt.grow || 1} 1 200px`, overflow: "hidden" }}>
         <button onClick={() => hideKPI(key, label)} title="이 카드 숨기기" className="kpi-hide-btn no-print"
           style={{
             position: "absolute", top: 8, right: 8, width: 22, height: 22, borderRadius: 11,
@@ -7196,7 +7196,24 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
         .dash-kpi-action { margin-top: auto; align-self: flex-start; height: 38px; min-height: 38px; padding: 0 18px; border: none; border-radius: 999px; background: #fff; color: #171A21; font-size: 12.5px; font-weight: 800; cursor: pointer; font-family: inherit; }
         .dash-kpi-hero .dash-kpi-action { margin-top: 16px; }
         .dash-kpi:not(.dash-kpi-hero) .dash-kpi-action { margin-top: 14px; background: var(--text1); color: var(--surface); }
-        @media (max-width: 680px) { .dash-a-duo { grid-template-columns: minmax(0, 1fr); } }`}</style>
+        @media (max-width: 680px) { .dash-a-duo { grid-template-columns: minmax(0, 1fr); } }
+        /* ── 폰: 두 칸 타일 (간격 10px에 맞춰 폭 계산), 버튼·링·긴 설명이 있는 카드는 한 줄 전체 ── */
+        @media (max-width: 768px) {
+          .dash-a { gap: 12px !important; }
+          .dash-a-row { gap: 10px; }
+          .dash-a .dash-kpi { padding: 14px !important; flex: 1 1 calc(50% - 5px) !important; min-width: calc(50% - 5px) !important; max-width: calc(50% - 5px) !important; border-radius: 20px !important; }
+          .dash-a .dash-kpi.dash-kpi-full-m { flex-basis: 100% !important; min-width: 100% !important; max-width: 100% !important; }
+          .dash-a .dash-kpi > div:first-of-type { margin-bottom: 8px !important; gap: 8px !important; }
+          .dash-kpi-ico { width: 30px; height: 30px; border-radius: 10px; }
+          .dash-kpi-ico svg { width: 15px; height: 15px; }
+          .dash-kpi-label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .dash-a .kpi-card .kpi-val { font-size: clamp(14px, 4.2vw, 18px) !important; }
+          .dash-a .dash-kpi-full-m .kpi-val { font-size: clamp(20px, 6.4vw, 26px) !important; }
+          .dash-a .dash-kpi-sub { font-size: 11.5px !important; }
+          .dash-kpi-action { height: 36px; min-height: 36px; }
+          .dash-a-tabs { width: 100%; justify-content: space-between; }
+          .dash-a-tabs button { padding: 0 10px; flex: 1 1 auto; font-size: 12.5px; }
+        }`}</style>
       {/* 리사이즈 중 정렬 기준선 오버레이 */}
       {dragging && (
         <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 4 }}>
@@ -7287,7 +7304,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
         })()}
         {kpi("kpi_year", thisYear+"년 총 매출", totalYearRevenue>0?Math.round(totalYearRevenue).toLocaleString()+"원":"—", "월별 입력 기준", null, { icon: "barChart" })}
         {kpi("kpi_top", "최다 매출 제품", topProduct?topProduct[0]:"—", topProduct?Math.round(topProduct[1]).toLocaleString()+"원":"기록 없음", null, { icon: "star" })}
-        {kpi("kpi_margin", "납품가 마진율", avgMarginSell>0?avgMarginSell.toFixed(1)+"%":"—", avgMarginSell>0?(avgMarginSell<20?"하한선 20% 아래 · 현재 제품 기준":"현재 제품 기준 · 하한선 20%"):"현재 제품 기준", avgMarginSell>=26?"var(--positive-text)":avgMarginSell>=20?"var(--warning-text)":avgMarginSell>0?"var(--negative-text)":null, { ring: avgMarginSell > 0 ? avgMarginSell : 0 })}
+        {kpi("kpi_margin", "납품가 마진율", avgMarginSell>0?avgMarginSell.toFixed(1)+"%":"—", avgMarginSell>0?(avgMarginSell<20?"하한선 20% 아래 · 현재 제품 기준":"현재 제품 기준 · 하한선 20%"):"현재 제품 기준", avgMarginSell>=26?"var(--positive-text)":avgMarginSell>=20?"var(--warning-text)":avgMarginSell>0?"var(--negative-text)":null, { ring: avgMarginSell > 0 ? avgMarginSell : 0, wideMobile: true })}
       </div>
       {(() => {
         const now = new Date();
@@ -7305,8 +7322,8 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
             {kpi("kpi_profit", "추정 순이익", (totalYearRevenue>0 && avgMarginSell>0)?Math.round(estimatedProfit).toLocaleString()+"원":"—", (totalYearRevenue>0 && avgMarginSell>0)?`${thisYear}년 매출 ${Math.round(totalYearRevenue/10000).toLocaleString()}만원 × 평균 마진 ${avgMarginSell.toFixed(1)}%`:"연매출 또는 제품 마진 입력 필요", (totalYearRevenue>0 && avgMarginSell>0)?(estimatedProfit>0?"var(--positive-text)":"var(--negative-text)"):null, { icon: "coins" })}
             {(() => {
               // 환율 카드 — 값/등락/갱신시각. 로딩·오류도 카드 안에서 그대로 알린다.
-              if (fxErr && !fx) return kpi("kpi_fx", "원/달러 환율", "—", `불러오지 못했습니다 · ${fxErr}`, "var(--negative-text)", { icon: "trendingUp" });
-              if (!fx) return kpi("kpi_fx", "원/달러 환율", "…", "환율을 불러오는 중", null, { icon: "trendingUp" });
+              if (fxErr && !fx) return kpi("kpi_fx", "원/달러 환율", "—", `불러오지 못했습니다 · ${fxErr}`, "var(--negative-text)", { icon: "trendingUp", wideMobile: true });
+              if (!fx) return kpi("kpi_fx", "원/달러 환율", "…", "환율을 불러오는 중", null, { icon: "trendingUp", wideMobile: true });
               const tail = `${fxUpdStr} 기준${fxLive ? " · 실시간" : " · 하루 1회 갱신"}${fx.stale ? " · 최신값 아님" : ""}`;
               const sub = fxDiff === null
                 ? `1 USD 기준 · ${tail}`
@@ -7315,7 +7332,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
               return kpi("kpi_fx", "원/달러 환율",
                 `${fxKrw.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}원`,
                 sub,
-                null, { icon: "trendingUp" });
+                null, { icon: "trendingUp", wideMobile: true });
             })()}
           </div>
         );
