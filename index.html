@@ -7110,7 +7110,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
     const layout = cardLayouts[key];
     // 카드 크기에 따라 폰트 자동 스케일
     const w = layout?.width || 200;
-    const valFontSize = opt.hero ? (w >= 300 || !layout ? 30 : 24) : (w >= 360 ? 32 : w >= 240 ? 26 : w >= 180 ? 22 : 18);
+    const valFontSize = (opt.hero || opt.big) ? (w >= 300 || !layout ? 30 : 24) : (w >= 360 ? 32 : w >= 240 ? 26 : w >= 180 ? 22 : 18);
     const ringPct = opt.ring != null ? Math.max(0, Math.min(100, opt.ring)) : null;
     return (
       <div className={"card rcard kpi-card dash-kpi" + (opt.hero ? " dash-kpi-hero" : "")} data-card-key={key} style={{ ...cardLayoutStyle(key), position: "relative", minWidth: 140, flex: layout ? "0 0 auto" : `${opt.grow || 1} 1 200px`, overflow: "hidden" }}>
@@ -7195,11 +7195,8 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
         .dash-kpi-hero .dash-kpi-label { color: rgba(255,255,255,0.92); }
         .dash-kpi-action { margin-top: auto; align-self: flex-start; height: 38px; min-height: 38px; padding: 0 18px; border: none; border-radius: 999px; background: #fff; color: #171A21; font-size: 12.5px; font-weight: 800; cursor: pointer; font-family: inherit; }
         .dash-kpi-hero .dash-kpi-action { margin-top: 16px; }
-        .dash-hello { display: flex !important; flex-direction: row !important; align-items: center; gap: 14px; padding: 20px 22px !important; }
-        .dash-hello-add { width: 76px; height: 96px; min-height: 96px; flex-shrink: 0; border: 1.5px dashed var(--border); border-radius: 18px; background: var(--surface2); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; font-family: inherit; }
-        .dash-hello-add span { width: 32px; height: 32px; border-radius: 10px; background: #DB6B2E; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; }
-        .dash-hello-add em { font-style: normal; font-size: 11px; font-weight: 700; color: var(--text2); }
-        @media (max-width: 680px) { .dash-a-duo { grid-template-columns: minmax(0, 1fr); } .dash-hello-add { width: 64px; height: 84px; min-height: 84px; } }`}</style>
+        .dash-kpi:not(.dash-kpi-hero) .dash-kpi-action { margin-top: 14px; background: var(--text1); color: var(--surface); }
+        @media (max-width: 680px) { .dash-a-duo { grid-template-columns: minmax(0, 1fr); } }`}</style>
       {/* 리사이즈 중 정렬 기준선 오버레이 */}
       {dragging && (
         <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 4 }}>
@@ -7280,23 +7277,13 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
         </div>
       )}
       <div id="dash-sec-kpi" className="dash-a-row" style={{scrollMarginTop:90}}>
-        {/* 인사 카드 — 오늘 날짜와 판매 추가 (시안 A의 인사 + 점선 추가 버튼) */}
+        {/* 이번 달 매출 — 첫 칸에 크게 (인사는 로그인 첫 화면이 맡는다) */}
         {(() => {
-          const t = new Date(); const wd = weekdayOf(`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`);
-          const hour = t.getHours();
-          return (
-            <div className="card dash-hello" style={{flex:"1.3 1 260px"}}>
-              <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",gap:6}}>
-                <div style={{fontSize:12,fontWeight:700,color:"var(--text3)"}}>{t.getMonth()+1}월 {t.getDate()}일 ({wd ? wd.label : ""})</div>
-                <div style={{fontSize:20,fontWeight:800,letterSpacing:-0.5,lineHeight:1.35,color:"var(--text1)"}}>{hour < 11 ? "좋은 아침이에요" : hour < 17 ? "좋은 오후예요" : "오늘도 수고 많으셨어요"}<br/>{thisYear}년 경영 현황</div>
-                <div style={{fontSize:12,color:"var(--text3)"}}>매출·마진·미수금·현금을 한눈에</div>
-              </div>
-              <button type="button" className="dash-hello-add no-print" title="판매 추가" aria-label="판매 추가"
-                onClick={() => { setShowOrderForm(true); setTimeout(() => { const el = document.getElementById("dash-sec-orders"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 50); }}>
-                <span>+</span><em>판매 추가</em>
-              </button>
-            </div>
-          );
+          const now = new Date();
+          const thisYM = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+          const thisMonthSales = (monthlyRevLedger[thisYM] || 0) || (monthlyRevOrders[thisYM] || 0);
+          return kpi("kpi_this_month", "이번 달 매출", thisMonthSales>0?Math.round(thisMonthSales).toLocaleString()+"원":"—", `${now.getFullYear()}년 ${now.getMonth()+1}월`, thisMonthSales>0?"var(--accent-strong)":null,
+            { icon: "calendar", grow: 1.3, big: true, action: { label: "+ 판매 추가", onClick: () => { setShowOrderForm(true); setTimeout(() => { const el = document.getElementById("dash-sec-orders"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 50); } } });
         })()}
         {kpi("kpi_year", thisYear+"년 총 매출", totalYearRevenue>0?Math.round(totalYearRevenue).toLocaleString()+"원":"—", "월별 입력 기준", null, { icon: "barChart" })}
         {kpi("kpi_top", "최다 매출 제품", topProduct?topProduct[0]:"—", topProduct?Math.round(topProduct[1]).toLocaleString()+"원":"기록 없음", null, { icon: "star" })}
@@ -7314,7 +7301,6 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
           <div className="dash-a-row">
             {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"곳 (장부 자동연동)", null,
               { hero: true, grow: 1.3, action: { label: "거래처별 미수금 보기", onClick: () => { save("frw_ledger_subtab", "ar"); setTab && setTab("ledger"); } } })}
-            {kpi("kpi_this_month", "이번 달 매출", thisMonthSales>0?Math.round(thisMonthSales).toLocaleString()+"원":"—", `${now.getFullYear()}년 ${now.getMonth()+1}월`, thisMonthSales>0?"var(--accent-strong)":null, { icon: "calendar" })}
             {kpi("kpi_cash", "현금 잔고", Math.round(cashTotal).toLocaleString()+"원", cashCount>0?cashCount+"개 계좌 합계":"등록된 계좌 없음", cashTotal>0?"var(--positive-text)":null, { icon: "treasury" })}
             {kpi("kpi_profit", "추정 순이익", (totalYearRevenue>0 && avgMarginSell>0)?Math.round(estimatedProfit).toLocaleString()+"원":"—", (totalYearRevenue>0 && avgMarginSell>0)?`${thisYear}년 매출 ${Math.round(totalYearRevenue/10000).toLocaleString()}만원 × 평균 마진 ${avgMarginSell.toFixed(1)}%`:"연매출 또는 제품 마진 입력 필요", (totalYearRevenue>0 && avgMarginSell>0)?(estimatedProfit>0?"var(--positive-text)":"var(--negative-text)"):null, { icon: "coins" })}
             {(() => {
