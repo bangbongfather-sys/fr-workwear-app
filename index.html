@@ -9515,6 +9515,80 @@ function BankAutoCollectBar({ biz }) {
 // 장부의 미입금 청구를 입금완료 처리하거나 미수금 원장에 입금으로 기록한다.
 // 한 번 지정한 입금자명→거래처 매핑은 기억해 다음 업로드부터 자동 추천.
 // (은행 인증정보는 어디에도 저장하지 않음 — 엑셀 파일만 사용)
+// ── 부분 입금으로 장부 청구 닫기 (거래처별 미수금 · 입금내역 공용) ──
+// 부분 입금은 가장 오래된 청구부터 채운다(FIFO). 미수금 원장의 「입금」 기록을 날짜순으로
+// 오래된 달부터 부어 보고, 한 달이 다 차면 그 달을 입금완료로 닫을 수 있다.
+// 경계에 걸친 입금은 쓴 만큼만 빼고 나머지는 원장에 남긴다 (입금 행 id 는 그대로).
+function arUnpaidRows(name, ledgers) {
+  const key = (name || "").trim(), out = [];
+  Object.entries(ledgers || {}).forEach(([ym, m]) => ((m && m.clients) || []).forEach(c => {
+    if ((c.name || "").trim() !== key || c.status !== "미입금") return;
+    const total = parseFloat(c.total) || ((parseFloat(c.supply) || 0) + (parseFloat(c.tax) || 0));
+    if (total > 0) out.push({ ym, id: c.id, total: Math.round(total), memo: c.memo || "" });
+  }));
+  return out.sort((a, b) => a.ym.localeCompare(b.ym) || String(a.id).localeCompare(String(b.id)));
+}
+function arPayEntries(name, clientAR) {
+  const es = ((((clientAR || {})[(name || "").trim()]) || {}).entries || []).filter(e => e.type === "입금" && (parseFloat(e.amount) || 0) > 0);
+  return [...es].sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")) || (Number(a.id) || 0) - (Number(b.id) || 0));
+}
+function arFifoPlan(name, ledgers, clientAR) {
+  const months = arUnpaidRows(name, ledgers);
+  const pays = arPayEntries(name, clientAR);
+  const left = pays.map(e => ({ id: e.id, rest: Math.round(Math.abs(parseFloat(e.amount) || 0)) }));
+  const paySum = left.reduce((s, x) => s + x.rest, 0);
+  let k = 0;
+  const plan = months.map(m => {
+    let need = m.total; const picks = [];
+    while (need > 0 && k < left.length) {
+      const take = Math.min(need, left[k].rest);
+      if (take > 0) picks.push({ id: left[k].id, take });
+      left[k].rest -= take; need -= take;
+      if (left[k].rest <= 0) k++;
+    }
+    const filled = m.total - need;
+    return { ...m, filled, full: need === 0, picks };
+  });
+  return { months: plan, pays, paySum };
+}
+// picks: [{id, take}] — 원장 입금에서 이만큼 쓴다. mode: "exact" | "writeoff"(부족분 수수료·할인) | "carry"(부족분을 청구로 남김)
+function applyARSettle({ name, row, picks, mode, date, entries: curEntries = [] }, { setLedgers, setClientAR, setBankDeposits }) {
+  const key = (name || "").trim();
+  const used = picks.reduce((s, p) => s + p.take, 0);
+  const short = Math.max(0, row.total - used);
+  const fmtW = (n) => Math.round(n).toLocaleString();
+  const note = short > 0 ? (mode === "writeoff" ? `부분 입금 ${fmtW(used)} · 차액 ${fmtW(short)}원 수수료·할인 처리` : `부분 입금 ${fmtW(used)} · 잔액 ${fmtW(short)}원 미수금 청구로 넘김`) : `부분 입금 ${picks.length}건으로 수금`;
+  setLedgers(prev => {
+    const m = prev[row.ym]; if (!m) return prev;
+    return { ...prev, [row.ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === String(row.id)
+      ? { ...c, status: "입금완료", memo: [c.memo, note].filter(Boolean).join(" · ") } : c) } };
+  });
+  const takeOf = new Map(picks.map(p => [p.id, p.take]));
+  // 다 쓰는 원장 입금 id — 지금 값으로 미리 계산 (상태 업데이트 순서에 기대지 않는다)
+  const gone = new Set(curEntries.filter(e => takeOf.has(e.id) && Math.round(Math.abs(parseFloat(e.amount) || 0)) - takeOf.get(e.id) <= 0).map(e => e.id));
+  setClientAR(prev => {
+    const cur = prev[key]; if (!cur) return prev;
+    const entries = [];
+    (cur.entries || []).forEach(e => {
+      if (!takeOf.has(e.id)) { entries.push(e); return; }
+      const rest = Math.round(Math.abs(parseFloat(e.amount) || 0)) - takeOf.get(e.id);
+      if (rest > 0) entries.push({ ...e, amount: rest, desc: (e.desc || "") + (/(나머지)/.test(e.desc || "") ? "" : " (나머지)") });
+    });
+    if (short > 0 && mode === "carry") entries.push({ id: uid(), type: "청구", desc: `${row.ym} 청구 잔액 (부분 입금 후)`, amount: short, date: date || plistToday() });
+    return { ...prev, [key]: { ...cur, entries } };
+  });
+  // 다 쓴 원장 입금에 걸려 있던 은행 입금 행은 그 달 장부 청구로 옮겨 단다 (입금내역의 되돌리기가 맞게)
+  if (setBankDeposits && gone.size) {
+    setBankDeposits(prev => ({
+      ...(prev || {}),
+      items: (((prev || {}).items) || []).map(x => (x.link && x.link.kind === "ar" && gone.has(x.link.entryId))
+        ? { ...x, link: { kind: "ledger", ym: row.ym, clientId: String(row.id) } } : x),
+      nameMap: ((prev || {}).nameMap) || {},
+    }));
+  }
+  return { used, short };
+}
+
 function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedgers, clientAR = {}, setClientAR, clients = [], darkMode, focusClient = null, clearFocus, onBackToLedger, onOpenAR }) {
   const allItems = (bankDeposits && bankDeposits.items) || [];
   const nameMap = (bankDeposits && bankDeposits.nameMap) || {};
@@ -10194,55 +10268,33 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   // 합이 청구액과 맞는 순간 그 달을 닫고, 원장에 쌓아 둔 입금은 지운다.
   // 잔액 = 미입금청구합 + 수동청구 − 원장입금합 이므로, 청구를 입금완료로 바꾸면서
   // 같은 금액의 원장 입금을 지워야 잔액이 그대로다. 안 지우면 두 번 차감된다.
+  // 원장 입금은 가장 오래된 청구부터 채운다 — 오래된 달이 다 차면 그 달을 닫는다.
+  // (예전엔 "합이 어느 한 달과 1원까지 같은가"만 봐서, 5월분을 나눠 내는 중인데 6월을 가리켰다)
   const arSettle = React.useMemo(() => {
     const out = [];
     Object.keys(clientAR || {}).forEach(name => {
-      const paidEntries = (((clientAR[name] || {}).entries) || []).filter(e => e.type === "입금");
-      if (!paidEntries.length) return;
-      const sum = paidEntries.reduce((a, e) => a + (parseFloat(e.amount) || 0), 0);
-      if (!(sum > 0)) return;
-      const ups = unpaidOf(name);
-      if (!ups.length) return;
-      const exact = ups.find(u => Math.round(u.total) === Math.round(sum)) || null;
-      let near = null;
-      if (!exact) ups.forEach(u => {
-        const d = Math.round(sum) - Math.round(u.total);
-        if (!near || Math.abs(d) < Math.abs(near.diff)) near = { ...u, diff: d };
-      });
-      out.push({ name, paidEntries, sum, exact, near });
+      const plan = arFifoPlan(name, ledgers, clientAR);
+      if (!plan.pays.length || !plan.months.length || !(plan.paySum > 0)) return;
+      const oldest = plan.months[0];
+      out.push({ name, paidEntries: plan.pays, sum: plan.paySum, oldest, ready: oldest.full, plan });
     });
-    return out.sort((a, b) => (b.exact ? 1 : 0) - (a.exact ? 1 : 0) || b.sum - a.sum);
-  }, [clientAR, unpaidCache]);
-  const arSettleReady = arSettle.filter(x => x.exact);
+    return out.sort((a, b) => (b.ready ? 1 : 0) - (a.ready ? 1 : 0) || b.sum - a.sum);
+  }, [clientAR, ledgers]);
+  const arSettleReady = arSettle.filter(x => x.ready);
 
   const settleMonthFromAR = (row) => {
-    const u = row.exact;
-    if (!u) return;
-    const ids = new Set(row.paidEntries.map(e => e.id));
+    const u = row.oldest;
+    if (!u || !u.full) return;
+    const partial = u.picks.some(pk => { const e = row.paidEntries.find(x => x.id === pk.id); return e && Math.round(Math.abs(parseFloat(e.amount) || 0)) > pk.take; });
     if (!window.confirm(
       `"${row.name}" ${u.ym} 청구 ${fmt(u.total)}원을 입금완료로 처리합니다.\n\n` +
-      `· 미수금 원장에 쌓아 둔 입금 ${row.paidEntries.length}건 ${fmt(row.sum)}원을 지웁니다\n` +
-      `· 그 입금들은 ${u.ym} 장부 청구에 붙습니다\n` +
+      `· 미수금 원장 입금 ${u.picks.length}건에서 ${fmt(u.total)}원을 씁니다 (오래된 입금부터)\n` +
+      (partial ? `· 마지막 입금은 쓴 만큼만 빼고 나머지는 원장에 남깁니다\n` : "") +
       `· 미수금 잔액은 그대로입니다 (청구가 빠지는 만큼 입금도 빠집니다)\n\n계속할까요?`
     )) return;
-
-    setLedgers(prev => {
-      const m = prev[u.ym]; if (!m) return prev;
-      return { ...prev, [u.ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === String(u.id) ? { ...c, status: "입금완료" } : c) } };
-    });
-    setClientAR(prev => {
-      const cur = prev[row.name]; if (!cur) return prev;
-      return { ...prev, [row.name]: { ...cur, entries: (cur.entries || []).filter(e => !ids.has(e.id)) } };
-    });
-    // 원장에 걸려 있던 입금 행들을 그 달 청구로 옮겨 단다 — 되돌리기가 제대로 동작하게
-    setBankDeposits(prev => ({
-      ...(prev || {}),
-      items: (((prev || {}).items) || []).map(x =>
-        (x.link && x.link.kind === "ar" && ids.has(x.link.entryId))
-          ? { ...x, link: { kind: "ledger", ym: u.ym, clientId: String(u.id) } } : x),
-      nameMap: ((prev || {}).nameMap) || {},
-    }));
-    showToast(`"${row.name}" ${u.ym} 수금 완료 — 원장 입금 ${row.paidEntries.length}건을 정리했습니다`, "success");
+    applyARSettle({ name: row.name, row: u, picks: u.picks, mode: "exact", entries: ((clientAR[row.name] || {}).entries) || [] },
+      { setLedgers, setClientAR, setBankDeposits });
+    showToast(`"${row.name}" ${u.ym} 수금 완료 — 원장 입금 ${u.picks.length}건을 정리했습니다`, "success");
   };
 
   // ── 하나씩 보기 (빠른 처리) ──
@@ -10554,17 +10606,17 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
             </span>
             {arSettleReady.length > 0 && (
               <span style={{ padding: "2px 9px", borderRadius: 100, background: "var(--positive)", color: "#fff", fontSize: 11, fontWeight: 800 }}>
-                {arSettleReady.length}곳 청구액과 일치
+                {arSettleReady.length}곳 오래된 달 다 참
               </span>
             )}
             <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 11.5, color: "var(--text3)" }}>합이 맞는 달은 여기서 바로 닫을 수 있습니다</span>
+            <span style={{ fontSize: 11.5, color: "var(--text3)" }}>입금은 가장 오래된 청구부터 채웁니다 · 다 찬 달은 여기서 바로 닫을 수 있어요</span>
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {arSettle.slice(0, 8).map(row => (
               <div key={row.name} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 13px", borderRadius: 11,
-                background: "var(--surface)", border: row.exact ? "1px solid rgba(3,178,108,0.35)" : "1px solid var(--divider)" }}>
+                background: "var(--surface)", border: row.ready ? "1px solid rgba(3,178,108,0.35)" : "1px solid var(--divider)" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{row.name}</div>
                   <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 2 }}>
@@ -10572,26 +10624,34 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                   </div>
                 </div>
                 <div style={{ flex: 1 }} />
-                {row.exact ? (
+                {row.ready ? (
                   <>
                     <div style={{ fontSize: 12, color: "var(--text2)", textAlign: "right" }}>
-                      <div>{row.exact.ym} 청구 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(row.exact.total)}원</b></div>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: "var(--positive-text)", marginTop: 2 }}>✓ 금액이 정확히 일치합니다</div>
+                      <div>가장 오래된 {row.oldest.ym} 청구 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(row.oldest.total)}원</b></div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "var(--positive-text)", marginTop: 2 }}>✓ 입금으로 다 찼어요{row.sum > row.oldest.total ? ` · 넘는 ${fmt(row.sum - row.oldest.total)}원은 다음 달로` : ""}</div>
                     </div>
                     <button onClick={() => settleMonthFromAR(row)}
-                      title={`${row.exact.ym} 청구를 입금완료로 바꾸고 원장 입금을 정리합니다`}
+                      title={`${row.oldest.ym} 청구를 입금완료로 바꾸고 원장 입금을 정리합니다`}
                       style={{ height: 36, padding: "0 16px", borderRadius: 10, border: "none", background: "#03B26C", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-                      {row.exact.ym} 수금 완료
+                      {row.oldest.ym} 수금 완료
                     </button>
                   </>
-                ) : row.near ? (
-                  <div style={{ fontSize: 12, color: "var(--text3)", textAlign: "right" }}>
-                    <div>가장 가까운 {row.near.ym} 청구 <b style={{ color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{fmt(row.near.total)}원</b></div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--negative-text)", marginTop: 2 }}>
-                      {fmt(Math.abs(row.near.diff))}원 {row.near.diff > 0 ? "초과" : "부족"} — 나머지가 들어오면 여기서 닫힙니다
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--text3)", textAlign: "right" }}>
+                      <div>가장 오래된 {row.oldest.ym} 청구 <b style={{ color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{fmt(row.oldest.total)}원</b> 중 <b style={{ color: "var(--text2)" }}>{Math.round(row.oldest.filled / row.oldest.total * 100)}%</b> 채워짐</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--warning-text)", marginTop: 2 }}>
+                        {fmt(row.oldest.total - row.oldest.filled)}원 남음 — 차액을 정리하려면 거래처별 미수금에서
+                      </div>
                     </div>
-                  </div>
-                ) : null}
+                    {onOpenAR && (
+                      <button onClick={() => onOpenAR(row.name)}
+                        style={{ height: 36, padding: "0 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                        맞춰 보기
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             ))}
             {arSettle.length > 8 && (
@@ -11639,7 +11699,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         <YearlyRevenueView yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} ledgers={ledgers} orders={orders} darkMode={darkMode} />
       )}
       {subTab === "ar" && (
-        <ARDetailView ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} darkMode={darkMode} focusClient={arJumpName || focusClient} clearFocus={() => { if (arJumpName) setArJumpName(null); if (clearFocus) clearFocus(); }} />
+        <ARDetailView ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} setBankDeposits={setBankDeposits} darkMode={darkMode} focusClient={arJumpName || focusClient} clearFocus={() => { if (arJumpName) setArJumpName(null); if (clearFocus) clearFocus(); }} />
       )}
       {subTab === "pattern" && (
         <CollectionPatternView ledgers={ledgers} clientAR={clientAR} bankDeposits={bankDeposits} darkMode={darkMode} onJump={(name) => { setArJumpName(name); setSubTab("ar"); }} />
@@ -12405,7 +12465,7 @@ function CollectionPatternView({ ledgers, clientAR, bankDeposits, darkMode, onJu
 }
 
 // 거래처별 미수금 상세 보기 (장부의 서브탭)
-function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, focusClient, clearFocus }) {
+function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, focusClient, clearFocus, setBankDeposits }) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("balance"); // balance | name | charge
   const [filterMode, setFilterMode] = useState("unpaid"); // all | unpaid | paid
@@ -12434,6 +12494,28 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
   }, [focusClient]);
   const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
   const [editArId, setEditArId] = useState(null);
+  // 「직접 골라서 닫기」 — { name, ids: [원장 입금 id], ym }
+  const [settlePick, setSettlePick] = useState(null);
+  const fmtW = (n) => Math.round(n || 0).toLocaleString();
+  // 부분 입금으로 한 달 청구를 닫는다 — 확인을 받고 공용 applyARSettle 로 처리
+  const settleARRow = (c, row, picks, mode) => {
+    const used = picks.reduce((s2, pk) => s2 + pk.take, 0);
+    const short = Math.max(0, row.total - used);
+    const partialPick = picks.some(pk => { const e = c.entries.find(x => x.id === pk.id); return e && Math.round(Math.abs(parseFloat(e.amount) || 0)) > pk.take; });
+    const lines = [
+      `"${c.name}" ${row.ym} 청구 ${fmtW(row.total)}원을 입금완료로 처리합니다.`, "",
+      `· 원장 입금 ${picks.length}건에서 ${fmtW(used)}원을 씁니다`,
+      partialPick ? "· 마지막 입금은 쓴 만큼만 빼고 나머지는 원장에 남깁니다" : "",
+      short > 0 && mode === "writeoff" ? `· 모자란 ${fmtW(short)}원은 수수료·할인으로 보고 받지 않습니다 (미수금 잔액이 그만큼 줄어요)` : "",
+      short > 0 && mode === "carry" ? `· 모자란 ${fmtW(short)}원은 「${row.ym} 청구 잔액」으로 미수금에 남깁니다 (잔액 그대로)` : "",
+      short === 0 ? "· 미수금 잔액은 그대로입니다 (청구가 빠지는 만큼 입금도 빠집니다)" : "",
+      "", "계속할까요?",
+    ].filter((x, i, arr) => x !== "" || (i > 0 && arr[i - 1] !== ""));
+    if (!window.confirm(lines.join("\n"))) return;
+    applyARSettle({ name: c.name, row, picks, mode, entries: c.entries }, { setLedgers, setClientAR, setBankDeposits });
+    setSettlePick(null);
+    showToast(`"${c.name}" ${row.ym} 수금 완료${short > 0 ? (mode === "writeoff" ? ` · 차액 ${fmtW(short)}원 수수료·할인` : ` · 잔액 ${fmtW(short)}원 미수금으로`) : ""}`, "success");
+  };
   const [editArDraft, setEditArDraft] = useState(null);
   const [showPaidHistory, setShowPaidHistory] = useState(() => new Set()); // 완납 내역 펼친 거래처 목록
 
@@ -12676,7 +12758,16 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                   return (
                     <tr key={a.id}>
                       <td style={{textAlign:"center"}}>
-                        <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FE9800":"#00B493"}}>{a.type}</span>
+                        {settlePick && settlePick.name === c.name && !isCharge ? (
+                          <label style={{display:"inline-flex",alignItems:"center",gap:5,cursor:"pointer"}}>
+                            <input type="checkbox" aria-label={`${a.desc || "입금"} 고르기`} checked={settlePick.ids.includes(a.id)}
+                              onChange={() => setSettlePick(p => ({ ...p, ids: p.ids.includes(a.id) ? p.ids.filter(x => x !== a.id) : [...p.ids, a.id] }))}
+                              style={{width:16,height:16,minHeight:16,accentColor:"#00B493"}}/>
+                            <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:"rgba(0,180,147,0.15)",color:"#00B493"}}>{a.type}</span>
+                          </label>
+                        ) : (
+                          <span style={{display:"inline-block",padding:"2px 8px",borderRadius:6,fontSize:11,fontWeight:700,background:isCharge?"rgba(255,149,0,0.15)":"rgba(0,180,147,0.15)",color:isCharge?"#FE9800":"#00B493"}}>{a.type}</span>
+                        )}
                       </td>
                       <td style={{fontSize:13}}>{a.desc}</td>
                       <td style={{textAlign:"right",fontSize:13,fontWeight:600,color:isCharge?"var(--text1)":"#00B493"}}>{isCharge?"+":"-"}{Math.round(Math.abs(a.amount)||0).toLocaleString()}원</td>
@@ -12709,6 +12800,119 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
               </tbody>
             </table>
           )}
+          {/* 3. 달별 청구와 맞춰 보기 — 부분 입금은 오래된 청구부터 채운다 */}
+          {(() => {
+            const plan = arFifoPlan(c.name, ledgers, clientAR);
+            if (!plan.months.length || !plan.pays.length) return null;
+            const firstOpen = plan.months[0];
+            const picking = settlePick && settlePick.name === c.name;
+            // 직접 고른 입금 → 고른 달과 비교
+            let pickView = null;
+            if (picking) {
+              const row = plan.months.find(m => m.ym + "|" + m.id === settlePick.ym) || firstOpen;
+              const chosen = plan.pays.filter(e => settlePick.ids.includes(e.id));
+              const sum = chosen.reduce((s2, e) => s2 + Math.round(Math.abs(parseFloat(e.amount) || 0)), 0);
+              // 넘치면 날짜순으로 채우고 마지막 입금은 쓴 만큼만
+              let need = row.total; const picks = [];
+              chosen.forEach(e => { const amt = Math.round(Math.abs(parseFloat(e.amount) || 0)); const take = Math.min(amt, need); if (take > 0) { picks.push({ id: e.id, take }); need -= take; } });
+              const diff = sum - row.total;
+              pickView = { row, chosen, sum, diff, picks };
+            }
+            const pill = (bg, fg) => ({ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 800, background: bg, color: fg, whiteSpace: "nowrap" });
+            return (
+              <div style={{ margin: "4px 0 14px", padding: "14px 16px", borderRadius: 14, border: "1.5px solid " + (firstOpen.full ? "rgba(3,178,108,0.45)" : "var(--border)"), background: firstOpen.full ? "rgba(3,178,108,0.05)" : "var(--surface)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 800, color: "var(--text1)" }}>달별 청구와 맞춰 보기</span>
+                  <span style={{ fontSize: 11.5, color: "var(--text3)" }}>부분 입금 {plan.pays.length}건 · {fmtW(plan.paySum)}원을 오래된 청구부터 채워요</span>
+                  <span style={{ flex: 1 }} />
+                  <button type="button" onClick={() => setSettlePick(picking ? null : { name: c.name, ids: [], ym: firstOpen.ym + "|" + firstOpen.id })}
+                    style={{ height: 32, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: picking ? "var(--text1)" : "var(--surface)", color: picking ? "var(--surface)" : "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    {picking ? "골라서 닫기 끝내기" : "직접 골라서 닫기"}
+                  </button>
+                </div>
+
+                {!picking && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                    {plan.months.map((m, mi) => {
+                      const pct = Math.round(m.filled / m.total * 100);
+                      return (
+                        <div key={m.ym + m.id} style={{ display: "grid", gridTemplateColumns: "72px minmax(0, 1fr) auto", gap: 12, alignItems: "center" }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text1)" }}>{m.ym}</span>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+                            <div style={{ height: 7, borderRadius: 4, background: "var(--surface2)", overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: pct + "%", borderRadius: 4, background: m.full ? "#03B26C" : "#E0A100" }} />
+                            </div>
+                            <span style={{ fontSize: 11.5, color: "var(--text3)" }}>
+                              청구 {fmtW(m.total)}원 · {m.full ? <b style={{ color: "var(--positive-text)" }}>입금으로 다 찼어요</b> : m.filled > 0 ? <>들어옴 <b style={{ color: "var(--text2)" }}>{fmtW(m.filled)}</b> ({pct}%) · <b style={{ color: "var(--warning-text)" }}>{fmtW(m.total - m.filled)}원 남음</b></> : "아직 들어온 입금 없음"}
+                            </span>
+                          </div>
+                          {mi === 0 && m.full ? (
+                            <button type="button" onClick={() => settleARRow(c, m, m.picks, "exact")}
+                              style={{ height: 34, padding: "0 14px", borderRadius: 9, border: "none", background: "#03B26C", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{m.ym} 수금 완료</button>
+                          ) : mi === 0 && m.filled > 0 ? (
+                            <span style={pill("var(--warning-bg)", "var(--warning-text)")}>채우는 중</span>
+                          ) : <span />}
+                        </div>
+                      );
+                    })}
+                    {!firstOpen.full && firstOpen.filled > 0 && (
+                      <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 2 }}>
+                        차액이 수수료·할인이라 더 들어올 돈이 없다면 「직접 골라서 닫기」로 {firstOpen.ym}을 닫을 수 있어요.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {picking && pickView && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12.5, color: "var(--text2)" }}>
+                      <span>위 표에서 이 달에 쓸 <b style={{ color: "var(--text1)" }}>입금을 체크</b>하고, 닫을 달을 고르세요</span>
+                      <select aria-label="닫을 달" value={pickView.row.ym + "|" + pickView.row.id} onChange={e => setSettlePick(p => ({ ...p, ym: e.target.value }))}
+                        style={{ width: "auto", height: 32, minHeight: 32, fontSize: 12.5, padding: "0 8px" }}>
+                        {plan.months.map(m => <option key={m.ym + m.id} value={m.ym + "|" + m.id}>{m.ym} 청구 {fmtW(m.total)}원</option>)}
+                      </select>
+                      <span style={{ flex: 1 }} />
+                      <button type="button" onClick={() => setSettlePick(p => ({ ...p, ids: plan.pays.map(e => e.id) }))}
+                        style={{ height: 30, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>입금 모두 고르기</button>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: "10px 12px", borderRadius: 10, background: "var(--surface2)", fontSize: 12.5 }}>
+                      <span>고른 입금 <b>{pickView.chosen.length}건 · {fmtW(pickView.sum)}원</b></span>
+                      <span style={{ color: "var(--text3)" }}>vs</span>
+                      <span>{pickView.row.ym} 청구 <b>{fmtW(pickView.row.total)}원</b></span>
+                      <span style={{ flex: 1 }} />
+                      {pickView.chosen.length === 0 ? <span style={{ color: "var(--text3)" }}>입금을 골라 주세요</span>
+                        : pickView.diff === 0 ? <span style={pill("rgba(3,178,108,0.14)", "var(--positive-text)")}>✓ 딱 맞아요</span>
+                        : pickView.diff < 0 ? <span style={pill("var(--warning-bg)", "var(--warning-text)")}>{fmtW(-pickView.diff)}원 부족</span>
+                        : <span style={pill("rgba(59,130,246,0.12)", "#2563EB")}>{fmtW(pickView.diff)}원 넘음</span>}
+                    </div>
+                    {pickView.chosen.length > 0 && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {pickView.diff === 0 && (
+                          <button type="button" onClick={() => settleARRow(c, pickView.row, pickView.picks, "exact")}
+                            style={{ height: 38, padding: "0 16px", borderRadius: 10, border: "none", background: "#03B26C", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{pickView.row.ym} 수금 완료</button>
+                        )}
+                        {pickView.diff > 0 && (
+                          <button type="button" onClick={() => settleARRow(c, pickView.row, pickView.picks, "exact")}
+                            style={{ height: 38, padding: "0 16px", borderRadius: 10, border: "none", background: "#03B26C", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>{pickView.row.ym} 수금 완료 · 넘는 {fmtW(pickView.diff)}원은 원장에 남김</button>
+                        )}
+                        {pickView.diff < 0 && (() => {
+                          // 차액이 청구의 3% 이하면 수수료·할인일 가능성이 커서 그쪽을 앞에, 크면 미수금으로 남기기를 앞에
+                          const small = -pickView.diff <= pickView.row.total * 0.03;
+                          const primary = { height: 38, padding: "0 14px", borderRadius: 10, border: "none", background: "#DB6B2E", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" };
+                          const ghost = { height: 38, padding: "0 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" };
+                          return (<>
+                            {!small && <span style={{ alignSelf: "center", fontSize: 11.5, color: "var(--warning-text)", fontWeight: 700 }}>차액이 커요 — 받을 돈이면 미수금으로 남기세요</span>}
+                            <button type="button" onClick={() => settleARRow(c, pickView.row, pickView.picks, "writeoff")} style={small ? primary : ghost}>차액 {fmtW(-pickView.diff)}원 수수료·할인으로 보고 닫기</button>
+                            <button type="button" onClick={() => settleARRow(c, pickView.row, pickView.picks, "carry")} style={small ? ghost : primary}>닫고 차액 {fmtW(-pickView.diff)}원은 미수금으로 남기기</button>
+                          </>);
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {/* 새 내역 추가 폼 */}
           <div style={{display:"grid",gridTemplateColumns:"80px 1fr 130px 130px auto",gap:6}}>
             <select value={arDraft.type} onChange={e=>setArDraft(d=>({...d,type:e.target.value}))} style={{height:36,fontSize:12,padding:"0 6px",border:"1px solid var(--border)",background:"var(--surface)"}}>
