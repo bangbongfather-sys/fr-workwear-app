@@ -13318,6 +13318,34 @@ function invWithValue(inv, value, date) {
   const next = base.filter(p => p.date !== d).concat([{ date: d, value: v }]).sort((a, b) => a.date.localeCompare(b.date));
   return { ...inv, currentValue: v, valueHistory: next, valueUpdatedAt: d };
 }
+// 다른 투자(파킹통장 등)로 옮겨 온 돈을 더한다 — 원금·평가액에 더하고,
+// 옮긴 날 이후의 평가액 기록도 같이 올려야 추이 그래프가 옮긴 날부터 이어진다.
+// 옮긴 날에 새로 찍은 점에는 by(옮겨 온 투자 id)를 남겨 되돌릴 때 지운다.
+function invAddMoney(inv, amt, date, byId) {
+  const cur = parseFloat(inv.currentValue) || parseFloat(inv.principal) || 0;
+  const base = Array.isArray(inv.valueHistory) && inv.valueHistory.length
+    ? inv.valueHistory.map(p => ({ ...p }))
+    : (inv.startDate && inv.startDate < date && parseFloat(inv.principal) > 0 ? [{ date: inv.startDate, value: parseFloat(inv.principal) }] : []);
+  const sorted = base.sort((a, b) => a.date.localeCompare(b.date));
+  const shifted = sorted.map(p => p.date >= date ? { ...p, value: (parseFloat(p.value) || 0) + amt } : p);
+  if (!shifted.some(p => p.date === date)) {
+    const before = sorted.filter(p => p.date < date).slice(-1)[0];
+    const after = sorted.some(p => p.date > date);
+    const v = (after || before ? (before ? parseFloat(before.value) || 0 : parseFloat(inv.principal) || 0) : cur) + amt;
+    shifted.push({ date, value: v, by: byId });
+  }
+  shifted.sort((a, b) => a.date.localeCompare(b.date));
+  const upd = inv.valueUpdatedAt && inv.valueUpdatedAt > date ? inv.valueUpdatedAt : date;
+  return { ...inv, principal: (parseFloat(inv.principal) || 0) + amt, currentValue: cur + amt, valueHistory: shifted, valueUpdatedAt: upd };
+}
+function invRemoveMoney(inv, amt, date, byId) {
+  const cur = parseFloat(inv.currentValue) || 0;
+  const h = (Array.isArray(inv.valueHistory) ? inv.valueHistory : [])
+    .filter(p => !(p.by != null && p.by === byId))
+    .map(p => p.date >= date ? { ...p, value: Math.max(0, (parseFloat(p.value) || 0) - amt) } : p);
+  return { ...inv, principal: Math.max(0, (parseFloat(inv.principal) || 0) - amt), currentValue: Math.max(0, cur - amt), valueHistory: h };
+}
+
 // 마지막으로 평가액을 적은 날 (기록 전 데이터는 모름)
 const invUpdatedAt = (inv) => inv.valueUpdatedAt
   || (Array.isArray(inv.valueHistory) && inv.valueHistory.length ? [...inv.valueHistory].sort((a, b) => a.date.localeCompare(b.date)).slice(-1)[0].date : null);
@@ -13700,10 +13728,17 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
     const gross = (inv.type === "예금" || inv.type === "채권") && rate > 0 && years > 0 ? Math.round(pr * rate / 100 * years) : 0;
     const net = Math.round(gross * (1 - INV_TAX));
     const lastAcct = load("frw_inv_close_acct", "");
+    // 옮길 수 있는 다른 투자 — 파킹통장처럼 만기 없는 것을 앞에
+    const others = investments.filter(i => !i.closedAt && i.id !== inv.id)
+      .sort((a, b) => (!!a.maturityDate - !!b.maturityDate));
+    const lastInv = load("frw_inv_close_inv", null);
+    const lastDest = load("frw_inv_close_dest", "account");
     return {
-      pr, cur, gross, net,
+      pr, cur, gross, net, others,
       draft: {
         id: inv.id,
+        dest: lastDest === "inv" && others.length ? "inv" : (accounts.length ? "account" : (others.length ? "inv" : "account")),
+        toInvId: others.some(i => i.id === lastInv) ? lastInv : (others[0] ? others[0].id : null),
         accountId: accounts.some(a => a.id === lastAcct) ? lastAcct : (accounts[0] ? accounts[0].id : ""),
         amount: String(gross > 0 ? pr + net : Math.round(cur)),
         date: inv.maturityDate && inv.maturityDate <= today ? inv.maturityDate : today,
@@ -13716,7 +13751,25 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
     const inv = investments.find(i => i.id === invClose.id);
     if (!inv) { setInvClose(null); return; }
     const amt = parseFloat(String(invClose.amount).replace(/[^\d.]/g, ""));
-    if (!(amt > 0)) { showToast("통장에 들어온 금액을 넣어 주세요"); return; }
+    if (!(amt > 0)) { showToast(invClose.dest === "inv" ? "옮기는 금액을 넣어 주세요" : "통장에 들어온 금액을 넣어 주세요"); return; }
+    if (invClose.dest === "inv") {
+      const target = investments.find(i => i.id === invClose.toInvId && !i.closedAt && i.id !== inv.id);
+      if (!target) { showToast("옮길 투자를 골라 주세요"); return; }
+      const date = invClose.date || plistToday();
+      setInvestments(prev => prev.map(i => {
+        if (i.id === inv.id) return {
+          ...invWithValue(i, amt, date),
+          closedAt: date, closedAmount: amt, closedToInvId: target.id, closedToInvName: target.name,
+          closedPrev: { currentValue: i.currentValue, valueHistory: i.valueHistory || [], valueUpdatedAt: i.valueUpdatedAt || null },
+        };
+        if (i.id === target.id) return invAddMoney(i, amt, date, inv.id);
+        return i;
+      }));
+      save("frw_inv_close_dest", "inv"); save("frw_inv_close_inv", target.id);
+      setInvClose(null);
+      showToast(`${inv.name} ${fmt(amt)}원 → ${target.name} (원금·평가액에 더함)`, "success");
+      return;
+    }
     const acct = accounts.find(a => a.id === invClose.accountId);
     if (!acct) { showToast("받을 통장을 골라 주세요"); return; }
     const date = invClose.date || plistToday();
@@ -13729,12 +13782,26 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
       closedAt: date, closedAmount: amt, closedAccountId: acct.id, closedAccountName: acct.name, closedCfId: cfId, closedBalanceAdded: !!invClose.addBalance,
       closedPrev: { currentValue: i.currentValue, valueHistory: i.valueHistory || [], valueUpdatedAt: i.valueUpdatedAt || null },
     } : i));
-    save("frw_inv_close_acct", acct.id);
+    save("frw_inv_close_acct", acct.id); save("frw_inv_close_dest", "account");
     setInvClose(null);
     showToast(`${inv.name} ${fmt(amt)}원 → ${acct.name}${invClose.addBalance ? " (잔액에 더함)" : ""}`, "success");
   };
   // 회수 되돌리기 — 통장 입금 기록(과 더한 잔액)까지 같이 되돌린다
   const reopenInv = (inv) => {
+    if (inv.closedToInvId != null) {
+      const tgt = investments.find(i => i.id === inv.closedToInvId);
+      if (!window.confirm(`「${inv.name}」을(를) 다시 투자 중으로 되돌릴까요?\n\n${inv.closedToInvName || "옮긴 투자"}에 더했던 ${fmt(inv.closedAmount)}원(원금·평가액)도 함께 뺍니다.`)) return;
+      setInvestments(prev => prev.map(i => {
+        if (i.id === inv.id) {
+          const { closedAt, closedAmount, closedToInvId, closedToInvName, closedPrev, ...rest } = i;
+          return closedPrev ? { ...rest, ...closedPrev } : rest;
+        }
+        if (tgt && i.id === tgt.id) return invRemoveMoney(i, parseFloat(inv.closedAmount) || 0, inv.closedAt, inv.id);
+        return i;
+      }));
+      if (!tgt) showToast("옮겼던 투자가 지워져 있어 그쪽 금액은 바꾸지 않았습니다");
+      return;
+    }
     if (!window.confirm(`「${inv.name}」을(를) 다시 투자 중으로 되돌릴까요?\n\n${inv.closedAccountName || "통장"} 입금 기록${inv.closedBalanceAdded ? "과 잔액에 더했던 " + fmt(inv.closedAmount) + "원" : ""}도 함께 되돌립니다.`)) return;
     if (inv.closedCfId) setCashFlows(prev => prev.filter(c => c.id !== inv.closedCfId));
     if (inv.closedBalanceAdded && inv.closedAccountId) setAccounts(prev => prev.map(a => a.id === inv.closedAccountId ? { ...a, balance: (parseFloat(a.balance)||0) - (parseFloat(inv.closedAmount)||0) } : a));
@@ -14385,14 +14452,14 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
           {/* ── 만기 지난 투자 — 통장으로 옮기라는 알림 ── */}
           {maturedRows.length > 0 && (
             <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10, border: "1.5px solid #DB6B2E", background: "var(--accent-tonal)" }}>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--accent-strong)" }}>만기가 된 투자 {maturedRows.length}건 — 받은 돈을 통장으로 옮겨 주세요</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--accent-strong)" }}>만기가 된 투자 {maturedRows.length}건 — 받은 돈을 통장이나 파킹통장으로 옮겨 주세요</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {maturedRows.map(r => (
                   <div key={r.inv.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "8px 12px", background: "var(--surface)", borderRadius: 12 }}>
                     <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11.5, fontWeight: 800, background: invStyle(r.inv.type).bg, color: invStyle(r.inv.type).fg }}>{r.inv.type}</span>
                     <b style={{ fontSize: 13.5, color: "var(--text1)", flex: 1, minWidth: 120 }}>{r.inv.name}</b>
                     <span style={{ fontSize: 12.5, color: "var(--text2)" }}>{r.inv.maturityDate.replace(/-/g, ".")} {r.left === 0 ? "오늘 만기" : `만기 · ${-r.left}일 지남`}</span>
-                    <button type="button" className="btn-primary" onClick={() => openInvClose(r.inv)} style={{ height: 34, minHeight: 34, padding: "0 14px", fontSize: 12.5 }}>통장으로 옮기기</button>
+                    <button type="button" className="btn-primary" onClick={() => openInvClose(r.inv)} style={{ height: 34, minHeight: 34, padding: "0 14px", fontSize: 12.5 }}>옮기기</button>
                   </div>
                 ))}
               </div>
@@ -14505,9 +14572,52 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                       <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                         <span style={{ display: "inline-flex", flexShrink: 0, alignItems: "center", height: 24, padding: "0 8px", borderRadius: 7, fontSize: 11.5, fontWeight: 800, background: st.bg, color: st.fg }}>{inv.type}</span>
                         <b style={{ fontSize: 14.5, color: "var(--text1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inv.name}</b>
-                        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 800, color: "var(--accent-strong)", whiteSpace: "nowrap" }}>→ 통장으로</span>
+                        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 800, color: "var(--accent-strong)", whiteSpace: "nowrap" }}>→ 옮기기</span>
                       </div>
-                      {accounts.length === 0 ? (
+                      {/* 옮길 곳: 회사 통장 / 다른 투자(파킹통장 등) */}
+                      <div role="radiogroup" aria-label="옮길 곳" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 4, padding: 4, borderRadius: 12, background: "var(--surface2)" }}>
+                        {[["account", "통장으로"], ["inv", "다른 투자로"]].map(([k, l]) => (
+                          <button key={k} type="button" role="radio" aria-checked={invClose.dest === k} onClick={() => setInvClose(c => ({ ...c, dest: k }))}
+                            style={{ height: 34, minHeight: 34, border: "none", borderRadius: 9, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800,
+                              background: invClose.dest === k ? "var(--surface)" : "transparent", color: invClose.dest === k ? "var(--text1)" : "var(--text3)",
+                              boxShadow: invClose.dest === k ? "0 1px 2px rgba(0,0,0,0.08)" : "none" }}>{l}</button>
+                        ))}
+                      </div>
+                      {invClose.dest === "inv" ? (dft.others.length === 0 ? (
+                        <div style={{ fontSize: 12.5, color: "var(--text2)", padding: "10px 12px", background: "var(--surface2)", borderRadius: 10, lineHeight: 1.6 }}>
+                          옮길 다른 투자가 없습니다. 「+ 투자 추가」로 파킹통장을 먼저 등록해 주세요 (유형 예금, 만기일 비움).
+                        </div>
+                      ) : (<>
+                        <label style={lbl}>옮길 투자 (파킹통장 등)
+                          <select aria-label="옮길 투자" value={invClose.toInvId ?? ""} onChange={e => { const v = e.target.value; const hit = dft.others.find(o => String(o.id) === v); setInvClose(c => ({ ...c, toInvId: hit ? hit.id : null })); }} style={{ height: 38, minHeight: 38, fontSize: 13 }}>
+                            {dft.others.map(o => <option key={o.id} value={o.id}>{o.name} · {o.type}{o.maturityDate ? "" : " · 만기 없음"} · {tmShort(parseFloat(o.currentValue) || parseFloat(o.principal) || 0)}</option>)}
+                          </select>
+                        </label>
+                        <label style={lbl}>옮기는 금액
+                          <input type="number" inputMode="numeric" aria-label="옮기는 금액" value={invClose.amount} onChange={e => setInvClose(c => ({ ...c, amount: e.target.value }))}
+                            style={{ height: 40, minHeight: 40, fontSize: 17, fontWeight: 800, textAlign: "right" }} />
+                        </label>
+                        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: -4 }}>
+                          {opts.map(([l, v]) => (
+                            <button key={l} type="button" onClick={() => setInvClose(c => ({ ...c, amount: String(v) }))}
+                              style={{ ...smallBtn, height: 26, minHeight: 26, padding: "0 8px", fontSize: 11, fontWeight: amtV === v ? 800 : 600,
+                                borderColor: amtV === v ? "#DB6B2E" : "var(--border)", color: amtV === v ? "var(--accent-strong)" : "var(--text3)" }}>{l} {tmShort(v)}</button>
+                          ))}
+                        </div>
+                        <label style={lbl}>옮긴 날
+                          <input type="date" aria-label="옮긴 날" value={invClose.date} onChange={e => setInvClose(c => ({ ...c, date: e.target.value }))} style={{ height: 36, minHeight: 36, fontSize: 12.5 }} />
+                        </label>
+                        {amtV > 0 && (() => {
+                          const tg = dft.others.find(o => o.id === invClose.toInvId);
+                          const tCur = tg ? (parseFloat(tg.currentValue) || parseFloat(tg.principal) || 0) : 0;
+                          return (
+                            <div style={{ fontSize: 12, color: "var(--text2)", padding: "8px 10px", background: "var(--surface2)", borderRadius: 10, lineHeight: 1.6 }}>
+                              원금 {fmt(dft.pr)} 대비 <b style={{ color: amtV - dft.pr >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{amtV - dft.pr >= 0 ? "+" : "−"}{fmt(Math.abs(amtV - dft.pr))}</b> · 옮기면 「끝난 투자」로 갑니다
+                              {tg && <><br/><b style={{ color: "var(--text1)" }}>{tg.name}</b> 평가액 {fmt(tCur)} → <b style={{ color: "var(--text1)" }}>{fmt(tCur + amtV)}</b> (원금에도 더해져요)</>}
+                            </div>
+                          );
+                        })()}
+                      </>)) : accounts.length === 0 ? (
                         <div style={{ fontSize: 12.5, color: "var(--text2)", padding: "10px 12px", background: "var(--surface2)", borderRadius: 10, lineHeight: 1.6 }}>
                           받을 통장이 없습니다. 「통장 관리」에서 통장을 먼저 등록해 주세요.
                           <div style={{ marginTop: 6 }}><button type="button" style={smallBtn} onClick={() => { setInvClose(null); setSubTab("accounts"); }}>통장 관리로</button></div>
@@ -14542,10 +14652,16 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                           </div>
                         )}
                       </>)}
-                      <div style={{ display: "flex", gap: 6 }}>
-                        {accounts.length > 0 && <button type="button" className="btn-primary" onClick={closeInv} style={{ flex: 1, height: 38, fontSize: 13 }}>통장으로 옮기기</button>}
-                        <button type="button" onClick={() => setInvClose(null)} style={{ ...smallBtn, flex: accounts.length ? "0 0 auto" : 1, height: 38, padding: "0 14px" }}>취소</button>
-                      </div>
+                      {(() => {
+                        const canGo = invClose.dest === "inv" ? dft.others.length > 0 : accounts.length > 0;
+                        const tg = invClose.dest === "inv" ? dft.others.find(o => o.id === invClose.toInvId) : null;
+                        return (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            {canGo && <button type="button" className="btn-primary" onClick={closeInv} style={{ flex: 1, height: 38, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{invClose.dest === "inv" ? `${tg ? tg.name : "투자"}로 옮기기` : "통장으로 옮기기"}</button>}
+                            <button type="button" onClick={() => setInvClose(null)} style={{ ...smallBtn, flex: canGo ? "0 0 auto" : 1, height: 38, padding: "0 14px" }}>취소</button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 }
@@ -14617,7 +14733,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                           <span>{inv.maturityDate.slice(2).replace(/-/g, ".")}</span>
                         </div>
                         {r.matured && (
-                          <button type="button" className="btn-primary" onClick={() => openInvClose(inv)} style={{ height: 36, minHeight: 36, fontSize: 12.5, marginTop: 2 }}>만기 — 통장으로 옮기기</button>
+                          <button type="button" className="btn-primary" onClick={() => openInvClose(inv)} style={{ height: 36, minHeight: 36, fontSize: 12.5, marginTop: 2 }}>만기 — 옮기기</button>
                         )}
                       </div>
                     ) : (
@@ -14640,7 +14756,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                       {quickOn
                         ? <button type="button" style={smallBtn} onClick={() => setInvQuick(null)}>취소</button>
                         : <button type="button" style={smallBtn} onClick={() => setInvQuick({ id: inv.id, val: String(Math.round(r.cur)) })}>평가액 수정</button>}
-                      <button type="button" onClick={() => openInvClose(inv)} title="통장으로 옮기기 (만기·매도)" aria-label="통장으로 옮기기"
+                      <button type="button" onClick={() => openInvClose(inv)} title="통장이나 다른 투자로 옮기기 (만기·매도)" aria-label="옮기기"
                         style={{ width: 30, height: 30, minHeight: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 8, background: r.matured ? "var(--accent-tonal)" : "transparent", color: r.matured ? "var(--accent-strong)" : "var(--text3)", cursor: "pointer" }}><Icon name="treasury" size={14}/></button>
                       <button type="button" onClick={() => startEditInv(inv)} title="투자 정보 수정" aria-label="투자 정보 수정"
                         style={{ width: 30, height: 30, minHeight: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 8, background: "transparent", color: "var(--text3)", cursor: "pointer" }}><Icon name="edit" size={14}/></button>
@@ -14664,7 +14780,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
               <button type="button" onClick={() => setShowClosedInv(v => !v)} aria-expanded={showClosedInv}
                 style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 0, padding: 0, border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                 <span style={{ fontSize: 14.5, fontWeight: 800, color: "var(--text1)" }}>끝난 투자 {closedInv.length}건</span>
-                <span style={{ fontSize: 12, color: "var(--text3)" }}>만기·매도로 통장에 옮긴 것 · 받은 돈 {fmt(closedInv.reduce((s2, i) => s2 + (parseFloat(i.closedAmount) || 0), 0))}</span>
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>만기·매도로 옮긴 것 · 받은 돈 {fmt(closedInv.reduce((s2, i) => s2 + (parseFloat(i.closedAmount) || 0), 0))}</span>
                 <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--text2)" }}>{showClosedInv ? "접기 ▲" : "펼치기 ▼"}</span>
               </button>
               {showClosedInv && (
@@ -14677,13 +14793,13 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                         <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11.5, fontWeight: 800, background: invStyle(inv.type).bg, color: invStyle(inv.type).fg, flexShrink: 0 }}>{inv.type}</span>
                         <div style={{ flex: 1, minWidth: 140, display: "flex", flexDirection: "column", gap: 1 }}>
                           <b style={{ fontSize: 13.5, color: "var(--text1)" }}>{inv.name}</b>
-                          <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{inv.closedAt.replace(/-/g, ".")} → {acct ? acct.name : (inv.closedAccountName || "삭제된 통장")}</span>
+                          <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{inv.closedAt.replace(/-/g, ".")} → {inv.closedToInvId != null ? `${inv.closedToInvName || "다른 투자"} (투자)` : (acct ? acct.name : (inv.closedAccountName || "삭제된 통장"))}</span>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
                           <b style={{ fontSize: 14, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(got)}</b>
                           {pr > 0 && <span style={{ fontSize: 11.5, fontWeight: 700, color: gain >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{gain >= 0 ? "+" : "−"}{fmt(Math.abs(gain))} ({gain >= 0 ? "+" : "−"}{Math.abs(gain / pr * 100).toFixed(1)}%)</span>}
                         </div>
-                        <button type="button" style={smallBtn} onClick={() => reopenInv(inv)} title="다시 투자 중으로 (통장 입금 기록도 되돌림)">되돌리기</button>
+                        <button type="button" style={smallBtn} onClick={() => reopenInv(inv)} title="다시 투자 중으로 (통장 입금 기록이나 옮긴 투자의 금액도 되돌림)">되돌리기</button>
                         <button type="button" onClick={() => deleteInv(inv.id)} title="기록 삭제" aria-label="끝난 투자 기록 삭제"
                           style={{ width: 30, height: 30, minHeight: 30, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", borderRadius: 8, background: "transparent", color: "var(--negative-text)", cursor: "pointer" }}><Icon name="trash" size={14}/></button>
                       </div>
