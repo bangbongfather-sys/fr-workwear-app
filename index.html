@@ -1607,6 +1607,38 @@ const toChosung = (s) => {
   return out.replace(/\s+/g, "");
 };
 const _isChosungQuery = (t) => /^[ㄱ-ㅎ]{2,}$/.test(t);
+// ── 입력 중인 마지막 글자 ──
+// 한글은 자판 한 번마다 글자가 바뀐다: 춘추복 = 춘 → 춘ㅊ → 춘추 → 춘춥 → 춘추보 → 춘추복.
+// 중간의 "춘춥"·"춘ㅊ" 은 어디에도 없는 글자라 그대로 비교하면 목록이 비었다가 다시 찬다.
+// 그래서 마지막 글자만은 "자판 순서의 앞부분"으로 본다 — 춥(ㅊㅜㅂ)은 추복(ㅊㅜㅂㅗㄱ)의 앞부분.
+// 겹모음(ㅘ=ㅗ+ㅏ)·겹받침(ㄺ=ㄹ+ㄱ)은 두 번 누르므로 둘로 쪼갠다. 결과는 늘기만 하고 줄지 않는다.
+const _JUNG_KEYS = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅗㅏ","ㅗㅐ","ㅗㅣ","ㅛ","ㅜ","ㅜㅓ","ㅜㅔ","ㅜㅣ","ㅠ","ㅡ","ㅡㅣ","ㅣ"];
+const _JONG_KEYS = ["","ㄱ","ㄲ","ㄱㅅ","ㄴ","ㄴㅈ","ㄴㅎ","ㄷ","ㄹ","ㄹㄱ","ㄹㅁ","ㄹㅂ","ㄹㅅ","ㄹㅌ","ㄹㅍ","ㄹㅎ","ㅁ","ㅂ","ㅂㅅ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+const _JAMO_SPLIT = { "ㄳ":"ㄱㅅ","ㄵ":"ㄴㅈ","ㄶ":"ㄴㅎ","ㄺ":"ㄹㄱ","ㄻ":"ㄹㅁ","ㄼ":"ㄹㅂ","ㄽ":"ㄹㅅ","ㄾ":"ㄹㅌ","ㄿ":"ㄹㅍ","ㅀ":"ㄹㅎ","ㅄ":"ㅂㅅ",
+  "ㅘ":"ㅗㅏ","ㅙ":"ㅗㅐ","ㅚ":"ㅗㅣ","ㅝ":"ㅜㅓ","ㅞ":"ㅜㅔ","ㅟ":"ㅜㅣ","ㅢ":"ㅡㅣ" };
+const _keysOf = (str) => {
+  let out = "";
+  for (const ch of str) {
+    const c = ch.charCodeAt(0);
+    if (c >= 0xAC00 && c <= 0xD7A3) { const i = c - 0xAC00; out += _CHO[Math.floor(i / 588)] + _JUNG_KEYS[Math.floor((i % 588) / 28)] + _JONG_KEYS[i % 28]; }
+    else out += _JAMO_SPLIT[ch] || ch;
+  }
+  return out;
+};
+const _isHangulChar = (ch) => /[가-힣ㄱ-ㅣ]/.test(ch || "");
+// field 안에 "확정된 앞부분 + 입력 중인 마지막 글자" 가 이어지는 자리가 있는가
+function _typingHit(field, tn) {
+  if (!field || !tn) return false;
+  const last = tn.slice(-1);
+  if (!_isHangulChar(last)) return false;
+  const head = tn.slice(0, -1), want = _keysOf(last);
+  for (let i = field.indexOf(head); i !== -1; i = field.indexOf(head, i + 1)) {
+    const rest = field.slice(i + head.length, i + head.length + 3); // 한 글자의 자판은 다음 두 글자까지 걸칠 수 있다
+    if (rest && _keysOf(rest).startsWith(want)) return true;
+    if (i + head.length >= field.length) break;
+  }
+  return false;
+}
 // 모든 토큰이 fields 중 어딘가에 걸려야 매칭(토큰별 최고점 합산). 0이면 미매칭.
 function searchScore(query, fields) {
   const tokens = String(query || "").trim().split(/\s+/).filter(Boolean);
@@ -1615,7 +1647,9 @@ function searchScore(query, fields) {
   const bare = fields.map(searchBare);
   const cho = fields.map(f => toChosung(searchNorm(f)));
   let total = 0;
-  for (const t of tokens) {
+  for (let ti = 0; ti < tokens.length; ti++) {
+    const t = tokens[ti];
+    const typing = ti === tokens.length - 1; // 입력 중인 건 마지막 낱말뿐 — 앞 낱말은 띄어쓰기로 확정됐다
     const tn = searchNorm(t), tb = searchBare(t);
     if (!tn) continue;
     let best = 0;
@@ -1633,6 +1667,7 @@ function searchScore(query, fields) {
         else if (b.includes(tb)) s = 45;
       }
       if (s === 0 && _isChosungQuery(tn) && cho[i].includes(tn)) s = 30; // 초성 (ㅁㄹㅈㄹ)
+      if (s === 0 && typing && (_typingHit(f, tn) || _typingHit(b, tb))) s = 40; // 치는 중 (춘춥 → 춘추복)
       if (s > 0 && i === 0) s += 10; // 첫 필드(이름) 가중치
       if (s > best) best = s;
     }
@@ -15860,6 +15895,12 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                     </tr>
                   );
                 };
+                // 맞는 게 없을 때 표가 통째로 접히면 화면이 위로 튄다 — 같은 높이로 안내만 둔다
+                if (visible.length === 0) return (
+                  <tbody><tr><td colSpan={8} style={{ height: 160, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+                    {q ? <>「<b style={{ color: "var(--text2)" }}>{search.trim()}</b>」와 맞는 품목이 없습니다</> : "재고 품목이 없습니다"}
+                  </td></tr></tbody>
+                );
                 if (!grouped) return <tbody>{visible.slice(0, 200).map(itemRow)}</tbody>;
                 // 품명별 그룹: 같은 제품의 사이즈들을 헤더 행(합계 포함) 아래로 — 클릭으로 접기/펼치기
                 return groups.map(([base, list]) => {
