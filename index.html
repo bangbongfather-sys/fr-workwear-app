@@ -4850,12 +4850,16 @@ function buildQuoteLines(groups, sets, grade, vatMode, multiCat) {
   const rowById = {};
   groups.forEach(g => g.items.forEach(r => { rowById[r.p.id] = r; }));
   const priceOf = (r) => vat((r.c.grades || {})[grade] || 0);
+  const saleOf = (r) => vat(plistSaleOf(r.p));
+  const setSale = (parts) => parts.every(pt => saleOf(rowById[pt.pid]) > 0)
+    ? parts.reduce((a, pt) => a + saleOf(rowById[pt.pid]) * (parseFloat(pt.qty) || 1), 0)
+    : 0; // 구성품 중 하나라도 소비자가가 없으면 합계를 내지 않는다 (덜 더한 값이 소비자가로 보이면 안 된다)
   const lines = [];
   groups.forEach(g => {
     if (multiCat) lines.push({ kind: "cat", cat: g.cat, key: "c:" + g.cat });
     const ids = g.items.map(r => r.p.id);
     g.items.forEach((r, i) => {
-      lines.push({ kind: "item", key: "i:" + r.p.id, name: quoteName(r.p.name), price: priceOf(r) });
+      lines.push({ kind: "item", key: "i:" + r.p.id, name: quoteName(r.p.name), price: priceOf(r), sale: saleOf(r) });
       (sets || []).forEach(st => {
         const parts = (st.parts || []).filter(pt => rowById[pt.pid]);
         if (parts.length === 0 || parts.length !== (st.parts || []).length) return; // 빠진 구성품이 있으면 세트를 싣지 않는다
@@ -4863,7 +4867,7 @@ function buildQuoteLines(groups, sets, grade, vatMode, multiCat) {
         if (Math.max(...parts.map(pt => ids.indexOf(pt.pid))) !== i) return;
         const price = parts.reduce((a, pt) => a + priceOf(rowById[pt.pid]) * (parseFloat(pt.qty) || 1), 0);
         const label = parts.map(pt => { const q = parseFloat(pt.qty) || 1; return quoteName(rowById[pt.pid].p.name) + (q > 1 ? ` ×${q}` : ""); }).join(" + ");
-        lines.push({ kind: "set", key: "s:" + st.id, name: st.name || "SET", label, price, st });
+        lines.push({ kind: "set", key: "s:" + st.id, name: st.name || "SET", label, price, sale: setSale(parts), st });
       });
     });
   });
@@ -4875,12 +4879,12 @@ function buildQuoteLines(groups, sets, grade, vatMode, multiCat) {
     if (parts.length === 0 || parts.length !== (st.parts || []).length) return;
     const price = parts.reduce((a, pt) => a + priceOf(rowById[pt.pid]) * (parseFloat(pt.qty) || 1), 0);
     const label = parts.map(pt => { const q = parseFloat(pt.qty) || 1; return quoteName(rowById[pt.pid].p.name) + (q > 1 ? ` ×${q}` : ""); }).join(" + ");
-    lines.push({ kind: "set", key: "s:" + st.id, name: st.name || "SET", label, price, st });
+    lines.push({ kind: "set", key: "s:" + st.id, name: st.name || "SET", label, price, sale: setSale(parts), st });
   });
   return lines;
 }
 
-function ClientQuoteSheet({ id, lines, options, applyDate, vatMode, client }) {
+function ClientQuoteSheet({ id, lines, options, applyDate, vatMode, client, showSale }) {
   const fmt = (n) => Math.round(n || 0).toLocaleString();
   const dateText = applyDate ? `${applyDate.replace(/-/g, ". ")}.` : "";
   return (
@@ -4902,17 +4906,19 @@ function ClientQuoteSheet({ id, lines, options, applyDate, vatMode, client }) {
         <table className="table-plain ps-tbl cq-tbl">
           <colgroup>
             <col />
-            <col style={{ width: "34%" }} />
+            {showSale && <col style={{ width: "24%" }} />}
+            <col style={{ width: showSale ? "24%" : "34%" }} />
           </colgroup>
           <thead>
             <tr className="ps-h2">
               <th>품 목</th>
-              <th>단 가</th>
+              {showSale && <th>소 비 자 가</th>}
+              <th>{showSale ? "공 급 단 가" : "단 가"}</th>
             </tr>
           </thead>
           <tbody>
             {lines.map(l => l.kind === "cat" ? (
-              <tr key={l.key} className="ps-cat"><td colSpan={2}><span className="ps-catlabel">{l.cat}</span></td></tr>
+              <tr key={l.key} className="ps-cat"><td colSpan={showSale ? 3 : 2}><span className="ps-catlabel">{l.cat}</span></td></tr>
             ) : l.kind === "set" ? (
               <tr key={l.key} className="ps-set">
                 <td className="ps-name">
@@ -4921,11 +4927,13 @@ function ClientQuoteSheet({ id, lines, options, applyDate, vatMode, client }) {
                     <span className="ps-parts">{l.label}</span>
                   </span>
                 </td>
+                {showSale && <td className="ps-cell cq-sale">{l.sale > 0 ? fmt(l.sale) : "—"}</td>}
                 <td className="ps-cell"><div className="ps-p">{l.price > 0 ? fmt(l.price) : "별도 문의"}</div></td>
               </tr>
             ) : (
               <tr key={l.key}>
                 <td className="ps-name"><span className="ps-nm">{l.name}</span></td>
+                {showSale && <td className="ps-cell cq-sale">{l.sale > 0 ? fmt(l.sale) : "—"}</td>}
                 <td className="ps-cell"><div className="ps-p">{l.price > 0 ? fmt(l.price) : "별도 문의"}</div></td>
               </tr>
             ))}
@@ -4966,6 +4974,8 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
   const [qClient, setQClient] = React.useState("");
   const [qOff, setQOff] = React.useState(() => new Set());    // 견적에서 뺀 제품 id (새 제품은 기본 포함)
   const [qBusy, setQBusy] = React.useState(false);
+  const [qSale, setQSale] = React.useState(() => load("frw_plist_qsale", true)); // 품목별 시장 소비자가 같이 싣기
+  React.useEffect(() => { save("frw_plist_qsale", qSale); }, [qSale]);
   // 거래처별로 마지막에 준 등급을 기억 — 같은 거래처 이름을 넣으면 그 등급이 바로 잡힌다
   const [qClientGrades, setQClientGrades] = React.useState(() => load("frw_plist_client_grades", {}));
   React.useEffect(() => { save("frw_plist_qgrade", qGrade); }, [qGrade]);
@@ -5056,7 +5066,10 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
       ];
       quoteLines.forEach(l => {
         if (l.kind === "cat") { out.push("", `[${l.cat}]`); return; }
-        const price = l.price > 0 ? `${fmt(l.price)}원` : "별도 문의";
+        const supply = l.price > 0 ? `${fmt(l.price)}원` : "별도 문의";
+        const price = qSale
+          ? `소비자가 ${l.sale > 0 ? `${fmt(l.sale)}원` : "—"} / 공급가 ${supply}`
+          : supply;
         out.push(l.kind === "set" ? `· [${l.name}] ${l.label} — ${price}` : `· ${l.name} — ${price}`);
       });
       const opts = (options || []).filter(o => (o.name || "").trim());
@@ -5263,8 +5276,16 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
                     color: quoteGrade === g ? "#fff" : "var(--text3)" }}>{g}급</button>
               ))}
             </div>
-            <span style={{ fontSize: 11, color: "var(--text3)" }}>← 이 등급 단가가 &lsquo;단가&rsquo; 한 열로만 나갑니다</span>
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>← 이 등급 단가가 &lsquo;{qSale ? "공급 단가" : "단가"}&rsquo; 한 열로만 나갑니다</span>
+            <span style={{ marginLeft: "auto" }}>
+              {chip(qSale, "소비자가 표시", () => setQSale(v => !v), "품목마다 시장 소비자가(요척서)를 공급 단가 옆에 같이 싣습니다")}
+            </span>
           </div>
+          {qSale && quoteLines.some(l => l.kind === "item" && !(l.sale > 0)) && (
+            <div style={{ fontSize: 11, color: "#F0A742", lineHeight: 1.5 }}>
+              소비자가가 비어 있는 제품 {quoteLines.filter(l => l.kind === "item" && !(l.sale > 0)).length}개 — 견적에는 &lsquo;—&rsquo;로 나갑니다. 단가 계산기에서 그 제품의 &lsquo;시장 소비자가&rsquo;를 넣어 주세요
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", minWidth: 40 }}>거래처</span>
             <input value={qClient} onChange={e => onClientChange(e.target.value)} placeholder="거래처명 (선택) — 넣으면 '○○ 귀중'"
@@ -5311,7 +5332,7 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
         </div>
       ) : (
         <ClientQuoteSheet id="plist-client-quote" lines={quoteLines} options={options}
-          applyDate={applyDate} vatMode={vatMode} client={qClient.trim()} />
+          applyDate={applyDate} vatMode={vatMode} client={qClient.trim()} showSale={qSale} />
       ))}
 
       {viewMode === "sheet" && (shown.length === 0 ? (
@@ -5471,6 +5492,7 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
         .cq-tbl .ps-nm { white-space:normal; overflow:visible; word-break:keep-all; }
         .cq-tbl .ps-h2 th { background:#f2f3f5; }
         .cq-to { font-size:15px; font-weight:800; margin-top:10px; }
+        .cq-sale { color:#5b6068; font-size:12.5px; }
         .cq-note { font-size:10.5px; color:#5b6068; margin-top:10px; text-align:center; }
         @media (max-width: 520px) {
           .ps-paper { padding:18px 12px 14px; }
