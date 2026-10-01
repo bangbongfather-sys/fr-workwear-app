@@ -4836,6 +4836,117 @@ function PriceSheet({ groups, allGrades, sets, options, optionNote, applyDate, v
   );
 }
 
+// ─── 거래처 견적 단가표 ───
+// 단가표에서 등급 하나를 골라 거래처에 바로 보내는 한 장짜리 견적.
+// 등급은 우리 내부 기준이라 거래처 문서에는 어떤 형태로도 남기지 않는다:
+// 등급 글자·GROUP·로마숫자·"내부용"·원가·마진·옵션 꼬리말(예: "전 등급 동일 적용")을
+// 모두 빼고, 고른 등급의 단가 한 열만 "단가"로 찍는다. 파일명·공유 문구에도 등급이 없다.
+// 제품명 끝의 "/update" 같은 내부 작업 메모도 거래처 문서에서는 지운다.
+const quoteName = (name) => String(name || "").replace(/\s*\/\s*update\s*$/i, "").trim() || "(이름 없음)";
+
+// 거래처 견적에 실을 줄 — 고른 제품만, 세트는 구성품이 모두 실릴 때만 (등급 단가로 계산)
+function buildQuoteLines(groups, sets, grade, vatMode, multiCat) {
+  const vat = (n) => vatMode ? Math.round(n * 1.1) : Math.round(n || 0);
+  const rowById = {};
+  groups.forEach(g => g.items.forEach(r => { rowById[r.p.id] = r; }));
+  const priceOf = (r) => vat((r.c.grades || {})[grade] || 0);
+  const lines = [];
+  groups.forEach(g => {
+    if (multiCat) lines.push({ kind: "cat", cat: g.cat, key: "c:" + g.cat });
+    const ids = g.items.map(r => r.p.id);
+    g.items.forEach((r, i) => {
+      lines.push({ kind: "item", key: "i:" + r.p.id, name: quoteName(r.p.name), price: priceOf(r) });
+      (sets || []).forEach(st => {
+        const parts = (st.parts || []).filter(pt => rowById[pt.pid]);
+        if (parts.length === 0 || parts.length !== (st.parts || []).length) return; // 빠진 구성품이 있으면 세트를 싣지 않는다
+        if (!parts.every(pt => ids.includes(pt.pid))) return;
+        if (Math.max(...parts.map(pt => ids.indexOf(pt.pid))) !== i) return;
+        const price = parts.reduce((a, pt) => a + priceOf(rowById[pt.pid]) * (parseFloat(pt.qty) || 1), 0);
+        const label = parts.map(pt => { const q = parseFloat(pt.qty) || 1; return quoteName(rowById[pt.pid].p.name) + (q > 1 ? ` ×${q}` : ""); }).join(" + ");
+        lines.push({ kind: "set", key: "s:" + st.id, name: st.name || "SET", label, price, st });
+      });
+    });
+  });
+  // 분류가 섞인 세트(어느 한 분류에 다 담기지 않는 구성)는 맨 아래에 — 내부 단가표와 같은 규칙
+  const placed = new Set(lines.filter(l => l.kind === "set").map(l => l.st.id));
+  (sets || []).forEach(st => {
+    if (placed.has(st.id)) return;
+    const parts = (st.parts || []).filter(pt => rowById[pt.pid]);
+    if (parts.length === 0 || parts.length !== (st.parts || []).length) return;
+    const price = parts.reduce((a, pt) => a + priceOf(rowById[pt.pid]) * (parseFloat(pt.qty) || 1), 0);
+    const label = parts.map(pt => { const q = parseFloat(pt.qty) || 1; return quoteName(rowById[pt.pid].p.name) + (q > 1 ? ` ×${q}` : ""); }).join(" + ");
+    lines.push({ kind: "set", key: "s:" + st.id, name: st.name || "SET", label, price, st });
+  });
+  return lines;
+}
+
+function ClientQuoteSheet({ id, lines, options, applyDate, vatMode, client }) {
+  const fmt = (n) => Math.round(n || 0).toLocaleString();
+  const dateText = applyDate ? `${applyDate.replace(/-/g, ". ")}.` : "";
+  return (
+    <div className="cq-wrap">
+      <div id={id} className="ps-paper">
+        <div className="ps-head">
+          <div className="ps-brandline">
+            <span className="ps-logo">NJ SAFETY</span>
+            <span className="ps-tag">FLAME RESISTANT WORKWEAR</span>
+          </div>
+          <div className="ps-title">견 적 단 가 표</div>
+          <div className="ps-eng">PRICE QUOTATION</div>
+          {client && <div className="cq-to">{client} 귀중</div>}
+          <div className="ps-meta">
+            {dateText ? `${dateText} 기준 · ` : ""}단위 원 · {vatMode ? "VAT 포함" : "VAT 별도"}
+          </div>
+        </div>
+
+        <table className="table-plain ps-tbl cq-tbl">
+          <colgroup>
+            <col />
+            <col style={{ width: "34%" }} />
+          </colgroup>
+          <thead>
+            <tr className="ps-h2">
+              <th>품 목</th>
+              <th>단 가</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map(l => l.kind === "cat" ? (
+              <tr key={l.key} className="ps-cat"><td colSpan={2}><span className="ps-catlabel">{l.cat}</span></td></tr>
+            ) : l.kind === "set" ? (
+              <tr key={l.key} className="ps-set">
+                <td className="ps-name">
+                  <span className="ps-nm">
+                    <span className="ps-badge">{l.name}</span>
+                    <span className="ps-parts">{l.label}</span>
+                  </span>
+                </td>
+                <td className="ps-cell"><div className="ps-p">{l.price > 0 ? fmt(l.price) : "별도 문의"}</div></td>
+              </tr>
+            ) : (
+              <tr key={l.key}>
+                <td className="ps-name"><span className="ps-nm">{l.name}</span></td>
+                <td className="ps-cell"><div className="ps-p">{l.price > 0 ? fmt(l.price) : "별도 문의"}</div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {(options || []).filter(o => (o.name || "").trim()).length > 0 && (
+          <div className="ps-opt">
+            <span className="ps-opt-label">제작 옵션</span>
+            {options.filter(o => (o.name || "").trim()).map(o => (
+              <span key={o.id} className="ps-opt-item">{o.name} <b>+{fmt(o.amt)}</b>원</span>
+            ))}
+          </div>
+        )}
+        <div className="cq-note">본 단가는 {dateText ? `${dateText} ` : ""}기준이며, 원자재 가격 변동에 따라 조정될 수 있습니다.</div>
+        <div className="ps-foot">{BUYER_INFO.name} · {BUYER_INFO.address} · {BUYER_INFO.tel}</div>
+      </div>
+    </div>
+  );
+}
+
 function ProductPriceListView({ products, materials, laborItems, darkMode, setActiveProdId, setCalcSubTab, T }) {
   const [search, setSearch] = React.useState("");
   const [catFilter, setCatFilter] = React.useState("all");
@@ -4850,6 +4961,15 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
   const [options, setOptions] = React.useState(() => load("frw_plist_opts", PLIST_DEFAULT_OPTIONS));
   const [optionNote, setOptionNote] = React.useState(() => load("frw_plist_optnote", "전 등급 동일 적용"));
   const [editPanel, setEditPanel] = React.useState("");  // "" | sets | opts
+  // ── 거래처 견적 (등급 하나만 골라 거래처에 보내는 단가표) ──
+  const [qGrade, setQGrade] = React.useState(() => load("frw_plist_qgrade", "A"));
+  const [qClient, setQClient] = React.useState("");
+  const [qOff, setQOff] = React.useState(() => new Set());    // 견적에서 뺀 제품 id (새 제품은 기본 포함)
+  const [qBusy, setQBusy] = React.useState(false);
+  // 거래처별로 마지막에 준 등급을 기억 — 같은 거래처 이름을 넣으면 그 등급이 바로 잡힌다
+  const [qClientGrades, setQClientGrades] = React.useState(() => load("frw_plist_client_grades", {}));
+  React.useEffect(() => { save("frw_plist_qgrade", qGrade); }, [qGrade]);
+  React.useEffect(() => { save("frw_plist_client_grades", qClientGrades); }, [qClientGrades]);
   React.useEffect(() => { save("frw_plist_vat", vatMode); }, [vatMode]);
   React.useEffect(() => { save("frw_plist_cost", showCost); }, [showCost]);
   React.useEffect(() => { save("frw_plist_compact", compact); }, [compact]);
@@ -4892,6 +5012,34 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
     return GRADES.filter(g => set.has(g)).concat([...set].filter(g => !GRADES.includes(g)));
   }, [shown]);
 
+  // 견적에 실을 제품 = 지금 걸러진 목록에서 뺀 것만 제외 (분류 묶음은 그대로)
+  const quoteGroups = groups
+    .map(g => ({ ...g, items: g.items.filter(r => !qOff.has(r.p.id)) }))
+    .filter(g => g.items.length > 0);
+  const quoteGrade = allGrades.includes(qGrade) ? qGrade : (allGrades[0] || "A");
+  const quoteLines = viewMode === "quote"
+    ? buildQuoteLines(quoteGroups, sets, quoteGrade, vatMode, quoteGroups.length > 1)
+    : [];
+  const quoteItemCount = quoteGroups.reduce((a, g) => a + g.items.length, 0);
+  const pickGrade = (g) => {
+    setQGrade(g);
+    const name = qClient.trim();
+    if (name) setQClientGrades(m => ({ ...m, [name]: g }));
+  };
+  const onClientChange = (v) => {
+    setQClient(v);
+    const known = qClientGrades[v.trim()];
+    if (known) setQGrade(known);
+  };
+  const shareQuote = async () => {
+    if (quoteItemCount === 0) { showToast("견적에 넣을 제품을 골라 주세요"); return; }
+    const name = qClient.trim();
+    if (name) setQClientGrades(m => ({ ...m, [name]: quoteGrade }));
+    setQBusy(true);
+    try { await shareQuoteImage("plist-client-quote", name ? `${name} 단가` : "제품 단가", name); }
+    finally { setQBusy(false); }
+  };
+
   const withVat = (n) => vatMode ? Math.round(n * 1.1) : Math.round(n);
   const fmt = (n) => Math.round(n || 0).toLocaleString();
   const pad = compact ? "6px 10px" : "10px 12px";
@@ -4899,6 +5047,27 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
 
   // 카톡·메일용 텍스트
   const copyText = async () => {
+    if (viewMode === "quote") {
+      // 거래처에 그대로 붙여넣는 문구 — 등급·원가·내부 메모 없음
+      const name = qClient.trim();
+      const out = [
+        `[NJ SAFETY] ${name ? `${name} 귀중 · ` : ""}제품 단가 안내`,
+        `${applyDate ? `${applyDate.replace(/-/g, ". ")}. 기준 · ` : ""}단위 원 · ${vatMode ? "VAT 포함" : "VAT 별도"}`,
+      ];
+      quoteLines.forEach(l => {
+        if (l.kind === "cat") { out.push("", `[${l.cat}]`); return; }
+        const price = l.price > 0 ? `${fmt(l.price)}원` : "별도 문의";
+        out.push(l.kind === "set" ? `· [${l.name}] ${l.label} — ${price}` : `· ${l.name} — ${price}`);
+      });
+      const opts = (options || []).filter(o => (o.name || "").trim());
+      if (opts.length) out.push("", `제작 옵션 — ${opts.map(o => `${o.name} +${fmt(o.amt)}원`).join(" · ")}`);
+      out.push("", `${BUYER_INFO.name} ${BUYER_INFO.tel}`);
+      const text = out.join("\n");
+      if (name) setQClientGrades(m => ({ ...m, [name]: quoteGrade }));
+      try { await navigator.clipboard.writeText(text); showToast("견적 문구를 복사했습니다.\n카톡·문자에 붙여넣기 하세요.", "success"); }
+      catch { showToast(text); }
+      return;
+    }
     const rowById = {};
     rows.forEach(r => { rowById[r.p.id] = r; });
     const head = viewMode === "sheet"
@@ -4977,9 +5146,11 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <div style={{ display: "inline-flex", padding: 2, gap: 2, borderRadius: 9, background: "var(--surface2)", border: "1px solid var(--border)" }}>
-            {[["table", "표 보기"], ["sheet", "단가표 양식"]].map(([v, label]) => (
+            {[["table", "표 보기"], ["sheet", "단가표 양식"], ["quote", "거래처 견적"]].map(([v, label]) => (
               <button key={v} onClick={() => setViewMode(v)}
-                title={v === "sheet" ? "회사 단가표(PRICE LIST) 종이 양식 그대로 보기 · 인쇄용" : "원가·마진까지 같이 보는 작업용 표"}
+                title={v === "sheet" ? "회사 단가표(PRICE LIST) 종이 양식 그대로 보기 · 인쇄용"
+                  : v === "quote" ? "등급 하나를 골라 거래처에 보내는 견적 — 등급·원가는 표시되지 않습니다"
+                  : "원가·마진까지 같이 보는 작업용 표"}
                 style={{ height: 26, padding: "0 10px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
                   background: viewMode === v ? "var(--surface)" : "transparent",
                   boxShadow: viewMode === v ? "0 1px 3px rgba(0,0,0,0.10)" : "none",
@@ -4990,7 +5161,14 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
           {viewMode === "table" && chip(showCost, "원가·마진", () => setShowCost(v => !v), "원가와 마진율 열 표시")}
           {viewMode === "table" && chip(compact, "좁게", () => setCompact(v => !v), "행 높이를 좁게")}
           {viewMode === "sheet" && chip(showSale, "하단 판매가", () => setShowSale(v => !v), "단가 아래에 판매가(요척서의 시장 소비자가)를 같이 찍습니다")}
-          <button onClick={copyText} title="카톡·메일로 보낼 수 있게 텍스트로 복사"
+          {viewMode === "quote" && (
+            <button onClick={shareQuote} disabled={qBusy} className="btn-orange"
+              title="견적을 이미지로 만들어 카톡·문자로 보냅니다 (PC는 이미지 다운로드)"
+              style={{ height: 30, padding: "0 12px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 5, opacity: qBusy ? 0.6 : 1 }}>
+              <Icon name="share" size={12}/>{qBusy ? "만드는 중…" : "견적 공유"}
+            </button>
+          )}
+          <button onClick={copyText} title={viewMode === "quote" ? "거래처에 붙여넣을 견적 문구로 복사 (등급 표시 없음)" : "카톡·메일로 보낼 수 있게 텍스트로 복사"}
             style={{ height: 30, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <Icon name="copy" size={12}/>복사
           </button>
@@ -5072,6 +5250,69 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
           )}
         </div>
       )}
+
+      {viewMode === "quote" && (
+        <div className="card no-print" style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", minWidth: 40 }}>적용 등급</span>
+            <div style={{ display: "inline-flex", padding: 2, gap: 2, borderRadius: 9, background: "var(--surface2)", border: "1px solid var(--border)" }}>
+              {allGrades.map(g => (
+                <button key={g} onClick={() => pickGrade(g)}
+                  style={{ height: 28, minWidth: 44, padding: "0 10px", borderRadius: 7, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 800,
+                    background: quoteGrade === g ? "#DB6B2E" : "transparent",
+                    color: quoteGrade === g ? "#fff" : "var(--text3)" }}>{g}급</button>
+              ))}
+            </div>
+            <span style={{ fontSize: 11, color: "var(--text3)" }}>← 이 등급 단가가 &lsquo;단가&rsquo; 한 열로만 나갑니다</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", minWidth: 40 }}>거래처</span>
+            <input value={qClient} onChange={e => onClientChange(e.target.value)} placeholder="거래처명 (선택) — 넣으면 '○○ 귀중'"
+              list="plist-quote-clients"
+              style={{ flex: "1 1 200px", minWidth: 160, maxWidth: 280, height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8 }} />
+            <datalist id="plist-quote-clients">
+              {Object.keys(qClientGrades).map(n => <option key={n} value={n} />)}
+            </datalist>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>기준일</span>
+            <input type="date" value={applyDate} onChange={e => setApplyDate(e.target.value)}
+              style={{ height: 30, fontSize: 12, padding: "0 8px", borderRadius: 8, width: 148 }} />
+          </div>
+          {qClient.trim() && qClientGrades[qClient.trim()] && (
+            <div style={{ fontSize: 11, color: "var(--text3)" }}>
+              이 거래처에 지난번에 준 등급: <b style={{ color: "#DB6B2E" }}>{qClientGrades[qClient.trim()]}급</b> (자동 선택됨)
+            </div>
+          )}
+          <div style={{ borderTop: "1px solid var(--divider)", paddingTop: 9, display: "flex", flexDirection: "column", gap: 7 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>넣을 제품 {quoteItemCount}/{shown.length}</span>
+              <button onClick={() => setQOff(new Set())}
+                style={{ height: 24, padding: "0 9px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>전체 선택</button>
+              <button onClick={() => setQOff(new Set(shown.map(r => r.p.id)))}
+                style={{ height: 24, padding: "0 9px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>전체 해제</button>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>위의 검색·분류로 먼저 좁힐 수 있어요</span>
+            </div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {shown.map(r => chip(!qOff.has(r.p.id), quoteName(r.p.name), () => setQOff(prev => {
+                const next = new Set(prev);
+                if (next.has(r.p.id)) next.delete(r.p.id); else next.add(r.p.id);
+                return next;
+              })))}
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--positive-text, #00B493)", lineHeight: 1.5 }}>
+            거래처용 문서에는 등급·원가·마진·내부 메모가 들어가지 않습니다 — 아래 미리보기가 그대로 전송됩니다
+          </div>
+        </div>
+      )}
+
+      {viewMode === "quote" && (quoteItemCount === 0 ? (
+        <div className="card" style={{ padding: "36px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+          {rows.length === 0 ? "등록된 제품이 없습니다 — 단가 계산에서 제품을 만들어 주세요" : "견적에 넣을 제품을 골라 주세요"}
+        </div>
+      ) : (
+        <ClientQuoteSheet id="plist-client-quote" lines={quoteLines} options={options}
+          applyDate={applyDate} vatMode={vatMode} client={qClient.trim()} />
+      ))}
 
       {viewMode === "sheet" && (shown.length === 0 ? (
         <div className="card" style={{ padding: "36px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
@@ -5222,6 +5463,15 @@ function ProductPriceListView({ products, materials, laborItems, darkMode, setAc
         .ps-opt-label { font-size:10px; font-weight:800; letter-spacing:2px; color:#DB6B2E; }
         .ps-opt-note { margin-left:auto; font-size:10.5px; color:#9aa0a6; }
         .ps-foot { text-align:center; font-size:10px; color:#9aa0a6; margin-top:12px; }
+        .cq-wrap { max-width:640px; margin:0 auto; width:100%; }
+        table.cq-tbl { min-width:0; width:100%; }
+        /* 2열이라 가로 스크롤이 없다 — 고정(sticky)을 풀어 둔다.
+           html2canvas가 sticky를 엉뚱한 자리에 그려 이미지의 머리줄·분류명이 깨진다 */
+        .cq-tbl .ps-name, .cq-tbl .ps-h2 th:first-child, .cq-tbl .ps-catlabel { position:static; box-shadow:none; }
+        .cq-tbl .ps-nm { white-space:normal; overflow:visible; word-break:keep-all; }
+        .cq-tbl .ps-h2 th { background:#f2f3f5; }
+        .cq-to { font-size:15px; font-weight:800; margin-top:10px; }
+        .cq-note { font-size:10.5px; color:#5b6068; margin-top:10px; text-align:center; }
         @media (max-width: 520px) {
           .ps-paper { padding:18px 12px 14px; }
           .ps-title { font-size:20px; letter-spacing:5px; }
