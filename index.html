@@ -1579,9 +1579,9 @@ const SECTION_LABELS = {
   investments: "투자", cashFlows: "자금흐름", scheduledExpenses: "예정지출", purchaseSubTabs: "매입 거래처 탭",
   todos: "일정", notes: "중요 메모", recurringSchedules: "정기 일정", yearlyRevenue: "연매출",
   purchaseDateMemos: "매입일 메모", stock: "재고", payables: "미지급", bankDeposits: "입금내역",
-  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록",
+  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록", weeklyGoals: "주간 목표",
 };
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes", "weeklyGoals"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -19559,6 +19559,7 @@ function App() {
   const [notes, setNotes] = useState(() => load("frw_notes", []));
   // 하루 기록(일별 메모·일기) — { "2026-08-26": { text, star, updatedAt } }
   const [dailyNotes, setDailyNotes] = useState(() => load("frw_daily_notes", {}));
+  const [weeklyGoals, setWeeklyGoals] = useState(() => load("frw_weekly_goals", {})); // 일정 › 주간 목표 (주 일요일 키)
   const [taxes, setTaxes] = useState(() => load("frw_taxes", [])); // 세무 관리 — 사업장별 세금 납부 기록
   // 2026년 7월 1차 건강보험료 고지 등록 (1회) — 국민건강보험공단 고지 내역서 기준.
   // 고지금액 35,766,480 = 건강 31,658,730 + 요양 4,107,750 (5인 개인별 합계와 일치 검산 완료).
@@ -20224,6 +20225,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.todos !== undefined) setTodos(d.todos);
     if (d.notes !== undefined) setNotes(d.notes);
     if (d.dailyNotes !== undefined && d.dailyNotes && typeof d.dailyNotes === "object") setDailyNotes(d.dailyNotes);
+    if (d.weeklyGoals !== undefined && d.weeklyGoals && typeof d.weeklyGoals === "object" && !Array.isArray(d.weeklyGoals)) setWeeklyGoals(d.weeklyGoals);
     if (d.taxes !== undefined) setTaxes(d.taxes);
     if (d.meetings !== undefined && Array.isArray(d.meetings)) setMeetings(d.meetings);
     if (d.recurringSchedules !== undefined) setRecurringSchedules(d.recurringSchedules);
@@ -20565,7 +20567,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR); save("frw_todos", todos);
-    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
+    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_weekly_goals", weeklyGoals); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
@@ -20575,7 +20577,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_prod_trash", prodTrash);
     save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals };
     // 저장 페이로드는 항상 이 최신 스냅샷으로 만든다 (타이머가 걸린 시점의 옛 값이 아니라).
     latestSnapshot.current = cur;
     if (!initialized.current) { prevSnapshot.current = cur; return; }
@@ -20595,7 +20597,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     markDirtyPersist();
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => { syncTimer.current = null; runSave(0); }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
@@ -24775,7 +24777,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "schedule" && (
           <>
           <ScheduleAlertSettings/>
-          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} />
+          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} />
           </>
         )}
         {tab === "news" && (
@@ -27504,7 +27506,169 @@ function DataSafetyPanel({ onClose, darkMode }) {
   );
 }
 
-function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab }) {
+// ── 주간 목표 ─────────────────────────────────────────────────────
+// 날짜 일정과 따로, "이번 주에 꼭 끝낼 것"을 주 단위로 적는다.
+// weeklyGoals = { "2026-09-27": { items: [{ id, text, done, carried }], updatedAt } }
+// 키는 그 주의 일요일 — 일정 캘린더가 일요일부터 한 줄이라 캘린더 한 줄 = 목표 한 묶음.
+// carried: 「다음 주로 넘기기」로 다음 주에 복사해 둔 항목. 이번 주 기록에는 미완료로 남는다.
+const wgYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const wgParse = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const wgWeekKey = (ds) => { const d = wgParse(ds); d.setDate(d.getDate() - d.getDay()); return wgYmd(d); };
+const wgShift = (k, n) => { const d = wgParse(k); d.setDate(d.getDate() + n * 7); return wgYmd(d); };
+const wgItems = (goals, k) => { const e = (goals || {})[k]; return e && Array.isArray(e.items) ? e.items : []; };
+const wgCount = (items) => ({ total: items.length, done: items.filter(i => i.done).length });
+const wgNewId = () => "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const wgRange = (k) => {
+  const WD = ["일", "월", "화", "수", "목", "금", "토"];
+  const a = wgParse(k), b = wgParse(wgShift(k, 1)); b.setDate(b.getDate() - 1);
+  const f = (d) => `${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]})`;
+  return `${f(a)} – ${f(b)}`;
+};
+
+function WeeklyGoalsCard({ weeklyGoals = {}, setWeeklyGoals, weekKey, setWeekKey, todayKey, inputRef }) {
+  const thisWeek = wgWeekKey(todayKey);
+  const items = wgItems(weeklyGoals, weekKey);
+  const { total, done } = wgCount(items);
+  const [draft, setDraft] = React.useState("");
+  const [editId, setEditId] = React.useState(null);
+  const [editText, setEditText] = React.useState("");
+  React.useEffect(() => { setDraft(""); setEditId(null); }, [weekKey]);
+
+  const putItems = (k, fn) => setWeeklyGoals(prev => {
+    const cur = wgItems(prev, k);
+    const next = fn(cur);
+    const out = { ...(prev || {}) };
+    if (next.length) out[k] = { items: next, updatedAt: Date.now() }; else delete out[k];
+    return out;
+  });
+  const add = () => {
+    const t = draft.trim(); if (!t) return;
+    putItems(weekKey, cur => [...cur, { id: wgNewId(), text: t, done: false }]);
+    setDraft("");
+  };
+  const toggle = (id) => putItems(weekKey, cur => cur.map(i => i.id === id ? { ...i, done: !i.done } : i));
+  const remove = (id) => putItems(weekKey, cur => cur.filter(i => i.id !== id));
+  const commitEdit = () => {
+    const t = editText.trim(), id = editId;
+    setEditId(null);
+    if (!id) return;
+    if (!t) { remove(id); return; }
+    putItems(weekKey, cur => cur.map(i => i.id === id ? { ...i, text: t } : i));
+  };
+  const carryable = items.filter(i => !i.done && !i.carried);
+  const carry = () => {
+    if (!carryable.length) return;
+    const nextKey = wgShift(weekKey, 1);
+    const ids = new Set(carryable.map(i => i.id));
+    setWeeklyGoals(prev => {
+      const src = wgItems(prev, weekKey), dst = wgItems(prev, nextKey);
+      const have = new Set(dst.map(i => i.text.trim()));
+      const moved = src.filter(i => ids.has(i.id) && !have.has(i.text.trim())).map(i => ({ id: wgNewId(), text: i.text, done: false }));
+      const now = Date.now();
+      return { ...(prev || {}),
+        [weekKey]: { items: src.map(i => ids.has(i.id) ? { ...i, carried: true } : i), updatedAt: now },
+        [nextKey]: { items: [...dst, ...moved], updatedAt: now } };
+    });
+    if (typeof showToast === "function") showToast(`못 끝낸 목표 ${carryable.length}개를 다음 주로 넘겼습니다`);
+  };
+
+  // 최근 5주 (보고 있는 주까지)
+  const recent = [-4, -3, -2, -1, 0].map(n => { const k = wgShift(weekKey, n); return { k, ...wgCount(wgItems(weeklyGoals, k)) }; });
+  const rTotal = recent.reduce((s, r) => s + r.total, 0), rDone = recent.reduce((s, r) => s + r.done, 0);
+  const label = weekKey === thisWeek ? "이번 주 목표" : weekKey === wgShift(thisWeek, -1) ? "지난주 목표" : weekKey === wgShift(thisWeek, 1) ? "다음 주 목표" : "주간 목표";
+
+  return (
+    <div className="card wg-card" style={{ padding: "16px 18px 18px" }}>
+      <div className="wg-grid">
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16, fontWeight: 800, color: "var(--text1)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Icon name="check" size={16}/>{label}
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{wgRange(weekKey)}</span>
+            {total > 0 && <span className={"wg-ratio " + (done === total ? "wg-ok" : "wg-mid")}>{done}/{total}</span>}
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+              {weekKey !== thisWeek && <button className="sched-todaybtn" onClick={() => setWeekKey(thisWeek)}>이번 주</button>}
+              <button className="sched-navbtn" onClick={() => setWeekKey(wgShift(weekKey, -1))} title="지난주" aria-label="지난주"><span aria-hidden="true">‹</span></button>
+              <button className="sched-navbtn" onClick={() => setWeekKey(wgShift(weekKey, 1))} title="다음 주" aria-label="다음 주"><span aria-hidden="true">›</span></button>
+            </div>
+          </div>
+          {total > 0 && <div className="wg-prog"><i style={{ width: `${(done / total) * 100}%` }}/></div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: total ? 8 : 10 }}>
+            {items.length === 0 && (
+              <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "2px 0 4px" }}>
+                이 주에 꼭 끝낼 일을 3–5개 적어 두세요. 체크하면 완료로 표시되고, 캘린더의 그 주 줄 위에도 보입니다.
+              </div>
+            )}
+            {items.map(i => (
+              <div key={i.id} className={"wg-item" + (i.done ? " wg-done" : "")}>
+                <button className={"wg-chk" + (i.done ? " on" : "")} onClick={() => toggle(i.id)} title={i.done ? "미완료로" : "완료로 표시"} aria-label={i.done ? "미완료로" : "완료로 표시"}>{i.done ? "✓" : ""}</button>
+                {editId === i.id ? (
+                  <input autoFocus value={editText} onChange={e => setEditText(e.target.value)}
+                    onBlur={commitEdit}
+                    onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) commitEdit(); if (e.key === "Escape") setEditId(null); }}
+                    style={{ flex: 1, minWidth: 0, height: 30, fontSize: 13.5 }}/>
+                ) : (
+                  <span className="wg-text" onClick={() => { setEditId(i.id); setEditText(i.text); }} title="눌러서 고치기">{i.text}</span>
+                )}
+                {i.carried && !i.done && <span className="wg-carried" title="다음 주 목표에도 들어가 있습니다">다음 주로 넘김</span>}
+                <button className="wg-del" onClick={() => remove(i.id)} title="삭제" aria-label="삭제">×</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+            <input ref={inputRef} value={draft} onChange={e => setDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); add(); } }}
+              placeholder="목표 추가 (Enter)" style={{ flex: 1, minWidth: 0, height: 36, fontSize: 13 }}/>
+            {draft.trim() && <button className="btn-orange" onClick={add} style={{ height: 36, padding: "0 14px", fontSize: 13, whiteSpace: "nowrap" }}>추가</button>}
+          </div>
+        </div>
+        <div className="wg-side">
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text3)" }}>최근 5주 달성</span>
+          <span style={{ fontSize: 26, fontWeight: 900, color: "var(--text1)", letterSpacing: -0.5, fontVariantNumeric: "tabular-nums" }}>
+            {rTotal ? `${Math.round((rDone / rTotal) * 100)}%` : "–"}
+          </span>
+          <div className="wg-weeks">
+            {recent.map(r => {
+              const d = wgParse(r.k);
+              return (
+                <button key={r.k} onClick={() => setWeekKey(r.k)} className={r.k === weekKey ? "on" : ""}
+                  title={r.total ? `${wgRange(r.k)} · ${r.done}/${r.total}` : `${wgRange(r.k)} · 목표 없음`}>
+                  <i>{r.total > 0 && <b style={{ height: `${Math.max(6, (r.done / r.total) * 100)}%`, opacity: r.done ? 1 : 0.25 }}/>}</i>
+                  {r.k === thisWeek ? "이번 주" : `${d.getMonth() + 1}/${d.getDate()}`}
+                </button>
+              );
+            })}
+          </div>
+          {carryable.length > 0 && (
+            <button className="wg-carry" onClick={carry} title="못 끝낸 목표를 다음 주 목표에 복사합니다. 이번 주 기록에는 미완료로 남습니다.">
+              못 끝낸 {carryable.length}개 다음 주로 넘기기 →
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 캘린더 주 줄 위의 얇은 띠 — 그 주 목표를 한 줄로 요약. 누르면 위 카드가 그 주로 넘어간다.
+function WeeklyGoalBand({ items, weekKey, isThisWeek, isActive, onOpen }) {
+  const { total, done } = wgCount(items);
+  const open = items.filter(i => !i.done);
+  const a = wgParse(weekKey);
+  return (
+    <button type="button" className={"wg-band" + (isThisWeek ? " wg-band-cur" : "") + (isActive ? " wg-band-active" : "") + (total ? "" : " wg-band-empty")}
+      onClick={onOpen} title={total ? items.map(i => `${i.done ? "✓" : "·"} ${i.text}`).join("\n") : "이 주 목표 적기"}>
+      <span className="wg-band-flag">{isThisWeek ? "이번 주 목표" : `${a.getMonth() + 1}/${a.getDate()} 주`}</span>
+      {total > 0 ? (<>
+        <span className={"wg-ratio " + (done === total ? "wg-ok" : "wg-mid")}>{done}/{total}</span>
+        <span className="wg-band-text">{done === total ? "모두 완료" : open.slice(0, 3).map(i => i.text).join(" · ")}</span>
+      </>) : <span className="wg-band-text">+ 목표 적기</span>}
+    </button>
+  );
+}
+
+function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, weeklyGoals = {}, setWeeklyGoals, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab }) {
   const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","timetable","daily","notes","recurring"], "data-schedule-sub");
   const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
@@ -27515,6 +27679,16 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   };
   const [cursor, setCursor] = React.useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = React.useState(() => ymd(today));
+  // 주간 목표 카드가 보여 주는 주(일요일 키). 캘린더 띠를 누르면 그 주로 넘어간다.
+  const [goalWeek, setGoalWeek] = React.useState(() => wgWeekKey(ymd(today)));
+  const goalCardRef = React.useRef(null);
+  const goalInputRef = React.useRef(null);
+  const openGoalWeek = (k) => {
+    setGoalWeek(k);
+    const el = goalCardRef.current;
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (!wgItems(weeklyGoals, k).length) setTimeout(() => { try { goalInputRef.current && goalInputRef.current.focus({ preventScroll: true }); } catch {} }, 250);
+  };
   // 타임테이블 현재 시각 표시 (1분마다 갱신)
   const [nowMin, setNowMin] = React.useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
   React.useEffect(() => { const iv = setInterval(() => { const n = new Date(); setNowMin(n.getHours() * 60 + n.getMinutes()); }, 60000); return () => clearInterval(iv); }, []);
@@ -28955,6 +29129,11 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       <div className="schedule-grid">
         {/* 왼쪽 컬럼 — 캘린더 + 다가오는 일정. 오른쪽 타임테이블이 페이지 끝까지 따라붙도록 한 열로 묶는다. */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+        {setWeeklyGoals && (
+          <div ref={goalCardRef} style={{ scrollMarginTop: 96 }}>
+            <WeeklyGoalsCard weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} weekKey={goalWeek} setWeekKey={setGoalWeek} todayKey={todayKey} inputRef={goalInputRef}/>
+          </div>
+        )}
         <div className="card" style={{ padding: "16px 18px 20px" }}>
           {/* 노션 캘린더식 월 헤더: 큰 월 표기 + ‹ 오늘 › 내비게이션 */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
@@ -29045,8 +29224,15 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   const headerH = 34; // 날짜 숫자 영역
                   const rowH = headerH + Math.max(1, maxTrack) * (trackH + trackGap) + 8;
 
+                  const goalKey = wgWeekKey(weekStart);
                   return (
-                    <div key={wi} className="sched-weekrow" style={{ position: "relative", minHeight: rowH, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderTop: wi > 0 ? "1px solid var(--divider)" : "none" }}>
+                    <React.Fragment key={wi}>
+                    {setWeeklyGoals && (
+                      <WeeklyGoalBand items={wgItems(weeklyGoals, goalKey)} weekKey={goalKey}
+                        isThisWeek={goalKey === wgWeekKey(todayKey)} isActive={goalKey === goalWeek}
+                        onOpen={() => openGoalWeek(goalKey)}/>
+                    )}
+                    <div className={"sched-weekrow" + (wi === 0 ? " sched-weekrow-first" : "")} style={{ position: "relative", minHeight: rowH, display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderTop: wi > 0 && !setWeeklyGoals ? "1px solid var(--divider)" : "none" }}>
                       {/* 날짜 셀 (배경) */}
                       {week.map((cell, ci) => {
                         const d = cell.d;
@@ -29171,6 +29357,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                         })}
                       </div>
                     </div>
+                    </React.Fragment>
                   );
                 })}
               </div>
@@ -29675,6 +29862,46 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
         .sched-todaybtn:hover:not(:disabled) { background: var(--surface2); }
         .sched-todaybtn:disabled { opacity: .4; cursor: default; }
         .sched-navbtn:hover { background: var(--surface2); color: var(--text1); }
+        /* ── 주간 목표 카드 + 캘린더 주 띠 ── */
+        .wg-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 18px; align-items: start; }
+        @media (max-width: 640px) { .wg-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; } }
+        .wg-ratio { font-size: 11px; font-weight: 800; border-radius: 999px; padding: 1px 8px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+        .wg-ok { background: rgba(0,180,147,0.13); color: #00A383; }
+        .wg-mid { background: var(--accent-tonal); color: var(--accent-strong); }
+        .wg-prog { height: 6px; border-radius: 99px; background: var(--surface2); overflow: hidden; margin-top: 10px; }
+        .wg-prog i { display: block; height: 100%; background: #00B493; border-radius: 99px; transition: width .25s; }
+        .wg-item { display: flex; align-items: center; gap: 8px; min-height: 34px; border-radius: 8px; padding: 0 4px; }
+        .wg-item:hover { background: var(--row-bg); }
+        .wg-chk { width: 18px; height: 18px; min-height: 18px; border-radius: 5px; border: 1.5px solid var(--text3); background: transparent; color: #fff; font-size: 11px; font-weight: 900; padding: 0; cursor: pointer; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-family: inherit; }
+        .wg-chk.on { background: #00B493; border-color: #00B493; }
+        .wg-text { flex: 1; min-width: 0; font-size: 13.5px; color: var(--text1); cursor: text; line-height: 1.4; padding: 6px 0; word-break: break-word; }
+        .wg-done .wg-text { text-decoration: line-through; color: var(--text3); }
+        .wg-carried { font-size: 10.5px; font-weight: 700; color: var(--text3); background: var(--surface2); border-radius: 999px; padding: 1px 7px; flex-shrink: 0; }
+        .wg-del { width: 26px; height: 26px; min-height: 26px; border: none; background: transparent; color: var(--text3); font-size: 16px; border-radius: 6px; cursor: pointer; opacity: 0; padding: 0; flex-shrink: 0; font-family: inherit; }
+        .wg-item:hover .wg-del, .wg-del:focus-visible { opacity: 1; }
+        .wg-del:hover { background: var(--surface2); color: #EF4444; }
+        @media (hover: none) { .wg-del { opacity: .6; } }
+        .wg-side { background: var(--surface2); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+        .wg-weeks { display: flex; gap: 5px; }
+        .wg-weeks button { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; border: none; background: transparent; padding: 0; cursor: pointer; font-family: inherit; font-size: 10.5px; color: var(--text3); font-variant-numeric: tabular-nums; white-space: nowrap; min-height: 0; }
+        .wg-weeks i { width: 100%; height: 28px; border-radius: 6px; background: var(--surface); position: relative; overflow: hidden; display: block; }
+        .wg-weeks b { position: absolute; left: 0; right: 0; bottom: 0; background: #00B493; }
+        .wg-weeks button.on { color: var(--accent-strong); font-weight: 800; }
+        .wg-weeks button.on i { box-shadow: inset 0 0 0 1.5px #DB6B2E; }
+        .wg-carry { border: none; background: transparent; color: var(--accent-strong); font-family: inherit; font-size: 12px; font-weight: 800; text-align: left; padding: 2px 0; cursor: pointer; min-height: 0; }
+        .wg-carry:hover { text-decoration: underline; }
+        .wg-band { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 4px 10px; border: none; border-top: 1px solid var(--divider); background: var(--surface); color: var(--text2); font-family: inherit; font-size: 12px; text-align: left; cursor: pointer; transition: background .13s; }
+        .sched-month-anim > .wg-band:first-child { border-top: none; }
+        .wg-band:hover { background: var(--row-bg); }
+        .wg-band-flag { font-size: 10.5px; font-weight: 800; color: var(--text3); flex-shrink: 0; letter-spacing: .02em; }
+        .wg-band-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .wg-band-cur { background: var(--accent-tonal); }
+        .wg-band-cur .wg-band-flag { color: var(--accent-strong); }
+        .wg-band-cur:hover { background: var(--accent-tonal); filter: brightness(0.98); }
+        .wg-band-active { box-shadow: inset 3px 0 0 #DB6B2E; }
+        .wg-band-empty .wg-band-text { color: var(--text3); opacity: 0; transition: opacity .13s; }
+        .wg-band-empty:hover .wg-band-text, .wg-band-empty.wg-band-cur .wg-band-text, .wg-band-empty:focus-visible .wg-band-text { opacity: 1; }
+        @media (hover: none) { .wg-band-empty .wg-band-text { opacity: .7; } }
         .sched-eventbar { transition: filter .12s, box-shadow .15s; }
         .sched-eventbar:hover { filter: brightness(1.04); box-shadow: var(--elev-2); }
         .sched-item { animation: schedSlideIn .3s cubic-bezier(0,0,.2,1) both; transition: border-color .15s, transform .15s, opacity .2s, background .2s; }
@@ -29732,8 +29959,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
         }
         .sched-eventbar:hover .sched-peek { opacity: 1; transform: translateY(0) scale(1); }
         /* 첫 주는 위 공간이 없으니 프리뷰를 아래로 */
-        .sched-weekrow:first-child .sched-peek { bottom: auto; top: calc(100% + 8px); transform-origin: top left; transform: translateY(-6px) scale(.92); }
-        .sched-weekrow:first-child .sched-eventbar:hover .sched-peek { transform: translateY(0) scale(1); }
+        .sched-weekrow-first .sched-peek { bottom: auto; top: calc(100% + 8px); transform-origin: top left; transform: translateY(-6px) scale(.92); }
+        .sched-weekrow-first .sched-eventbar:hover .sched-peek { transform: translateY(0) scale(1); }
         /* ── 모바일 반응형: 캘린더 축소 대신 원본 크기 유지 + 좌우 스와이프 스크롤 ── */
         .sched-scroll-hint { display: none; }
         @media (max-width: 768px) {
@@ -29779,7 +30006,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
         .sched-dragging .sched-peek { display: none !important; }
         /* 오른쪽 끝(금·토) 열 일정은 프리뷰를 왼쪽으로 펼쳐 화면 밖 잘림 방지 */
         .sched-eventbar-right .sched-peek { left: auto; right: 0; transform-origin: bottom right; }
-        .sched-weekrow:first-child .sched-eventbar-right .sched-peek { transform-origin: top right; }
+        .sched-weekrow-first .sched-eventbar-right .sched-peek { transform-origin: top right; }
         @media (prefers-reduced-motion: reduce) {
           .sched-month-anim, .sched-item, .sched-up-row { animation: none !important; }
           .sched-cell, .sched-item, .sched-up-row, .sched-progress > div, .sched-peek, .sched-addbtn { transition: none !important; }
