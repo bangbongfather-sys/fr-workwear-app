@@ -348,6 +348,18 @@
       .app-header > div { gap: 6px !important; padding-left: 10px !important; padding-right: 10px !important; }
     }
 
+    /* 휴대폰 헤더 — 버튼이 화면 밖으로 밀리지 않게 「앱 설치」·「동기화됨」은 아이콘만 남기고 간격을 줄인다.
+       (아이콘 뜻은 title/aria-label 로 남아 있다. 오류·충돌 상태는 짧은 글자를 그대로 보여 준다) */
+    @media (max-width: 480px) {
+      .header-top { gap: 8px !important; }
+      .hdr-actions { gap: 6px !important; }
+      .hdr-install { width: 36px; padding: 0 !important; justify-content: center; }
+      .hdr-install .install-label-full { display: none; }
+      .sync-badge .sb-label { display: none; }
+      .sync-badge:has(.sb-label), .sync-badge.sb-safety { padding: 0 !important; width: 32px; height: 32px; justify-content: center; }
+      .sync-badge.sb-safety { margin-left: 6px !important; }
+    }
+
     /* 동기화 상태 뱃지 — 좁은 화면에서는 긴 라벨을 짧게 (헤더가 넘치거나 글자가 세로로 쌓이는 것 방지) */
     .sync-badge .sb-short { display: none; }
     @media (max-width: 480px) {
@@ -21645,19 +21657,19 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     };
     const safetyBtn = (
       <button onClick={() => setSafetyOpen(true)} title="데이터 안전 — 자동 백업을 보고 항목별로 되돌립니다"
-        className="sync-badge no-print"
+        className="sync-badge sb-safety no-print" aria-label="데이터 안전"
         style={{ ...styles.wrap, cursor: "pointer", padding: "5px 9px", marginLeft: 6, background: "transparent" }}>
         <Icon name="history" size={13} />
       </button>
     );
     const withSafety = (el) => <span style={{ display: "inline-flex", alignItems: "center" }}>{el}{safetyBtn}</span>;
-    if (syncStatus === "syncing") return withSafety(<div className="sync-badge" style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span style={styles.text}>저장 중</span></div>);
+    if (syncStatus === "syncing") return withSafety(<div className="sync-badge" style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span className="sb-label" style={styles.text}>저장 중</span></div>);
     // "동기화됨"도 눌러서 즉시 확인할 수 있게 — 저장 대기분이 있으면 바로 밀어올리고,
     // 없으면 클라우드 최신본을 다시 받아온다. (정말 저장됐는지 불안할 때 쓰는 수단)
     if (syncStatus === "saved") return withSafety(<div onClick={() => {
       if (dirtySections.current.size > 0) { if (syncTimer.current) { clearTimeout(syncTimer.current); syncTimer.current = null; } setSyncStatus("syncing"); runSave(0); }
       else { setSyncStatus("syncing"); cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); showToast("클라우드 최신본으로 맞췄습니다 ✓"); }).catch(() => setSyncStatus("error")); }
-    }} className="sync-badge" style={{ ...styles.wrap, cursor: "pointer" }} title="클릭하면 지금 바로 동기화합니다 (저장 대기분이 있으면 즉시 저장, 없으면 클라우드 최신본 확인)"><Icon name="check" size={13}/><span style={styles.text}>동기화됨</span></div>);
+    }} className="sync-badge" style={{ ...styles.wrap, cursor: "pointer" }} title="클릭하면 지금 바로 동기화합니다 (저장 대기분이 있으면 즉시 저장, 없으면 클라우드 최신본 확인)"><Icon name="check" size={13}/><span className="sb-label" style={styles.text}>동기화됨</span></div>);
     if (syncStatus === "conflict") return withSafety(<div onClick={() => window.location.reload()} className="sync-badge" style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="같은 항목을 다른 기기에서도 동시에 수정했어요. 다른 항목들은 자동으로 합쳐 저장됐습니다. 클릭하면 이 항목을 최신본으로 새로고침합니다 (지금 화면의 이 항목 수정은 사라질 수 있어요)."><Icon name="alert" size={13}/><span style={styles.text}><span className="sb-full">충돌 · 새로고침</span><span className="sb-short">충돌</span></span></div>);
     return withSafety(<div onClick={() => { if (dirtySections.current.size > 0) { setOnlineRetryTick(t => t + 1); } else { setSyncStatus("syncing"); cloudLoad().then(d => { applyCloudData(d); setSyncStatus("saved"); }).catch(() => setSyncStatus("error")); } }} className="sync-badge" style={{ ...styles.wrap, cursor: "pointer", borderColor: "#F04452", color: "#F04452" }} title="클라우드 저장에 실패했어요. 클릭하면 즉시 재시도합니다. (자동으로도 8초마다 재시도돼요)"><Icon name="alert" size={13}/><span style={styles.text}><span className="sb-full">연결 오류 · 재시도</span><span className="sb-short">재시도</span></span></div>);
   };
@@ -22228,7 +22240,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 })()}
               </div>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="hdr-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               {/* 좁은 화면 전용 검색 버튼 — 통합 검색 오버레이 열기 (1024px 이하에서만 CSS로 표시) */}
               <button className="gs-mobile-btn no-print" title="통합 검색"
                 onClick={() => {
@@ -22241,7 +22253,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   color: "var(--text1)", alignItems: "center", justifyContent: "center", flexShrink: 0,
                 }}><Icon name="search" size={16}/></button>
               {!installed && (
-                <button onClick={promptInstall} title="앱처럼 바탕화면에 설치" className="no-print"
+                <button onClick={promptInstall} title="앱처럼 바탕화면에 설치" aria-label="앱 설치" className="no-print hdr-install"
                   style={{
                     height: 36, padding: "0 14px", borderRadius: 18,
                     border: "none", cursor: "pointer", fontFamily: "inherit",
