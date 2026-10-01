@@ -11964,6 +11964,15 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   const ledgerSubOrder = useSubtabOrder("frw_ledger_subtab_order", ["monthly", "ar", "pattern", "deposits", "yearly"], "data-ledger-sub");
   const [arJumpName, setArJumpName] = useState(null); // 수금 패턴 행 클릭 → 거래처별 미수금으로 점프
   const [depJumpName, setDepJumpName] = useState(null); // 월별 장부 거래처 → 입금내역으로 점프 (거래처명 자동 검색)
+  // 장부 거래처 → 입금내역 탭으로 넘어가 그 거래처로 필터.
+  // 장부 목록 아래쪽에서 눌러도 입금내역 맨 위(안내 띠·검색)부터 보이게 스크롤도 올린다.
+  const jumpToDeposits = (name) => {
+    const nm = (name || "").trim();
+    if (!nm) return;
+    setDepJumpName(nm);
+    setSubTab("deposits");
+    try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch { window.scrollTo(0, 0); }
+  };
   return (
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {/* 서브탭 토글 */}
@@ -12293,9 +12302,12 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                         </td>
                         <td style={{textAlign:"center",fontSize:12,color:"var(--text3)"}}>{idx+1}</td>
                         <td style={{fontWeight:600,fontSize:13,color:isPaid?"#00B493":"inherit"}}>
-                          <span onClick={()=>setExpandedClientId(isExpanded?null:c.id)} style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6}} title="클릭하여 미수금 내역 펼치기">
+                          <span onClick={()=>jumpToDeposits(c.name)} style={{cursor:"pointer",display:"inline-flex",alignItems:"center",gap:6}} title="클릭하면 입금내역으로 이동해 이 거래처로 필터합니다 (미수금 상세는 오른쪽 › 버튼)"
+                            onMouseEnter={e=>{const n=e.currentTarget.querySelector(".lg-cname"); if(n) n.style.textDecoration="underline";}}
+                            onMouseLeave={e=>{const n=e.currentTarget.querySelector(".lg-cname"); if(n) n.style.textDecoration="none";}}>
                             {isPaid && <span style={{fontSize:14,color:"#00B493"}}>✓</span>}
-                            {c.name}
+                            <span className="lg-cname" style={{textUnderlineOffset:3}}>{c.name}</span>
+                            <Icon name="coins" size={12} style={{color:"var(--text3)",flexShrink:0}}/>
                             {clientBal > 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(240,68,82,0.12)",color:"#F04452",marginLeft:0}}>미수 {Math.round(clientBal).toLocaleString()}원</span>}
                             {clientBal < 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.12)",color:"#00B493",marginLeft:0}}>선납 {Math.round(Math.abs(clientBal)).toLocaleString()}원</span>}
                             {isExpanded && <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:100,background:"#DB6B2E",color:"#fff"}}>선택됨</span>}
@@ -12357,7 +12369,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                                 const hit = nq ? depItems.filter(d => [d.client, d.name, d.memo].some(v => (v||"").toLowerCase().includes(nq))) : [];
                                 const doneN = hit.filter(d => d.status === "done").length;
                                 return (
-                                  <button onClick={() => { setDepJumpName(nm); setSubTab("deposits"); }} disabled={!nm}
+                                  <button onClick={() => jumpToDeposits(nm)} disabled={!nm}
                                     title="입금내역 탭으로 이동해 이 거래처명으로 자동 검색합니다 (처리완료 포함)"
                                     style={{marginLeft:"auto",height:32,padding:"0 13px",borderRadius:8,border:"1px solid rgba(219,107,46,0.4)",background:"rgba(219,107,46,0.10)",color:"#DB6B2E",fontSize:12,fontWeight:800,cursor:nm?"pointer":"not-allowed",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>
                                     <Icon name="coins" size={13}/>이 거래처 입금내역 확인하기
