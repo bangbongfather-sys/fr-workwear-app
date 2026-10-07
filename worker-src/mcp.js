@@ -428,7 +428,15 @@ async function buildCampusSnapshot(env) {
     const k = r.supplier || "기타"; bySupplier[k] = (bySupplier[k] || 0) + toNumber(r.qty) * toNumber(r.unitPrice);
   }
   const open = fi.filter((r) => r.status && r.status !== "입고완료").slice(0, 30).map(line);
-  const purchases = { recent: fi.slice(0, 15).map(line), open, monthBySupplier: bySupplier };
+  // 공급처별 가장 최근 기록과 가장 최근 입고완료 기록 (원단·부자재처럼 드문 공급처도 보이게)
+  const last = {}, lastIn = {};
+  for (const r of fi) {
+    const k = r.supplier || "기타";
+    if (!last[k]) last[k] = line(r);
+    if (r.status === "입고완료" && !lastIn[k]) lastIn[k] = line(r);
+  }
+  const openTotal = fi.filter((r) => r.status && r.status !== "입고완료");
+  const purchases = { recent: fi.slice(0, 15).map(line), open, openCount: openTotal.length, openQty: openTotal.reduce((s, r) => s + toNumber(r.qty), 0), monthBySupplier: bySupplier, last, lastIn };
 
   // 발주서: 최근 6건 요약 (본문 마크다운·첨부 제외)
   const poList = asList(pos).sort((a, b) => String(b.orderDate || "").localeCompare(String(a.orderDate || ""))).slice(0, 6).map((p) => ({
