@@ -126,6 +126,13 @@ const TOOLS = [
     },
   },
   {
+    name: "get_campus_snapshot",
+    description:
+      "NJ 캠퍼스(3D 업무 시뮬레이터)용 요약 스냅샷. 장부 월매출·사업자별 입금·최근 매입/임가공·발주·완제품 재고·다가오는 일정·세무 기한·입찰 공고 수를 작게 묶어 반환합니다. 읽기 전용.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: "mark_tax_paid",
     description:
       "세무 탭의 특정 고지 건에 납부일을 기록합니다(또는 지웁니다). 대상은 id로 지정하며, get_business_section(section:\"taxes\")로 먼저 id를 확인하세요. paidDate 필드만 바꾸고 금액·기한·메모는 건드리지 않습니다.",
@@ -346,6 +353,8 @@ async function toolGetSection(args, env) {
   if (section === "_version") {
     return { content: [{ type: "text", text: JSON.stringify({ build: "2026-07-30-ledger-row-width", note: "장부 표 행이 짧게 끊기던 문제 수정 — 전역 table 규칙의 display:block 때문에 블록 박스만 늘어나고 thead/tbody는 max-content에 머물러 행·확장 패널이 헤더보다 짧았다(측정 971px vs 헤더 1512px). 월별 장부·거래처별 미수금 표를 table-plain(display:table·width:100%)으로 전환해 헤더와 폭 일치, 가로 스크롤은 기존 래퍼가 담당(모바일 정상)"}) }] };
   }
+  // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
+  if (section === "_campus") return textContent(await buildCampusSnapshot(env));
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
   }
@@ -357,6 +366,114 @@ async function toolGetSection(args, env) {
   let text = JSON.stringify(data, null, 2);
   if (text.length > 60000) text = text.slice(0, 60000) + "\n... (잘림 — 데이터가 너무 큼)";
   return { content: [{ type: "text", text }] };
+}
+
+// ── NJ 캠퍼스 스냅샷 ──
+// 큰 섹션(장부·재고·매입·일정)을 서버에서 줄여서 한 번에 넘긴다. get_business_section 은
+// 60KB에서 잘리기 때문에 페이지가 원본을 직접 읽으면 최근 달이 빠진다.
+const asList = (v) => (Array.isArray(v) ? v : v ? Object.values(v) : []).filter(Boolean);
+function kstNow() {
+  const d = new Date(Date.now() + 9 * 3600e3);
+  return { ymd: d.toISOString().slice(0, 10), ym: d.toISOString().slice(0, 7), iso: d.toISOString().slice(0, 19) + "+09:00" };
+}
+function addDays(ymd, n) {
+  const d = new Date(ymd + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10);
+}
+
+async function buildCampusSnapshot(env) {
+  const S = env.FIREBASE_DB_SECRET;
+  const get = (n) => fbGet(n, S).catch(() => null);
+  const [ledgers, deposits, intakes, pos, stock, todos, taxes, notices, clients] = await Promise.all([
+    get("/frw/ledgers"), get("/frw/bankDeposits"), get("/frw/fabricIntakes"), get("/frw/purchaseOrders"),
+    get("/frw/stock"), get("/frw/todos"), get("/frw/taxes"), get("/tenders/notices"), get("/frw/clients"),
+  ]);
+  const now = kstNow();
+
+  // 장부: 월별 공급가 합계(법인 거래 제외 = 나정), 법인 거래 건수, 미입금
+  const months = Object.keys(ledgers || {}).filter((k) => /^\d{4}-\d{2}$/.test(k)).sort().slice(-8);
+  const sales = months.map((m) => {
+    const cs = asList(ledgers[m] && ledgers[m].clients);
+    const nj = cs.filter((c) => c.status !== "법인 거래");
+    const unpaid = nj.filter((c) => c.status === "미입금");
+    const top = [...nj].sort((a, b) => toNumber(b.supply) - toNumber(a.supply)).slice(0, 5).map((c) => ({ name: c.name, supply: toNumber(c.supply) }));
+    return {
+      month: m, supply: nj.reduce((s, c) => s + toNumber(c.supply), 0), clients: nj.length,
+      unpaidCount: unpaid.length, unpaidTotal: unpaid.reduce((s, c) => s + toNumber(c.total), 0),
+      corpRows: cs.length - nj.length, top,
+    };
+  });
+
+  // 입금: 사업자(nj/corp)별 월 합계 + 최근 12건 + 오늘
+  const dep = asList(deposits && deposits.items).filter((d) => d.date);
+  const depMonth = { nj: {}, corp: {} };
+  for (const d of dep) {
+    const b = d.biz === "corp" ? "corp" : "nj", m = String(d.date).slice(0, 7);
+    depMonth[b][m] = (depMonth[b][m] || 0) + toNumber(d.amount);
+  }
+  dep.sort((a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`));
+  const today = dep.filter((d) => d.date === now.ymd);
+  const deposit = {
+    byMonth: depMonth,
+    today: { count: today.length, nj: today.filter((d) => d.biz !== "corp").reduce((s, d) => s + toNumber(d.amount), 0), corp: today.filter((d) => d.biz === "corp").reduce((s, d) => s + toNumber(d.amount), 0) },
+    recent: dep.slice(0, 12).map((d) => ({ date: d.date, time: d.time || "", name: d.name || d.client || "", amount: toNumber(d.amount), biz: d.biz === "corp" ? "corp" : "nj" })),
+  };
+
+  // 매입: 최근 내역, 공급처별 이번 달 합계, 아직 입고 안 된(주문완료) 건 = 진행 중
+  const fi = asList(intakes).filter((r) => r.date).map((r) => ({ ...r, date: normalizeDate(r.date) }));
+  fi.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const line = (r) => ({ date: r.date, supplier: r.supplier || "", item: r.materialName || "", qty: toNumber(r.qty), amount: toNumber(r.qty) * toNumber(r.unitPrice), status: r.status || "", note: r.note || "" });
+  const bySupplier = {};
+  for (const r of fi) {
+    if (!String(r.date).startsWith(now.ym)) continue;
+    const k = r.supplier || "기타"; bySupplier[k] = (bySupplier[k] || 0) + toNumber(r.qty) * toNumber(r.unitPrice);
+  }
+  const open = fi.filter((r) => r.status && r.status !== "입고완료").slice(0, 30).map(line);
+  const purchases = { recent: fi.slice(0, 15).map(line), open, monthBySupplier: bySupplier };
+
+  // 발주서: 최근 6건 요약 (본문 마크다운·첨부 제외)
+  const poList = asList(pos).sort((a, b) => String(b.orderDate || "").localeCompare(String(a.orderDate || ""))).slice(0, 6).map((p) => ({
+    date: p.orderDate || "", supplier: (p.supplier && p.supplier.name) || "", deliveryDate: p.deliveryDate || "",
+    items: asList(p.items).slice(0, 4).map((i) => ({ name: i.name || "", qty: toNumber(i.qty), unit: i.unit || "" })),
+    amount: asList(p.items).reduce((s, i) => s + toNumber(i.qty) * toNumber(i.unitPrice), 0),
+  }));
+
+  // 완제품 재고: 사이즈를 뗀 품명별 합계
+  const items = asList(stock && stock.items);
+  const groups = {};
+  let low = 0;
+  for (const it of items) {
+    const q = toNumber(it.qty), base = String(it.name || it.code || "").replace(/\s*\[[^\]]*\]\s*$/, "").trim() || "기타";
+    groups[base] = (groups[base] || 0) + Math.max(0, q);
+    if (it.safeQty !== "" && it.safeQty != null && q <= toNumber(it.safeQty)) low++;
+  }
+  const stockOut = {
+    skus: items.length, totalQty: items.reduce((s, i) => s + Math.max(0, toNumber(i.qty)), 0), low,
+    groups: Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, qty]) => ({ name, qty })),
+    updatedAt: (stock && stock.updatedAt) || null,
+  };
+
+  // 일정: 오늘~7일 뒤, 미완료
+  const until = addDays(now.ymd, 7);
+  const upcoming = asList(todos).filter((t) => !t.done && t.date && t.date >= now.ymd && t.date <= until)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(0, 10).map((t) => ({ date: t.date, text: String(t.text || "").slice(0, 80) }));
+  const overdue = asList(todos).filter((t) => !t.done && t.date && t.date < now.ymd && t.date >= addDays(now.ymd, -14)).length;
+
+  // 세무: 30일 안에 기한 도래, 미납
+  const tax = asList(taxes).filter((t) => !t.paidDate && t.dueDate && t.dueDate >= addDays(now.ymd, -7) && t.dueDate <= addDays(now.ymd, 30))
+    .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))).map((t) => ({ biz: t.biz, type: t.taxType, amount: toNumber(t.amount), due: t.dueDate }));
+
+  // 입찰: 새 공고 수 + 마감 임박 3건
+  const nts = asList(notices);
+  // bidClseDt 는 "2026-10-10 10:00" 또는 "202610101000" 형태가 섞여 있어 숫자만 비교한다
+  const dk = (s) => String(s || "").replace(/\D/g, "").slice(0, 12);
+  const live = nts.filter((n) => dk(n.bidClseDt).slice(0, 8) >= now.ymd.replace(/-/g, "") && n.status !== "skipped");
+  live.sort((a, b) => dk(a.bidClseDt).localeCompare(dk(b.bidClseDt)));
+  const tenders = {
+    newCount: nts.filter((n) => n.status === "new").length, openCount: live.length,
+    soon: live.slice(0, 3).map((n) => ({ title: n.bidNtceNm, org: n.ntceInsttNm || n.dminsttNm || "", close: n.bidClseDt, status: n.status || "" })),
+  };
+
+  return { asOf: now.iso, today: now.ymd, sales, deposit, purchases, purchaseOrders: poList, stock: stockOut, todos: { upcoming, overdue }, taxes: tax, tenders, clientCount: asList(clients).length };
 }
 
 async function toolGetPricing(args, env) {
@@ -483,6 +600,7 @@ async function callTool(params, env) {
     if (name === "get_business_section") return await toolGetSection(args, env);
     if (name === "search_purchases") return await toolSearchPurchases(args, env);
     if (name === "get_pricing") return await toolGetPricing(args, env);
+    if (name === "get_campus_snapshot") return textContent(await buildCampusSnapshot(env));
     if (name === "mark_tax_paid") return await toolMarkTaxPaid(args, env);
     if (name === "list_backups") return await toolListBackups(args, env);
     if (name === "get_backup_section") return await toolGetBackupSection(args, env);
