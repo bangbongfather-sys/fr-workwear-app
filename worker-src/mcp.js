@@ -499,6 +499,7 @@ async function buildCampusSnapshot(env) {
   dep.sort((a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`));
   const today = dep.filter((d) => d.date === now.ymd);
   const deposit = {
+    pendingCount: asList(deposits && deposits.items).filter((d) => d.status === "pending").length,
     byMonth: depMonth,
     today: { count: today.length, nj: today.filter((d) => d.biz !== "corp").reduce((s, d) => s + toNumber(d.amount), 0), corp: today.filter((d) => d.biz === "corp").reduce((s, d) => s + toNumber(d.amount), 0) },
     recent: dep.slice(0, 12).map((d) => ({ date: d.date, time: d.time || "", name: d.name || d.client || "", amount: toNumber(d.amount), biz: d.biz === "corp" ? "corp" : "nj" })),
@@ -540,7 +541,9 @@ async function buildCampusSnapshot(env) {
     groups[base] = (groups[base] || 0) + Math.max(0, q);
     if (it.safeQty !== "" && it.safeQty != null && q <= toNumber(it.safeQty)) low++;
   }
+  const neg = items.filter((i) => toNumber(i.qty) < 0);
   const stockOut = {
+    negCount: neg.length, negTop: neg.slice(0, 8).map((i) => ({ name: i.name || i.code, qty: toNumber(i.qty) })),
     skus: items.length, totalQty: items.reduce((s, i) => s + Math.max(0, toNumber(i.qty)), 0), low,
     groups: Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, qty]) => ({ name, qty })),
     updatedAt: (stock && stock.updatedAt) || null,
