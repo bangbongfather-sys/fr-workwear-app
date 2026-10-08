@@ -1167,7 +1167,29 @@ async function toolCampusWrite(a, env) {
   if (op === "deposit_undo") return await toolDepositUndo(a, env);
   if (op === "deposit_batch") return await toolDepositBatch(a, env);
   if (op === "tax_paid") return await toolMarkTaxPaid({ id: a.id, paidDate: a.paidDate ?? "" }, env);
+  if (op === "quote_save") return await toolQuoteSave(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
+}
+
+// 캠퍼스에서 만든 견적서를 회사앱 견적 이력(quoteHistory)에 넣는다 — 앱의 저장 항목과 같은 모양(status draft, quoteStyle apple)
+async function toolQuoteSave(a, env) {
+  const token = String(a.token || `${Date.now()}`).slice(0, 64);
+  const quote = String(a.quote || "").trim(), title = String(a.title || "").trim().slice(0, 120), client = String(a.client || "").trim().slice(0, 80);
+  if (!quote) return errContent("견적서 본문(quote)이 필요합니다.");
+  const products = (Array.isArray(a.products) ? a.products : []).slice(0, 60).map((p) => ({ name: String(p.name || "").slice(0, 80), grade: String(p.grade || "").slice(0, 2), price: toNumber(p.price), qty: toNumber(p.qty) || 1 }));
+  const now = new Date(Date.now() + 9 * 3600 * 1000);
+  const dateStr = `${now.getUTCFullYear()}.${String(now.getUTCMonth() + 1).padStart(2, "0")}.${String(now.getUTCDate()).padStart(2, "0")}`;
+  const timeStr = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
+  const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
+  const plan = await safeSectionWrite("quoteHistory", (d) => {
+    if (list(d).some(([, r]) => r.campusToken === token)) return { done: true, result: { 결과: "이미 저장됨" } };
+    const key = Array.isArray(d) || d == null ? String(d ? d.length : 0) : `c${Date.now()}`;
+    const ids = new Set(list(d).map(([, r]) => String(r.id))); let id = `q${Date.now().toString(36)}`; while (ids.has(id)) id += "x";
+    const row = { id, title: title || products.map((p) => p.name).join(", ") || "견적서", dateStr, timeStr, savedAt: Date.now(), status: "draft", quote, quoteClient: client, quoteStyle: String(a.style || "apple"), products, fromCampus: true, campusToken: token };
+    const apply = (dd) => { if (Array.isArray(dd) || dd == null) { const x = [...(dd || [])]; x[Number(key)] = row; return x; } return { ...dd, [key]: row }; };
+    return { patch: { [key]: row }, apply, check: (dd) => list(dd).some(([, r]) => r.campusToken === token), result: { 결과: "견적 이력에 저장", id, 제목: row.title, 거래처: client, 품목수: products.length } };
+  }, env);
+  return plan.isError ? plan : textContent(plan.result);
 }
 
 // 세무 탭의 납부일만 기록/해제한다. 유일한 쓰기 도구이므로 대상과 형식을 엄격히 검증한다.
