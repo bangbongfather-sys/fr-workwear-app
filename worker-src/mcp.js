@@ -226,6 +226,32 @@ async function webSearch(q, env) {
     return { query: q, results, news };
   } catch (e) { return { error: "검색 실패: " + (e && e.message), query: q, results: [] }; }
 }
+// Claude API 리서치 — 서버가 Anthropic Messages API를 웹 검색 도구와 함께 부른다. 호출마다 API 요금이 나가므로 캠퍼스 쪽에서 사용자 승인 뒤에만 부른다.
+async function claudeResearch(raw, env) {
+  let a = {}; try { a = JSON.parse(raw); } catch { a = { q: raw }; }
+  const q = String(a.q || "").trim().slice(0, 600), ctx = String(a.context || "").slice(0, 1500);
+  if (!q) return { error: "조사할 내용이 비었습니다." };
+  if (!env.ANTHROPIC_API_KEY) return { error: "Claude API 키(ANTHROPIC_API_KEY)가 아직 등록되지 않았습니다. 대표에게 등록을 요청하세요.", query: q };
+  const model = env.RESEARCH_MODEL || "claude-sonnet-5-5";
+  const sys = "당신은 나정엔터프라이즈(NJ SAFETY, 산업용 방염작업복 제조·B2B 판매, 거래처는 안전용품 대리점·전기공사 업체)의 리서치 담당입니다. 웹 검색으로 최신 정보를 확인해 한국어로 보고합니다. 형식: 결론 2~3줄 → 핵심 사실(숫자·날짜 포함, 항목마다 출처 번호) → 우리 회사에 주는 시사점 2~3개. 확인 못 한 건 모른다고 적습니다. 1,200자 안쪽.";
+  const user = (ctx ? `배경: ${ctx}\n\n` : "") + `조사 요청: ${q}\n오늘: ${kstToday()}`;
+  const body = { model, max_tokens: 1400, system: sys, messages: [{ role: "user", content: user }], tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5, user_location: { type: "approximate", country: "KR", timezone: "Asia/Seoul" } }] };
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 85000);
+    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", signal: ctrl.signal, headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" }, body: JSON.stringify(body) });
+    clearTimeout(t);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return { error: `Claude API 응답 ${r.status}: ${(j.error && j.error.message) || ""}`.slice(0, 300), query: q };
+    const text = [], sources = new Map(); let searches = 0;
+    for (const b of j.content || []) {
+      if (b.type === "text") { text.push(b.text); for (const c of b.citations || []) if (c.url && !sources.has(c.url)) sources.set(c.url, String(c.title || "").slice(0, 100)); }
+      else if (b.type === "server_tool_use") searches++;
+      else if (b.type === "web_search_tool_result" && Array.isArray(b.content)) for (const x of b.content) if (x.url && !sources.has(x.url)) sources.set(x.url, String(x.title || "").slice(0, 100));
+    }
+    const u = j.usage || {};
+    return { query: q, model, text: text.join("\n").slice(0, 6000), sources: [...sources].slice(0, 12).map(([url, title]) => ({ title, url })), searches, usage: { input: u.input_tokens, output: u.output_tokens, web_search_requests: u.server_tool_use && u.server_tool_use.web_search_requests } };
+  } catch (e) { return { error: "리서치 실패: " + (e && e.name === "AbortError" ? "시간 초과(85초)" : e && e.message), query: q }; }
+}
 // 공개 웹 페이지 본문 읽기 — HTML에서 글만 남겨 8,000자까지
 async function webRead(url) {
   url = String(url || "").trim();
@@ -481,6 +507,8 @@ async function toolGetSection(args, env) {
   // AI 직원 외부 정보: 웹 검색(Brave Search API, 시크릿 SEARCH_API_KEY 필요)과 공개 페이지 읽기
   if (section.startsWith("_web:")) return compact(await webSearch(section.slice(5), env));
   if (section.startsWith("_fetch:")) return compact(await webRead(section.slice(7)));
+  // 깊은 리서치: Anthropic API(웹 검색 도구 포함)를 서버가 직접 부른다 — 유료, ANTHROPIC_API_KEY 필요
+  if (section.startsWith("_research:")) return compact(await claudeResearch(section.slice(10), env));
   if (section.startsWith("_intake:")) {
     let a; try { a = JSON.parse(section.slice(8)); } catch { return errContent("_intake 인자 JSON 이 잘못됐습니다."); }
     return await toolRecordIntake(a || {}, env);
