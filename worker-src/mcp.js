@@ -139,7 +139,9 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        mode: { type: "string", enum: ["receive", "new"] },
+        mode: { type: "string", enum: ["receive", "new", "batch"] },
+        rows: { type: "array", description: "batch: [{materialName, qty, unit, unitPrice, status(입고완료|주문완료), note}]", items: { type: "object" } },
+        inspector: { type: "string", description: "batch: 검수 담당자 (선택)" },
         id: { type: ["string", "number"], description: "receive: 매입현황 행 id" },
         qty: { type: "number", description: "받은 수량(receive) 또는 입고 수량(new)" },
         date: { type: "string", description: "입고일 YYYY-MM-DD (기본 오늘, KST)" },
@@ -150,7 +152,7 @@ const TOOLS = [
         note: { type: "string", description: "비고 (선택, 사이즈 등)" },
         token: { type: "string", description: "중복 방지용 1회 토큰 (같은 토큰 재요청은 한 번만 반영)" },
       },
-      required: ["mode", "qty"],
+      required: ["mode"],
     },
     annotations: { readOnlyHint: false, destructiveHint: false },
   },
@@ -410,9 +412,10 @@ function addDays(ymd, n) {
 async function buildCampusSnapshot(env) {
   const S = env.FIREBASE_DB_SECRET;
   const get = (n) => fbGet(n, S).catch(() => null);
-  const [ledgers, deposits, intakes, pos, stock, todos, taxes, notices, clients] = await Promise.all([
+  const [ledgers, deposits, intakes, pos, stock, todos, taxes, notices, clients, materials, laborItems] = await Promise.all([
     get("/frw/ledgers"), get("/frw/bankDeposits"), get("/frw/fabricIntakes"), get("/frw/purchaseOrders"),
     get("/frw/stock"), get("/frw/todos"), get("/frw/taxes"), get("/tenders/notices"), get("/frw/clients"),
+    get("/frw/materials"), get("/frw/laborItems"),
   ]);
   const now = kstNow();
 
@@ -508,7 +511,12 @@ async function buildCampusSnapshot(env) {
     soon: live.slice(0, 3).map((n) => ({ title: n.bidNtceNm, org: n.ntceInsttNm || n.dminsttNm || "", close: n.bidClseDt, status: n.status || "" })),
   };
 
-  return { asOf: now.iso, today: now.ymd, sales, deposit, purchases, purchaseOrders: poList, stock: stockOut, todos: { upcoming, overdue }, taxes: tax, tenders, clientCount: asList(clients).length };
+  // 단가표 이름 — 붙여넣기 입고에서 회사앱과 같은 규칙으로 품목명을 맞추는 데 쓴다
+  const catalog = {
+    materials: asList(materials).filter((m) => m.name).map((m) => ({ name: m.name, unit: m.unit || "", price: toNumber(m.price) })),
+    labor: asList(laborItems).filter((l) => l.name).map((l) => ({ name: l.name, unit: l.unit || "", price: toNumber(l.price) })),
+  };
+  return { catalog, asOf: now.iso, today: now.ymd, sales, deposit, purchases, purchaseOrders: poList, stock: stockOut, todos: { upcoming, overdue }, taxes: tax, tenders, clientCount: asList(clients).length };
 }
 
 async function toolGetPricing(args, env) {
@@ -639,7 +647,7 @@ function kstToday() { return new Date(Date.now() + 9 * 3600e3).toISOString().sli
 async function toolRecordIntake(args, env) {
   const mode = String(args.mode || "");
   const qty = Number(args.qty);
-  if (!(qty > 0) || !Number.isFinite(qty)) return errContent("qty 는 0보다 큰 숫자여야 합니다.");
+  if (mode !== "batch" && (!(qty > 0) || !Number.isFinite(qty))) return errContent("qty 는 0보다 큰 숫자여야 합니다.");
   const date = args.date ? String(args.date) : kstToday();
   if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}"`);
   const token = String(args.token || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).slice(0, 64);
@@ -660,6 +668,31 @@ async function toolRecordIntake(args, env) {
         unitPrice: args.unitPrice != null && args.unitPrice !== "" ? String(args.unitPrice) : "", status: "입고완료",
         note: note || "", receivedAt: date, campusToken: token, fromCampus: true };
       return { patch: { [key]: row }, apply: (dd) => withRow(dd, key, row), check: hasToken, result: { 결과: "새 입고 등록", 행: row } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+
+  if (mode === "batch") {
+    const supplier = String(args.supplier || "").trim();
+    const rows = Array.isArray(args.rows) ? args.rows.slice(0, 80) : [];
+    if (!supplier) return errContent("일괄 입고에는 supplier(공급처)가 필요합니다.");
+    const clean = rows.map((r) => ({ name: String(r.materialName || "").trim(), qty: Number(r.qty), unit: String(r.unit || ""),
+      price: r.unitPrice != null && r.unitPrice !== "" ? String(r.unitPrice) : "", status: r.status === "주문완료" ? "주문완료" : "입고완료",
+      note: r.note != null ? String(r.note).slice(0, 120) : "" })).filter((r) => r.name && r.qty > 0);
+    if (!clean.length) return errContent("기록할 행이 없습니다 (품목명과 0보다 큰 수량 필요).");
+    const plan = await safeSectionWrite("fabricIntakes", (d) => {
+      if (hasToken(d)) return { done: true, result: { 결과: "이미 반영됨 (같은 요청)" } };
+      let id = newId(d), base = Array.isArray(d) || d == null ? (d ? d.length : 0) : null;
+      const patch = {}, made = [];
+      clean.forEach((r, i) => {
+        const key = base != null ? String(base + i) : `c${Date.now()}_${i}`;
+        const row = { id: id++, date, supplier, inspector: String(args.inspector || ""), materialName: r.name, qty: String(r.qty), unit: r.unit,
+          unitPrice: r.price, status: r.status, note: r.note, campusToken: i === 0 ? token : `${token}#${i}`, fromCampus: true,
+          ...(r.status === "입고완료" ? { receivedAt: date } : {}) };
+        patch[key] = row; made.push(row);
+      });
+      const apply = (dd) => { let out = dd; for (const [k, v] of Object.entries(patch)) out = withRow(out, k, v); return out; };
+      return { patch, apply, check: hasToken, result: { 결과: `${made.length}건 일괄 등록`, 행수: made.length } };
     }, env);
     return plan.isError ? plan : textContent(plan.result);
   }
