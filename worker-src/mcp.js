@@ -379,6 +379,26 @@ async function toolGetSection(args, env) {
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
+  // AI 직원용 작은 조회 (큰 섹션은 60KB에서 잘리므로 서버에서 필요한 만큼만 줄여 준다)
+  if (section.startsWith("_ledger:")) {
+    const m = section.slice(8);
+    if (!/^\d{4}-\d{2}$/.test(m)) return errContent("월 형식은 YYYY-MM 입니다.");
+    const L = await fbGet(`/frw/ledgers/${m}`, env.FIREBASE_DB_SECRET);
+    const rows = asList(L && L.clients).map((c) => ({ 거래처: c.name, 공급가: toNumber(c.supply), 합계: toNumber(c.total), 상태: c.status || "", 메모: c.memo || "" }));
+    return textContent({ 월: m, 행수: rows.length, 공급가합계: rows.filter((r) => r.상태 !== "법인 거래").reduce((a, r) => a + r.공급가, 0), 행: rows });
+  }
+  if (section.startsWith("_deposits:")) {
+    const m = section.slice(10);
+    if (!/^\d{4}-\d{2}$/.test(m)) return errContent("월 형식은 YYYY-MM 입니다.");
+    const d = await fbGet("/frw/bankDeposits", env.FIREBASE_DB_SECRET);
+    const rows = asList(d && d.items).filter((x) => String(x.date || "").startsWith(m)).map((x) => ({ 일자: x.date, 시각: x.time || "", 입금자: x.name || x.client || "", 금액: toNumber(x.amount), 사업자: x.biz === "corp" ? "엔제이세이프티(법인)" : "나정", 메모: x.memo || "" }));
+    return textContent({ 월: m, 건수: rows.length, 합계: rows.reduce((a, r) => a + r.금액, 0), 행: rows.slice(0, 300) });
+  }
+  if (section === "_stock") {
+    const st = await fbGet("/frw/stock", env.FIREBASE_DB_SECRET);
+    const items = asList(st && st.items).map((i) => ({ 코드: i.code, 품명: i.name, 수량: toNumber(i.qty), 안전재고: i.safeQty === "" ? null : toNumber(i.safeQty) }));
+    return textContent({ 반영시각: (st && st.updatedAt) || null, 품목수: items.length, 품목: items });
+  }
   // 커넥터가 record_intake 를 아직 못 볼 때의 우회: section = "_intake:" + JSON 인자
   if (section.startsWith("_intake:")) {
     let a; try { a = JSON.parse(section.slice(8)); } catch { return errContent("_intake 인자 JSON 이 잘못됐습니다."); }
