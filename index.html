@@ -17382,6 +17382,12 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const removeItemRow = (id) => setNewBatch(p => p.items.length <= 1 ? p : ({ ...p, items: p.items.filter(it => it.id !== id) }));
   const resetBatch = () => setNewBatch({ date: new Date().toISOString().slice(0,10), supplier: filterSupplier || "", inspector: "", items: [blankItem()] });
   const batchTotal = newBatch.items.reduce((s,it) => s + (parseFloat(it.unitPrice||0) * parseFloat(it.qty||0)), 0);
+  // 입력 중인 품목들의 총 수량 — 단위가 섞이면 단위별로 (예: 717벌 + 40yard)
+  const batchQtyText = (() => {
+    const by = {};
+    newBatch.items.forEach(it => { const q = parseFloat(it.qty); if (!(q > 0)) return; const u = (it.unit || "").trim() || "개"; by[u] = (by[u] || 0) + q; });
+    return Object.entries(by).map(([u, q]) => `${(Math.round(q * 100) / 100).toLocaleString()}${u}`).join(" + ");
+  })();
   const batchValidCount = newBatch.items.filter(it => (it.materialName === "__custom__" ? it.customMaterial : it.materialName) && it.qty).length;
   // 거래처(공급업체) 검색 후보 — 기존 매입기록의 고유 공급업체명에서 추출
   const supplierOptions = React.useMemo(() => {
@@ -18160,6 +18166,7 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                 title="ERP/엑셀 표를 붙여넣어 한번에 N건 추가"
                 style={{padding:"8px 14px",borderRadius:8,border:`1.5px solid ${pasteOpen?"#DB6B2E":"rgba(219,107,46,0.5)"}`,background:pasteOpen?"#DB6B2E":"transparent",color:pasteOpen?"#fff":"#DB6B2E",cursor:"pointer",fontSize:12,fontFamily:"inherit",fontWeight:700}}><Icon name="clipboard" size={13} style={{marginRight:5}}/>{pasteOpen?"붙여넣기 닫기":"붙여넣기 일괄 입력"}</button>
               <div style={{flex:1,textAlign:"right",fontSize:13,color:"var(--text2)",fontVariantNumeric:"tabular-nums"}}>
+                {batchQtyText && (<>총 수량: <span style={{fontWeight:800,color:"var(--text1)",fontSize:14}}>{batchQtyText}</span><span style={{margin:"0 10px",color:"var(--border)"}}>|</span></>)}
                 예상 합계: <span style={{fontWeight:800,color:"var(--text1)",fontSize:14}}>{Math.round(batchTotal).toLocaleString()}원</span>
                 <span style={{marginLeft:8,fontSize:11,color:"#DB6B2E",fontWeight:600}}>(부가세포함 {Math.round(batchTotal*1.1).toLocaleString()}원)</span>
               </div>
