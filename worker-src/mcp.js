@@ -256,7 +256,9 @@ function findRecordKey(data, id) {
 }
 
 function textContent(obj) {
-  const text = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  // 큰 응답은 들여쓰기를 빼서 작게 — 아티팩트 페이지가 커넥터로 받을 때 잘리거나 거절되지 않게
+  let text = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
+  if (typeof obj !== "string" && text.length > 20000) text = JSON.stringify(obj);
   return { content: [{ type: "text", text }] };
 }
 function errContent(msg) {
