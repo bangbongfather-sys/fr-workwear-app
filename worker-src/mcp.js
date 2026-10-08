@@ -35,13 +35,26 @@ function getActiveSpec(p) {
   return p; // 레거시 평면 구조
 }
 
-function computeProduct(p, materials, laborItems) {
+// 견적용 요척서 — 앱에서 「납품가」로 지정한 요척서(deliverySpecId)가 있으면 그것,
+// 없으면 화면에서 마지막으로 보고 있던 요척서(activeSpecId).
+// activeSpecId 는 누가 무엇을 열어 봤느냐에 따라 바뀌므로 견적 기준으로는 납품가가 맞다.
+function getPricingSpec(p) {
+  if (p && Array.isArray(p.specs) && p.deliverySpecId != null) {
+    const d = p.specs.find((s) => String(s.id) === String(p.deliverySpecId));
+    if (d) return { spec: d, basis: "납품가" };
+  }
+  return { spec: getActiveSpec(p), basis: "화면 선택(납품가 미지정)" };
+}
+
+function computeProduct(p, materials, laborItems, specOverride) {
   const mats = materials || [];
   const labor = laborItems || [];
-  const spec = getActiveSpec(p) || p;
+  const spec = specOverride || getActiveSpec(p) || p;
+  // index.html fabricInfo 와 같게: 단가표 원단이 없으면 직접 입력 단가(f.price)를 쓴다
   const fCost = (spec.fabrics || []).reduce((s, f) => {
     const m = f.matId !== "" && f.matId != null ? mats.find((x) => x.id == f.matId) : null;
-    return s + (m ? m.price * parseFloat(f.qty || 0) : 0);
+    const price = m ? (m.price || 0) : parseFloat(f.price || 0);
+    return s + (price > 0 ? price * parseFloat(f.qty || 0) : 0);
   }, 0);
   const eCost = (spec.extras || []).reduce((s, e) => {
     const u = e.laborId !== "" && e.laborId != null ? ((labor.find((l) => l.id == e.laborId) || {}).price || 0) : parseFloat(e.price || 0);
@@ -104,11 +117,13 @@ const TOOLS = [
   },
   {
     name: "get_pricing",
-    description: "단가 계산기의 제품별 A~D 등급 단가를 계산해 반환합니다. (원단비+공임+관리비+등급마진/오버라이드 반영)",
+    description: "단가 계산기의 제품별 등급(A~D) 단가를 계산해 반환합니다. (원단비+공임+관리비+등급마진/오버라이드 반영) 기본은 제품마다 앱에서 「납품가」로 지정한 요척서 기준이며, 견적서를 만들 때는 이 값을 쓰세요. 예: 'D급 견적서' → grade:\"D\" 로 호출해 각 제품의 단가를 사용. 응답의 '기준'이 '화면 선택(납품가 미지정)'인 제품은 납품가가 지정되지 않은 것이므로 사용자에게 확인을 권하세요.",
     inputSchema: {
       type: "object",
       properties: {
         query: { type: "string", description: "제품명 부분검색 (선택, 없으면 전체)" },
+        grade: { type: "string", description: "견적 등급 (선택, 예: A·B·C·D). 지정하면 각 제품에 '단가'(그 등급 단가)를 함께 반환" },
+        allSpecs: { type: "boolean", description: "true면 납품가 외 다른 요척서(예: 25년 가격)의 등급 단가도 함께 반환 (비교용)" },
       },
     },
   },
@@ -588,7 +603,7 @@ async function toolGetPricing(args, env) {
         const onlyBackup = [...bs.keys()].filter((k) => !ls.has(k)).map((k) => ({ id: k, name: bs.get(k).name }));
         const onlyLive = [...ls.keys()].filter((k) => !bs.has(k)).map((k) => ({ id: k, name: ls.get(k).name }));
         const changedShared = [...bs.keys()].filter((k) => ls.has(k) && JSON.stringify(bs.get(k)) !== JSON.stringify(ls.get(k))).map((k) => ({ id: k, backupName: bs.get(k).name, liveName: ls.get(k).name }));
-        const fieldDiff = ["name", "marketPrice", "memo", "category", "include", "activeSpecId"].filter((f) => JSON.stringify(b[f]) !== JSON.stringify(l[f])).map((f) => ({ field: f, backup: b[f], live: l[f] }));
+        const fieldDiff = ["name", "marketPrice", "memo", "category", "include", "activeSpecId", "deliverySpecId"].filter((f) => JSON.stringify(b[f]) !== JSON.stringify(l[f])).map((f) => ({ field: f, backup: b[f], live: l[f] }));
         if (onlyBackup.length || onlyLive.length || changedShared.length || fieldDiff.length) out.push({ id, name: l.name, onlyBackup, onlyLive, changedShared, fieldDiff });
       }
       return textContent({ slot: parts[1], backupCount: B.size, liveCount: L.size, differences: out });
@@ -608,19 +623,31 @@ async function toolGetPricing(args, env) {
   let filtered = prods.filter((p) => p && p.include !== false);
   if (q) filtered = filtered.filter((p) => (p.name || "").toLowerCase().includes(q));
   const round = (n) => Math.round(n || 0);
+  const grade = String(args.grade || "").trim().toUpperCase().replace(/급$/, "");
+  const gradeMap = (c) => { const o = {}; for (const g of c.gradeList) o[g] = round(c.grades[g]); return o; };
   const out = filtered.map((p) => {
-    const c = computeProduct(p, mats, labor);
-    const gradePrices = {};
-    for (const g of c.gradeList) gradePrices[g] = round(c.grades[g]);
-    return {
+    const { spec, basis } = getPricingSpec(p);
+    const c = computeProduct(p, mats, labor, spec);
+    const row = {
       제품명: p.name,
+      요척서: spec && spec.name ? spec.name : "",
+      기준: basis,
       원가: round(c.base),
       관리비포함원가: round(c.beforeMargin),
-      등급단가: gradePrices,
+      등급단가: gradeMap(c),
       선택등급: c.selectedGrade,
     };
+    if (grade) row.단가 = c.grades[grade] != null ? round(c.grades[grade]) : null;
+    if (args.allSpecs && Array.isArray(p.specs) && p.specs.length > 1) {
+      row.다른요척서 = p.specs.filter((s) => s !== spec).map((s) => ({ 요척서: s.name, 등급단가: gradeMap(computeProduct(p, mats, labor, s)) }));
+    }
+    return row;
   });
-  return textContent({ 제품수: out.length, 제품: out });
+  const result = { 제품수: out.length, 제품: out };
+  const unset = out.filter((r) => r.기준 !== "납품가").map((r) => r.제품명);
+  if (unset.length) result.안내 = `납품가 요척서가 지정되지 않은 제품 ${unset.length}개는 화면에서 마지막으로 본 요척서 기준입니다: ${unset.join(", ")}`;
+  if (grade && out.some((r) => r.단가 == null)) result.등급안내 = `'${grade}' 등급이 없는 제품은 단가가 null 입니다`;
+  return textContent(result);
 }
 
 // ── 회사앱 동기화 규약을 지키는 서버 쓰기 ──

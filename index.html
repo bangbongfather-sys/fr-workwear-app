@@ -1459,6 +1459,7 @@ const ICON_PATHS = {
   trash:      <><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></>,
   close:      <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>,
   check:      <><polyline points="20 6 9 17 4 12"/></>,
+  truck:      <><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></>,
   download:   <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>,
   upload:     <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>,
   share:      <><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></>,
@@ -2228,6 +2229,11 @@ const getActiveSpec = (p) => {
   }
   return null;
 };
+// 납품가로 지정된 요척서 (없으면 null). 화면에서 보고 있는 요척서(activeSpecId)와는 별개다.
+const getDeliverySpec = (p) => {
+  if (!p || !Array.isArray(p.specs) || p.deliverySpecId == null) return null;
+  return p.specs.find(s => String(s.id) === String(p.deliverySpecId)) || null;
+};
 // 활성 요척서의 시장 소비자가. 아직 마이그레이션되지 않은 데이터는 제품 레벨 값으로 폴백.
 const getMarketPrice = (p) => {
   const s = getActiveSpec(p);
@@ -2277,6 +2283,8 @@ const migrateProduct = (p) => {
       name: p.name,
       specs: fixed,
       activeSpecId: p.activeSpecId && fixed.find(s => s.id === p.activeSpecId) ? p.activeSpecId : fixed[0].id,
+      // 납품가 요척서 — 실제로 납품하고 있는 단가의 요척서. Claude 단가 조회(MCP get_pricing)가 이것을 기준으로 쓴다.
+      deliverySpecId: p.deliverySpecId != null && fixed.find(s => String(s.id) === String(p.deliverySpecId)) ? p.deliverySpecId : undefined,
       include: p.include === undefined ? true : p.include,
       marketPrice: p.marketPrice === undefined ? "" : p.marketPrice,
     };
@@ -21018,7 +21026,9 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       if (p.specs.length <= 1) return p;
       const remaining = p.specs.filter(s => s.id !== specId);
       const newActive = p.activeSpecId === specId ? remaining[0].id : p.activeSpecId;
-      return { ...p, specs: remaining, activeSpecId: newActive };
+      const out = { ...p, specs: remaining, activeSpecId: newActive };
+      if (String(p.deliverySpecId) === String(specId)) delete out.deliverySpecId;
+      return out;
     }));
   };
   const renameSpec = (specId, name) => {
@@ -21030,6 +21040,19 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   };
   const switchSpec = (specId) => {
     setProducts(ps => ps.map(p => p.id === activeProdId ? { ...p, activeSpecId: specId } : p));
+  };
+  // 납품가 요척서 지정/해제 — 값은 바꾸지 않으므로 보기 모드 잠금과 무관하게 허용한다 (되돌리기 가능)
+  const setDeliverySpec = (specId) => {
+    pushHistory();
+    setProducts(ps => ps.map(p => {
+      if (p.id !== activeProdId) return p;
+      const out = { ...p };
+      if (specId == null) delete out.deliverySpecId; else out.deliverySpecId = specId;
+      return out;
+    }));
+    const prod = products.find(p => p.id === activeProdId);
+    const sp = prod && (prod.specs || []).find(x => x.id === specId);
+    showToast(specId == null ? "납품가 지정을 해제했습니다" : `'${sp ? sp.name : "요척서"}'를 납품가로 지정했습니다 — Claude 견적은 이 단가를 씁니다`);
   };
   // 요척서 칩 드래그 정렬 — dropId 칩의 왼쪽/오른쪽에 dragId를 끼워 넣는다
   const reorderSpecs = (dragId, dropId, side) => {
@@ -22986,6 +23009,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                                     color: isActive ? "#fff" : "#00B493",
                                   }}>✓ 견적 반영중</span>
                               )}
+                              {/* 실제 납품가 요척서 — Claude 견적·단가 조회 기준 */}
+                              {String(activeProd.deliverySpecId) === String(s.id) && (
+                                <span title="실제 납품하고 있는 단가의 요척서입니다. Claude에게 견적을 부탁하면 이 요척서 단가로 계산합니다."
+                                  style={{
+                                    display: "inline-flex", alignItems: "center", gap: 3,
+                                    marginLeft: 2, padding: "2px 7px", borderRadius: 100,
+                                    fontSize: 10, fontWeight: 800, whiteSpace: "nowrap",
+                                    background: isActive ? "rgba(255,255,255,0.22)" : "rgba(49,130,246,0.14)",
+                                    color: isActive ? "#fff" : "#3182F6",
+                                  }}><Icon name="truck" size={11}/>납품가</span>
+                              )}
                               {isActive && (
                                 <span onClick={e => { e.stopPropagation(); if (!requireCalcEdit()) return; setEditingSpec({ id: s.id, value: s.name }); }} title="이름 수정" style={{ fontSize: 10, opacity: 0.85, cursor: "pointer" }}><Icon name="edit" size={14}/></span>
                               )}
@@ -23003,6 +23037,55 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       );
                     })}
                   </div>
+                  {/* 납품가 요척서 — 어느 요척서가 "지금 실제로 납품하는 단가"인지 지정.
+                      Claude 대화에서 "D급 견적서 뽑아줘" 하면 MCP get_pricing 이 이 요척서로 등급 단가를 계산한다. */}
+                  {(() => {
+                    const dSpec = getDeliverySpec(activeProd);
+                    const viewing = activeSpec;
+                    const c = dSpec ? computeProduct({ ...activeProd, activeSpecId: dSpec.id }, materials, laborItems) : null;
+                    const isViewingDelivery = dSpec && viewing && String(dSpec.id) === String(viewing.id);
+                    return (
+                      <div className="dlv-row" style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: dSpec ? "rgba(49,130,246,0.07)" : "var(--surface2)", border: `1px ${dSpec ? "solid rgba(49,130,246,0.28)" : "dashed var(--border)"}`, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, background: dSpec ? "rgba(49,130,246,0.14)" : "var(--surface)", color: dSpec ? "#3182F6" : "var(--text3)", flexShrink: 0 }}><Icon name="truck" size={15}/></span>
+                        <div style={{ flex: 1, minWidth: 220, display: "flex", flexDirection: "column", gap: 3 }}>
+                          {dSpec ? (<>
+                            <span style={{ fontSize: 12.5, color: "var(--text1)", lineHeight: 1.45 }}>
+                              <b style={{ color: "#3182F6" }}>납품가</b> · '{dSpec.name}'
+                              <span style={{ color: "var(--text3)", fontWeight: 500 }}> — Claude 견적·단가 조회는 이 요척서 단가를 씁니다</span>
+                            </span>
+                            <span style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11.5, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>
+                              {(c.gradeList || []).map(g => (
+                                <span key={g}><b style={{ color: "var(--text1)" }}>{g}급</b> {Math.round(c.grades[g] || 0).toLocaleString()}원</span>
+                              ))}
+                            </span>
+                          </>) : (
+                            <span style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.5 }}>
+                              <b style={{ color: "var(--text1)" }}>납품가 요척서가 지정되지 않았습니다.</b> 지정하지 않으면 Claude는 지금 화면에서 보고 있는 요척서 단가로 견적을 계산합니다.
+                            </span>
+                          )}
+                        </div>
+                        {viewing && !isViewingDelivery && (
+                          <button onClick={() => setDeliverySpec(viewing.id)}
+                            title={`지금 보고 있는 '${viewing.name}'를 실제 납품가로 지정합니다`}
+                            style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: "#3182F6", color: "#fff", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                            '{viewing.name}' 납품가로 지정
+                          </button>
+                        )}
+                        {dSpec && !isViewingDelivery && (
+                          <button onClick={() => switchSpec(dSpec.id)}
+                            style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                            납품가 요척서 보기
+                          </button>
+                        )}
+                        {isViewingDelivery && (
+                          <button onClick={() => setDeliverySpec(null)} title="납품가 지정 해제"
+                            style={{ padding: "7px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                            지정 해제
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {/* 견적서에 반영된 요척서 ≠ 지금 보고 있는 요척서 → 재생성 안내 (옛 단가로 견적 나가는 사고 방지) */}
                   {specStampMismatch && (
                     <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(245,158,11,0.10)", border: "1px solid rgba(245,158,11,0.35)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
