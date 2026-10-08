@@ -419,7 +419,13 @@ async function toolGetSection(args, env) {
     let a; try { a = JSON.parse(section.slice(7)); } catch { return errContent("_write 인자 JSON 이 잘못됐습니다."); }
     return await toolCampusWrite(a || {}, env);
   }
-  if (section === "_deposit_inbox") return textContent(await depositInbox(env));
+  // 응답은 들여쓰기 없이(작게) — 큰 응답은 커넥터 중간에서 잘리거나 거절될 수 있다
+  const compact = (o) => ({ content: [{ type: "text", text: JSON.stringify(o) }] });
+  if (section === "_deposit_inbox" || section.startsWith("_deposit_inbox:")) {
+    let o = {}; if (section.length > 15) { try { o = JSON.parse(section.slice(15)); } catch {} }
+    return compact(await depositInbox(env, o));
+  }
+  if (section.startsWith("_unpaid:")) return compact(await unpaidOf(env, section.slice(8)));
   // 일정 전체(최근 60일~앞으로 60일, 미완료 우선) — AI 직원 조회용
   if (section === "_todos") {
     const t = asList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)); const now = kstToday();
@@ -853,7 +859,7 @@ const FB_UNESC = { "7E": "~", "2E": ".", "23": "#", "24": "$", "2F": "/", "5B": 
 const fbEsc = (k) => String(k).replace(/[~.#$\/[\]]/g, (c) => FB_ESC[c]);
 const fbUnesc = (k) => String(k).replace(/~([0-9A-F]{2})/g, (m, h) => FB_UNESC[h] || m);
 
-async function depositInbox(env) {
+async function depositInbox(env, opt = {}) {
   const S = env.FIREBASE_DB_SECRET;
   const [dep, ledgers, clients, ar] = await Promise.all([fbGet("/frw/bankDeposits", S), fbGet("/frw/ledgers", S), fbGet("/frw/clients", S), fbGet("/frw/clientAR", S)]);
   const items = asList(dep && dep.items);
@@ -870,11 +876,23 @@ async function depositInbox(env) {
     (unpaid[n] = unpaid[n] || []).push({ ym, id: c.id, total: toNumber(c.total), supply: toNumber(c.supply) });
   }));
   const byDate = (a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`);
-  const pending = items.filter((x) => x.status === "pending").sort(byDate).slice(0, 150)
+  const off = Math.max(0, Number(opt.offset) || 0), lim = Math.min(80, Math.max(1, Number(opt.limit) || 40));
+  const bizF = opt.biz === "nj" || opt.biz === "corp" ? opt.biz : null;
+  const pendAll = items.filter((x) => x.status === "pending" && (!bizF || (x.biz === "corp" ? "corp" : "nj") === bizF)).sort(byDate);
+  const pending = pendAll.slice(off, off + lim)
     .map((x) => ({ id: x.id, date: x.date, time: x.time || "", name: x.name || "", amount: toNumber(x.amount), biz: x.biz === "corp" ? "corp" : "nj", memo: x.memo || "", suggest: suggest(x.name) }));
-  const done = items.filter((x) => x.status === "done").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 20)
+  const done = items.filter((x) => x.status === "done").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 15)
     .map((x) => ({ id: x.id, date: x.date, name: x.name || "", amount: toNumber(x.amount), client: x.client || "", link: x.link || null, doneAt: x.doneAt || null }));
-  return { pendingCount: items.filter((x) => x.status === "pending").length, pending, done, unpaid, clientNames };
+  // 화면에 나온 입금의 추천 거래처 미입금 청구만 넘겨 응답을 작게 유지한다
+  const need = new Set(pending.map((x) => x.suggest).filter(Boolean));
+  const unpaidSmall = {}; for (const n of need) if (unpaid[n]) unpaidSmall[n] = unpaid[n].filter((u) => u.total > 0).slice(0, 6);
+  return { pendingCount: items.filter((x) => x.status === "pending").length, filtered: pendAll.length, offset: off, limit: lim, pending, done, unpaid: unpaidSmall, clientNames };
+}
+// 거래처 하나의 미입금 청구 (팝업에서 거래처를 바꿨을 때)
+async function unpaidOf(env, name) {
+  const L = await fbGet("/frw/ledgers", env.FIREBASE_DB_SECRET); const n = String(name || "").trim(); const out = [];
+  Object.keys(L || {}).sort().reverse().forEach((ym) => asList(L[ym] && L[ym].clients).forEach((c) => { if (c.status === "미입금" && String(c.name || "").trim() === n && toNumber(c.total) > 0) out.push({ ym, id: c.id, total: toNumber(c.total), supply: toNumber(c.supply) }); }));
+  return { name: n, unpaid: out.slice(0, 12) };
 }
 
 async function toolDepositProcess(a, env) {
