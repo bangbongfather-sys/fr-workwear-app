@@ -864,6 +864,20 @@ const FB_UNESC = { "7E": "~", "2E": ".", "23": "#", "24": "$", "2F": "/", "5B": 
 const fbEsc = (k) => String(k).replace(/[~.#$\/[\]]/g, (c) => FB_ESC[c]);
 const fbUnesc = (k) => String(k).replace(/~([0-9A-F]{2})/g, (m, h) => FB_UNESC[h] || m);
 
+const searchNorm = (t) => String(t || "").toLowerCase().replace(/[\s()（）\[\]{}<>.,·・‧\-_/\\'"]+/g, "");
+const _CORP_WORDS = /주식회사|유한책임회사|유한회사|합자회사|합명회사|재단법인|사단법인|농업회사법인|영농조합법인|협동조합/g;
+const _CORP_MARKS = /㈜|㈔|\((?:주|유|합|재|사)\)|（(?:주|유|합|재|사)）/g;
+const _CORP_DOT = /(^|[\s·,])(?:주|유|합|재|사)[.)]\s*/g;
+const searchBare = (t) => searchNorm(String(t || "").replace(_CORP_WORDS, " ").replace(_CORP_MARKS, " ").replace(_CORP_DOT, "$1"));
+const _CHO = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"];
+const toChosung = (t) => { let o = ""; for (const ch of String(t || "")) { const c = ch.charCodeAt(0); o += (c >= 0xAC00 && c <= 0xD7A3) ? _CHO[Math.floor((c - 0xAC00) / 588)] : ch.toLowerCase(); } return o.replace(/\s+/g, ""); };
+function depQueryMatcher(q) {
+  const bare = String(q || "").trim(); if (!bare) return null;
+  if (/^[ㄱ-ㅎ\s]{2,}$/.test(bare)) { const cho = bare.replace(/\s+/g, ""); return (txt) => toChosung(txt).includes(cho); }
+  const toks = bare.split(/\s+/).filter(Boolean), tn = toks.map(searchNorm), tb = toks.map(searchBare);
+  return (txt) => { const n = searchNorm(txt), b = searchBare(txt); return tn.every((t, i) => (t && n.includes(t)) || (tb[i] && b.includes(tb[i]))); };
+}
+
 async function depositInbox(env, opt = {}) {
   const S = env.FIREBASE_DB_SECRET;
   const [dep, ledgers, clients, ar] = await Promise.all([fbGet("/frw/bankDeposits", S), fbGet("/frw/ledgers", S), fbGet("/frw/clients", S), fbGet("/frw/clientAR", S)]);
@@ -881,9 +895,11 @@ async function depositInbox(env, opt = {}) {
     (unpaid[n] = unpaid[n] || []).push({ ym, id: c.id, total: toNumber(c.total), supply: toNumber(c.supply) });
   }));
   const byDate = (a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`);
-  const off = Math.max(0, Number(opt.offset) || 0), lim = Math.min(80, Math.max(1, Number(opt.limit) || 40));
+  const off = Math.max(0, Number(opt.offset) || 0), lim = Math.min(200, Math.max(1, Number(opt.limit) || 40));
   const bizF = opt.biz === "nj" || opt.biz === "corp" ? opt.biz : null;
-  const pendAll = items.filter((x) => x.status === "pending" && (!bizF || (x.biz === "corp" ? "corp" : "nj") === bizF)).sort(byDate);
+  const qm = depQueryMatcher(opt.q);
+  const pendAll = items.filter((x) => x.status === "pending" && (!bizF || (x.biz === "corp" ? "corp" : "nj") === bizF)
+    && (!qm || qm([x.name, x.memo, suggest(x.name)].filter(Boolean).join("\u0001")))).sort(byDate);
   const pending = pendAll.slice(off, off + lim)
     .map((x) => ({ id: x.id, date: x.date, time: x.time || "", name: x.name || "", amount: toNumber(x.amount), biz: x.biz === "corp" ? "corp" : "nj", memo: x.memo || "", suggest: suggest(x.name) }));
   const done = items.filter((x) => x.status === "done").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 15)
@@ -891,7 +907,7 @@ async function depositInbox(env, opt = {}) {
   // 화면에 나온 입금의 추천 거래처 미입금 청구만 넘겨 응답을 작게 유지한다
   const need = new Set(pending.map((x) => x.suggest).filter(Boolean));
   const unpaidSmall = {}; for (const n of need) if (unpaid[n]) unpaidSmall[n] = unpaid[n].filter((u) => u.total > 0).slice(0, 6);
-  return { pendingCount: items.filter((x) => x.status === "pending").length, filtered: pendAll.length, offset: off, limit: lim, pending, done, unpaid: unpaidSmall, clientNames };
+  return { pendingCount: items.filter((x) => x.status === "pending").length, filtered: pendAll.length, filteredTotal: pendAll.reduce((t, x) => t + toNumber(x.amount), 0), offset: off, limit: lim, pending, done, unpaid: unpaidSmall, clientNames };
 }
 // 거래처 하나의 미입금 청구 (팝업에서 거래처를 바꿨을 때)
 async function unpaidOf(env, name) {
@@ -963,6 +979,66 @@ async function toolDepositProcess(a, env) {
   return textContent({ 결과: "입금완료 처리", 입금: { 날짜: dep.date, 입금자: dep.name, 금액: toNumber(dep.amount) }, 거래처: client, 연결: finalLink });
 }
 
+// 여러 입금 → 한 거래처. 장부 청구 하나에 묶거나(ledger) 입금마다 미수금 원장(ar) 또는 연결 없음(none).
+async function toolDepositBatch(a, env) {
+  const S = env.FIREBASE_DB_SECRET;
+  const ids = (Array.isArray(a.depositIds) ? a.depositIds : []).map(String).slice(0, 200);
+  const client = String(a.client || "").trim(), token = String(a.token || `${Date.now()}`).slice(0, 64);
+  const link = a.link && typeof a.link === "object" ? a.link : { kind: "none" };
+  if (!ids.length) return errContent("선택한 입금이 없습니다.");
+  if (!client) return errContent("거래처(client)를 정해 주세요.");
+  const bd = await fbGet("/frw/bankDeposits", S);
+  const all = (Array.isArray(bd && bd.items) ? bd.items : Object.values((bd && bd.items) || {})).filter(Boolean);
+  const deps = ids.map((id) => all.find((x) => String(x.id) === id)).filter(Boolean);
+  if (deps.length !== ids.length) return errContent("선택한 입금 중 없는 건이 있습니다. 새로고침 후 다시 시도해 주세요.");
+  const already = deps.filter((x) => x.status === "done" && x.campusToken !== token);
+  if (already.length) return errContent(`이미 처리된 입금 ${already.length}건이 섞여 있습니다 (${already.map((x) => x.name).slice(0, 3).join(", ")}).`);
+  const total = deps.reduce((t, x) => t + toNumber(x.amount), 0);
+  const linkOf = {};
+  if (link.kind === "ledger") {
+    const ym = String(link.ym || ""), cid = String(link.clientId || "");
+    const r = await safeSectionWrite("ledgers", (d) => {
+      const arr = d && d[ym] && d[ym].clients;
+      const list = Array.isArray(arr) ? arr.map((x, i) => [String(i), x]) : Object.entries(arr || {});
+      const hit = list.find(([, x]) => x && String(x.id) === cid);
+      if (!hit) return errContent(`${ym} 장부에 해당 청구가 없습니다.`);
+      const [k, cur] = hit; if (cur.status === "입금완료") return { done: true };
+      if (cur.status !== "미입금") return errContent(`이 청구는 '${cur.status}' 상태라 바꾸지 않습니다.`);
+      const row = { ...cur, status: "입금완료", campusToken: token };
+      const apply = (dd) => { const o = { ...(dd || {}) }; const m = { ...(o[ym] || {}) }; const cl = Array.isArray(m.clients) ? [...m.clients] : { ...(m.clients || {}) }; cl[k] = row; m.clients = cl; o[ym] = m; return o; };
+      return { patch: { [`${ym}/clients/${k}`]: row }, apply, check: (dd) => { const x = dd && dd[ym] && dd[ym].clients && dd[ym].clients[k]; return !!x && x.status === "입금완료"; } };
+    }, env);
+    if (r.isError) return r;
+    deps.forEach((x) => { linkOf[x.id] = { kind: "ledger", ym, clientId: cid }; });
+  } else if (link.kind === "ar") {
+    const key = fbEsc(client), base = Date.now();
+    const adds = deps.map((x, i) => ({ id: base + i, type: "입금", desc: `은행입금 (${x.name || ""})`, amount: toNumber(x.amount), date: x.date, campusToken: `${token}#${i}` }));
+    const r = await safeSectionWrite("clientAR", (d) => {
+      const cur = (d && d[key]) || { entries: [] };
+      const entries = Array.isArray(cur.entries) ? cur.entries : Object.values(cur.entries || {});
+      if (entries.some((e) => e && e.campusToken === `${token}#0`)) return { done: true };
+      const next = { ...cur, entries: [...entries, ...adds] };
+      return { patch: { [key]: next }, apply: (dd) => ({ ...(dd || {}), [key]: next }),
+        check: (dd) => { const c = dd && dd[key]; const es = c ? (Array.isArray(c.entries) ? c.entries : Object.values(c.entries || {})) : []; return es.some((e) => e && e.campusToken === `${token}#0`); } };
+    }, env);
+    if (r.isError) return r;
+    deps.forEach((x, i) => { linkOf[x.id] = { kind: "ar", entryId: adds[i].id }; });
+  } else deps.forEach((x) => { linkOf[x.id] = { kind: "none" }; });
+  const r3 = await safeSectionWrite("bankDeposits", (d) => {
+    const its = (d && d.items) || [];
+    const ents = Array.isArray(its) ? its.map((x, i) => [String(i), x]) : Object.entries(its);
+    const patch = {}, rows = {};
+    for (const [k, cur] of ents) { if (!cur || !linkOf[cur.id]) continue;
+      if (cur.status === "done" && cur.campusToken !== token) return errContent("그 사이 다른 기기에서 처리된 입금이 있습니다. 새로고침 후 다시 시도해 주세요.");
+      const row = { ...cur, status: "done", client, link: linkOf[cur.id], doneAt: Date.now(), campusToken: token }; patch[`items/${k}`] = row; rows[k] = row; }
+    deps.forEach((x) => { const nk = fbEsc(payNorm(x.name)); if (nk) patch[`nameMap/${nk}`] = client; });
+    const apply = (dd) => { const o = { ...(dd || {}) }; const it = Array.isArray(o.items) ? [...o.items] : { ...(o.items || {}) }; for (const [k, v] of Object.entries(rows)) it[k] = v; o.items = it; return o; };
+    return { patch, apply, check: (dd) => Object.keys(rows).every((k) => dd && dd.items && dd.items[k] && dd.items[k].campusToken === token) };
+  }, env);
+  if (r3.isError) return r3;
+  return textContent({ 결과: "일괄 입금완료", 건수: deps.length, 합계: total, 거래처: client, 연결: link.kind === "ledger" ? { 월: link.ym } : link.kind });
+}
+
 async function toolDepositUndo(a, env) {
   const S = env.FIREBASE_DB_SECRET, want = String(a.depositId || "");
   const bd = await fbGet("/frw/bankDeposits", S);
@@ -1016,6 +1092,7 @@ async function toolCampusWrite(a, env) {
   if (op === "todo_add" || op === "todo_done") return await toolTodo(a, env);
   if (op === "deposit_process") return await toolDepositProcess(a, env);
   if (op === "deposit_undo") return await toolDepositUndo(a, env);
+  if (op === "deposit_batch") return await toolDepositBatch(a, env);
   if (op === "tax_paid") return await toolMarkTaxPaid({ id: a.id, paidDate: a.paidDate ?? "" }, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
 }
