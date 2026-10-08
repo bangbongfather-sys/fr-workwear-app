@@ -133,6 +133,28 @@ const TOOLS = [
     annotations: { readOnlyHint: true },
   },
   {
+    name: "record_intake",
+    description:
+      "매입현황 입고를 기록합니다(NJ 캠퍼스용 쓰기 도구). mode=receive: 기존 '주문완료' 건(id)을 입고완료로 바꾸고, 받은 수량이 적으면 받은 만큼만 입고완료 행으로 나누고 나머지는 주문완료로 남깁니다. mode=new: 새 입고 행(입고완료)을 추가합니다. 회사앱 동기화 안전장치(_revs 증가·_sigs 갱신)를 지킵니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: { type: "string", enum: ["receive", "new"] },
+        id: { type: ["string", "number"], description: "receive: 매입현황 행 id" },
+        qty: { type: "number", description: "받은 수량(receive) 또는 입고 수량(new)" },
+        date: { type: "string", description: "입고일 YYYY-MM-DD (기본 오늘, KST)" },
+        supplier: { type: "string", description: "new: 공급처" },
+        materialName: { type: "string", description: "new: 품목명" },
+        unit: { type: "string", description: "new: 단위 (선택)" },
+        unitPrice: { type: "number", description: "new: 단가 (선택)" },
+        note: { type: "string", description: "비고 (선택, 사이즈 등)" },
+        token: { type: "string", description: "중복 방지용 1회 토큰 (같은 토큰 재요청은 한 번만 반영)" },
+      },
+      required: ["mode", "qty"],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
     name: "mark_tax_paid",
     description:
       "세무 탭의 특정 고지 건에 납부일을 기록합니다(또는 지웁니다). 대상은 id로 지정하며, get_business_section(section:\"taxes\")로 먼저 id를 확인하세요. paidDate 필드만 바꾸고 금액·기한·메모는 건드리지 않습니다.",
@@ -355,6 +377,11 @@ async function toolGetSection(args, env) {
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
+  // 커넥터가 record_intake 를 아직 못 볼 때의 우회: section = "_intake:" + JSON 인자
+  if (section.startsWith("_intake:")) {
+    let a; try { a = JSON.parse(section.slice(8)); } catch { return errContent("_intake 인자 JSON 이 잘못됐습니다."); }
+    return await toolRecordIntake(a || {}, env);
+  }
   if (!ALLOWED_SECTIONS.includes(section)) {
     return errContent(`허용되지 않은 섹션: "${section}". 가능: ${ALLOWED_SECTIONS.join(", ")}`);
   }
@@ -421,7 +448,7 @@ async function buildCampusSnapshot(env) {
   // 매입: 최근 내역, 공급처별 이번 달 합계, 아직 입고 안 된(주문완료) 건 = 진행 중
   const fi = asList(intakes).filter((r) => r.date).map((r) => ({ ...r, date: normalizeDate(r.date) }));
   fi.sort((a, b) => String(b.date).localeCompare(String(a.date)));
-  const line = (r) => ({ date: r.date, supplier: r.supplier || "", item: r.materialName || "", qty: toNumber(r.qty), amount: toNumber(r.qty) * toNumber(r.unitPrice), status: r.status || "", note: r.note || "" });
+  const line = (r) => ({ id: r.id, date: r.date, supplier: r.supplier || "", item: r.materialName || "", qty: toNumber(r.qty), amount: toNumber(r.qty) * toNumber(r.unitPrice), status: r.status || "", note: r.note || "" });
   const bySupplier = {};
   for (const r of fi) {
     if (!String(r.date).startsWith(now.ym)) continue;
@@ -556,6 +583,117 @@ async function toolGetPricing(args, env) {
   return textContent({ 제품수: out.length, 제품: out });
 }
 
+// ── 회사앱 동기화 규약을 지키는 서버 쓰기 ──
+// 앱은 섹션별 _revs 로 "누가 바꿨는지"를 알아챈다. 서버가 데이터만 고치고 rev 를 안 올리면
+// 옛 복사본을 쥔 기기가 그대로 덮어쓸 수 있다(요척서 유실과 같은 기제). 그래서:
+//   ① 데이터 PATCH(+_sigs) → ② rev 를 조건부(if-match)로 +1 → ③ 다시 읽어 반영됐는지 확인,
+//   빠졌으면(그 사이 다른 기기가 덮음) 처음부터 다시. 변경은 id·토큰 기준이라 여러 번 적용해도 한 번과 같다.
+function sectionSignature(v) {   // index.html 의 같은 함수와 동일해야 한다
+  const recs = Array.isArray(v) ? v : (v && typeof v === "object" ? Object.keys(v).filter((k) => k !== "gone").map((k) => v[k]) : []);
+  let n = 0, m = 0, a = 0;
+  for (const r of recs) {
+    n++;
+    if (r && typeof r === "object" && !Array.isArray(r)) for (const k of Object.keys(r)) if (Array.isArray(r[k])) m += r[k].length;
+    if (Array.isArray(r)) a += r.length;
+  }
+  return { n, m, a };
+}
+async function fbGetTagged(node, secret) {
+  const res = await fetch(`https://${FB_HOST}${node}.json?auth=${encodeURIComponent(secret)}`, { headers: { "X-Firebase-ETag": "true" } });
+  if (!res.ok) throw new Error(`Firebase ${res.status}`);
+  return { etag: res.headers.get("ETag"), value: await res.json() };
+}
+async function fbPutIfMatch(node, value, etag, secret) {
+  const res = await fetch(`https://${FB_HOST}${node}.json?auth=${encodeURIComponent(secret)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json", "if-match": etag }, body: JSON.stringify(value),
+  });
+  if (res.status === 412) return false;
+  if (!res.ok) throw new Error(`Firebase ${res.status}`);
+  return true;
+}
+// mutate(data) → { patch: {상대키: 값}, check(data2): boolean, result } | { done:true, result }
+async function safeSectionWrite(section, mutate, env) {
+  const S = env.FIREBASE_DB_SECRET;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const data = await fbGet(`/frw/${section}`, S);
+    const plan = mutate(data);
+    if (plan.isError || plan.done) return plan;
+    const next = plan.apply(data);              // 적용 후 섹션 전체 (지문 계산용)
+    const body = {};
+    for (const [k, v] of Object.entries(plan.patch)) body[`${section}/${k}`] = v;
+    body[`_sigs/${section}`] = sectionSignature(next);
+    await fbPatch(`/frw`, body, S);
+    let bumped = false;
+    for (let i = 0; i < 5 && !bumped; i++) {
+      const { etag, value } = await fbGetTagged(`/frw/_revs/${section}`, S);
+      bumped = await fbPutIfMatch(`/frw/_revs/${section}`, (Number(value) || 0) + 1, etag, S);
+    }
+    if (!bumped) throw new Error("rev 갱신 충돌이 계속됩니다");
+    const after = await fbGet(`/frw/${section}`, S);
+    if (plan.check(after)) return plan;
+  }
+  throw new Error("다른 기기의 저장과 계속 겹쳐 반영하지 못했습니다. 잠시 뒤 다시 시도해 주세요.");
+}
+
+function kstToday() { return new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10); }
+async function toolRecordIntake(args, env) {
+  const mode = String(args.mode || "");
+  const qty = Number(args.qty);
+  if (!(qty > 0) || !Number.isFinite(qty)) return errContent("qty 는 0보다 큰 숫자여야 합니다.");
+  const date = args.date ? String(args.date) : kstToday();
+  if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}"`);
+  const token = String(args.token || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).slice(0, 64);
+  const note = args.note != null ? String(args.note).slice(0, 120) : null;
+  const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
+  const nextKey = (d) => (Array.isArray(d) || d == null ? String(Array.isArray(d) ? d.length : 0) : `c${Date.now()}`);
+  const hasToken = (d) => list(d).some(([, r]) => r.campusToken === token);
+  const newId = (d) => { const ids = new Set(list(d).map(([, r]) => String(r.id))); let id = Date.now(); while (ids.has(String(id))) id++; return id; };
+  const withRow = (d, key, row) => { if (Array.isArray(d) || d == null) { const a = [...(d || [])]; a[Number(key)] = row; return a; } return { ...d, [key]: row }; };
+
+  if (mode === "new") {
+    const supplier = String(args.supplier || "").trim(), materialName = String(args.materialName || "").trim();
+    if (!supplier || !materialName) return errContent("새 입고에는 supplier(공급처)와 materialName(품목)이 필요합니다.");
+    const plan = await safeSectionWrite("fabricIntakes", (d) => {
+      if (hasToken(d)) return { done: true, result: { 결과: "이미 반영됨 (같은 요청)" } };
+      const key = nextKey(d);
+      const row = { id: newId(d), date, supplier, inspector: "", materialName, qty: String(qty), unit: String(args.unit || ""),
+        unitPrice: args.unitPrice != null && args.unitPrice !== "" ? String(args.unitPrice) : "", status: "입고완료",
+        note: note || "", receivedAt: date, campusToken: token, fromCampus: true };
+      return { patch: { [key]: row }, apply: (dd) => withRow(dd, key, row), check: hasToken, result: { 결과: "새 입고 등록", 행: row } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+
+  if (mode === "receive") {
+    if (args.id === undefined || args.id === null || String(args.id) === "") return errContent("receive 에는 id 가 필요합니다.");
+    const want = String(args.id);
+    const plan = await safeSectionWrite("fabricIntakes", (d) => {
+      if (hasToken(d)) return { done: true, result: { 결과: "이미 반영됨 (같은 요청)" } };
+      const hit = list(d).find(([, r]) => String(r.id) === want);
+      if (!hit) return errContent(`매입현황에 id=${want} 인 행이 없습니다.`);
+      const [key, cur] = hit;
+      if (cur.status === "입고완료") return errContent("이미 입고완료된 행입니다.");
+      const ordered = toNumber(cur.qty);
+      const extra = note ? ` · ${note}` : "";
+      if (qty >= ordered) {
+        const row = { ...cur, qty: String(qty), status: "입고완료", receivedAt: date, campusToken: token,
+          note: `${cur.note || ""}${extra}`.trim() };
+        return { patch: { [key]: row }, apply: (dd) => withRow(dd, key, row), check: hasToken,
+          result: { 결과: "입고완료 처리", 행: row, 주문수량: ordered } };
+      }
+      // 일부 입고: 받은 만큼 새 입고완료 행, 원래 행은 남은 수량으로 줄여 주문완료 유지
+      const rest = { ...cur, qty: String(ordered - qty) };
+      const nkey = nextKey(d);
+      const got = { ...cur, id: newId(d), qty: String(qty), status: "입고완료", receivedAt: date, campusToken: token, splitFrom: cur.id,
+        note: `${cur.note || ""} · 부분입고 ${qty}/${ordered}${extra}`.trim() };
+      return { patch: { [key]: rest, [nkey]: got }, apply: (dd) => withRow(withRow(dd, key, rest), nkey, got), check: hasToken,
+        result: { 결과: "부분 입고", 입고행: got, 남은행: rest } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  return errContent('mode 는 "receive" 또는 "new" 여야 합니다.');
+}
+
 // 세무 탭의 납부일만 기록/해제한다. 유일한 쓰기 도구이므로 대상과 형식을 엄격히 검증한다.
 async function toolMarkTaxPaid(args, env) {
   const id = args.id;
@@ -581,7 +719,15 @@ async function toolMarkTaxPaid(args, env) {
     });
   }
 
-  await fbPatch(`/frw/taxes/${found.key}`, { paidDate }, env.FIREBASE_DB_SECRET);
+  // 다른 기기의 옛 복사본에 덮이지 않도록 rev 를 올리는 경로로 쓴다
+  await safeSectionWrite("taxes", (d) => {
+    const f = findRecordKey(d, id);
+    if (!f) return errContent(`세무 탭에 id=${id} 인 건이 없습니다.`);
+    if ((f.record.paidDate || "") === paidDate) return { done: true };
+    const row = { ...f.record, paidDate };
+    const setRow = (dd) => { if (Array.isArray(dd)) { const a = [...dd]; a[Number(f.key)] = row; return a; } return { ...dd, [f.key]: row }; };
+    return { patch: { [f.key]: row }, apply: setRow, check: (dd) => { const g = findRecordKey(dd, id); return !!g && (g.record.paidDate || "") === paidDate; } };
+  }, env);
 
   return textContent({
     결과: paidDate === "" ? "납부 기록 해제" : "납부일 기록 완료",
@@ -609,6 +755,7 @@ async function callTool(params, env) {
     if (name === "search_purchases") return await toolSearchPurchases(args, env);
     if (name === "get_pricing") return await toolGetPricing(args, env);
     if (name === "get_campus_snapshot") return textContent(await buildCampusSnapshot(env));
+    if (name === "record_intake") return await toolRecordIntake(args, env);
     if (name === "mark_tax_paid") return await toolMarkTaxPaid(args, env);
     if (name === "list_backups") return await toolListBackups(args, env);
     if (name === "get_backup_section") return await toolGetBackupSection(args, env);
