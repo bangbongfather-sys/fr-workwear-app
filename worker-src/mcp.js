@@ -210,6 +210,48 @@ const TOOLS = [
   },
 ];
 
+/* ───────── 외부 정보 (AI 직원용) ───────── */
+// Brave Search API — 무료 플랜 키를 SEARCH_API_KEY 시크릿으로 넣으면 켜진다. 없으면 이유를 돌려준다(추측 금지).
+async function webSearch(q, env) {
+  q = String(q || "").trim().slice(0, 200);
+  if (!q) return { error: "검색어가 비었습니다." };
+  if (!env.SEARCH_API_KEY) return { error: "웹 검색 키(SEARCH_API_KEY)가 아직 등록되지 않았습니다. 대표에게 Brave Search API 키 등록을 요청하세요.", query: q, results: [] };
+  const u = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=8&search_lang=ko&country=KR&text_decorations=false&safesearch=moderate`;
+  try {
+    const r = await fetch(u, { headers: { Accept: "application/json", "X-Subscription-Token": env.SEARCH_API_KEY } });
+    if (!r.ok) return { error: `검색 서비스 응답 ${r.status}`, query: q, results: [] };
+    const j = await r.json();
+    const results = ((j.web && j.web.results) || []).slice(0, 8).map((x) => ({ title: String(x.title || "").slice(0, 120), url: x.url, snippet: String(x.description || "").slice(0, 300), age: x.age || x.page_age || "" }));
+    const news = ((j.news && j.news.results) || []).slice(0, 4).map((x) => ({ title: String(x.title || "").slice(0, 120), url: x.url, snippet: String(x.description || "").slice(0, 200), age: x.age || "" }));
+    return { query: q, results, news };
+  } catch (e) { return { error: "검색 실패: " + (e && e.message), query: q, results: [] }; }
+}
+// 공개 웹 페이지 본문 읽기 — HTML에서 글만 남겨 8,000자까지
+async function webRead(url) {
+  url = String(url || "").trim();
+  if (!/^https?:\/\//i.test(url)) return { error: "http(s) 주소만 읽을 수 있습니다.", url };
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
+    const r = await fetch(url, { signal: ctrl.signal, redirect: "follow", headers: { "User-Agent": "Mozilla/5.0 (compatible; NJ-Campus-Reader/1.0)", Accept: "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5", "Accept-Language": "ko,en;q=0.8" } });
+    clearTimeout(t);
+    const ct = r.headers.get("content-type") || "";
+    if (!r.ok) return { error: `페이지 응답 ${r.status}`, url };
+    let text = await r.text();
+    if (/json/.test(ct)) return { url, type: "json", text: text.slice(0, 8000) };
+    if (/html/.test(ct) || /<html/i.test(text.slice(0, 2000))) text = htmlToText(text);
+    return { url, title: (text.match(/^.{0,120}/) || [""])[0], text: text.slice(0, 8000), truncated: text.length > 8000 };
+  } catch (e) { return { error: "읽기 실패: " + (e && e.name === "AbortError" ? "시간 초과" : e && e.message), url }; }
+}
+function htmlToText(h) {
+  const title = (h.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || ["", ""])[1].replace(/\s+/g, " ").trim();
+  let s = h.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(nav|header|footer|aside|form)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<\/(p|div|li|tr|h[1-6]|br|section|article|td|th)>/gi, "\n").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ");
+  s = s.replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n));
+  s = s.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter((l) => l.length > 1).join("\n");
+  return (title ? title + "\n\n" : "") + s;
+}
+
 async function fbGet(node, secret) {
   const url = `https://${FB_HOST}${node}.json?auth=${encodeURIComponent(secret)}`;
   const res = await fetch(url);
@@ -436,6 +478,9 @@ async function toolGetSection(args, env) {
       .map((x) => ({ id: x.id, 날짜: x.date, 내용: String(x.text || "").slice(0, 120), 완료: !!x.done }));
     return textContent({ 오늘: now, 건수: rows.length, 일정: rows });
   }
+  // AI 직원 외부 정보: 웹 검색(Brave Search API, 시크릿 SEARCH_API_KEY 필요)과 공개 페이지 읽기
+  if (section.startsWith("_web:")) return compact(await webSearch(section.slice(5), env));
+  if (section.startsWith("_fetch:")) return compact(await webRead(section.slice(7)));
   if (section.startsWith("_intake:")) {
     let a; try { a = JSON.parse(section.slice(8)); } catch { return errContent("_intake 인자 JSON 이 잘못됐습니다."); }
     return await toolRecordIntake(a || {}, env);
