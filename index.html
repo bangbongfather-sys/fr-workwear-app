@@ -24865,9 +24865,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     카드를 끌어 옮기면 상태가 바뀌고, 발송한 지 며칠 됐는지 세어 준다. */}
                 {historyView === "board" && savedQuotes.length > 0 && (() => {
                   const k = historySearch.trim().toLowerCase();
-                  const list = k
+                  const list = (k
                     ? savedQuotes.filter(q => searchHit(k, q.quoteClient, q.title))
-                    : savedQuotes;
+                    : savedQuotes).slice().sort((x, y) => (y.savedAt || 0) - (x.savedAt || 0));
                   const amountOf = (q) => (q.products||[]).reduce((s,p)=>s+(p.price||0)*(p.qty||1),0);
                   const daysAgo = (ms) => Math.floor((Date.now() - ms) / 86400000);
                   const byStatus = (id) => list.filter(q => (q.status || "draft") === id);
@@ -24973,9 +24973,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     {(() => {
                       // 검색 필터
                       const k = historySearch.trim().toLowerCase();
-                      const filtered = k
+                      const filtered = (k
                         ? savedQuotes.filter(q => searchHit(k, q.quoteClient, q.title))
-                        : savedQuotes;
+                        : savedQuotes).slice().sort((x, y) => (y.savedAt || 0) - (x.savedAt || 0));
                       if (filtered.length === 0) {
                         return (
                           <div className="card" style={{ padding: 40, textAlign: "center", color: T.empty }}>
