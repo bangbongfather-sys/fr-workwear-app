@@ -404,6 +404,7 @@ async function toolGetSection(args, env) {
     let a; try { a = JSON.parse(section.slice(7)); } catch { return errContent("_write 인자 JSON 이 잘못됐습니다."); }
     return await toolCampusWrite(a || {}, env);
   }
+  if (section === "_deposit_inbox") return textContent(await depositInbox(env));
   // 일정 전체(최근 60일~앞으로 60일, 미완료 우선) — AI 직원 조회용
   if (section === "_todos") {
     const t = asList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)); const now = kstToday();
@@ -816,11 +817,155 @@ async function toolTodo(a, env) {
   }
   return errContent("알 수 없는 일정 작업");
 }
+// ── 입금내역 처리 (회사앱 입금내역 탭과 같은 규칙) ──
+// index.html 의 payablesNameNorm / payablesNameMatch / fbEscKey 와 같아야 한다.
+const payNorm = (s) => String(s || "").replace(/\(주\)|（주）|㈜|주식회사/g, "").replace(/[\s()（）\[\],.·]/g, "").toLowerCase();
+const payMatch = (a, b) => { const x = payNorm(a), y = payNorm(b); if (!x || !y) return false; return x === y || (x.length >= 3 && y.length >= 3 && (x.includes(y) || y.includes(x))); };
+const FB_ESC = { "~": "~7E", ".": "~2E", "#": "~23", "$": "~24", "/": "~2F", "[": "~5B", "]": "~5D" };
+const FB_UNESC = { "7E": "~", "2E": ".", "23": "#", "24": "$", "2F": "/", "5B": "[", "5D": "]" };
+const fbEsc = (k) => String(k).replace(/[~.#$\/[\]]/g, (c) => FB_ESC[c]);
+const fbUnesc = (k) => String(k).replace(/~([0-9A-F]{2})/g, (m, h) => FB_UNESC[h] || m);
+
+async function depositInbox(env) {
+  const S = env.FIREBASE_DB_SECRET;
+  const [dep, ledgers, clients, ar] = await Promise.all([fbGet("/frw/bankDeposits", S), fbGet("/frw/ledgers", S), fbGet("/frw/clients", S), fbGet("/frw/clientAR", S)]);
+  const items = asList(dep && dep.items);
+  const nameMap = {}; for (const [k, v] of Object.entries((dep && dep.nameMap) || {})) nameMap[fbUnesc(k)] = v;
+  const names = new Set();
+  asList(clients).forEach((c) => c.name && names.add(String(c.name).trim()));
+  Object.values(ledgers || {}).forEach((m) => asList(m && m.clients).forEach((c) => c.name && names.add(String(c.name).trim())));
+  Object.keys(ar || {}).forEach((k) => names.add(fbUnesc(k).trim()));
+  const clientNames = [...names].filter(Boolean).sort((a, b) => a.localeCompare(b, "ko"));
+  const suggest = (n) => nameMap[payNorm(n)] || clientNames.find((c) => payMatch(c, n)) || "";
+  const unpaid = {};
+  Object.keys(ledgers || {}).sort().reverse().forEach((ym) => asList(ledgers[ym] && ledgers[ym].clients).forEach((c) => {
+    if (c.status !== "미입금") return; const n = String(c.name || "").trim(); if (!n) return;
+    (unpaid[n] = unpaid[n] || []).push({ ym, id: c.id, total: toNumber(c.total), supply: toNumber(c.supply) });
+  }));
+  const byDate = (a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`);
+  const pending = items.filter((x) => x.status === "pending").sort(byDate).slice(0, 150)
+    .map((x) => ({ id: x.id, date: x.date, time: x.time || "", name: x.name || "", amount: toNumber(x.amount), biz: x.biz === "corp" ? "corp" : "nj", memo: x.memo || "", suggest: suggest(x.name) }));
+  const done = items.filter((x) => x.status === "done").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 20)
+    .map((x) => ({ id: x.id, date: x.date, name: x.name || "", amount: toNumber(x.amount), client: x.client || "", link: x.link || null, doneAt: x.doneAt || null }));
+  return { pendingCount: items.filter((x) => x.status === "pending").length, pending, done, unpaid, clientNames };
+}
+
+async function toolDepositProcess(a, env) {
+  const S = env.FIREBASE_DB_SECRET;
+  const want = String(a.depositId || ""), client = String(a.client || "").trim();
+  const token = String(a.token || `${Date.now()}`).slice(0, 64);
+  const link = a.link && typeof a.link === "object" ? a.link : { kind: "none" };
+  if (!want) return errContent("depositId 가 필요합니다.");
+  if (!client) return errContent("거래처(client)를 정해 주세요.");
+  const bd = await fbGet("/frw/bankDeposits", S);
+  const items = (bd && bd.items) || [];
+  const ent = (Array.isArray(items) ? items.map((r, i) => [String(i), r]) : Object.entries(items)).find(([, r]) => r && String(r.id) === want);
+  if (!ent) return errContent(`입금 id=${want} 이(가) 없습니다.`);
+  const dep = ent[1];
+  if (dep.status === "done") return dep.campusToken === token ? textContent({ 결과: "이미 반영됨" }) : errContent(`이미 처리된 입금입니다 (거래처: ${dep.client || "-"}).`);
+  let finalLink = { kind: "none" };
+  // ① 장부 청구 → 입금완료
+  if (link.kind === "ledger") {
+    const ym = String(link.ym || ""), cid = String(link.clientId || "");
+    const r = await safeSectionWrite("ledgers", (d) => {
+      const arr = d && d[ym] && d[ym].clients;
+      const list = Array.isArray(arr) ? arr.map((x, i) => [String(i), x]) : Object.entries(arr || {});
+      const hit = list.find(([, x]) => x && String(x.id) === cid);
+      if (!hit) return errContent(`${ym} 장부에 해당 청구가 없습니다.`);
+      const [k, cur] = hit;
+      if (cur.status === "입금완료") return { done: true };
+      if (cur.status !== "미입금") return errContent(`이 청구는 '${cur.status}' 상태라 바꾸지 않습니다.`);
+      const row = { ...cur, status: "입금완료", campusToken: token };
+      const apply = (dd) => { const o = { ...(dd || {}) }; const m = { ...(o[ym] || {}) }; const cl = Array.isArray(m.clients) ? [...m.clients] : { ...(m.clients || {}) }; cl[k] = row; m.clients = cl; o[ym] = m; return o; };
+      return { patch: { [`${ym}/clients/${k}`]: row }, apply, check: (dd) => { const x = dd && dd[ym] && dd[ym].clients && dd[ym].clients[k]; return !!x && x.status === "입금완료"; } };
+    }, env);
+    if (r.isError) return r;
+    finalLink = { kind: "ledger", ym, clientId: cid };
+  } else if (link.kind === "ar") {
+    // ② 미수금 원장에 입금 기록
+    const key = fbEsc(client), entryId = Date.now();
+    const r = await safeSectionWrite("clientAR", (d) => {
+      const cur = (d && d[key]) || { entries: [] };
+      const entries = Array.isArray(cur.entries) ? cur.entries : Object.values(cur.entries || {});
+      if (entries.some((e) => e && e.campusToken === token)) return { done: true };
+      const row = { id: entryId, type: "입금", desc: `은행입금 (${dep.name || ""})`, amount: toNumber(dep.amount), date: dep.date, campusToken: token };
+      const next = { ...cur, entries: [...entries, row] };
+      return { patch: { [key]: next }, apply: (dd) => ({ ...(dd || {}), [key]: next }),
+        check: (dd) => { const c = dd && dd[key]; const es = c ? (Array.isArray(c.entries) ? c.entries : Object.values(c.entries || {})) : []; return es.some((e) => e && e.campusToken === token); } };
+    }, env);
+    if (r.isError) return r;
+    finalLink = { kind: "ar", entryId };
+  }
+  // ③ 입금 행 처리완료 + 입금자명→거래처 기억
+  const nmKey = fbEsc(payNorm(dep.name));
+  const r3 = await safeSectionWrite("bankDeposits", (d) => {
+    const its = (d && d.items) || [];
+    const e = (Array.isArray(its) ? its.map((x, i) => [String(i), x]) : Object.entries(its)).find(([, x]) => x && String(x.id) === want);
+    if (!e) return errContent("입금 행이 사라졌습니다.");
+    const [k, cur] = e;
+    if (cur.status === "done") return cur.campusToken === token ? { done: true } : errContent("그 사이 다른 기기에서 처리됐습니다.");
+    const row = { ...cur, status: "done", client, link: finalLink, doneAt: Date.now(), campusToken: token };
+    const patch = { [`items/${k}`]: row }; if (nmKey) patch[`nameMap/${nmKey}`] = client;
+    const apply = (dd) => { const o = { ...(dd || {}) }; const it = Array.isArray(o.items) ? [...o.items] : { ...(o.items || {}) }; it[k] = row; o.items = it; o.nameMap = { ...(o.nameMap || {}), ...(nmKey ? { [nmKey]: client } : {}) }; return o; };
+    return { patch, apply, check: (dd) => { const x = dd && dd.items && dd.items[k]; return !!x && x.campusToken === token; } };
+  }, env);
+  if (r3.isError) return r3;
+  return textContent({ 결과: "입금완료 처리", 입금: { 날짜: dep.date, 입금자: dep.name, 금액: toNumber(dep.amount) }, 거래처: client, 연결: finalLink });
+}
+
+async function toolDepositUndo(a, env) {
+  const S = env.FIREBASE_DB_SECRET, want = String(a.depositId || "");
+  const bd = await fbGet("/frw/bankDeposits", S);
+  const all = (Array.isArray(bd && bd.items) ? bd.items : Object.values((bd && bd.items) || {})).filter(Boolean);
+  const dep = all.find((x) => String(x.id) === want);
+  if (!dep) return errContent(`입금 id=${want} 이(가) 없습니다.`);
+  if (dep.status !== "done") return textContent({ 결과: "이미 미처리 상태" });
+  const link = dep.link || {};
+  if (link.kind === "ledger") {
+    const siblings = all.filter((x) => String(x.id) !== want && x.status === "done" && x.link && x.link.kind === "ledger" && x.link.ym === link.ym && String(x.link.clientId) === String(link.clientId));
+    if (!siblings.length) {
+      const r = await safeSectionWrite("ledgers", (d) => {
+        const arr = d && d[link.ym] && d[link.ym].clients;
+        const list = Array.isArray(arr) ? arr.map((x, i) => [String(i), x]) : Object.entries(arr || {});
+        const hit = list.find(([, x]) => x && String(x.id) === String(link.clientId));
+        if (!hit || hit[1].status !== "입금완료") return { done: true };
+        const [k, cur] = hit; const row = { ...cur, status: "미입금" };
+        const apply = (dd) => { const o = { ...(dd || {}) }; const m = { ...(o[link.ym] || {}) }; const cl = Array.isArray(m.clients) ? [...m.clients] : { ...(m.clients || {}) }; cl[k] = row; m.clients = cl; o[link.ym] = m; return o; };
+        return { patch: { [`${link.ym}/clients/${k}`]: row }, apply, check: (dd) => { const x = dd && dd[link.ym] && dd[link.ym].clients && dd[link.ym].clients[k]; return !!x && x.status === "미입금"; } };
+      }, env);
+      if (r.isError) return r;
+    }
+  } else if (link.kind === "ar") {
+    const key = fbEsc(dep.client || "");
+    const r = await safeSectionWrite("clientAR", (d) => {
+      const cur = d && d[key]; if (!cur) return { done: true };
+      const entries = (Array.isArray(cur.entries) ? cur.entries : Object.values(cur.entries || {})).filter(Boolean);
+      if (!entries.some((e) => String(e.id) === String(link.entryId))) return { done: true };
+      const next = { ...cur, entries: entries.filter((e) => String(e.id) !== String(link.entryId)) };
+      return { patch: { [key]: next }, apply: (dd) => ({ ...(dd || {}), [key]: next }), check: (dd) => { const c = dd && dd[key]; const es = c ? (Array.isArray(c.entries) ? c.entries : Object.values(c.entries || {})) : []; return !es.some((e) => e && String(e.id) === String(link.entryId)); } };
+    }, env);
+    if (r.isError) return r;
+  }
+  const r3 = await safeSectionWrite("bankDeposits", (d) => {
+    const its = (d && d.items) || [];
+    const e = (Array.isArray(its) ? its.map((x, i) => [String(i), x]) : Object.entries(its)).find(([, x]) => x && String(x.id) === want);
+    if (!e) return errContent("입금 행이 사라졌습니다.");
+    const [k, cur] = e; if (cur.status !== "done") return { done: true };
+    const row = { ...cur, status: "pending", client: "", link: null };
+    const apply = (dd) => { const o = { ...(dd || {}) }; const it = Array.isArray(o.items) ? [...o.items] : { ...(o.items || {}) }; it[k] = row; o.items = it; return o; };
+    return { patch: { [`items/${k}`]: row }, apply, check: (dd) => { const x = dd && dd.items && dd.items[k]; return !!x && x.status === "pending"; } };
+  }, env);
+  if (r3.isError) return r3;
+  return textContent({ 결과: "되돌림", 입금자: dep.name, 금액: toNumber(dep.amount), 거래처: dep.client });
+}
+
 async function toolCampusWrite(a, env) {
   const op = String(a.op || "");
   if (op === "intake") return await toolRecordIntake(a, env);
   if (op === "ledger_status") return await toolLedgerStatus(a, env);
   if (op === "todo_add" || op === "todo_done") return await toolTodo(a, env);
+  if (op === "deposit_process") return await toolDepositProcess(a, env);
+  if (op === "deposit_undo") return await toolDepositUndo(a, env);
   if (op === "tax_paid") return await toolMarkTaxPaid({ id: a.id, paidDate: a.paidDate ?? "" }, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
 }
