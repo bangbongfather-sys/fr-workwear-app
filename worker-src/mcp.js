@@ -400,6 +400,18 @@ async function toolGetSection(args, env) {
     return textContent({ 반영시각: (st && st.updatedAt) || null, 품목수: items.length, 품목: items });
   }
   // 커넥터가 record_intake 를 아직 못 볼 때의 우회: section = "_intake:" + JSON 인자
+  if (section.startsWith("_write:")) {
+    let a; try { a = JSON.parse(section.slice(7)); } catch { return errContent("_write 인자 JSON 이 잘못됐습니다."); }
+    return await toolCampusWrite(a || {}, env);
+  }
+  // 일정 전체(최근 60일~앞으로 60일, 미완료 우선) — AI 직원 조회용
+  if (section === "_todos") {
+    const t = asList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)); const now = kstToday();
+    const lo = addDays(now, -60), hi = addDays(now, 60);
+    const rows = t.filter((x) => x.date && x.date >= lo && x.date <= hi).sort((a, b) => String(a.date).localeCompare(String(b.date)))
+      .map((x) => ({ id: x.id, 날짜: x.date, 내용: String(x.text || "").slice(0, 120), 완료: !!x.done }));
+    return textContent({ 오늘: now, 건수: rows.length, 일정: rows });
+  }
   if (section.startsWith("_intake:")) {
     let a; try { a = JSON.parse(section.slice(8)); } catch { return errContent("_intake 인자 JSON 이 잘못됐습니다."); }
     return await toolRecordIntake(a || {}, env);
@@ -745,6 +757,72 @@ async function toolRecordIntake(args, env) {
     return plan.isError ? plan : textContent(plan.result);
   }
   return errContent('mode 는 "receive" 또는 "new" 여야 합니다.');
+}
+
+// ── AI 직원 쓰기 (캠퍼스 페이지가 사용자 승인 뒤에만 부른다) ──
+// 장부 입금 상태: ledgers/<월>/clients/<i> 의 status·memo 만 바꾼다
+async function toolLedgerStatus(a, env) {
+  const month = String(a.month || ""), name = String(a.name || "").trim(), status = String(a.status || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) return errContent("month 는 YYYY-MM 입니다.");
+  if (!name) return errContent("거래처 이름(name)이 필요합니다.");
+  if (!["입금완료", "미입금"].includes(status)) return errContent('status 는 "입금완료" 또는 "미입금" 입니다.');
+  const token = String(a.token || `${Date.now()}`).slice(0, 64), memo = a.memo ? String(a.memo).slice(0, 120) : "";
+  const plan = await safeSectionWrite("ledgers", (d) => {
+    const L = d && d[month]; const arr = L && L.clients;
+    const list = Array.isArray(arr) ? arr.map((r, i) => [String(i), r]) : Object.entries(arr || {});
+    let hit = list.find(([, r]) => r && String(r.name || "").trim() === name);
+    if (!hit) { const c = list.filter(([, r]) => r && String(r.name || "").includes(name)); if (c.length === 1) hit = c[0]; else if (c.length > 1) return errContent(`'${name}' 이(가) 여러 거래처와 겹칩니다: ${c.map(([, r]) => r.name).join(", ")}`); }
+    if (!hit) return errContent(`${month} 장부에 '${name}' 거래처가 없습니다.`);
+    const [k, cur] = hit;
+    if (cur.status === "법인 거래") return errContent("법인 거래 행은 바꾸지 않습니다.");
+    if (cur.status === status && !memo) return { done: true, result: { 결과: "변경 없음", 거래처: cur.name, 상태: status } };
+    const row = { ...cur, status, memo: memo ? `${cur.memo ? cur.memo + " / " : ""}${memo}` : (cur.memo || ""), campusToken: token };
+    const key = `${month}/clients/${k}`;
+    const apply = (dd) => { const o = { ...(dd || {}) }; const m = { ...(o[month] || {}) }; const cl = Array.isArray(m.clients) ? [...m.clients] : { ...(m.clients || {}) }; cl[k] = row; m.clients = cl; o[month] = m; return o; };
+    const check = (dd) => { const r = dd && dd[month] && dd[month].clients && dd[month].clients[k]; return !!r && r.campusToken === token; };
+    return { patch: { [key]: row }, apply, check, result: { 결과: "장부 상태 변경", 월: month, 거래처: cur.name, 이전: cur.status, 변경: status, 공급가: toNumber(cur.supply) } };
+  }, env);
+  return plan.isError ? plan : textContent(plan.result);
+}
+// 일정: 추가 / 완료 체크
+async function toolTodo(a, env) {
+  const token = String(a.token || `${Date.now()}`).slice(0, 64);
+  const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
+  if (a.op === "todo_add") {
+    const date = String(a.date || kstToday()), text = String(a.text || "").trim();
+    if (!isRealDate(date)) return errContent("date 는 YYYY-MM-DD 입니다.");
+    if (!text) return errContent("할 일 내용(text)이 필요합니다.");
+    const plan = await safeSectionWrite("todos", (d) => {
+      if (list(d).some(([, r]) => r.campusToken === token)) return { done: true, result: { 결과: "이미 반영됨" } };
+      const key = Array.isArray(d) || d == null ? String(d ? d.length : 0) : `c${Date.now()}`;
+      const ids = new Set(list(d).map(([, r]) => String(r.id))); let id = Date.now(); while (ids.has(String(id))) id++;
+      const row = { id, date, endDate: "", text: text.slice(0, 200), memo: a.memo ? String(a.memo).slice(0, 300) : "", done: false, createdAt: Date.now(), atts: [], campusToken: token, fromCampus: true };
+      const apply = (dd) => { if (Array.isArray(dd) || dd == null) { const x = [...(dd || [])]; x[Number(key)] = row; return x; } return { ...dd, [key]: row }; };
+      return { patch: { [key]: row }, apply, check: (dd) => list(dd).some(([, r]) => r.campusToken === token), result: { 결과: "일정 추가", 일정: { 날짜: date, 내용: row.text } } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  if (a.op === "todo_done") {
+    const want = String(a.id || ""); const done = a.done !== false;
+    if (!want) return errContent("완료할 일정의 id 가 필요합니다.");
+    const plan = await safeSectionWrite("todos", (d) => {
+      const hit = list(d).find(([, r]) => String(r.id) === want); if (!hit) return errContent(`일정 id=${want} 이(가) 없습니다.`);
+      const [k, cur] = hit; if (!!cur.done === done) return { done: true, result: { 결과: "변경 없음", 내용: cur.text } };
+      const row = { ...cur, done, campusToken: token };
+      const apply = (dd) => { if (Array.isArray(dd)) { const x = [...dd]; x[Number(k)] = row; return x; } return { ...dd, [k]: row }; };
+      return { patch: { [k]: row }, apply, check: (dd) => { const r = list(dd).find(([, x]) => String(x.id) === want); return !!r && r[1].campusToken === token; }, result: { 결과: done ? "완료 체크" : "완료 해제", 내용: cur.text } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  return errContent("알 수 없는 일정 작업");
+}
+async function toolCampusWrite(a, env) {
+  const op = String(a.op || "");
+  if (op === "intake") return await toolRecordIntake(a, env);
+  if (op === "ledger_status") return await toolLedgerStatus(a, env);
+  if (op === "todo_add" || op === "todo_done") return await toolTodo(a, env);
+  if (op === "tax_paid") return await toolMarkTaxPaid({ id: a.id, paidDate: a.paidDate ?? "" }, env);
+  return errContent(`알 수 없는 쓰기: ${op}`);
 }
 
 // 세무 탭의 납부일만 기록/해제한다. 유일한 쓰기 도구이므로 대상과 형식을 엄격히 검증한다.
