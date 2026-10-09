@@ -14081,12 +14081,42 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   ])).filter(Boolean).sort((a, b) => a.localeCompare(b, "ko")), [clients, suppliers, cashFlows]);
   const [editCfId, setEditCfId] = useState(null);
   const [editCfDraft, setEditCfDraft] = useState(null);
-  const startEditCf = (cf) => { setEditCfId(cf.id); setEditCfDraft({ ...cf, amount: String(cf.amount || "") }); };
+  const startEditCf = (cf) => { setEditCfId(cf.id); setEditCfDraft({ ...cf, accountId: cf.accountId == null ? "" : String(cf.accountId), amount: String(cf.amount || "") }); };
   const cancelEditCf = () => { setEditCfId(null); setEditCfDraft(null); };
+  // 통장 id 는 숫자·문자열이 섞여 저장돼 있다(선택 상자는 문자열, 통장 카드에서 바로 입력하면 숫자) → 항상 문자열로 비교
+  const sameAcc = (a, b) => a != null && b != null && a !== "" && b !== "" && String(a) === String(b);
+  const accOf = (id) => (id == null || id === "") ? null : accounts.find(a => sameAcc(a.id, id)) || null;
+  const cfEffect = (cf) => (cf.type === "입금" ? 1 : -1) * (parseFloat(cf.amount) || 0);
+  // 통장 잔액에 거래 효과를 더하거나(+1) 빼기(-1)
+  const applyCfToBalance = (cf, dir) => {
+    if (!accOf(cf.accountId)) return;
+    const d = dir * cfEffect(cf);
+    setAccounts(prev => prev.map(a => sameAcc(a.id, cf.accountId) ? { ...a, balance: (parseFloat(a.balance) || 0) + d } : a));
+  };
   const saveEditCf = () => {
     if (!editCfDraft || !editCfDraft.client?.trim() || !editCfDraft.amount) { showToast("거래처명 + 금액 필수"); return; }
     const amt = parseFloat(editCfDraft.amount) || 0;
-    setCashFlows(prev => prev.map(c => c.id === editCfId ? { ...editCfDraft, client: editCfDraft.client.trim(), amount: amt } : c));
+    const before = cashFlows.find(c => c.id === editCfId);
+    const after = { ...editCfDraft, client: editCfDraft.client.trim(), amount: amt };
+    // 금액·입출금·통장이 바뀌었으면 통장 잔액도 같이 고칠지 묻는다 (거래를 추가할 때 잔액이 자동으로 움직이므로)
+    const moneyChanged = before && (cfEffect(before) !== cfEffect(after) || !sameAcc(before.accountId, after.accountId) && (accOf(before.accountId) || accOf(after.accountId)));
+    let syncBal = false;
+    if (moneyChanged && (accOf(before.accountId) || accOf(after.accountId))) {
+      const ba = accOf(before.accountId), aa = accOf(after.accountId);
+      const lines = [];
+      const sgn = (n) => `${n >= 0 ? "+" : "−"}${fmt(Math.abs(n))}원`;
+      if (ba && aa && sameAcc(ba.id, aa.id)) {
+        const net = cfEffect(after) - cfEffect(before);
+        lines.push(`${ba.name}: ${sgn(net)} → 잔액 ${fmt((parseFloat(ba.balance) || 0) + net)}원`);
+      } else {
+        if (ba) lines.push(`${ba.name}: ${sgn(-cfEffect(before))} (원래 거래 되돌림)`);
+        if (aa) lines.push(`${aa.name}: ${sgn(cfEffect(after))} (고친 거래 반영)`);
+      }
+      syncBal = window.confirm(`통장 잔액도 맞춰 고칠까요?\n\n${lines.join("\n")}\n\n확인 = 잔액도 고침 · 취소 = 거래만 고치고 잔액은 그대로`);
+    }
+    setCashFlows(prev => prev.map(c => c.id === editCfId ? after : c));
+    if (syncBal) { applyCfToBalance(before, -1); applyCfToBalance(after, +1); }
+    showToast(syncBal ? "거래와 통장 잔액을 고쳤습니다" : "거래를 고쳤습니다");
     cancelEditCf();
   };
   const [showSchedForm, setShowSchedForm] = useState(false);
@@ -14362,14 +14392,21 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
     setCashFlows(prev => [...prev, { id: uid(), ...cfDraft, client: cfDraft.client.trim(), amount: amt }]);
     // 계좌가 선택돼 있으면 잔액 자동 업데이트
     if (cfDraft.accountId) {
-      setAccounts(prev => prev.map(a => a.id === cfDraft.accountId ? { ...a, balance: (parseFloat(a.balance)||0) + (cfDraft.type === "입금" ? amt : -amt) } : a));
+      setAccounts(prev => prev.map(a => sameAcc(a.id, cfDraft.accountId) ? { ...a, balance: (parseFloat(a.balance)||0) + (cfDraft.type === "입금" ? amt : -amt) } : a));
     }
     setCfDraft({ accountId:"", client:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
     setShowCfForm(false);
   };
   const deleteCf = (id) => {
-    if (!window.confirm("이 거래내역을 삭제할까요? (계좌 잔액은 자동 보정되지 않습니다)")) return;
+    const cf = cashFlows.find(c => c.id === id);
+    if (!cf) return;
+    if (!window.confirm(`이 거래를 삭제할까요?\n\n${cf.date || ""} · ${cf.client || "(미지정)"} · ${cf.type} ${fmt(cf.amount)}원`)) return;
+    const acc = accOf(cf.accountId);
+    // 거래를 추가할 때 통장 잔액이 자동으로 움직였으므로, 지울 때 되돌릴지 묻는다
+    const revert = acc ? window.confirm(`${acc.name} 잔액도 되돌릴까요?\n\n${cfEffect(cf) >= 0 ? "−" : "+"}${fmt(Math.abs(cfEffect(cf)))}원 → 잔액 ${fmt((parseFloat(acc.balance) || 0) - cfEffect(cf))}원\n\n확인 = 잔액도 되돌림 · 취소 = 거래만 삭제 (잔액은 그대로)`) : false;
     setCashFlows(prev => prev.filter(c => c.id !== id));
+    if (revert) applyCfToBalance(cf, -1);
+    showToast(revert ? `거래를 삭제하고 ${acc.name} 잔액을 되돌렸습니다` : "거래를 삭제했습니다");
   };
 
   const addSched = () => {
@@ -14453,9 +14490,9 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
         // 잔액 흐름 — 지금 잔액에서 기록한 거래를 하루씩 되돌려 최근 30일 곡선을 만든다
         // (통장을 골라 기록한 거래만 잔액을 움직이므로 그 거래만 쓴다)
         const balanceSeries = (ids, current) => {
-          const idSet = new Set(ids);
+          const idSet = new Set(ids.map(String));
           const byDay = {};
-          cashFlows.forEach(cf => { if (cf.accountId && idSet.has(cf.accountId) && cf.date) byDay[cf.date] = (byDay[cf.date] || 0) + signed(cf); });
+          cashFlows.forEach(cf => { if (cf.accountId && idSet.has(String(cf.accountId)) && cf.date) byDay[cf.date] = (byDay[cf.date] || 0) + signed(cf); });
           const pts = []; let bal = current;
           for (let i = 0; i < 30; i++) {
             const d = ymd(new Date(now.getTime() - i * 86400000));
@@ -14474,13 +14511,13 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
             </svg>
           );
         };
-        const monthNet = (ids) => cashFlows.filter(cf => cf.accountId && ids.includes(cf.accountId) && (cf.date || "").startsWith(thisYM)).reduce((s, cf) => s + signed(cf), 0);
-        const lastTx = (id) => cashFlows.filter(cf => cf.accountId === id && cf.date).reduce((m, cf) => cf.date > m ? cf.date : m, "");
+        const monthNet = (ids) => cashFlows.filter(cf => cf.accountId && ids.map(String).includes(String(cf.accountId)) && (cf.date || "").startsWith(thisYM)).reduce((s, cf) => s + signed(cf), 0);
+        const lastTx = (id) => cashFlows.filter(cf => sameAcc(cf.accountId, id) && cf.date).reduce((m, cf) => cf.date > m ? cf.date : m, "");
 
         // ── 피드 범위: 통장 → 기간 → 입출금 → 거래처 필터 → 검색 ──
         const periodOk = (cf) => cfPeriod === "all" ? true : cfPeriod === "month" ? (cf.date || "").startsWith(thisYM) : (cf.date || "") >= since90;
         const periodLabel = cfPeriod === "month" ? `${now.getMonth()+1}월` : cfPeriod === "3m" ? "최근 3개월" : "전체 기간";
-        const scoped = cashFlows.filter(cf => (focusId === "all" || cf.accountId === focusId) && periodOk(cf));
+        const scoped = cashFlows.filter(cf => (focusId === "all" || sameAcc(cf.accountId, focusId)) && periodOk(cf));
         const q = cfSearch.trim().toLowerCase();
         const feed = scoped
           .filter(cf => cfKind === "all" || (cfKind === "in" ? cf.type === "입금" : cf.type !== "입금"))
@@ -14720,8 +14757,23 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
               {feed.length === 0 ? (
                 <div style={{ padding: "34px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7, border: "1.5px dashed var(--border)", borderRadius: 12 }}>
                   {cashFlows.length === 0 ? <>아직 기록한 거래가 없습니다.<br/>「+ 거래 입력」으로 첫 거래를 적어 보세요.</>
-                    : <>{periodLabel}에 조건에 맞는 거래가 없습니다.
-                      {cfPeriod !== "all" && <><br/><button type="button" onClick={() => setCfPeriod("all")} style={{ marginTop: 8, height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>전체 기간 보기</button></>}</>}
+                    : (() => {
+                      // 왜 비었는지 — 걸려 있는 조건을 보여 주고 한 번에 풀 수 있게 (요약 카드에는 보이는데 목록엔 없는 혼란 방지)
+                      const conds = [];
+                      if (cfKind !== "all") conds.push(cfKind === "in" ? "들어온 돈만" : "나간 돈만");
+                      if (q) conds.push(`검색 '${cfSearch.trim()}'`);
+                      if (cfClientFilter) conds.push(`거래처 '${cfClientFilter}'`);
+                      const btn = { marginTop: 8, height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" };
+                      return (<>
+                        {periodLabel}{focusAcc ? ` · ${focusAcc.name}` : ""}에 조건에 맞는 거래가 없습니다.
+                        {conds.length > 0 && <><br/><span style={{ color: "var(--text2)" }}>지금 걸린 조건: <b>{conds.join(" · ")}</b>{scoped.length > 0 && <> — 조건을 풀면 <b style={{ color: "var(--accent-strong)" }}>{scoped.length}건</b>이 보입니다</>}</span></>}
+                        <br/>
+                        <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+                          {conds.length > 0 && <button type="button" onClick={() => { setCfKind("all"); setCfSearch(""); setCfClientFilter(""); setCfLimit(60); }} style={{ ...btn, borderColor: "#DB6B2E", color: "var(--accent-strong)" }}>조건 풀기</button>}
+                          {cfPeriod !== "all" && <button type="button" onClick={() => setCfPeriod("all")} style={btn}>전체 기간 보기</button>}
+                        </span>
+                      </>);
+                    })()}
                 </div>
               ) : days.map(d => (
                 <div key={d.date} style={{ display: "flex", flexDirection: "column" }}>
@@ -14731,7 +14783,7 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
                   </div>
                   {d.items.map(cf => {
                     const isIn = cf.type === "입금";
-                    const acc = accounts.find(a => a.id === cf.accountId);
+                    const acc = accOf(cf.accountId);
                     if (editCfId === cf.id && editCfDraft) {
                       return (
                         <div key={cf.id} style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", padding: "10px 4px", borderBottom: "1px solid var(--divider)", background: "var(--accent-tonal)", borderRadius: 8 }}>
