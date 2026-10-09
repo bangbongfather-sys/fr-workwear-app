@@ -479,6 +479,19 @@ async function toolGetSection(args, env) {
     const rows = asList(d && d.items).filter((x) => String(x.date || "").startsWith(m)).map((x) => ({ 일자: x.date, 시각: x.time || "", 입금자: x.name || x.client || "", 금액: toNumber(x.amount), 사업자: x.biz === "corp" ? "엔제이세이프티(법인)" : "나정", 메모: x.memo || "" }));
     return textContent({ 월: m, 건수: rows.length, 합계: rows.reduce((a, r) => a + r.금액, 0), 행: rows.slice(0, 300) });
   }
+  // 캠퍼스 창고용: 단가계산기 제품 목록(가벼운 것)과 제품 사진 한 장(base64 data URL)
+  if (section === "_prodlist") {
+    const ps = asList(await fbGet("/frw/products", env.FIREBASE_DB_SECRET));
+    return textContent({ 제품: ps.map((p) => ({ id: p.id, 이름: p.name || "", 시즌: p.category || "", 포함: p.include !== false, 사진: !!(p.image && String(p.image).length > 50), 사진크기: p.image ? String(p.image).length : 0 })) });
+  }
+  if (section.startsWith("_prodimg:")) {
+    const id = section.slice(9).trim();
+    const ps = asList(await fbGet("/frw/products", env.FIREBASE_DB_SECRET));
+    const p = ps.find((x) => x && String(x.id) === id);
+    if (!p) return errContent(`제품이 없습니다: ${id}`);
+    if (!p.image || String(p.image).length < 50) return textContent({ id, 사진: null });
+    return { content: [{ type: "text", text: JSON.stringify({ id, 이름: p.name || "", 사진: String(p.image) }) }] };
+  }
   if (section === "_stock") {
     const st = await fbGet("/frw/stock", env.FIREBASE_DB_SECRET);
     const items = asList(st && st.items).map((i) => ({ 코드: i.code, 품명: i.name, 수량: toNumber(i.qty), 안전재고: i.safeQty === "" || i.safeQty == null ? null : toNumber(i.safeQty), ...(i.adjustedAt ? { 조정: i.adjustedAt, 조정사유: i.adjustNote || "" } : {}) }));
