@@ -481,8 +481,8 @@ async function toolGetSection(args, env) {
   }
   if (section === "_stock") {
     const st = await fbGet("/frw/stock", env.FIREBASE_DB_SECRET);
-    const items = asList(st && st.items).map((i) => ({ 코드: i.code, 품명: i.name, 수량: toNumber(i.qty), 안전재고: i.safeQty === "" ? null : toNumber(i.safeQty) }));
-    return textContent({ 반영시각: (st && st.updatedAt) || null, 품목수: items.length, 품목: items });
+    const items = asList(st && st.items).map((i) => ({ 코드: i.code, 품명: i.name, 수량: toNumber(i.qty), 안전재고: i.safeQty === "" || i.safeQty == null ? null : toNumber(i.safeQty), ...(i.adjustedAt ? { 조정: i.adjustedAt, 조정사유: i.adjustNote || "" } : {}) }));
+    return textContent({ 반영시각: (st && st.updatedAt) || null, 품목수: items.length, 품목: items, 조정가능: true });
   }
   // 커넥터가 record_intake 를 아직 못 볼 때의 우회: section = "_intake:" + JSON 인자
   if (section.startsWith("_write:")) {
@@ -1168,7 +1168,34 @@ async function toolCampusWrite(a, env) {
   if (op === "deposit_batch") return await toolDepositBatch(a, env);
   if (op === "tax_paid") return await toolMarkTaxPaid({ id: a.id, paidDate: a.paidDate ?? "" }, env);
   if (op === "quote_save") return await toolQuoteSave(a, env);
+  if (op === "stock_adjust") return await toolStockAdjust(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
+}
+
+// 캠퍼스 창고 실사 조정 — 품목코드 하나의 재고 수량을 실제 센 수량으로 바꾼다.
+// 다음 엑셀 업로드가 오면 통째로 덮이므로(ERP 가 정답) 그때까지만 유효. 조정 이력은 캠퍼스 db 에 따로 남는다.
+async function toolStockAdjust(a, env) {
+  const code = String(a.code || "").trim(), qty = Number(a.qty);
+  if (!code) return errContent("품목코드(code)가 필요합니다.");
+  if (!Number.isFinite(qty)) return errContent("qty 는 숫자여야 합니다.");
+  const token = String(a.token || `${Date.now()}`).slice(0, 64);
+  const reason = String(a.reason || "").slice(0, 120);
+  let from = null, name = "";
+  const r = await safeSectionWrite("stock", (d) => {
+    const items = d && d.items;
+    const list = Array.isArray(items) ? items.map((x, i) => [String(i), x]) : Object.entries(items || {});
+    const hit = list.find(([, x]) => x && String(x.code || "").trim() === code);
+    if (!hit) return errContent(`재고에 없는 품목코드: ${code}`);
+    const [k, it] = hit;
+    if (it.adjustToken === token) return { done: true };
+    from = toNumber(it.qty); name = it.name || code;
+    const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+    const patch = { [`items/${k}/qty`]: qty, [`items/${k}/adjustToken`]: token, [`items/${k}/adjustedAt`]: at, [`items/${k}/adjustNote`]: reason };
+    return { patch, apply: (dd) => { const n = JSON.parse(JSON.stringify(dd)); const t = n.items[k]; Object.assign(t, { qty, adjustToken: token, adjustedAt: at, adjustNote: reason }); return n; },
+      check: (dd) => { const x = dd && dd.items && dd.items[k]; return !!x && x.adjustToken === token && toNumber(x.qty) === qty; } };
+  }, env);
+  if (r && r.isError) return r;
+  return textContent({ 결과: "재고 조정", 품목코드: code, 품명: name, 이전: from, 조정후: qty, 차이: from == null ? null : qty - from, 사유: reason });
 }
 
 // 캠퍼스에서 만든 견적서를 회사앱 견적 이력(quoteHistory)에 넣는다 — 앱의 저장 항목과 같은 모양(status draft, quoteStyle apple)
