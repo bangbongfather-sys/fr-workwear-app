@@ -1185,6 +1185,7 @@ async function toolCampusWrite(a, env) {
   if (op === "quote_save") return await toolQuoteSave(a, env);
   if (op === "stock_adjust") return await toolStockAdjust(a, env);
   if (op === "hr_payroll") return await toolHrPayroll(a, env);
+  if (op === "hr_employee") return await toolHrEmployee(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
 }
 
@@ -1199,6 +1200,42 @@ async function hrRead(env, ym) {
     기본급: toNumber(e.base), 수당: toNumber(e.allow), 식대: e.meal, 소득세: toNumber(e.incomeTax) }));
   const p = pays && typeof pays === "object" ? pays : {};
   return { 직원수: employees.length, 직원: employees, 급여대장달: Object.keys(p).sort(), ...(ym ? { [ym]: p[ym] || null } : {}) };
+}
+// 직원 기본값(기본급·수당·식대·간이세액표 소득세)을 이름으로 찾아 고친다. create:true 면 없는 사람을 새로 등록(입사일 필수).
+// 앱의 직원 저장(saveEmp)과 같은 모양 — 숫자는 정수로, updatedAt 갱신.
+async function toolHrEmployee(a, env) {
+  const rows = Array.isArray(a.rows) ? a.rows.slice(0, 60) : [];
+  if (!rows.length) return errContent("rows 가 비었습니다 ([{name, base, allow, meal, incomeTax, role, biz, joined}]).");
+  const NUM = ["base", "allow", "meal", "incomeTax"], TXT = ["role", "biz", "joined", "phone", "memo"];
+  const now = new Date().toISOString();
+  const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
+  const pick = (r) => { const o = {}; for (const f of NUM) if (r[f] !== undefined && r[f] !== null && r[f] !== "") o[f] = Math.round(toNumber(r[f]));
+    for (const f of TXT) if (r[f] !== undefined && r[f] !== null && r[f] !== "") o[f] = String(r[f]).trim(); return o; };
+  const out = { 고침: [], 추가: [], 못함: [] };
+  const plan = await safeSectionWrite("employees", (d) => {
+    const ents = list(d), patch = {}; let arr = Array.isArray(d) ? [...d] : null, obj = Array.isArray(d) ? null : { ...(d || {}) };
+    out.고침 = []; out.추가 = []; out.못함 = [];
+    let nextIdx = Array.isArray(d) ? d.length : 0;
+    for (const r of rows) {
+      const hit = ents.filter(([, e]) => hrNameKey(e.name) === hrNameKey(r.name) && (!r.biz || !e.biz || String(e.biz) === String(r.biz)));
+      const vals = pick(r);
+      if (hit.length === 1) {
+        const [k, e] = hit[0]; const row = { ...e, ...vals, updatedAt: now };
+        patch[k] = row; if (arr) arr[Number(k)] = row; else obj[k] = row; out.고침.push({ 이름: e.name, ...vals });
+      } else if (!hit.length && a.create && vals.joined && /^\d{4}-\d{2}-\d{2}$/.test(vals.joined)) {
+        const row = { id: Date.now() * 1000 + Math.floor(Math.random() * 1000), name: String(r.name).trim(), role: "", biz: "", probationEnd: "", birthday: "", phone: "",
+          base: 0, allow: 0, meal: 200000, incomeTax: 0, memo: "", leftAt: "", ...vals, createdAt: now, updatedAt: now };
+        const k = arr ? String(nextIdx++) : `c${row.id}`;
+        patch[k] = row; if (arr) arr[Number(k)] = row; else obj[k] = row; out.추가.push({ 이름: row.name, ...vals });
+      } else out.못함.push({ 이름: r.name, 사유: hit.length ? "같은 이름이 여러 명" : "직원 목록에 없음 (create:true 와 joined 로 새로 등록 가능)" });
+    }
+    if (!Object.keys(patch).length) return errContent(`고칠 직원이 없습니다: ${JSON.stringify(out.못함)}`);
+    const want = Object.values(patch);
+    return { patch, apply: () => arr || obj,
+      check: (dd) => want.every((w) => list(dd).some(([, e]) => String(e.id) === String(w.id) && e.updatedAt === w.updatedAt)) };
+  }, env);
+  if (plan.isError) return plan;
+  return textContent({ 결과: "직원 정보 저장", ...out });
 }
 async function toolHrPayroll(a, env) {
   const ym = String(a.ym || "");
