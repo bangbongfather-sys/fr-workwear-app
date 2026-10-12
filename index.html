@@ -1592,9 +1592,9 @@ const SECTION_LABELS = {
   investments: "투자", cashFlows: "자금흐름", scheduledExpenses: "예정지출", purchaseSubTabs: "매입 거래처 탭",
   todos: "일정", notes: "중요 메모", recurringSchedules: "정기 일정", yearlyRevenue: "연매출",
   purchaseDateMemos: "매입일 메모", stock: "재고", payables: "미지급", bankDeposits: "입금내역",
-  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록", weeklyGoals: "주간 목표",
+  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록", weeklyGoals: "주간 목표", employees: "직원", payrolls: "급여대장", leaves: "휴가", hrSettings: "인사 설정",
 };
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes", "weeklyGoals"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes", "weeklyGoals", "employees", "payrolls", "leaves", "hrSettings"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -19923,6 +19923,11 @@ function App() {
   // 하루 기록(일별 메모·일기) — { "2026-08-26": { text, star, updatedAt } }
   const [dailyNotes, setDailyNotes] = useState(() => load("frw_daily_notes", {}));
   const [weeklyGoals, setWeeklyGoals] = useState(() => load("frw_weekly_goals", {})); // 일정 › 주간 목표 (주 일요일 키)
+  // 인사 관리 — 직원 · 달별 급여대장 · 휴가 · 설정(급여일)
+  const [employees, setEmployees] = useState(() => load("frw_employees", []));
+  const [payrolls, setPayrolls] = useState(() => load("frw_payrolls", {}));
+  const [leaves, setLeaves] = useState(() => load("frw_leaves", []));
+  const [hrSettings, setHrSettings] = useState(() => load("frw_hr_settings", {}));
   const [taxes, setTaxes] = useState(() => load("frw_taxes", [])); // 세무 관리 — 사업장별 세금 납부 기록
   // 2026년 7월 1차 건강보험료 고지 등록 (1회) — 국민건강보험공단 고지 내역서 기준.
   // 고지금액 35,766,480 = 건강 31,658,730 + 요양 4,107,750 (5인 개인별 합계와 일치 검산 완료).
@@ -20589,6 +20594,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.notes !== undefined) setNotes(d.notes);
     if (d.dailyNotes !== undefined && d.dailyNotes && typeof d.dailyNotes === "object") setDailyNotes(d.dailyNotes);
     if (d.weeklyGoals !== undefined && d.weeklyGoals && typeof d.weeklyGoals === "object" && !Array.isArray(d.weeklyGoals)) setWeeklyGoals(d.weeklyGoals);
+    if (d.employees !== undefined && Array.isArray(d.employees)) setEmployees(d.employees.filter(Boolean));
+    if (d.payrolls !== undefined && d.payrolls && typeof d.payrolls === "object" && !Array.isArray(d.payrolls)) setPayrolls(d.payrolls);
+    if (d.leaves !== undefined && Array.isArray(d.leaves)) setLeaves(d.leaves.filter(Boolean));
+    if (d.hrSettings !== undefined && d.hrSettings && typeof d.hrSettings === "object" && !Array.isArray(d.hrSettings)) setHrSettings(d.hrSettings);
     if (d.taxes !== undefined) setTaxes(d.taxes);
     if (d.meetings !== undefined && Array.isArray(d.meetings)) setMeetings(d.meetings);
     if (d.recurringSchedules !== undefined) setRecurringSchedules(d.recurringSchedules);
@@ -20930,7 +20939,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR); save("frw_todos", todos);
-    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_weekly_goals", weeklyGoals); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
+    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_weekly_goals", weeklyGoals); save("frw_employees", employees); save("frw_payrolls", payrolls); save("frw_leaves", leaves); save("frw_hr_settings", hrSettings); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
@@ -20940,7 +20949,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_prod_trash", prodTrash);
     save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, employees, payrolls, leaves, hrSettings };
     // 저장 페이로드는 항상 이 최신 스냅샷으로 만든다 (타이머가 걸린 시점의 옛 값이 아니라).
     latestSnapshot.current = cur;
     if (!initialized.current) { prevSnapshot.current = cur; return; }
@@ -20960,7 +20969,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     markDirtyPersist();
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => { syncTimer.current = null; runSave(0); }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, employees, payrolls, leaves, hrSettings, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
@@ -22055,12 +22064,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(219,107,46,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["meeting", "회의록", "clipboard"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
+  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["hr", "인사 관리", "user"], ["meeting", "회의록", "clipboard"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
   // 사이드바 메뉴 그룹 (토스 핸드오프 — 평면 나열 → 그룹 헤더). TABS는 평면 유지(퀵메뉴 등 재사용)
   const TAB_GROUPS = [
     { label: "핵심", ids: ["dashboard", "calc", "quote"] },
     { label: "운영", ids: ["pricedb", "purchase", "inventory", "stock"] },
-    { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury", "tax"] },
+    { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury", "tax", "hr"] },
     { label: "일정·외부", ids: ["schedule", "meeting", "bids", "files", "mail", "news"] },
   ];
   // 사이드바 하단 바로가기 — 평소엔 한 줄만, 누르면 위로 팝오버가 열린다.
@@ -25188,6 +25197,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         )}
         {tab === "tax" && (
           <TaxTab taxes={taxes} setTaxes={setTaxes} setTodos={setTodos} darkMode={darkMode} apiKey={apiKey} />
+        )}
+        {tab === "hr" && (
+          <HrTab employees={employees} setEmployees={setEmployees} payrolls={payrolls} setPayrolls={setPayrolls}
+            leaves={leaves} setLeaves={setLeaves} hrSettings={hrSettings} setHrSettings={setHrSettings} />
         )}
         {tab === "meeting" && (
           <MeetingTab meetings={meetings} setMeetings={setMeetings} setTodos={setTodos} clients={clients} darkMode={darkMode} />
@@ -31502,6 +31515,957 @@ const TAX_CALENDAR_HINTS = [
   ["종합소득세", "5/31 (개인사업자)"],
   ["지방소득세", "법인 4/30 · 개인 5/31"],
 ];
+
+// ─── 인사 관리: 계산 로직 (순수 함수 — 화면과 떼어 node 로 검증한다) ───
+// 사업체는 세무 탭(TAX_BIZ)과 같은 표기를 쓴다. 회사 이름 앞 "주식회사"는 화면에서만 뗀다.
+const HR_BIZ = ["주식회사 엔제이세이프티", "나정엔터프라이즈", "엔제이"];
+const hrBizShort = (b) => String(b || "").replace(/^주식회사\s*/, "");
+// 2026년 근로자 부담분. 건강·장기요양·고용은 매년 1월, 국민연금 기준소득월액 상·하한은 매년 7월에 바뀐다.
+// 상·하한은 2025년 7월 고시값 — 월 과세급여 637만 원을 넘는 사람만 영향을 받는다.
+const HR_RATES = { np: 0.0475, npMin: 400000, npMax: 6370000, hi: 0.03595, ltOfHi: 0.1314, ei: 0.009, mealFree: 200000, localOfIt: 0.1 };
+// 회사 규정: 월차는 매달 1개(입사한 달부터, 1월~12월 한 해 단위), 여름휴가는 해마다 5일.
+const HR_POLICY = { monthlyPerMonth: 1, summerDays: 5 };
+const HR_LEAVE_KINDS = [
+  { k: "월차", pool: "monthly", unit: 1 },
+  { k: "반차(오전)", pool: "monthly", unit: 0.5 },
+  { k: "반차(오후)", pool: "monthly", unit: 0.5 },
+  { k: "여름휴가", pool: "summer", unit: 1 },
+  { k: "병가", pool: null, unit: 1 },
+  { k: "경조사", pool: null, unit: 1 },
+  { k: "기타", pool: null, unit: 1 },
+];
+const hrKindOf = (k) => HR_LEAVE_KINDS.find(x => x.k === k) || HR_LEAVE_KINDS[HR_LEAVE_KINDS.length - 1];
+// 공휴일 — 휴가 일수, 급여일·원천세 마감일을 영업일로 옮길 때 쓴다. 해마다 다음 해 것을 덧붙일 것.
+// 근로자의 날(5/1)은 법정 공휴일은 아니지만 유급휴일이라 휴가 일수에서 뺀다.
+const HR_HOLIDAYS = {
+  "2026-01-01": "신정", "2026-02-16": "설날 연휴", "2026-02-17": "설날", "2026-02-18": "설날 연휴",
+  "2026-03-01": "삼일절", "2026-03-02": "대체공휴일", "2026-05-01": "근로자의 날", "2026-05-05": "어린이날",
+  "2026-05-24": "부처님오신날", "2026-05-25": "대체공휴일", "2026-06-03": "지방선거", "2026-06-06": "현충일",
+  "2026-08-15": "광복절", "2026-08-17": "대체공휴일", "2026-09-24": "추석 연휴", "2026-09-25": "추석",
+  "2026-09-26": "추석 연휴", "2026-10-03": "개천절", "2026-10-05": "대체공휴일", "2026-10-09": "한글날",
+  "2026-12-25": "성탄절",
+  "2027-01-01": "신정", "2027-02-05": "설날 연휴", "2027-02-06": "설날", "2027-02-07": "설날 연휴",
+  "2027-02-08": "대체공휴일", "2027-03-01": "삼일절", "2027-05-01": "근로자의 날", "2027-05-05": "어린이날",
+  "2027-05-13": "부처님오신날", "2027-06-06": "현충일", "2027-08-15": "광복절", "2027-08-16": "대체공휴일",
+  "2027-09-14": "추석 연휴", "2027-09-15": "추석", "2027-09-16": "추석 연휴", "2027-10-03": "개천절",
+  "2027-10-04": "대체공휴일", "2027-10-09": "한글날", "2027-10-11": "대체공휴일", "2027-12-25": "성탄절",
+  "2027-12-27": "대체공휴일",
+};
+const hrYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const hrDate = (ymd) => { const [y, m, d] = String(ymd).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); };
+const hrAddDays = (ymd, n) => { const d = hrDate(ymd); d.setDate(d.getDate() + n); return hrYmd(d); };
+const hrIsOff = (ymd) => { const w = hrDate(ymd).getDay(); return w === 0 || w === 6 || !!HR_HOLIDAYS[ymd]; };
+// 쉬는 날이면 dir 방향(+1 다음, -1 이전)으로 첫 영업일까지 옮긴다
+const hrToBizDay = (ymd, dir) => { let d = ymd; for (let i = 0; i < 15 && hrIsOff(d); i++) d = hrAddDays(d, dir); return d; };
+// start~end(포함) 사이 영업일 수
+function hrBizDays(start, end) {
+  if (!start) return 0;
+  const e = end && end >= start ? end : start;
+  let n = 0;
+  for (let d = start, i = 0; d <= e && i < 400; d = hrAddDays(d, 1), i++) if (!hrIsOff(d)) n++;
+  return n;
+}
+const hrMonthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return hrYmd(new Date(y, m, 0)); };
+const hrShiftMonth = (ym, n) => { const [y, m] = ym.split("-").map(Number); const d = new Date(y, m - 1 + n, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+// 그 달 급여일: 정한 날(말일보다 크면 말일)이 쉬는 날이면 앞당긴다
+function hrPayDate(ym, payDay) {
+  const last = Number(hrMonthEnd(ym).slice(8));
+  const d = Math.min(Math.max(1, Number(payDay) || 25), last);
+  return hrToBizDay(`${ym}-${String(d).padStart(2, "0")}`, -1);
+}
+// 원천세·4대보험 납부: 매달 10일, 쉬는 날이면 다음 영업일
+const hrTaxDue = (ym) => hrToBizDay(`${ym}-10`, +1);
+// 그 달에 재직한 사람인가 (입사일 ≤ 말일, 퇴사일 없음 또는 ≥ 1일)
+const hrEmployedIn = (emp, ym) => !!emp && !!emp.joined && emp.joined <= hrMonthEnd(ym) && (!emp.leftAt || emp.leftAt >= `${ym}-01`);
+
+// 10원 미만 절사. 100000 × 0.1314 가 13139.999… 로 계산돼 13,130원이 되는 소수 오차를 먼저 걷어낸다.
+const hrFloor10 = (x) => Math.floor(Math.round((Number(x) || 0) * 1000) / 1000 / 10) * 10;
+const hrNum = (v) => { const n = Number(String(v ?? "").replace(/,/g, "")); return Number.isFinite(n) ? Math.round(n) : 0; };
+const hrHas = (v) => v !== undefined && v !== null && v !== "";
+// 한 사람의 한 달 급여. src 의 공제 항목(np·hi·lt·ei·lo)이 비어 있으면 자동 계산, 값이 있으면 그대로 쓴다.
+// 소득세(it)는 간이세액표 금액을 사람마다 넣는다 — 표를 흉내 낸 추정치로 월급을 틀리게 주지 않기 위해서다.
+function hrCalcRow(src) {
+  const s = src || {};
+  const base = hrNum(s.base), allow = hrNum(s.allow), meal = hrNum(s.meal);
+  const mealFree = Math.min(Math.max(meal, 0), HR_RATES.mealFree);
+  const taxable = Math.max(0, base + allow + meal - mealFree);
+  const npBase = Math.min(Math.max(taxable, HR_RATES.npMin), HR_RATES.npMax);
+  const np = hrHas(s.np) ? hrNum(s.np) : (taxable > 0 ? hrFloor10(npBase * HR_RATES.np) : 0);
+  const hi = hrHas(s.hi) ? hrNum(s.hi) : hrFloor10(taxable * HR_RATES.hi);
+  const lt = hrHas(s.lt) ? hrNum(s.lt) : hrFloor10(hi * HR_RATES.ltOfHi);
+  const ei = hrHas(s.ei) ? hrNum(s.ei) : hrFloor10(taxable * HR_RATES.ei);
+  const it = hrNum(s.it);
+  const lo = hrHas(s.lo) ? hrNum(s.lo) : hrFloor10(it * HR_RATES.localOfIt);
+  const gross = base + allow + meal;
+  const ded = np + hi + lt + ei + it + lo;
+  return { base, allow, meal, taxable, gross, np, hi, lt, ei, it, lo, ded, net: gross - ded,
+    manual: { np: hrHas(s.np), hi: hrHas(s.hi), lt: hrHas(s.lt), ei: hrHas(s.ei), lo: hrHas(s.lo) } };
+}
+// 급여대장의 한 줄 입력값: 직원 기본값 위에 그 달에 고친 값(over)을 얹는다
+function hrRowSource(emp, over) {
+  const o = over || {};
+  return {
+    base: hrHas(o.base) ? o.base : (emp.base || 0),
+    allow: hrHas(o.allow) ? o.allow : (emp.allow || 0),
+    meal: hrHas(o.meal) ? o.meal : (hrHas(emp.meal) ? emp.meal : HR_RATES.mealFree),
+    it: hrHas(o.it) ? o.it : (emp.incomeTax || 0),
+    np: o.np, hi: o.hi, lt: o.lt, ei: o.ei, lo: o.lo,
+  };
+}
+
+// 한 해 휴가 잔여. 승인된 것만 '사용', 대기는 따로 센다. 해는 시작일 기준.
+function hrLeaveBalance(emp, leaves, year, todayYmd) {
+  const y = Number(year), ty = Number(String(todayYmd).slice(0, 4)), tm = Number(String(todayYmd).slice(5, 7));
+  const j = String(emp && emp.joined || "");
+  const jy = Number(j.slice(0, 4)) || 0, jm = Number(j.slice(5, 7)) || 1;
+  const lv = String(emp && emp.leftAt || "");
+  const ly = Number(lv.slice(0, 4)) || 0, lm = Number(lv.slice(5, 7)) || 12;
+  // 올해 월차가 생기는 달: 입사한 달(또는 1월)부터 퇴사한 달(또는 12월)까지
+  const firstM = !jy || jy > y ? 13 : (jy === y ? jm : 1);
+  const lastM = ly && ly < y ? 0 : (ly === y ? lm : 12);
+  const yearMax = Math.max(0, lastM - firstM + 1) * HR_POLICY.monthlyPerMonth;
+  // 지금까지 생긴 것: 지난해는 전부, 올해는 이번 달까지, 내년은 아직 0
+  const upto = y < ty ? 12 : (y === ty ? tm : 0);
+  const accrued = Math.max(0, Math.min(lastM, upto) - firstM + 1) * HR_POLICY.monthlyPerMonth;
+  const summerTotal = jy && jy <= y && (!ly || ly >= y) ? HR_POLICY.summerDays : 0;
+  let monthlyUsed = 0, summerUsed = 0, pending = 0, otherUsed = 0;
+  for (const l of leaves || []) {
+    if (!l || l.empId !== (emp && emp.id) || !String(l.start || "").startsWith(String(y))) continue;
+    const days = Number(l.days) || 0;
+    if (l.status === "대기") { pending += days; continue; }
+    if (l.status === "반려") continue;
+    const pool = hrKindOf(l.kind).pool;
+    if (pool === "monthly") monthlyUsed += days;
+    else if (pool === "summer") summerUsed += days;
+    else otherUsed += days;
+  }
+  return { yearMax, accrued, monthlyUsed, monthlyLeft: accrued - monthlyUsed,
+    summerTotal, summerUsed, summerLeft: summerTotal - summerUsed, pending, otherUsed };
+}
+
+// 그 달에 챙길 일 — 마감·급여일·수습 종료·생일·입사 기념일. 날짜순.
+function hrMonthAgenda(employees, ym, payDay) {
+  const out = [];
+  const due = hrTaxDue(ym);
+  out.push({ date: due, kind: "tax", title: "원천세 신고·납부", sub: due.slice(8) !== "10" ? "10일이 쉬는 날이라 미뤄진 마감" : "지난달 급여분" });
+  out.push({ date: due, kind: "tax", title: "4대보험 납부", sub: "공단 고지액" });
+  const active = (employees || []).filter(e => hrEmployedIn(e, ym));
+  if (active.length) {
+    const pd = hrPayDate(ym, payDay);
+    const want = `${ym}-${String(Math.min(Number(payDay) || 25, Number(hrMonthEnd(ym).slice(8)))).padStart(2, "0")}`;
+    out.push({ date: pd, kind: "pay", title: `${Number(ym.slice(5))}월 급여 지급`, sub: pd !== want ? `${Number(want.slice(8))}일이 쉬는 날이라 앞당김 · ${active.length}명` : `${active.length}명` });
+  }
+  for (const e of active) {
+    if (e.probationEnd && e.probationEnd.startsWith(ym)) out.push({ date: e.probationEnd, kind: "probation", title: `${e.name} 수습 종료`, sub: "정식 급여·조건으로 바꿀지 확인" });
+    const bd = String(e.birthday || "");
+    if (/^\d{2}-\d{2}$/.test(bd) && bd.slice(0, 2) === ym.slice(5)) out.push({ date: `${ym}-${bd.slice(3)}`, kind: "birthday", title: `${e.name} 생일`, sub: "" });
+    const j = String(e.joined || "");
+    const yrs = Number(ym.slice(0, 4)) - Number(j.slice(0, 4));
+    if (j.slice(5, 7) === ym.slice(5) && yrs >= 1) out.push({ date: `${ym}-${j.slice(8, 10)}`, kind: "anniv", title: `${e.name} 입사 ${yrs}주년`, sub: "" });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+// 근속 표기 — "3년 4개월"
+function hrTenure(joined, todayYmd) {
+  if (!joined) return "";
+  const [jy, jm, jd] = joined.split("-").map(Number), [ty, tm, td] = String(todayYmd).split("-").map(Number);
+  let months = (ty - jy) * 12 + (tm - jm) - (td < jd ? 1 : 0);
+  if (months < 0) return "입사 전";
+  const y = Math.floor(months / 12), m = months % 12;
+  return y ? (m ? `${y}년 ${m}개월` : `${y}년`) : (m ? `${m}개월` : "1개월 미만");
+}
+
+
+// ─── 인사 관리 탭 ───
+// 데이터: employees(직원 배열) · payrolls({"2026-10": {status, rows, snap, closedAt}}) · leaves(휴가 배열) · hrSettings({payDay})
+// 급여는 달마다 "직원 기본값 + 그 달에 고친 값"으로 계산하고, 마감하면 그 순간의 숫자를 snap 으로 굳힌다
+// (나중에 기본급을 바꿔도 지난달 급여대장이 바뀌지 않게).
+const HR_EMP_COLORS = ["#DB6B2E", "#3182F6", "#03B26C", "#8B5CF6", "#F04452", "#0EA5E9", "#C47700", "#64748B"];
+const HR_BIZ_TONE = {
+  "주식회사 엔제이세이프티": ["rgba(219,107,46,0.14)", "var(--accent-strong)"],
+  "나정엔터프라이즈": ["rgba(49,130,246,0.14)", "#1B64DA"],
+  "엔제이": ["rgba(3,178,108,0.14)", "var(--positive-text)"],
+};
+const hrWon = (n) => Number(n || 0).toLocaleString("ko-KR");
+const hrMan = (n) => { const v = Math.round(Number(n || 0) / 10000); return v.toLocaleString("ko-KR"); };
+const hrMd = (ymd) => ymd ? `${Number(ymd.slice(5, 7))}월 ${Number(ymd.slice(8, 10))}일` : "";
+const hrDow = (ymd) => "일월화수목금토"[hrDate(ymd).getDay()];
+const hrNewId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
+
+// 그 달 급여대장 줄들. 마감된 달은 굳혀 둔 숫자, 아니면 지금 직원 정보로 계산.
+function hrMonthRows(emps, rec, ym) {
+  if (rec && rec.status === "closed" && Array.isArray(rec.snap)) {
+    return rec.snap.map(s => ({ empId: s.empId, name: s.name, role: s.role, biz: s.biz, calc: hrCalcRow(s), locked: true }));
+  }
+  return (emps || []).filter(e => hrEmployedIn(e, ym))
+    .sort((a, b) => HR_BIZ.indexOf(a.biz) - HR_BIZ.indexOf(b.biz) || String(a.joined).localeCompare(String(b.joined)))
+    .map(e => ({ empId: e.id, name: e.name, role: e.role, biz: e.biz, emp: e,
+      calc: hrCalcRow(hrRowSource(e, rec && rec.rows && rec.rows[e.id])), locked: false }));
+}
+const hrSumRows = (rows) => rows.reduce((t, r) => {
+  for (const k of ["base", "allow", "meal", "gross", "np", "hi", "lt", "ei", "it", "lo", "ded", "net"]) t[k] = (t[k] || 0) + r.calc[k];
+  return t;
+}, {});
+
+function HrBizBadge({ biz }) {
+  const t = HR_BIZ_TONE[biz] || ["var(--surface2)", "var(--text2)"];
+  return <span style={{ fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 100, background: t[0], color: t[1], whiteSpace: "nowrap" }}>{hrBizShort(biz) || "소속 없음"}</span>;
+}
+
+// 금액 칸 — 평소엔 쉼표 숫자, 누르면 바로 고친다. Enter 저장, Esc 취소.
+function HrNumCell({ value, manual, onCommit, disabled, bold, title }) {
+  const [draft, setDraft] = useState(null);
+  const cancel = useRef(false);
+  const shown = draft !== null ? draft : hrWon(value);
+  if (disabled) return <span style={{ fontWeight: bold ? 800 : 400 }}>{hrWon(value)}</span>;
+  return (
+    <input type="text" inputMode="numeric" value={shown} title={title || (manual ? "직접 고친 값 — 지우면 자동 계산으로 돌아갑니다" : "눌러서 고치기")}
+      aria-label={title || "금액"}
+      onFocus={e => { cancel.current = false; setDraft(String(value || 0)); const el = e.target; setTimeout(() => { try { el.select(); } catch {} }, 0); }}
+      onChange={e => setDraft(e.target.value.replace(/[^\d]/g, ""))}
+      onBlur={() => { if (!cancel.current && draft !== null && draft !== String(value || 0)) onCommit(draft); setDraft(null); }}
+      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") { cancel.current = true; e.currentTarget.blur(); } }}
+      style={{ width: 96, height: 32, padding: "0 8px", textAlign: "right", fontSize: 13, fontWeight: bold ? 800 : 500, fontVariantNumeric: "tabular-nums",
+        background: draft !== null ? "var(--surface)" : "transparent", borderRadius: 7,
+        boxShadow: draft !== null ? "0 0 0 2px var(--accent)" : (manual ? "inset 0 -2px 0 var(--accent)" : "none"),
+        color: manual ? "var(--accent-strong)" : "var(--text1)" }}/>
+  );
+}
+
+function HrModal({ title, onClose, children, footer }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9990, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div role="dialog" aria-modal="true" aria-label={title} onClick={e => e.stopPropagation()}
+        onKeyDown={e => { if (e.key === "Escape") onClose(); }}
+        style={{ background: "var(--surface)", borderRadius: 18, width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
+        <div style={{ padding: "20px 24px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)" }}>{title}</div>
+          <button type="button" onClick={onClose} aria-label="닫기" style={{ width: 36, height: 36, border: "none", borderRadius: 10, background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={16}/></button>
+        </div>
+        <div style={{ padding: "4px 24px 16px", overflowY: "auto" }}>{children}</div>
+        <div style={{ padding: "12px 24px 20px", borderTop: "1px solid var(--divider)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>{footer}</div>
+      </div>
+    </div>
+  );
+}
+const hrLabel = { fontSize: 12.5, fontWeight: 700, color: "var(--text2)", display: "block", marginBottom: 6 };
+const hrBtn = (primary) => ({ height: 40, padding: "0 16px", borderRadius: 10, border: primary ? "none" : "1px solid var(--border)", background: primary ? "var(--accent)" : "var(--surface)", color: primary ? "#fff" : "var(--text2)", fontFamily: "inherit", fontSize: 13.5, fontWeight: 800, cursor: "pointer", whiteSpace: "nowrap" });
+
+function HrEmployeeModal({ draft, setDraft, onSave, onClose, onDelete }) {
+  const set = (k) => (e) => setDraft(d => ({ ...d, [k]: e.target.value }));
+  const money = (k) => (e) => setDraft(d => ({ ...d, [k]: e.target.value.replace(/[^\d]/g, "") }));
+  const field = (label, el, hint) => (
+    <label style={{ display: "block" }}><span style={hrLabel}>{label}</span>{el}{hint && <span style={{ display: "block", fontSize: 11.5, color: "var(--text3)", marginTop: 5, lineHeight: 1.5 }}>{hint}</span>}</label>
+  );
+  const preview = hrCalcRow(hrRowSource(draft, null));
+  return (
+    <HrModal title={draft.id ? `${draft.name || "직원"} 정보` : "직원 추가"} onClose={onClose}
+      footer={<>
+        {draft.id && <button type="button" onClick={onDelete} style={{ ...hrBtn(false), color: "var(--negative-text)" }}>삭제</button>}
+        <span style={{ flex: 1 }}/>
+        <button type="button" onClick={onClose} style={hrBtn(false)}>취소</button>
+        <button type="button" onClick={onSave} style={hrBtn(true)}>저장</button>
+      </>}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+        {field("이름 *", <input type="text" value={draft.name} onChange={set("name")} autoFocus placeholder="홍길동"/>)}
+        {field("직급", <input type="text" value={draft.role} onChange={set("role")} placeholder="대리"/>)}
+        {field("소속", <select value={draft.biz} onChange={set("biz")}>{HR_BIZ.map(b => <option key={b} value={b}>{hrBizShort(b)}</option>)}</select>)}
+        {field("입사일 *", <input type="date" value={draft.joined} onChange={set("joined")}/>)}
+        {field("수습 종료일", <input type="date" value={draft.probationEnd || ""} onChange={set("probationEnd")}/>, "수습이 없으면 비워 두세요")}
+        {field("생일 (월-일)", <input type="text" value={draft.birthday || ""} onChange={e => setDraft(d => ({ ...d, birthday: e.target.value.replace(/[^\d-]/g, "").slice(0, 5) }))} placeholder="03-15"/>, "연도는 넣지 않습니다")}
+        {field("연락처", <input type="tel" value={draft.phone || ""} onChange={set("phone")} placeholder="010-0000-0000"/>)}
+        {field("퇴사일", <input type="date" value={draft.leftAt || ""} onChange={set("leftAt")}/>, "넣으면 그다음 달부터 급여대장에서 빠집니다")}
+      </div>
+      <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--divider)" }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", marginBottom: 12 }}>매달 급여 기본값</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 14 }}>
+          {field("기본급", <input type="text" inputMode="numeric" value={hrWon(draft.base)} onChange={money("base")}/>)}
+          {field("수당 (과세)", <input type="text" inputMode="numeric" value={hrWon(draft.allow)} onChange={money("allow")}/>)}
+          {field("식대", <input type="text" inputMode="numeric" value={hrWon(draft.meal)} onChange={money("meal")}/>, "월 20만 원까지 비과세")}
+          {field("소득세 (월)", <input type="text" inputMode="numeric" value={hrWon(draft.incomeTax)} onChange={money("incomeTax")}/>, "홈택스 간이세액표 금액")}
+        </div>
+        <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "var(--surface2)", fontSize: 13, color: "var(--text2)", lineHeight: 1.7, fontVariantNumeric: "tabular-nums" }}>
+          지급 <b style={{ color: "var(--text1)" }}>{hrWon(preview.gross)}</b> − 공제 {hrWon(preview.ded)}
+          <span style={{ fontSize: 12 }}> (국민연금 {hrWon(preview.np)} · 건강 {hrWon(preview.hi)} · 요양 {hrWon(preview.lt)} · 고용 {hrWon(preview.ei)} · 소득세 {hrWon(preview.it)} · 지방 {hrWon(preview.lo)})</span>
+          {" "}= 실수령 <b style={{ color: "var(--accent-strong)" }}>{hrWon(preview.net)}원</b>
+        </div>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        {field("메모", <textarea value={draft.memo || ""} onChange={set("memo")} rows={2} style={{ width: "100%", boxSizing: "border-box", borderRadius: 10, border: "none", background: "var(--input-bg)", color: "var(--input-color)", padding: "10px 14px", fontFamily: "inherit", fontSize: 14, resize: "vertical" }}/>)}
+      </div>
+      <div style={{ marginTop: 12, fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>주민등록번호는 넣지 않습니다. 4대보험 신고는 공단 사이트에서 하므로 앱에는 필요 없습니다.</div>
+    </HrModal>
+  );
+}
+
+function HrLeaveModal({ draft, setDraft, emps, lvs, today, onSave, onClose, onDelete }) {
+  const kind = hrKindOf(draft.kind);
+  const half = kind.unit === 0.5;
+  const autoDays = half ? 0.5 : hrBizDays(draft.start, draft.end || draft.start);
+  const days = draft.daysManual ? Number(draft.days) || 0 : autoDays;
+  const emp = emps.find(e => e.id === Number(draft.empId)) || null;
+  const year = String(draft.start || today).slice(0, 4);
+  const others = lvs.filter(l => l.id !== draft.id);
+  const bal = emp ? hrLeaveBalance(emp, others, year, today) : null;
+  const after = bal && kind.pool && draft.status !== "반려"
+    ? (kind.pool === "monthly" ? { label: "월차", now: bal.monthlyLeft, next: bal.monthlyLeft - (draft.status === "승인" ? days : 0) }
+                               : { label: "여름휴가", now: bal.summerLeft, next: bal.summerLeft - (draft.status === "승인" ? days : 0) })
+    : null;
+  const setStart = (v) => setDraft(d => ({ ...d, start: v, end: !d.end || d.end < v || hrKindOf(d.kind).unit === 0.5 ? v : d.end }));
+  return (
+    <HrModal title={draft.id ? "휴가 고치기" : "휴가 등록"} onClose={onClose}
+      footer={<>
+        {draft.id && <button type="button" onClick={onDelete} style={{ ...hrBtn(false), color: "var(--negative-text)" }}>삭제</button>}
+        <span style={{ flex: 1 }}/>
+        <button type="button" onClick={onClose} style={hrBtn(false)}>취소</button>
+        <button type="button" onClick={() => onSave({ ...draft, empId: Number(draft.empId), end: half ? draft.start : (draft.end || draft.start), days })} style={hrBtn(true)}>저장</button>
+      </>}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <label style={{ display: "block" }}><span style={hrLabel}>직원</span>
+          <select value={draft.empId || ""} onChange={e => setDraft(d => ({ ...d, empId: e.target.value }))}>
+            {emps.map(e => <option key={e.id} value={e.id}>{e.name}{e.role ? ` ${e.role}` : ""}</option>)}
+          </select>
+        </label>
+        <div>
+          <span style={hrLabel}>종류</span>
+          <div role="radiogroup" aria-label="휴가 종류" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {HR_LEAVE_KINDS.map(k => {
+              const on = draft.kind === k.k;
+              return <button key={k.k} type="button" role="radio" aria-checked={on}
+                onClick={() => setDraft(d => ({ ...d, kind: k.k, end: k.unit === 0.5 ? d.start : d.end, daysManual: false }))}
+                style={{ height: 36, padding: "0 13px", borderRadius: 100, border: on ? "none" : "1px solid var(--border)", background: on ? "var(--text1)" : "var(--surface)", color: on ? "var(--surface)" : "var(--text2)", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{k.k}</button>;
+            })}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>
+            {kind.pool === "monthly" ? "월차에서 빠집니다" : kind.pool === "summer" ? "여름휴가 5일에서 빠집니다" : "월차·여름휴가에서 빠지지 않고 기록만 남습니다"}
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: half ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+          <label style={{ display: "block" }}><span style={hrLabel}>{half ? "날짜" : "시작일"}</span><input type="date" value={draft.start} onChange={e => setStart(e.target.value)}/></label>
+          {!half && <label style={{ display: "block" }}><span style={hrLabel}>종료일</span><input type="date" value={draft.end || draft.start} min={draft.start} onChange={e => setDraft(d => ({ ...d, end: e.target.value }))}/></label>}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 14px", borderRadius: 12, background: "var(--surface2)" }}>
+          <span style={{ fontSize: 13, color: "var(--text2)" }}>일수</span>
+          <input type="text" inputMode="decimal" value={draft.daysManual ? draft.days : String(autoDays)} aria-label="휴가 일수"
+            onChange={e => setDraft(d => ({ ...d, days: e.target.value.replace(/[^\d.]/g, ""), daysManual: true }))}
+            style={{ width: 70, height: 34, textAlign: "right", fontWeight: 800, background: "var(--surface)" }}/>
+          <span style={{ fontSize: 13, color: "var(--text2)" }}>일</span>
+          <span style={{ fontSize: 11.5, color: "var(--text3)", flex: 1, minWidth: 160 }}>
+            {draft.daysManual ? <button type="button" onClick={() => setDraft(d => ({ ...d, daysManual: false }))} style={{ border: "none", background: "none", padding: 0, color: "var(--accent-strong)", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>자동 계산({autoDays}일)으로 되돌리기</button>
+              : half ? "반나절" : "주말·공휴일은 빼고 셉니다"}
+          </span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+          <label style={{ display: "block" }}><span style={hrLabel}>상태</span>
+            <select value={draft.status} onChange={e => setDraft(d => ({ ...d, status: e.target.value }))}>
+              <option value="승인">승인</option><option value="대기">승인 대기</option><option value="반려">반려</option>
+            </select>
+          </label>
+          <label style={{ display: "block" }}><span style={hrLabel}>메모</span><input type="text" value={draft.memo || ""} onChange={e => setDraft(d => ({ ...d, memo: e.target.value }))} placeholder="사유 등"/></label>
+        </div>
+        {after && (
+          <div style={{ fontSize: 13, color: after.next < 0 ? "var(--negative-text)" : "var(--text2)", fontWeight: 600 }}>
+            {draft.status === "승인" ? `저장하면 ${emp.name}의 ${after.label} 남은 날: ${after.now}일 → ${after.next}일` : `승인 전까지는 ${after.label}에서 빠지지 않습니다 (지금 ${after.now}일 남음)`}
+            {after.next < 0 && " — 남은 날보다 많습니다"}
+          </div>
+        )}
+      </div>
+    </HrModal>
+  );
+}
+
+function HrOverview({ emps, lvs, pays, payDay, today, onEditEmp, onNewEmp, onLeaveStatus, setSub }) {
+  const [bizFilter, setBizFilter] = useState("");
+  const [showLeft, setShowLeft] = useState(false);
+  const ym = today.slice(0, 7), year = today.slice(0, 4);
+  const current = emps.filter(e => !e.leftAt || e.leftAt >= today);
+  const departed = emps.filter(e => e.leftAt && e.leftAt < today);
+  const onProbation = current.filter(e => e.probationEnd && e.probationEnd >= today).length;
+  const rows = hrMonthRows(emps, pays[ym], ym);
+  const tot = hrSumRows(rows);
+  const bals = current.map(e => ({ e, b: hrLeaveBalance(e, lvs, year, today) }));
+  const monthlyLeft = bals.reduce((s, x) => s + x.b.monthlyLeft, 0);
+  const summerLeft = bals.reduce((s, x) => s + x.b.summerLeft, 0);
+  const pending = lvs.filter(l => l.status === "대기").sort((a, b) => String(a.start).localeCompare(String(b.start)));
+  let nextPay = hrPayDate(ym, payDay);
+  if (nextPay < today) nextPay = hrPayDate(hrShiftMonth(ym, 1), payDay);
+  const dday = Math.round((hrDate(nextPay) - hrDate(today)) / 86400000);
+  const agenda = hrMonthAgenda(emps, ym, payDay);
+  const pool = (showLeft ? departed : current).filter(e => !bizFilter || e.biz === bizFilter);
+  const empName = (id) => (emps.find(e => e.id === id) || {}).name || "(삭제된 직원)";
+
+  const kpi = (label, value, unit, sub, tone) => (
+    <div className="card" style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 6, background: tone ? "var(--accent-tonal)" : undefined, borderColor: tone ? "transparent" : undefined }}>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: tone ? "var(--accent-strong)" : "var(--text3)" }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.5px", color: tone ? "var(--accent-strong)" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{value}<span style={{ fontSize: 15, fontWeight: 700, marginLeft: 3 }}>{unit}</span></div>
+      <div style={{ fontSize: 12.5, color: tone ? "var(--accent-strong)" : "var(--text2)" }}>{sub}</div>
+    </div>
+  );
+
+  if (!emps.length) {
+    return (
+      <div className="card" style={{ padding: "48px 24px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 56, height: 56, borderRadius: 18, background: "var(--accent-tonal)", color: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="user" size={26}/></div>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>아직 등록된 직원이 없습니다</div>
+        <div style={{ fontSize: 13.5, color: "var(--text2)", lineHeight: 1.7, maxWidth: 420 }}>직원을 추가하면 이번 달 급여대장과 월차·여름휴가 잔여가 자동으로 만들어집니다.</div>
+        <button type="button" onClick={onNewEmp} style={{ ...hrBtn(true), height: 44, marginTop: 6 }}>+ 첫 직원 추가</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        {kpi("재직 인원", current.length, "명", onProbation ? `수습 ${onProbation}명 포함` : "수습 없음")}
+        {kpi(`${Number(ym.slice(5))}월 지급 총액`, hrMan(tot.gross || 0), "만 원", `실수령 합계 ${hrMan(tot.net || 0)}만 원`)}
+        {kpi("남은 월차", monthlyLeft, "일", `여름휴가 ${summerLeft}일 남음${pending.length ? ` · 승인 대기 ${pending.length}건` : ""}`)}
+        {kpi("다음 급여일", hrMd(nextPay), "", `${dday === 0 ? "오늘" : `D-${dday}`} · ${hrDow(nextPay)}요일`, true)}
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
+        <section className="card" style={{ flex: "999 1 560px", minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <span className="section-header-title">{showLeft ? "퇴사한 직원" : "직원"} <span className="section-sub">— {pool.length}명</span></span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {["", ...HR_BIZ].map(b => {
+                const n = (showLeft ? departed : current).filter(e => !b || e.biz === b).length;
+                if (b && !n) return null;
+                const on = bizFilter === b;
+                return <button key={b || "all"} type="button" aria-pressed={on} onClick={() => setBizFilter(b)}
+                  style={{ height: 32, padding: "0 12px", borderRadius: 100, border: on ? "1px solid var(--text1)" : "1px solid var(--border)", background: on ? "var(--text1)" : "var(--surface)", color: on ? "var(--surface)" : "var(--text2)", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>{b ? hrBizShort(b) : "전체"} {n}</button>;
+              })}
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+            {pool.map(e => {
+              const b = hrLeaveBalance(e, lvs, year, today);
+              const usedPct = b.accrued > 0 ? Math.min(100, Math.max(0, b.monthlyUsed / b.accrued * 100)) : 0;
+              const prob = e.probationEnd && e.probationEnd >= today;
+              return (
+                <button key={e.id} type="button" onClick={() => onEditEmp(e)}
+                  style={{ textAlign: "left", fontFamily: "inherit", color: "inherit", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16, display: "flex", flexDirection: "column", gap: 12, cursor: "pointer", opacity: showLeft ? 0.75 : 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div aria-hidden="true" style={{ width: 42, height: 42, borderRadius: "50%", background: "var(--surface2)", color: "var(--text2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, flexShrink: 0 }}>{String(e.name || "?").slice(0, 1)}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{e.name} <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text2)" }}>{e.role}</span></div>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}><HrBizBadge biz={e.biz}/>{prob && <span style={{ fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 100, background: "rgba(254,152,0,0.15)", color: "var(--warning-text)" }}>수습 ~{hrMd(e.probationEnd)}</span>}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "var(--text2)" }}>{e.leftAt ? `퇴사 ${e.leftAt.replace(/-/g, ".")}` : `입사 ${String(e.joined || "").replace(/-/g, ".")} · ${hrTenure(e.joined, today)}`}</div>
+                  {!showLeft && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                        <span style={{ color: "var(--text2)" }}>월차</span>
+                        <span style={{ fontWeight: 700, color: b.monthlyLeft < 0 ? "var(--negative-text)" : "var(--text1)" }}>{b.monthlyLeft}일 남음 <span style={{ color: "var(--text3)", fontWeight: 500 }}>/ 발생 {b.accrued} · 여름 {b.summerLeft}</span></span>
+                      </div>
+                      <div aria-hidden="true" style={{ height: 6, borderRadius: 6, background: "var(--surface2)", overflow: "hidden" }}><div style={{ height: 6, borderRadius: 6, background: "var(--accent)", width: `${usedPct}%` }}/></div>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+            {!showLeft && <button type="button" onClick={onNewEmp} style={{ fontFamily: "inherit", border: "1.5px dashed var(--border)", borderRadius: 14, background: "transparent", color: "var(--text2)", fontSize: 14, fontWeight: 700, minHeight: 140, cursor: "pointer" }}>+ 직원 추가</button>}
+          </div>
+          {(departed.length > 0 || showLeft) && (
+            <button type="button" onClick={() => { setShowLeft(v => !v); setBizFilter(""); }} style={{ marginTop: 12, border: "none", background: "none", padding: "6px 0", color: "var(--text2)", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+              {showLeft ? "← 재직 중인 직원 보기" : `퇴사한 직원 ${departed.length}명 보기`}
+            </button>
+          )}
+        </section>
+
+        <aside style={{ flex: "1 1 320px", minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+          <section className="card">
+            <div className="section-header" style={{ marginBottom: 12 }}><span className="section-header-title">{Number(ym.slice(5))}월에 챙길 일</span></div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {agenda.map((a, i) => {
+                const past = a.date < today, isToday = a.date === today;
+                const hot = a.kind === "tax" && !past && Math.round((hrDate(a.date) - hrDate(today)) / 86400000) <= 3;
+                const tone = hot ? ["rgba(240,68,82,0.12)", "var(--negative-text)"] : (a.kind === "pay" || a.kind === "probation") ? ["var(--accent-tonal)", "var(--accent-strong)"] : ["var(--surface2)", "var(--text2)"];
+                return (
+                  <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start", opacity: past ? 0.45 : 1 }}>
+                    <div style={{ width: 50, flexShrink: 0, textAlign: "center", borderRadius: 10, padding: "5px 0", background: tone[0], color: tone[1] }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700 }}>{isToday ? "오늘" : `${hrDow(a.date)}요일`}</div>
+                      <div style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>{Number(a.date.slice(8))}</div>
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", textDecoration: past ? "line-through" : "none" }}>{a.title}</div>
+                      {a.sub && <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.5 }}>{a.sub}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+          {pending.length > 0 && (
+            <section className="card">
+              <div className="section-header" style={{ marginBottom: 12 }}><span className="section-header-title">휴가 승인 대기 <span className="section-sub">— {pending.length}건</span></span></div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {pending.map(l => (
+                  <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 150 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)" }}>{empName(l.empId)} · {l.kind} {l.days}일</div>
+                      <div style={{ fontSize: 12.5, color: "var(--text2)" }}>{hrMd(l.start)}({hrDow(l.start)}){l.end && l.end !== l.start ? ` – ${hrMd(l.end)}(${hrDow(l.end)})` : ""}</div>
+                    </div>
+                    <button type="button" onClick={() => onLeaveStatus(l.id, "반려")} style={{ ...hrBtn(false), height: 38 }}>반려</button>
+                    <button type="button" onClick={() => onLeaveStatus(l.id, "승인")} style={{ ...hrBtn(true), height: 38 }}>승인</button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          <button type="button" onClick={() => setSub("leave")} style={{ ...hrBtn(false), height: 44 }}>휴가 캘린더 열기 →</button>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
+  const [ym, setYm] = useState(today.slice(0, 7));
+  const [selId, setSelId] = useState(null);
+  const rec = pays[ym] || null;
+  const closed = !!(rec && rec.status === "closed");
+  const rows = hrMonthRows(emps, rec, ym);
+  const tot = hrSumRows(rows);
+  const sel = rows.find(r => r.empId === selId) || rows[0] || null;
+  const payDate = closed && rec.payDate ? rec.payDate : hrPayDate(ym, payDay);
+  const taxDue = hrTaxDue(hrShiftMonth(ym, 1));
+  const ymLabel = `${ym.slice(0, 4)}년 ${Number(ym.slice(5))}월`;
+
+  const setOver = (empId, field, raw) => setPayrolls(prev => {
+    const p = prev && typeof prev === "object" ? prev : {};
+    const r = { status: "draft", ...(p[ym] || {}) };
+    if (r.status === "closed") return p;
+    const rowsMap = { ...(r.rows || {}) };
+    const o = { ...(rowsMap[empId] || {}) };
+    if (raw === "" || raw == null) delete o[field]; else o[field] = hrNum(raw);
+    rowsMap[empId] = o;
+    return { ...p, [ym]: { ...r, rows: rowsMap } };
+  });
+  const copyPrev = () => {
+    const pym = hrShiftMonth(ym, -1), prev = pays[pym];
+    if (!prev) { showToast(`${Number(pym.slice(5))}월 급여대장이 없습니다`); return; }
+    if (rec && rec.rows && Object.keys(rec.rows).some(k => Object.keys(rec.rows[k] || {}).length) && !window.confirm("이번 달에 고친 값을 지난달 값으로 바꿉니다. 계속할까요?")) return;
+    const rowsMap = {};
+    if (prev.status === "closed" && Array.isArray(prev.snap)) {
+      for (const s of prev.snap) rowsMap[s.empId] = { base: s.base, allow: s.allow, meal: s.meal, it: s.it };
+    } else Object.assign(rowsMap, prev.rows || {});
+    setPayrolls(p => ({ ...(p || {}), [ym]: { status: "draft", ...((p || {})[ym] || {}), rows: rowsMap } }));
+    showToast("지난달 기본급·수당·식대·소득세를 가져왔습니다", "success");
+  };
+  const closeMonth = () => {
+    if (!rows.length) { showToast("이 달에 재직한 직원이 없습니다"); return; }
+    if (!window.confirm(`${ymLabel} 급여를 마감할까요?\n\n지금 숫자로 굳어져서, 나중에 직원 기본급을 바꿔도 이 달 급여대장은 바뀌지 않습니다. (마감은 다시 풀 수 있습니다)`)) return;
+    const snap = rows.map(r => ({ empId: r.empId, name: r.name, role: r.role || "", biz: r.biz || "",
+      base: r.calc.base, allow: r.calc.allow, meal: r.calc.meal, it: r.calc.it,
+      np: r.calc.np, hi: r.calc.hi, lt: r.calc.lt, ei: r.calc.ei, lo: r.calc.lo }));
+    setPayrolls(p => ({ ...(p || {}), [ym]: { ...((p || {})[ym] || {}), status: "closed", snap, payDate, closedAt: new Date().toISOString() } }));
+    showToast(`${ymLabel} 급여를 마감했습니다`, "success");
+  };
+  const reopen = () => {
+    if (!window.confirm(`${ymLabel} 마감을 풀까요? 다시 고칠 수 있게 됩니다.`)) return;
+    setPayrolls(p => {
+      const r = (p || {})[ym] || {};
+      // 굳혀 둔 숫자를 그대로 '고친 값'으로 돌려놓는다 — 풀자마자 지금 기본급으로 바뀌어 버리지 않게
+      const rowsMap = {};
+      for (const s of r.snap || []) rowsMap[s.empId] = { base: s.base, allow: s.allow, meal: s.meal, it: s.it, np: s.np, hi: s.hi, lt: s.lt, ei: s.ei, lo: s.lo };
+      const { snap, closedAt, ...rest } = r;
+      return { ...(p || {}), [ym]: { ...rest, status: "draft", rows: rowsMap } };
+    });
+  };
+  const exportXlsx = () => {
+    if (typeof XLSX === "undefined") { showToast("엑셀 모듈을 불러오지 못했습니다"); return; }
+    const head = ["이름", "직급", "소속", "기본급", "수당", "식대", "지급계", "국민연금", "건강보험", "장기요양", "고용보험", "소득세", "지방소득세", "공제계", "실수령"];
+    const line = (r) => [r.name, r.role || "", hrBizShort(r.biz), r.calc.base, r.calc.allow, r.calc.meal, r.calc.gross, r.calc.np, r.calc.hi, r.calc.lt, r.calc.ei, r.calc.it, r.calc.lo, r.calc.ded, r.calc.net];
+    const aoa = [[`${ymLabel} 급여대장 (지급일 ${payDate})`], [], head, ...rows.map(line), ["합계", "", "", tot.base, tot.allow, tot.meal, tot.gross, tot.np, tot.hi, tot.lt, tot.ei, tot.it, tot.lo, tot.ded, tot.net]];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [{ wch: 10 }, { wch: 8 }, { wch: 14 }, ...Array(12).fill({ wch: 12 })];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, `${ym.slice(0, 4)}년${ym.slice(5)}월`);
+    XLSX.writeFile(wb, `급여대장_${ym.slice(0, 4)}년${ym.slice(5)}월.xlsx`);
+  };
+  const shareSlip = async () => {
+    if (!sel) return;
+    const c = sel.calc;
+    const esc = (s) => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+    const tr = (k, v, b) => `<tr><td style="padding:7px 0;color:${b ? "#191F28" : "#4E5968"};font-weight:${b ? 800 : 400};">${esc(k)}</td><td style="padding:7px 0;text-align:right;font-weight:${b ? 800 : 500};color:#191F28;">${hrWon(v)}</td></tr>`;
+    const node = document.createElement("div");
+    node.style.cssText = "position:fixed;left:-10000px;top:0;width:420px;padding:28px;background:#fff;font-family:Pretendard,'Apple SD Gothic Neo',sans-serif;color:#191F28;font-variant-numeric:tabular-nums;";
+    node.innerHTML =
+      `<div style="font-size:20px;font-weight:800;margin-bottom:4px;">임금명세서</div>` +
+      `<div style="font-size:13px;color:#4E5968;margin-bottom:18px;">${esc(ymLabel)}분 · 지급일 ${esc(payDate.replace(/-/g, "."))}</div>` +
+      `<div style="font-size:14px;margin-bottom:16px;"><b>${esc(sel.name)}</b> ${esc(sel.role || "")} · ${esc(hrBizShort(sel.biz))}</div>` +
+      `<div style="font-size:12px;font-weight:800;color:#8B95A1;margin-bottom:2px;">지급</div><table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:14px;">` +
+      tr("기본급", c.base) + (c.allow ? tr("수당", c.allow) : "") + tr("식대 (비과세 20만 원까지)", c.meal) + tr("지급계", c.gross, true) + `</table>` +
+      `<div style="font-size:12px;font-weight:800;color:#8B95A1;margin-bottom:2px;">공제</div><table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:14px;">` +
+      tr("국민연금", c.np) + tr("건강보험", c.hi) + tr("장기요양보험", c.lt) + tr("고용보험", c.ei) + tr("소득세", c.it) + tr("지방소득세", c.lo) + tr("공제계", c.ded, true) + `</table>` +
+      `<div style="display:flex;justify-content:space-between;align-items:center;background:#FBF0E8;border-radius:12px;padding:14px 16px;"><span style="font-weight:800;color:#AB4F1F;">실수령액</span><span style="font-size:22px;font-weight:800;color:#AB4F1F;">${hrWon(c.net)}원</span></div>` +
+      `<div style="font-size:11px;color:#8B95A1;line-height:1.6;margin-top:14px;">계산 방법 — 국민연금 과세급여×4.75%, 건강보험 ×3.595%, 장기요양 건강보험료×13.14%, 고용보험 ×0.9% (각 10원 미만 절사). 소득세는 간이세액표, 지방소득세는 소득세의 10%.</div>`;
+    try {
+      document.body.appendChild(node);
+      const canvas = await html2canvas(node, { scale: 2, backgroundColor: "#ffffff" });
+      document.body.removeChild(node);
+      const blob = await new Promise(res => canvas.toBlob(res, "image/png"));
+      if (!blob) throw new Error("이미지 생성 실패");
+      const fname = `임금명세서_${sel.name}_${ym}.png`;
+      const file = new File([blob], fname, { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: "임금명세서" }); return; }
+        catch (e) { if (e.name === "AbortError") return; }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = fname; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showToast("명세서 이미지를 내려받았습니다 — 카톡에 사진으로 보내세요", "success");
+    } catch (err) {
+      try { document.body.removeChild(node); } catch {}
+      showToast("명세서 이미지를 만들지 못했습니다: " + (err && err.message || ""));
+    }
+  };
+
+  const th = (label, opt = {}) => <th scope="col" style={{ textAlign: opt.left ? "left" : "right", padding: "10px 10px", fontSize: 12, fontWeight: opt.strong ? 800 : 700, color: opt.strong ? "var(--text1)" : "var(--text2)", borderBottom: "1px solid var(--border)", background: opt.bg || "var(--surface2)", whiteSpace: "nowrap" }}>{label}</th>;
+  const td = (child, opt = {}) => <td style={{ textAlign: "right", padding: opt.input ? "4px 4px" : "10px 10px", fontSize: 13, borderBottom: "1px solid var(--divider)", background: opt.bg, fontWeight: opt.strong ? 800 : 400, fontVariantNumeric: "tabular-nums", color: opt.muted ? "var(--text2)" : "var(--text1)" }}>{child}</td>;
+  const cell = (r, field, srcField) => td(
+    <HrNumCell value={r.calc[field]} manual={!r.locked && field in r.calc.manual ? r.calc.manual[field] : (!r.locked && rec && rec.rows && rec.rows[r.empId] && hrHas(rec.rows[r.empId][srcField || field]))}
+      disabled={r.locked} onCommit={v => setOver(r.empId, srcField || field, v)}/>, { input: !r.locked });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="card" style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <button type="button" aria-label="이전 달" onClick={() => setYm(hrShiftMonth(ym, -1))} style={{ ...hrBtn(false), width: 40, padding: 0 }}><Icon name="chevronLeft" size={16}/></button>
+          <div style={{ fontSize: 17, fontWeight: 800, padding: "0 10px", color: "var(--text1)", minWidth: 120, textAlign: "center" }}>{ymLabel}</div>
+          <button type="button" aria-label="다음 달" onClick={() => setYm(hrShiftMonth(ym, 1))} style={{ ...hrBtn(false), width: 40, padding: 0 }}><Icon name="chevronRight" size={16}/></button>
+        </div>
+        <span style={{ fontSize: 12.5, fontWeight: 700, padding: "4px 10px", borderRadius: 100, background: closed ? "rgba(3,178,108,0.13)" : "rgba(254,152,0,0.15)", color: closed ? "var(--positive-text)" : "var(--warning-text)" }}>
+          {closed ? `마감됨 · ${String(rec.closedAt || "").slice(0, 10)}` : "작성 중"} · 지급일 {hrMd(payDate)}({hrDow(payDate)})
+        </span>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text2)" }}>
+          급여일 매달
+          <select value={payDay} onChange={e => setPayDay(Number(e.target.value))} style={{ width: 72, height: 34, padding: "0 8px" }}>
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d === 31 ? "말일" : d}</option>)}
+          </select>
+          일
+        </label>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {!closed && <button type="button" onClick={copyPrev} style={hrBtn(false)}>지난달 값 가져오기</button>}
+          <button type="button" onClick={exportXlsx} style={hrBtn(false)}>엑셀 받기</button>
+          {closed ? <button type="button" onClick={reopen} style={hrBtn(false)}>마감 풀기</button> : <button type="button" onClick={closeMonth} style={hrBtn(true)}>급여 마감</button>}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+        {[["지급 총액", tot.gross, null], ["공제 총액", tot.ded, "neg"], ["실수령 합계 (이체할 돈)", tot.net, null]].map(([l, v, t]) => (
+          <div key={l} className="card" style={{ padding: "16px 20px" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text3)" }}>{l}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: t ? "var(--negative-text)" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{t && v ? "−" : ""}{hrWon(v || 0)}<span style={{ fontSize: 13, marginLeft: 2 }}>원</span></div>
+          </div>
+        ))}
+        <div className="card" style={{ padding: "16px 20px", background: "var(--accent-tonal)", borderColor: "transparent" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--accent-strong)" }}>{hrMd(taxDue)}까지 낼 원천세</div>
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4, color: "var(--accent-strong)", fontVariantNumeric: "tabular-nums" }}>{hrWon((tot.it || 0) + (tot.lo || 0))}<span style={{ fontSize: 13, marginLeft: 2 }}>원</span></div>
+          <div style={{ fontSize: 12, color: "var(--accent-strong)", marginTop: 2 }}>소득세 {hrWon(tot.it || 0)} + 지방소득세 {hrWon(tot.lo || 0)}</div>
+        </div>
+      </div>
+
+      <section className="card">
+        <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+          <span className="section-header-title">급여대장 <span className="section-sub">— {rows.length}명</span></span>
+          <span style={{ fontSize: 12, color: "var(--text3)" }}>{closed ? "마감된 달은 고칠 수 없습니다" : "숫자를 누르면 이 달만 고쳐집니다 · 주황 밑줄 = 직접 고친 값 (지우면 자동)"}</span>
+        </div>
+        {rows.length === 0 ? (
+          <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13.5, color: "var(--text3)" }}>{ymLabel}에 재직한 직원이 없습니다</div>
+        ) : (
+          <table style={{ fontSize: 13 }}>
+            <thead><tr>
+              {th("이름 · 소속", { left: true })}{th("기본급")}{th("수당")}{th("식대")}{th("지급계", { strong: true })}
+              {th("국민연금")}{th("건강보험")}{th("장기요양")}{th("고용보험")}{th("소득세")}{th("지방소득세")}{th("공제계")}{th("실수령", { strong: true, bg: "var(--accent-tonal)" })}
+            </tr></thead>
+            <tbody>
+              {rows.map(r => {
+                const on = sel && sel.empId === r.empId;
+                return (
+                  <tr key={r.empId} style={{ background: on ? "rgba(219,107,46,0.05)" : undefined }}>
+                    <th scope="row" style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--divider)", fontWeight: 400 }}>
+                      <button type="button" onClick={() => setSelId(r.empId)} aria-pressed={on} title="명세서 보기"
+                        style={{ border: "none", background: "none", padding: 0, textAlign: "left", fontFamily: "inherit", cursor: "pointer", color: "inherit" }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: on ? "var(--accent-strong)" : "var(--text1)" }}>{r.name} <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text2)" }}>{r.role}</span></div>
+                        <div style={{ fontSize: 11.5, color: "var(--text3)" }}>{hrBizShort(r.biz)}</div>
+                      </button>
+                    </th>
+                    {cell(r, "base")}{cell(r, "allow")}{cell(r, "meal")}
+                    {td(hrWon(r.calc.gross), { strong: true, bg: "var(--surface2)" })}
+                    {cell(r, "np")}{cell(r, "hi")}{cell(r, "lt")}{cell(r, "ei")}{cell(r, "it")}{cell(r, "lo")}
+                    {td(hrWon(r.calc.ded), { muted: true })}
+                    {td(hrWon(r.calc.net), { strong: true, bg: "var(--accent-tonal)" })}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot><tr>
+              <th scope="row" style={{ textAlign: "left", padding: "10px", fontWeight: 800, background: "var(--surface2)" }}>합계</th>
+              {["base", "allow", "meal", "gross", "np", "hi", "lt", "ei", "it", "lo", "ded", "net"].map(k => (
+                <td key={k} style={{ textAlign: "right", padding: "10px", fontWeight: k === "gross" || k === "net" ? 800 : 700, background: k === "net" ? "var(--accent-tonal)" : "var(--surface2)", color: k === "net" ? "var(--accent-strong)" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{hrWon(tot[k] || 0)}</td>
+              ))}
+            </tr></tfoot>
+          </table>
+        )}
+      </section>
+
+      {sel && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
+          <section className="card" style={{ flex: "999 1 520px", minWidth: 0 }}>
+            <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+              <span className="section-header-title">임금명세서 — {sel.name} {sel.role}</span>
+              <button type="button" onClick={shareSlip} style={hrBtn(false)}>명세서 이미지 보내기</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, fontVariantNumeric: "tabular-nums" }}>
+              {[["지급", [["기본급", sel.calc.base], ...(sel.calc.allow ? [["수당", sel.calc.allow]] : []), ["식대 (비과세)", sel.calc.meal]], ["지급계", sel.calc.gross]],
+                ["공제", [["국민연금", sel.calc.np], ["건강보험 · 장기요양", `${hrWon(sel.calc.hi)} · ${hrWon(sel.calc.lt)}`], ["고용보험", sel.calc.ei], ["소득세 · 지방소득세", `${hrWon(sel.calc.it)} · ${hrWon(sel.calc.lo)}`]], ["공제계", sel.calc.ded]]].map(([title, items, total]) => (
+                <div key={title} style={{ background: "var(--surface2)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text2)" }}>{title}</div>
+                  {items.map(([k, v]) => <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "var(--text1)" }}><span>{k}</span><span>{typeof v === "number" ? hrWon(v) : v}</span></div>)}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 800, borderTop: "1px solid var(--border)", paddingTop: 8, color: "var(--text1)" }}><span>{total[0]}</span><span>{hrWon(total[1])}</span></div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--accent-tonal)", borderRadius: 12, padding: "14px 18px" }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: "var(--accent-strong)" }}>실수령액</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: "var(--accent-strong)", fontVariantNumeric: "tabular-nums" }}>{hrWon(sel.calc.net)}원</span>
+            </div>
+          </section>
+          <aside className="card" style={{ flex: "1 1 280px", minWidth: 0 }}>
+            <div className="section-header" style={{ marginBottom: 10 }}><span className="section-header-title">공제 기준 (근로자 몫)</span></div>
+            {[["국민연금", "4.75%"], ["건강보험", "3.595%"], ["장기요양", "건강보험료의 13.14%"], ["고용보험", "0.9%"], ["소득세", "간이세액표 (직원별 입력)"], ["지방소득세", "소득세의 10%"]].map(([k, v]) => (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13.5, padding: "7px 0", borderBottom: "1px solid var(--divider)", color: "var(--text1)" }}><span>{k}</span><b>{v}</b></div>
+            ))}
+            <div style={{ fontSize: 12, color: "var(--text3)", lineHeight: 1.6, marginTop: 10 }}>2026년 요율 · 10원 미만 절사 · 식대 월 20만 원까지 비과세. 공단 고지액과 다르면 칸을 눌러 맞추세요.</div>
+          </aside>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HrLeave({ emps, lvs, today, onNewLeave, onEditLeave, onLeaveStatus }) {
+  const [ym, setYm] = useState(today.slice(0, 7));
+  const year = ym.slice(0, 4);
+  const people = emps.filter(e => e.joined && e.joined <= `${year}-12-31` && (!e.leftAt || e.leftAt >= `${year}-01-01`));
+  const [selId, setSelId] = useState(null);
+  const sel = people.find(e => e.id === selId) || people[0] || null;
+  const colorOf = (id) => HR_EMP_COLORS[Math.max(0, emps.findIndex(e => e.id === id)) % HR_EMP_COLORS.length];
+  const nameOf = (id) => (emps.find(e => e.id === id) || {}).name || "(삭제된 직원)";
+  const live = lvs.filter(l => l.status !== "반려");
+  const first = hrDate(`${ym}-01`), lead = first.getDay(), last = Number(hrMonthEnd(ym).slice(8));
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (let d = 1; d <= last; d++) {
+    const ymd = `${ym}-${String(d).padStart(2, "0")}`;
+    const off = hrIsOff(ymd);
+    const evs = off ? [] : live.filter(l => l.start <= ymd && (l.end || l.start) >= ymd);
+    cells.push({ ymd, d, off, dow: hrDate(ymd).getDay(), hol: HR_HOLIDAYS[ymd] || "", evs });
+  }
+  while (cells.length % 7) cells.push(null);
+  const selBal = sel ? hrLeaveBalance(sel, lvs, year, today) : null;
+  const selList = sel ? lvs.filter(l => l.empId === sel.id && String(l.start || "").startsWith(year)).sort((a, b) => String(b.start).localeCompare(String(a.start))) : [];
+  const bar = (used, total, color) => (
+    <div aria-hidden="true" style={{ height: 7, borderRadius: 7, background: "var(--border)", overflow: "hidden" }}>
+      <div style={{ height: 7, background: color, width: `${total > 0 ? Math.min(100, Math.max(0, used / total * 100)) : 0}%` }}/>
+    </div>
+  );
+
+  if (!emps.length) return <div className="card" style={{ padding: "40px 24px", textAlign: "center", color: "var(--text3)", fontSize: 13.5 }}>먼저 개요에서 직원을 추가해 주세요</div>;
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
+      <section className="card" style={{ flex: "1 1 230px", minWidth: 0, padding: 16 }}>
+        <div className="section-header" style={{ marginBottom: 10, paddingLeft: 4 }}><span className="section-header-title">{year}년 남은 휴가</span></div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {people.map(e => {
+            const b = hrLeaveBalance(e, lvs, year, today);
+            const on = sel && sel.id === e.id;
+            return (
+              <button key={e.id} type="button" aria-pressed={on} onClick={() => setSelId(e.id)}
+                style={{ fontFamily: "inherit", color: "inherit", textAlign: "left", border: "none", borderRadius: 12, background: on ? "var(--surface2)" : "transparent", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 7, cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: "50%", background: colorOf(e.id), flexShrink: 0 }}/>
+                  <span style={{ fontSize: 14, fontWeight: 800, flex: 1, color: "var(--text1)" }}>{e.name}</span>
+                  <span style={{ fontSize: 12.5, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>월차 <b style={{ color: b.monthlyLeft < 0 ? "var(--negative-text)" : "var(--text1)" }}>{b.monthlyLeft}</b> · 여름 <b style={{ color: "var(--text1)" }}>{b.summerLeft}</b></span>
+                </div>
+                {bar(b.monthlyUsed, b.accrued, colorOf(e.id))}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6, marginTop: 10, paddingLeft: 4 }}>회사 규정: 월차 매달 1개(입사한 달부터) · 여름휴가 연 5일</div>
+      </section>
+
+      <section className="card" style={{ flex: "999 1 540px", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button type="button" aria-label="이전 달" onClick={() => setYm(hrShiftMonth(ym, -1))} style={{ ...hrBtn(false), width: 40, padding: 0 }}><Icon name="chevronLeft" size={16}/></button>
+            <div style={{ fontSize: 17, fontWeight: 800, padding: "0 10px", color: "var(--text1)", minWidth: 120, textAlign: "center" }}>{ym.slice(0, 4)}년 {Number(ym.slice(5))}월</div>
+            <button type="button" aria-label="다음 달" onClick={() => setYm(hrShiftMonth(ym, 1))} style={{ ...hrBtn(false), width: 40, padding: 0 }}><Icon name="chevronRight" size={16}/></button>
+            {ym !== today.slice(0, 7) && <button type="button" onClick={() => setYm(today.slice(0, 7))} style={{ ...hrBtn(false), height: 34, marginLeft: 4 }}>이번 달</button>}
+          </div>
+          <span style={{ fontSize: 12, color: "var(--text3)" }}>날짜를 누르면 그날 휴가를 등록합니다 · 점선 = 승인 대기</span>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 560, display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)" }}>
+            {"일월화수목금토".split("").map((w, i) => (
+              <div key={w} style={{ padding: "7px 8px", fontSize: 12, fontWeight: 700, color: i === 0 ? "var(--negative-text)" : i === 6 ? "#1B64DA" : "var(--text2)", borderRight: "1px solid var(--border)", borderBottom: "1px solid var(--border)", background: "var(--surface2)" }}>{w}</div>
+            ))}
+            {cells.map((c, i) => c ? (
+              <div key={c.ymd} style={{ minHeight: 96, padding: 5, borderRight: "1px solid var(--border)", borderBottom: "1px solid var(--border)", background: c.off ? "rgba(240,68,82,0.03)" : "var(--surface)", display: "flex", flexDirection: "column", gap: 3 }}>
+                <button type="button" onClick={() => onNewLeave({ date: c.ymd, empId: sel && sel.id })} aria-label={`${hrMd(c.ymd)} 휴가 등록`}
+                  style={{ display: "flex", alignItems: "center", gap: 4, border: "none", background: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", textAlign: "left", minHeight: 26 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: c.ymd === today ? 800 : 500, minWidth: 24, height: 24, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    background: c.ymd === today ? "var(--text1)" : "transparent",
+                    color: c.ymd === today ? "var(--surface)" : (c.hol || c.dow === 0) ? "var(--negative-text)" : c.dow === 6 ? "#1B64DA" : "var(--text1)" }}>{c.d}</span>
+                  {c.hol && <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--negative-text)", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{c.hol}</span>}
+                </button>
+                {c.evs.map(l => {
+                  const col = colorOf(l.empId), wait = l.status === "대기";
+                  return <button key={l.id} type="button" onClick={() => onEditLeave(l)} title={`${nameOf(l.empId)} ${l.kind}${wait ? " (승인 대기)" : ""}${l.memo ? ` — ${l.memo}` : ""}`}
+                    style={{ fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, padding: "3px 6px", borderRadius: 5, textAlign: "left", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      border: wait ? `1.5px dashed ${col}` : "none", background: wait ? "var(--surface)" : col, color: wait ? col : "#fff" }}>{nameOf(l.empId)} {l.kind.replace("반차(", "").replace(")", " 반차")}</button>;
+                })}
+              </div>
+            ) : <div key={"x" + i} style={{ borderRight: "1px solid var(--border)", borderBottom: "1px solid var(--border)", background: "var(--surface2)", opacity: 0.5 }}/>)}
+          </div>
+        </div>
+      </section>
+
+      {sel && selBal && (
+        <aside className="card" style={{ flex: "1 1 290px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div aria-hidden="true" style={{ width: 46, height: 46, borderRadius: "50%", background: colorOf(sel.id), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 800 }}>{String(sel.name || "?").slice(0, 1)}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>{sel.name} {sel.role}</div>
+              <div style={{ fontSize: 12.5, color: "var(--text2)" }}>{hrBizShort(sel.biz)} · 입사 {String(sel.joined).replace(/-/g, ".")} ({hrTenure(sel.joined, today)})</div>
+            </div>
+          </div>
+          <div style={{ background: "var(--surface2)", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 10, fontVariantNumeric: "tabular-nums" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>월차</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: selBal.monthlyLeft < 0 ? "var(--negative-text)" : "var(--text1)" }}>{selBal.monthlyLeft}일 <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text2)" }}>남음 / 발생 {selBal.accrued} (올해 {selBal.yearMax})</span></span>
+            </div>
+            {bar(selBal.monthlyUsed, selBal.accrued, colorOf(sel.id))}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text2)" }}>여름휴가</span>
+              <span style={{ fontSize: 20, fontWeight: 800, color: selBal.summerLeft < 0 ? "var(--negative-text)" : "var(--text1)" }}>{selBal.summerLeft}일 <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text2)" }}>남음 / {selBal.summerTotal}</span></span>
+            </div>
+            {bar(selBal.summerUsed, selBal.summerTotal, colorOf(sel.id))}
+            {(selBal.pending > 0 || selBal.otherUsed > 0) && <div style={{ fontSize: 12, color: "var(--text2)" }}>{selBal.pending > 0 ? `승인 대기 ${selBal.pending}일` : ""}{selBal.pending > 0 && selBal.otherUsed > 0 ? " · " : ""}{selBal.otherUsed > 0 ? `병가·경조사 등 ${selBal.otherUsed}일 (차감 안 함)` : ""}</div>}
+          </div>
+          <button type="button" onClick={() => onNewLeave({ empId: sel.id })} style={{ ...hrBtn(true), height: 44 }}>+ {sel.name} 휴가 등록</button>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text2)", marginBottom: 4 }}>{year}년 휴가 기록</div>
+            {selList.length === 0 && <div style={{ fontSize: 13, color: "var(--text3)", padding: "10px 0" }}>아직 없습니다</div>}
+            {selList.map(l => (
+              <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px solid var(--divider)", flexWrap: "wrap" }}>
+                <button type="button" onClick={() => onEditLeave(l)} style={{ flex: 1, minWidth: 140, display: "flex", justifyContent: "space-between", gap: 8, border: "none", background: "none", padding: 0, fontFamily: "inherit", fontSize: 13.5, cursor: "pointer", color: "var(--text1)", textAlign: "left", opacity: l.status === "반려" ? 0.5 : 1, textDecoration: l.status === "반려" ? "line-through" : "none" }}>
+                  <span>{hrMd(l.start)}{l.end && l.end !== l.start ? ` – ${hrMd(l.end)}` : ""}</span>
+                  <span style={{ color: "var(--text2)" }}>{l.kind} <b style={{ color: "var(--text1)" }}>{l.days}일</b></span>
+                </button>
+                {l.status === "대기" && <>
+                  <button type="button" onClick={() => onLeaveStatus(l.id, "반려")} style={{ ...hrBtn(false), height: 32, padding: "0 10px", fontSize: 12 }}>반려</button>
+                  <button type="button" onClick={() => onLeaveStatus(l.id, "승인")} style={{ ...hrBtn(true), height: 32, padding: "0 10px", fontSize: 12 }}>승인</button>
+                </>}
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
+    </div>
+  );
+}
+
+function HrTab({ employees = [], setEmployees, payrolls = {}, setPayrolls, leaves = [], setLeaves, hrSettings = {}, setHrSettings }) {
+  const [sub, setSub] = useState(() => load("frw_hr_sub", "overview"));
+  useEffect(() => { save("frw_hr_sub", sub); }, [sub]);
+  const [empDraft, setEmpDraft] = useState(null);
+  const [leaveDraft, setLeaveDraft] = useState(null);
+  const today = hrYmd(new Date());
+  const emps = Array.isArray(employees) ? employees.filter(Boolean) : [];
+  const lvs = Array.isArray(leaves) ? leaves.filter(Boolean) : [];
+  const pays = payrolls && typeof payrolls === "object" && !Array.isArray(payrolls) ? payrolls : {};
+  const settings = hrSettings && typeof hrSettings === "object" && !Array.isArray(hrSettings) ? hrSettings : {};
+  const payDay = Number(settings.payDay) || 25;
+  const current = emps.filter(e => !e.leftAt || e.leftAt >= today);
+
+  const newEmp = () => setEmpDraft({ id: null, name: "", role: "", biz: HR_BIZ[0], joined: today, probationEnd: "", birthday: "", phone: "", base: "", allow: "", meal: HR_RATES.mealFree, incomeTax: "", memo: "", leftAt: "" });
+  const saveEmp = () => {
+    const d = empDraft;
+    if (!String(d.name || "").trim()) { showToast("이름을 넣어 주세요"); return; }
+    if (!d.joined) { showToast("입사일을 넣어 주세요"); return; }
+    if (d.birthday && !/^\d{2}-\d{2}$/.test(d.birthday)) { showToast("생일은 03-15 처럼 월-일로 넣어 주세요"); return; }
+    const rec = { ...d, name: d.name.trim(), role: String(d.role || "").trim(), base: hrNum(d.base), allow: hrNum(d.allow), meal: hrNum(d.meal), incomeTax: hrNum(d.incomeTax), updatedAt: new Date().toISOString() };
+    if (rec.id) setEmployees(prev => (prev || []).map(e => e.id === rec.id ? rec : e));
+    else setEmployees(prev => [...(prev || []), { ...rec, id: hrNewId(), createdAt: rec.updatedAt }]);
+    setEmpDraft(null);
+    showToast(d.id ? "직원 정보를 저장했습니다" : `${rec.name} 님을 추가했습니다`, "success");
+  };
+  const deleteEmp = () => {
+    const d = empDraft;
+    const n = lvs.filter(l => l.empId === d.id).length;
+    if (!window.confirm(`${d.name} 님을 삭제할까요?${n ? `\n휴가 기록 ${n}건도 함께 지워집니다.` : ""}\n\n그만둔 경우라면 삭제 대신 '퇴사일'을 넣으세요 — 기록이 남습니다.\n(마감된 달 급여대장은 그대로 남습니다)`)) return;
+    setEmployees(prev => (prev || []).filter(e => e.id !== d.id));
+    if (n) setLeaves(prev => (prev || []).filter(l => l.empId !== d.id));
+    setEmpDraft(null);
+  };
+  const newLeave = (preset = {}) => {
+    const pool = current.length ? current : emps;
+    if (!pool.length) { showToast("먼저 직원을 추가해 주세요"); return; }
+    const date = preset.date || today;
+    setLeaveDraft({ id: null, empId: preset.empId || pool[0].id, kind: "월차", start: date, end: date, days: 1, daysManual: false, status: "승인", memo: "" });
+  };
+  const saveLeave = (d) => {
+    if (!d.empId) { showToast("직원을 골라 주세요"); return; }
+    if (!d.start) { showToast("날짜를 넣어 주세요"); return; }
+    if (!(Number(d.days) > 0)) { showToast("일수가 0입니다 — 주말·공휴일만 고르셨는지 확인해 주세요"); return; }
+    const rec = { id: d.id || hrNewId(), empId: d.empId, kind: d.kind, start: d.start, end: d.end || d.start, days: Number(d.days), status: d.status, memo: String(d.memo || "").trim(), updatedAt: new Date().toISOString() };
+    setLeaves(prev => d.id ? (prev || []).map(l => l.id === d.id ? { ...l, ...rec } : l) : [...(prev || []), { ...rec, createdAt: rec.updatedAt }]);
+    setLeaveDraft(null);
+    showToast("휴가를 저장했습니다", "success");
+  };
+  const deleteLeave = () => {
+    if (!window.confirm("이 휴가 기록을 지울까요?")) return;
+    setLeaves(prev => (prev || []).filter(l => l.id !== leaveDraft.id));
+    setLeaveDraft(null);
+  };
+  const setLeaveStatus = (id, status) => setLeaves(prev => (prev || []).map(l => l.id === id ? { ...l, status, updatedAt: new Date().toISOString() } : l));
+  const editLeave = (l) => setLeaveDraft({ ...l, daysManual: Number(l.days) !== (hrKindOf(l.kind).unit === 0.5 ? 0.5 : hrBizDays(l.start, l.end || l.start)) });
+
+  const SUBS = [["overview", "개요"], ["payroll", "급여"], ["leave", "휴가"]];
+  return (
+    <div className="frw-rise" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.4px" }}>인사 관리</div>
+          <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 3 }}>재직 {current.length}명 · {HR_BIZ.map(hrBizShort).join(" · ")}</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {sub === "overview" && <button type="button" onClick={newEmp} style={{ ...hrBtn(true), height: 42 }}>+ 직원 추가</button>}
+          {sub === "leave" && <button type="button" onClick={() => newLeave()} style={{ ...hrBtn(true), height: 42 }}>+ 휴가 등록</button>}
+        </div>
+      </div>
+      <nav aria-label="인사 관리 하위 메뉴" style={{ display: "flex", gap: 6, flexWrap: "wrap", borderBottom: "1px solid var(--border)", paddingBottom: 12 }}>
+        {SUBS.map(([k, label]) => {
+          const on = sub === k;
+          return <button key={k} type="button" aria-current={on ? "page" : undefined} onClick={() => setSub(k)}
+            style={{ height: 38, padding: "0 18px", borderRadius: 100, border: "none", background: on ? "var(--text1)" : "transparent", color: on ? "var(--surface)" : "var(--text2)", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{label}</button>;
+        })}
+      </nav>
+      {sub === "overview" && <HrOverview emps={emps} lvs={lvs} pays={pays} payDay={payDay} today={today} onEditEmp={e => setEmpDraft({ ...e })} onNewEmp={newEmp} onLeaveStatus={setLeaveStatus} setSub={setSub}/>}
+      {sub === "payroll" && <HrPayroll emps={emps} pays={pays} setPayrolls={setPayrolls} payDay={payDay} setPayDay={d => setHrSettings(s => ({ ...((s && typeof s === "object" && !Array.isArray(s)) ? s : {}), payDay: d }))} today={today}/>}
+      {sub === "leave" && <HrLeave emps={emps} lvs={lvs} today={today} onNewLeave={newLeave} onEditLeave={editLeave} onLeaveStatus={setLeaveStatus}/>}
+      {empDraft && <HrEmployeeModal draft={empDraft} setDraft={setEmpDraft} onSave={saveEmp} onClose={() => setEmpDraft(null)} onDelete={deleteEmp}/>}
+      {leaveDraft && <HrLeaveModal draft={leaveDraft} setDraft={setLeaveDraft} emps={current.length ? current : emps} lvs={lvs} today={today} onSave={saveLeave} onClose={() => setLeaveDraft(null)} onDelete={deleteLeave}/>}
+    </div>
+  );
+}
+
 
 function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
   const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
