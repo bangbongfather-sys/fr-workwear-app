@@ -31596,9 +31596,11 @@ function hrCalcRow(src) {
   const ei = hrHas(s.ei) ? hrNum(s.ei) : hrFloor10(taxable * HR_RATES.ei);
   const it = hrNum(s.it);
   const lo = hrHas(s.lo) ? hrNum(s.lo) : hrFloor10(it * HR_RATES.localOfIt);
+  // 선지급 — 이미 먼저 준 돈(예: 상여를 앞서 지급)을 이번 달 실수령에서 뺀다. 세무사 급여대장의 「선지급」 칸.
+  const adv = hrNum(s.adv);
   const gross = base + allow + meal;
-  const ded = np + hi + lt + ei + it + lo;
-  return { base, allow, meal, taxable, gross, np, hi, lt, ei, it, lo, ded, net: gross - ded,
+  const ded = np + hi + lt + ei + it + lo + adv;
+  return { base, allow, meal, taxable, gross, np, hi, lt, ei, it, lo, adv, ded, net: gross - ded,
     manual: { np: hrHas(s.np), hi: hrHas(s.hi), lt: hrHas(s.lt), ei: hrHas(s.ei), lo: hrHas(s.lo) } };
 }
 // 급여대장의 한 줄 입력값: 직원 기본값 위에 그 달에 고친 값(over)을 얹는다
@@ -31609,7 +31611,7 @@ function hrRowSource(emp, over) {
     allow: hrHas(o.allow) ? o.allow : (emp.allow || 0),
     meal: hrHas(o.meal) ? o.meal : (hrHas(emp.meal) ? emp.meal : HR_RATES.mealFree),
     it: hrHas(o.it) ? o.it : (emp.incomeTax || 0),
-    np: o.np, hi: o.hi, lt: o.lt, ei: o.ei, lo: o.lo,
+    np: o.np, hi: o.hi, lt: o.lt, ei: o.ei, lo: o.lo, adv: o.adv,
   };
 }
 
@@ -31703,7 +31705,7 @@ function hrMonthRows(emps, rec, ym) {
       calc: hrCalcRow(hrRowSource(e, rec && rec.rows && rec.rows[e.id])), locked: false }));
 }
 const hrSumRows = (rows) => rows.reduce((t, r) => {
-  for (const k of ["base", "allow", "meal", "gross", "np", "hi", "lt", "ei", "it", "lo", "ded", "net"]) t[k] = (t[k] || 0) + r.calc[k];
+  for (const k of ["base", "allow", "meal", "gross", "np", "hi", "lt", "ei", "it", "lo", "adv", "ded", "net"]) t[k] = (t[k] || 0) + r.calc[k];
   return t;
 }, {});
 
@@ -32049,7 +32051,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
     const rowsMap = {};
     if (prev.status === "closed" && Array.isArray(prev.snap)) {
       for (const s of prev.snap) rowsMap[s.empId] = { base: s.base, allow: s.allow, meal: s.meal, it: s.it };
-    } else Object.assign(rowsMap, prev.rows || {});
+    } else for (const [k, v] of Object.entries(prev.rows || {})) { const { adv, ...rest } = v || {}; rowsMap[k] = rest; } // 선지급은 그 달 한 번뿐이라 안 가져온다
     setPayrolls(p => ({ ...(p || {}), [ym]: { status: "draft", ...((p || {})[ym] || {}), rows: rowsMap } }));
     showToast("지난달 기본급·수당·식대·소득세를 가져왔습니다", "success");
   };
@@ -32058,7 +32060,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
     if (!window.confirm(`${ymLabel} 급여를 마감할까요?\n\n지금 숫자로 굳어져서, 나중에 직원 기본급을 바꿔도 이 달 급여대장은 바뀌지 않습니다. (마감은 다시 풀 수 있습니다)`)) return;
     const snap = rows.map(r => ({ empId: r.empId, name: r.name, role: r.role || "", biz: r.biz || "",
       base: r.calc.base, allow: r.calc.allow, meal: r.calc.meal, it: r.calc.it,
-      np: r.calc.np, hi: r.calc.hi, lt: r.calc.lt, ei: r.calc.ei, lo: r.calc.lo }));
+      np: r.calc.np, hi: r.calc.hi, lt: r.calc.lt, ei: r.calc.ei, lo: r.calc.lo, adv: r.calc.adv }));
     setPayrolls(p => ({ ...(p || {}), [ym]: { ...((p || {})[ym] || {}), status: "closed", snap, payDate, closedAt: new Date().toISOString() } }));
     showToast(`${ymLabel} 급여를 마감했습니다`, "success");
   };
@@ -32068,18 +32070,18 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
       const r = (p || {})[ym] || {};
       // 굳혀 둔 숫자를 그대로 '고친 값'으로 돌려놓는다 — 풀자마자 지금 기본급으로 바뀌어 버리지 않게
       const rowsMap = {};
-      for (const s of r.snap || []) rowsMap[s.empId] = { base: s.base, allow: s.allow, meal: s.meal, it: s.it, np: s.np, hi: s.hi, lt: s.lt, ei: s.ei, lo: s.lo };
+      for (const s of r.snap || []) rowsMap[s.empId] = { base: s.base, allow: s.allow, meal: s.meal, it: s.it, np: s.np, hi: s.hi, lt: s.lt, ei: s.ei, lo: s.lo, ...(s.adv ? { adv: s.adv } : {}) };
       const { snap, closedAt, ...rest } = r;
       return { ...(p || {}), [ym]: { ...rest, status: "draft", rows: rowsMap } };
     });
   };
   const exportXlsx = () => {
     if (typeof XLSX === "undefined") { showToast("엑셀 모듈을 불러오지 못했습니다"); return; }
-    const head = ["이름", "직급", "소속", "기본급", "수당", "식대", "지급계", "국민연금", "건강보험", "장기요양", "고용보험", "소득세", "지방소득세", "공제계", "실수령"];
-    const line = (r) => [r.name, r.role || "", hrBizShort(r.biz), r.calc.base, r.calc.allow, r.calc.meal, r.calc.gross, r.calc.np, r.calc.hi, r.calc.lt, r.calc.ei, r.calc.it, r.calc.lo, r.calc.ded, r.calc.net];
-    const aoa = [[`${ymLabel} 급여대장 (지급일 ${payDate})`], [], head, ...rows.map(line), ["합계", "", "", tot.base, tot.allow, tot.meal, tot.gross, tot.np, tot.hi, tot.lt, tot.ei, tot.it, tot.lo, tot.ded, tot.net]];
+    const head = ["이름", "직급", "소속", "기본급", "수당·상여", "식대", "지급계", "국민연금", "건강보험", "장기요양", "고용보험", "소득세", "지방소득세", "선지급", "공제계", "실수령"];
+    const line = (r) => [r.name, r.role || "", hrBizShort(r.biz), r.calc.base, r.calc.allow, r.calc.meal, r.calc.gross, r.calc.np, r.calc.hi, r.calc.lt, r.calc.ei, r.calc.it, r.calc.lo, r.calc.adv, r.calc.ded, r.calc.net];
+    const aoa = [[`${ymLabel} 급여대장 (지급일 ${payDate})`], [], head, ...rows.map(line), ["합계", "", "", tot.base, tot.allow, tot.meal, tot.gross, tot.np, tot.hi, tot.lt, tot.ei, tot.it, tot.lo, tot.adv, tot.ded, tot.net]];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 10 }, { wch: 8 }, { wch: 14 }, ...Array(12).fill({ wch: 12 })];
+    ws["!cols"] = [{ wch: 10 }, { wch: 8 }, { wch: 14 }, ...Array(13).fill({ wch: 12 })];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `${ym.slice(0, 4)}년${ym.slice(5)}월`);
     XLSX.writeFile(wb, `급여대장_${ym.slice(0, 4)}년${ym.slice(5)}월.xlsx`);
@@ -32096,9 +32098,9 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
       `<div style="font-size:13px;color:#4E5968;margin-bottom:18px;">${esc(ymLabel)}분 · 지급일 ${esc(payDate.replace(/-/g, "."))}</div>` +
       `<div style="font-size:14px;margin-bottom:16px;"><b>${esc(sel.name)}</b> ${esc(sel.role || "")} · ${esc(hrBizShort(sel.biz))}</div>` +
       `<div style="font-size:12px;font-weight:800;color:#8B95A1;margin-bottom:2px;">지급</div><table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:14px;">` +
-      tr("기본급", c.base) + (c.allow ? tr("수당", c.allow) : "") + tr("식대 (비과세 20만 원까지)", c.meal) + tr("지급계", c.gross, true) + `</table>` +
+      tr("기본급", c.base) + (c.allow ? tr("수당·상여", c.allow) : "") + tr("식대 (비과세 20만 원까지)", c.meal) + tr("지급계", c.gross, true) + `</table>` +
       `<div style="font-size:12px;font-weight:800;color:#8B95A1;margin-bottom:2px;">공제</div><table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:14px;">` +
-      tr("국민연금", c.np) + tr("건강보험", c.hi) + tr("장기요양보험", c.lt) + tr("고용보험", c.ei) + tr("소득세", c.it) + tr("지방소득세", c.lo) + tr("공제계", c.ded, true) + `</table>` +
+      tr("국민연금", c.np) + tr("건강보험", c.hi) + tr("장기요양보험", c.lt) + tr("고용보험", c.ei) + tr("소득세", c.it) + tr("지방소득세", c.lo) + (c.adv ? tr("선지급 (먼저 받은 돈)", c.adv) : "") + tr("공제계", c.ded, true) + `</table>` +
       `<div style="display:flex;justify-content:space-between;align-items:center;background:#FBF0E8;border-radius:12px;padding:14px 16px;"><span style="font-weight:800;color:#AB4F1F;">실수령액</span><span style="font-size:22px;font-weight:800;color:#AB4F1F;">${hrWon(c.net)}원</span></div>` +
       `<div style="font-size:11px;color:#8B95A1;line-height:1.6;margin-top:14px;">계산 방법 — 국민연금 과세급여×4.75%, 건강보험 ×3.595%, 장기요양 건강보험료×13.14%, 고용보험 ×0.9% (각 10원 미만 절사). 소득세는 간이세액표, 지방소득세는 소득세의 10%.</div>`;
     try {
@@ -32178,8 +32180,8 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
         ) : (
           <table style={{ fontSize: 13 }}>
             <thead><tr>
-              {th("이름 · 소속", { left: true })}{th("기본급")}{th("수당")}{th("식대")}{th("지급계", { strong: true })}
-              {th("국민연금")}{th("건강보험")}{th("장기요양")}{th("고용보험")}{th("소득세")}{th("지방소득세")}{th("공제계")}{th("실수령", { strong: true, bg: "var(--accent-tonal)" })}
+              {th("이름 · 소속", { left: true })}{th("기본급")}{th("수당·상여")}{th("식대")}{th("지급계", { strong: true })}
+              {th("국민연금")}{th("건강보험")}{th("장기요양")}{th("고용보험")}{th("소득세")}{th("지방소득세")}{th("선지급")}{th("공제계")}{th("실수령", { strong: true, bg: "var(--accent-tonal)" })}
             </tr></thead>
             <tbody>
               {rows.map(r => {
@@ -32195,7 +32197,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
                     </th>
                     {cell(r, "base")}{cell(r, "allow")}{cell(r, "meal")}
                     {td(hrWon(r.calc.gross), { strong: true, bg: "var(--surface2)" })}
-                    {cell(r, "np")}{cell(r, "hi")}{cell(r, "lt")}{cell(r, "ei")}{cell(r, "it")}{cell(r, "lo")}
+                    {cell(r, "np")}{cell(r, "hi")}{cell(r, "lt")}{cell(r, "ei")}{cell(r, "it")}{cell(r, "lo")}{cell(r, "adv")}
                     {td(hrWon(r.calc.ded), { muted: true })}
                     {td(hrWon(r.calc.net), { strong: true, bg: "var(--accent-tonal)" })}
                   </tr>
@@ -32204,7 +32206,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
             </tbody>
             <tfoot><tr>
               <th scope="row" style={{ textAlign: "left", padding: "10px", fontWeight: 800, background: "var(--surface2)" }}>합계</th>
-              {["base", "allow", "meal", "gross", "np", "hi", "lt", "ei", "it", "lo", "ded", "net"].map(k => (
+              {["base", "allow", "meal", "gross", "np", "hi", "lt", "ei", "it", "lo", "adv", "ded", "net"].map(k => (
                 <td key={k} style={{ textAlign: "right", padding: "10px", fontWeight: k === "gross" || k === "net" ? 800 : 700, background: k === "net" ? "var(--accent-tonal)" : "var(--surface2)", color: k === "net" ? "var(--accent-strong)" : "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{hrWon(tot[k] || 0)}</td>
               ))}
             </tr></tfoot>
@@ -32220,8 +32222,8 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
               <button type="button" onClick={shareSlip} style={hrBtn(false)}>명세서 이미지 보내기</button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, fontVariantNumeric: "tabular-nums" }}>
-              {[["지급", [["기본급", sel.calc.base], ...(sel.calc.allow ? [["수당", sel.calc.allow]] : []), ["식대 (비과세)", sel.calc.meal]], ["지급계", sel.calc.gross]],
-                ["공제", [["국민연금", sel.calc.np], ["건강보험 · 장기요양", `${hrWon(sel.calc.hi)} · ${hrWon(sel.calc.lt)}`], ["고용보험", sel.calc.ei], ["소득세 · 지방소득세", `${hrWon(sel.calc.it)} · ${hrWon(sel.calc.lo)}`]], ["공제계", sel.calc.ded]]].map(([title, items, total]) => (
+              {[["지급", [["기본급", sel.calc.base], ...(sel.calc.allow ? [["수당·상여", sel.calc.allow]] : []), ["식대 (비과세)", sel.calc.meal]], ["지급계", sel.calc.gross]],
+                ["공제", [["국민연금", sel.calc.np], ["건강보험 · 장기요양", `${hrWon(sel.calc.hi)} · ${hrWon(sel.calc.lt)}`], ["고용보험", sel.calc.ei], ["소득세 · 지방소득세", `${hrWon(sel.calc.it)} · ${hrWon(sel.calc.lo)}`], ...(sel.calc.adv ? [["선지급 (먼저 받은 돈)", sel.calc.adv]] : [])], ["공제계", sel.calc.ded]]].map(([title, items, total]) => (
                 <div key={title} style={{ background: "var(--surface2)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text2)" }}>{title}</div>
                   {items.map(([k, v]) => <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "var(--text1)" }}><span>{k}</span><span>{typeof v === "number" ? hrWon(v) : v}</span></div>)}
