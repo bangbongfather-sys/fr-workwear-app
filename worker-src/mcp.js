@@ -509,6 +509,8 @@ async function toolGetSection(args, env) {
     return compact(await depositInbox(env, o));
   }
   if (section.startsWith("_unpaid:")) return compact(await unpaidOf(env, section.slice(8)));
+  // 인사 관리 — 직원 목록 + 급여대장 (선택: "_hr:2026-10" 이면 그 달 기록까지)
+  if (section === "_hr" || section.startsWith("_hr:")) return compact(await hrRead(env, section.slice(4) || ""));
   // 일정 전체(최근 60일~앞으로 60일, 미완료 우선) — AI 직원 조회용
   if (section === "_todos") {
     const t = asList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)); const now = kstToday();
@@ -1182,7 +1184,52 @@ async function toolCampusWrite(a, env) {
   if (op === "tax_paid") return await toolMarkTaxPaid({ id: a.id, paidDate: a.paidDate ?? "" }, env);
   if (op === "quote_save") return await toolQuoteSave(a, env);
   if (op === "stock_adjust") return await toolStockAdjust(a, env);
+  if (op === "hr_payroll") return await toolHrPayroll(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
+}
+
+// ── 인사 관리: 직원 목록·달별 급여대장 ──
+// payrolls = { "2026-10": { status: "draft"|"closed", rows: { [empId]: {base, allow, meal, np, hi, lt, ei, it, lo, adv} }, snap, closedAt } }
+// 앱은 rows 의 값을 "그 달에 고친 값"으로 보고 비어 있는 칸만 자동 계산한다. 세무사 급여대장을 그대로 옮길 때 모든 칸을 채운다.
+const HR_FIELDS = ["base", "allow", "meal", "np", "hi", "lt", "ei", "it", "lo", "adv"];
+const hrNameKey = (s) => String(s || "").replace(/\s+/g, "");
+async function hrRead(env, ym) {
+  const [emps, pays] = await Promise.all([fbGet("/frw/employees", env.FIREBASE_DB_SECRET), fbGet("/frw/payrolls", env.FIREBASE_DB_SECRET)]);
+  const employees = asList(emps).map((e) => ({ id: e.id, 이름: e.name, 직급: e.role || "", 소속: e.biz || "", 입사일: e.joined || "", 퇴사일: e.leftAt || "",
+    기본급: toNumber(e.base), 수당: toNumber(e.allow), 식대: e.meal, 소득세: toNumber(e.incomeTax) }));
+  const p = pays && typeof pays === "object" ? pays : {};
+  return { 직원수: employees.length, 직원: employees, 급여대장달: Object.keys(p).sort(), ...(ym ? { [ym]: p[ym] || null } : {}) };
+}
+async function toolHrPayroll(a, env) {
+  const ym = String(a.ym || "");
+  if (!/^\d{4}-\d{2}$/.test(ym)) return errContent('ym 은 "YYYY-MM" 형식이어야 합니다.');
+  const rows = Array.isArray(a.rows) ? a.rows.slice(0, 60) : [];
+  if (!rows.length) return errContent("rows 가 비었습니다 ([{name, base, allow, meal, np, hi, lt, ei, it, lo, adv}]).");
+  const emps = asList(await fbGet("/frw/employees", env.FIREBASE_DB_SECRET));
+  const matched = [], missing = [];
+  for (const r of rows) {
+    const cand = emps.filter((e) => hrNameKey(e.name) === hrNameKey(r.name) && (!a.biz || String(e.biz || "") === String(a.biz)));
+    if (cand.length !== 1) { missing.push({ 이름: r.name, 사유: cand.length ? "같은 이름이 여러 명" : "직원 목록에 없음" }); continue; }
+    const vals = {};
+    for (const f of HR_FIELDS) if (r[f] !== undefined && r[f] !== null && r[f] !== "") vals[f] = Math.round(toNumber(r[f]));
+    matched.push({ emp: cand[0], vals });
+  }
+  // 한 명이라도 못 찾으면 아무것도 쓰지 않는다 — 반쯤 들어간 급여대장이 더 헷갈린다
+  if (missing.length && !a.partial) return textContent({ 결과: "쓰지 않음", 못찾음: missing, 안내: "앱 인사 관리 › 직원에 먼저 등록하거나 이름을 맞춘 뒤 다시 요청하세요." });
+  if (!matched.length) return errContent("맞는 직원이 없습니다.");
+  const same = (x, y) => HR_FIELDS.every((f) => (x || {})[f] === (y || {})[f]);
+  const plan = await safeSectionWrite("payrolls", (d) => {
+    const all = d && typeof d === "object" && !Array.isArray(d) ? d : {};
+    const rec = all[ym] || {};
+    if (rec.status === "closed") return errContent(`${ym} 급여는 이미 마감됐습니다. 앱에서 마감을 푼 뒤 다시 요청하세요.`);
+    const rowsMap = { ...(rec.rows || {}) };
+    for (const m of matched) rowsMap[String(m.emp.id)] = { ...m.vals };
+    const next = { ...rec, status: "draft", rows: rowsMap, importedAt: new Date().toISOString() };
+    return { patch: { [ym]: next }, apply: (dd) => ({ ...(dd && typeof dd === "object" && !Array.isArray(dd) ? dd : {}), [ym]: next }),
+      check: (dd) => !!dd && !!dd[ym] && matched.every((m) => same(dd[ym].rows && dd[ym].rows[String(m.emp.id)], m.vals)) };
+  }, env);
+  if (plan.isError) return plan;
+  return textContent({ 결과: `${ym} 급여 입력`, 입력: matched.map((m) => ({ 이름: m.emp.name, ...m.vals })), ...(missing.length ? { 못찾음: missing } : {}) });
 }
 
 // 캠퍼스 창고 실사 조정 — 품목코드 하나의 재고 수량을 실제 센 수량으로 바꾼다.
