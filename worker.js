@@ -24,6 +24,7 @@ import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
 import { handleMcp } from "./worker-src/mcp.js";
+import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { handleBankApi } from "./worker-src/bank.js";
 
@@ -809,13 +810,16 @@ async function buildKakaoBriefing(env) {
   };
   const todos = (data.todos || []).filter(t => !t.done);
   const lines = [];
+  // 급여일 2일 전·전날·당일 — 맨 위에 두어 폰 알림 미리보기에 바로 보이게
+  const pays = upcomingPays(data, today, 2);
+  if (pays.length) lines.push("[급여 송금]", ...payLines(pays), "");
   const tToday = todos.filter(t => inRange(t, today));
   const tTomorrow = todos.filter(t => inRange(t, tomorrow) && !inRange(t, today));
   if (tToday.length) lines.push("[오늘 일정]", ...tToday.map(t => "· " + t.text));
   if (tTomorrow.length) lines.push("", "[내일 일정]", ...tTomorrow.map(t => "· " + t.text));
   const bids = (data.bids || []).filter(b => b.status !== "종료" && (b.closeDate || "").slice(0, 10) >= today && (b.closeDate || "").slice(0, 10) <= tomorrow);
   if (bids.length) lines.push("", "[입찰 마감 임박]", ...bids.map(b => `· ${b.title} (마감 ${(b.closeDate || "").slice(5, 10)})`));
-  if (lines.length === 0) return null; // 알릴 것 없음 → 발송 생략
+  if (!lines.some(l => l && !l.startsWith("["))) return null; // 알릴 것 없음 → 발송 생략
   const [y, m2, d2] = today.split("-");
   return `📅 NJ SAFETY ${+m2}/${+d2} 아침 브리핑\n\n` + lines.join("\n");
 }
@@ -921,6 +925,14 @@ async function sendPushDailyBriefing(env) {
   const data = (await fbGet(env, "/frw.json")) || {};
   const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
   const badge = (data.todos || []).filter(t => !t.done && (t.date || "").slice(0, 10) <= today && today <= ((t.endDate || t.date || "").slice(0, 10))).length;
+  // 급여일이 가까우면 제목부터 급여로 — 누르면 인사 관리 급여 화면(송금하기 버튼)으로
+  const pays = upcomingPays(data, today, 2);
+  if (pays.length) {
+    const p0 = pays[0];
+    const when = p0.daysLeft === 0 ? "오늘" : p0.daysLeft === 1 ? "내일" : `${p0.daysLeft}일 뒤`;
+    const title = `💸 ${when} 급여일 · ${pays.filter(p => p.date === p0.date).map(p => p.name).join("·")}`;
+    return pushBroadcast(env, title, lines.slice(1).join("\n").trim(), "/?tab=hr", badge);
+  }
   return pushBroadcast(env, lines[0] || "NJ SAFETY 아침 브리핑", lines.slice(1).join("\n").trim(), "/?tab=schedule", badge);
 }
 

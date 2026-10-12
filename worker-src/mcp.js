@@ -1206,7 +1206,7 @@ async function hrRead(env, ym) {
 async function toolHrEmployee(a, env) {
   const rows = Array.isArray(a.rows) ? a.rows.slice(0, 60) : [];
   if (!rows.length) return errContent("rows 가 비었습니다 ([{name, base, allow, meal, incomeTax, role, biz, joined}]).");
-  const NUM = ["base", "allow", "meal", "incomeTax", "payDay"], TXT = ["role", "biz", "joined", "phone", "memo"];
+  const NUM = ["base", "allow", "meal", "incomeTax", "payDay"], TXT = ["role", "biz", "joined", "phone", "memo", "payBank", "payAccount", "payHolder"];
   const now = new Date().toISOString();
   const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
   const pick = (r) => { const o = {}; for (const f of NUM) if (r[f] !== undefined && r[f] !== null && r[f] !== "") o[f] = Math.round(toNumber(r[f]));
