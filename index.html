@@ -31573,6 +31573,8 @@ function hrPayDate(ym, payDay) {
   const d = Math.min(Math.max(1, Number(payDay) || 25), last);
   return hrToBizDay(`${ym}-${String(d).padStart(2, "0")}`, -1);
 }
+// 사람마다 급여일이 다를 수 있다 (직원 정보의 payDay). 없으면 회사 기본 급여일.
+const hrEmpPayDay = (emp, payDay) => Number(emp && emp.payDay) || Number(payDay) || 25;
 // 원천세·4대보험 납부: 매달 10일, 쉬는 날이면 다음 영업일
 const hrTaxDue = (ym) => hrToBizDay(`${ym}-10`, +1);
 // 그 달에 재직한 사람인가 (입사일 ≤ 말일, 퇴사일 없음 또는 ≥ 1일)
@@ -31652,10 +31654,14 @@ function hrMonthAgenda(employees, ym, payDay) {
   out.push({ date: due, kind: "tax", title: "원천세 신고·납부", sub: due.slice(8) !== "10" ? "10일이 쉬는 날이라 미뤄진 마감" : "지난달 급여분" });
   out.push({ date: due, kind: "tax", title: "4대보험 납부", sub: "공단 고지액" });
   const active = (employees || []).filter(e => hrEmployedIn(e, ym));
-  if (active.length) {
-    const pd = hrPayDate(ym, payDay);
-    const want = `${ym}-${String(Math.min(Number(payDay) || 25, Number(hrMonthEnd(ym).slice(8)))).padStart(2, "0")}`;
-    out.push({ date: pd, kind: "pay", title: `${Number(ym.slice(5))}월 급여 지급`, sub: pd !== want ? `${Number(want.slice(8))}일이 쉬는 날이라 앞당김 · ${active.length}명` : `${active.length}명` });
+  // 급여 지급 — 급여일이 같은 사람끼리 묶어 한 줄씩
+  const byDay = {};
+  for (const e of active) { const d = hrEmpPayDay(e, payDay); (byDay[d] = byDay[d] || []).push(e); }
+  for (const [d, list] of Object.entries(byDay)) {
+    const pd = hrPayDate(ym, d);
+    const want = `${ym}-${String(Math.min(Number(d), Number(hrMonthEnd(ym).slice(8)))).padStart(2, "0")}`;
+    const who = list.length <= 3 ? list.map(e => e.name).join("·") : `${list.length}명`;
+    out.push({ date: pd, kind: "pay", title: `${who} 급여 지급`, sub: pd !== want ? `${Number(want.slice(8))}일이 쉬는 날이라 앞당김` : `매달 ${d}일` });
   }
   for (const e of active) {
     if (e.probationEnd && e.probationEnd.startsWith(ym)) out.push({ date: e.probationEnd, kind: "probation", title: `${e.name} 수습 종료`, sub: "정식 급여·조건으로 바꿀지 확인" });
@@ -31695,13 +31701,13 @@ const hrDow = (ymd) => "일월화수목금토"[hrDate(ymd).getDay()];
 const hrNewId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
 
 // 그 달 급여대장 줄들. 마감된 달은 굳혀 둔 숫자, 아니면 지금 직원 정보로 계산.
-function hrMonthRows(emps, rec, ym) {
+function hrMonthRows(emps, rec, ym, payDay) {
   if (rec && rec.status === "closed" && Array.isArray(rec.snap)) {
-    return rec.snap.map(s => ({ empId: s.empId, name: s.name, role: s.role, biz: s.biz, calc: hrCalcRow(s), locked: true }));
+    return rec.snap.map(s => ({ empId: s.empId, name: s.name, role: s.role, biz: s.biz, payDate: s.payDate || rec.payDate || hrPayDate(ym, payDay), calc: hrCalcRow(s), locked: true }));
   }
   return (emps || []).filter(e => hrEmployedIn(e, ym))
     .sort((a, b) => HR_BIZ.indexOf(a.biz) - HR_BIZ.indexOf(b.biz) || String(a.joined).localeCompare(String(b.joined)))
-    .map(e => ({ empId: e.id, name: e.name, role: e.role, biz: e.biz, emp: e,
+    .map(e => ({ empId: e.id, name: e.name, role: e.role, biz: e.biz, emp: e, payDate: hrPayDate(ym, hrEmpPayDay(e, payDay)),
       calc: hrCalcRow(hrRowSource(e, rec && rec.rows && rec.rows[e.id])), locked: false }));
 }
 const hrSumRows = (rows) => rows.reduce((t, r) => {
@@ -31785,6 +31791,10 @@ function HrEmployeeModal({ draft, setDraft, onSave, onClose, onDelete }) {
           {field("수당 (과세)", <input type="text" inputMode="numeric" value={hrWon(draft.allow)} onChange={money("allow")}/>)}
           {field("식대", <input type="text" inputMode="numeric" value={hrWon(draft.meal)} onChange={money("meal")}/>, "월 20만 원까지 비과세")}
           {field("소득세 (월)", <input type="text" inputMode="numeric" value={hrWon(draft.incomeTax)} onChange={money("incomeTax")}/>, "홈택스 간이세액표 금액")}
+          {field("급여일", <select value={draft.payDay || ""} onChange={e => setDraft(d => ({ ...d, payDay: e.target.value ? Number(e.target.value) : "" }))}>
+            <option value="">회사 기본일</option>
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(d => <option key={d} value={d}>매달 {d === 31 ? "말일" : `${d}일`}</option>)}
+          </select>, "쉬는 날이면 앞 영업일로 당깁니다")}
         </div>
         <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "var(--surface2)", fontSize: 13, color: "var(--text2)", lineHeight: 1.7, fontVariantNumeric: "tabular-nums" }}>
           지급 <b style={{ color: "var(--text1)" }}>{hrWon(preview.gross)}</b> − 공제 {hrWon(preview.ded)}
@@ -31883,14 +31893,17 @@ function HrOverview({ emps, lvs, pays, payDay, today, onEditEmp, onNewEmp, onLea
   const current = emps.filter(e => !e.leftAt || e.leftAt >= today);
   const departed = emps.filter(e => e.leftAt && e.leftAt < today);
   const onProbation = current.filter(e => e.probationEnd && e.probationEnd >= today).length;
-  const rows = hrMonthRows(emps, pays[ym], ym);
+  const rows = hrMonthRows(emps, pays[ym], ym, payDay);
   const tot = hrSumRows(rows);
   const bals = current.map(e => ({ e, b: hrLeaveBalance(e, lvs, year, today) }));
   const monthlyLeft = bals.reduce((s, x) => s + x.b.monthlyLeft, 0);
   const summerLeft = bals.reduce((s, x) => s + x.b.summerLeft, 0);
   const pending = lvs.filter(l => l.status === "대기").sort((a, b) => String(a.start).localeCompare(String(b.start)));
-  let nextPay = hrPayDate(ym, payDay);
-  if (nextPay < today) nextPay = hrPayDate(hrShiftMonth(ym, 1), payDay);
+  // 다음 급여일 — 사람마다 급여일이 달라서 오늘 이후 가장 가까운 날, 그날 받는 사람
+  const payNext = current.map(e => { let d = hrPayDate(ym, hrEmpPayDay(e, payDay)); if (d < today) d = hrPayDate(hrShiftMonth(ym, 1), hrEmpPayDay(e, payDay)); return { e, d }; })
+    .sort((a, b) => a.d.localeCompare(b.d));
+  const nextPay = payNext.length ? payNext[0].d : hrPayDate(ym, payDay);
+  const nextPayWho = payNext.filter(x => x.d === nextPay).map(x => x.e.name).join("·");
   const dday = Math.round((hrDate(nextPay) - hrDate(today)) / 86400000);
   const agenda = hrMonthAgenda(emps, ym, payDay);
   const pool = (showLeft ? departed : current).filter(e => !bizFilter || e.biz === bizFilter);
@@ -31921,7 +31934,7 @@ function HrOverview({ emps, lvs, pays, payDay, today, onEditEmp, onNewEmp, onLea
         {kpi("재직 인원", current.length, "명", onProbation ? `수습 ${onProbation}명 포함` : "수습 없음")}
         {kpi(`${Number(ym.slice(5))}월 지급 총액`, hrMan(tot.gross || 0), "만 원", `실수령 합계 ${hrMan(tot.net || 0)}만 원`)}
         {kpi("남은 월차", monthlyLeft, "일", `여름휴가 ${summerLeft}일 남음${pending.length ? ` · 승인 대기 ${pending.length}건` : ""}`)}
-        {kpi("다음 급여일", hrMd(nextPay), "", `${dday === 0 ? "오늘" : `D-${dday}`} · ${hrDow(nextPay)}요일`, true)}
+        {kpi("다음 급여일", hrMd(nextPay), "", `${dday === 0 ? "오늘" : `D-${dday}`} · ${hrDow(nextPay)}요일${nextPayWho ? ` · ${nextPayWho}` : ""}`, true)}
       </div>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
@@ -32027,10 +32040,11 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
   const [selId, setSelId] = useState(null);
   const rec = pays[ym] || null;
   const closed = !!(rec && rec.status === "closed");
-  const rows = hrMonthRows(emps, rec, ym);
+  const rows = hrMonthRows(emps, rec, ym, payDay);
   const tot = hrSumRows(rows);
   const sel = rows.find(r => r.empId === selId) || rows[0] || null;
-  const payDate = closed && rec.payDate ? rec.payDate : hrPayDate(ym, payDay);
+  const payDate = closed && rec.payDate ? rec.payDate : hrPayDate(ym, payDay);   // 회사 기본 급여일 (개인 급여일이 없는 사람)
+  const payDates = [...new Set(rows.map(r => r.payDate).filter(Boolean))].sort();
   const taxDue = hrTaxDue(hrShiftMonth(ym, 1));
   const ymLabel = `${ym.slice(0, 4)}년 ${Number(ym.slice(5))}월`;
 
@@ -32058,7 +32072,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
   const closeMonth = () => {
     if (!rows.length) { showToast("이 달에 재직한 직원이 없습니다"); return; }
     if (!window.confirm(`${ymLabel} 급여를 마감할까요?\n\n지금 숫자로 굳어져서, 나중에 직원 기본급을 바꿔도 이 달 급여대장은 바뀌지 않습니다. (마감은 다시 풀 수 있습니다)`)) return;
-    const snap = rows.map(r => ({ empId: r.empId, name: r.name, role: r.role || "", biz: r.biz || "",
+    const snap = rows.map(r => ({ empId: r.empId, name: r.name, role: r.role || "", biz: r.biz || "", payDate: r.payDate || payDate,
       base: r.calc.base, allow: r.calc.allow, meal: r.calc.meal, it: r.calc.it,
       np: r.calc.np, hi: r.calc.hi, lt: r.calc.lt, ei: r.calc.ei, lo: r.calc.lo, adv: r.calc.adv }));
     setPayrolls(p => ({ ...(p || {}), [ym]: { ...((p || {})[ym] || {}), status: "closed", snap, payDate, closedAt: new Date().toISOString() } }));
@@ -32077,11 +32091,11 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
   };
   const exportXlsx = () => {
     if (typeof XLSX === "undefined") { showToast("엑셀 모듈을 불러오지 못했습니다"); return; }
-    const head = ["이름", "직급", "소속", "기본급", "수당·상여", "식대", "지급계", "국민연금", "건강보험", "장기요양", "고용보험", "소득세", "지방소득세", "선지급", "공제계", "실수령"];
-    const line = (r) => [r.name, r.role || "", hrBizShort(r.biz), r.calc.base, r.calc.allow, r.calc.meal, r.calc.gross, r.calc.np, r.calc.hi, r.calc.lt, r.calc.ei, r.calc.it, r.calc.lo, r.calc.adv, r.calc.ded, r.calc.net];
-    const aoa = [[`${ymLabel} 급여대장 (지급일 ${payDate})`], [], head, ...rows.map(line), ["합계", "", "", tot.base, tot.allow, tot.meal, tot.gross, tot.np, tot.hi, tot.lt, tot.ei, tot.it, tot.lo, tot.adv, tot.ded, tot.net]];
+    const head = ["이름", "직급", "소속", "지급일", "기본급", "수당·상여", "식대", "지급계", "국민연금", "건강보험", "장기요양", "고용보험", "소득세", "지방소득세", "선지급", "공제계", "실수령"];
+    const line = (r) => [r.name, r.role || "", hrBizShort(r.biz), r.payDate || payDate, r.calc.base, r.calc.allow, r.calc.meal, r.calc.gross, r.calc.np, r.calc.hi, r.calc.lt, r.calc.ei, r.calc.it, r.calc.lo, r.calc.adv, r.calc.ded, r.calc.net];
+    const aoa = [[`${ymLabel} 급여대장`], [], head, ...rows.map(line), ["합계", "", "", "", tot.base, tot.allow, tot.meal, tot.gross, tot.np, tot.hi, tot.lt, tot.ei, tot.it, tot.lo, tot.adv, tot.ded, tot.net]];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws["!cols"] = [{ wch: 10 }, { wch: 8 }, { wch: 14 }, ...Array(13).fill({ wch: 12 })];
+    ws["!cols"] = [{ wch: 10 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, ...Array(13).fill({ wch: 12 })];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, `${ym.slice(0, 4)}년${ym.slice(5)}월`);
     XLSX.writeFile(wb, `급여대장_${ym.slice(0, 4)}년${ym.slice(5)}월.xlsx`);
@@ -32095,7 +32109,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
     node.style.cssText = "position:fixed;left:-10000px;top:0;width:420px;padding:28px;background:#fff;font-family:Pretendard,'Apple SD Gothic Neo',sans-serif;color:#191F28;font-variant-numeric:tabular-nums;";
     node.innerHTML =
       `<div style="font-size:20px;font-weight:800;margin-bottom:4px;">임금명세서</div>` +
-      `<div style="font-size:13px;color:#4E5968;margin-bottom:18px;">${esc(ymLabel)}분 · 지급일 ${esc(payDate.replace(/-/g, "."))}</div>` +
+      `<div style="font-size:13px;color:#4E5968;margin-bottom:18px;">${esc(ymLabel)}분 · 지급일 ${esc(String(sel.payDate || payDate).replace(/-/g, "."))}</div>` +
       `<div style="font-size:14px;margin-bottom:16px;"><b>${esc(sel.name)}</b> ${esc(sel.role || "")} · ${esc(hrBizShort(sel.biz))}</div>` +
       `<div style="font-size:12px;font-weight:800;color:#8B95A1;margin-bottom:2px;">지급</div><table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:14px;">` +
       tr("기본급", c.base) + (c.allow ? tr("수당·상여", c.allow) : "") + tr("식대 (비과세 20만 원까지)", c.meal) + tr("지급계", c.gross, true) + `</table>` +
@@ -32140,10 +32154,10 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
           <button type="button" aria-label="다음 달" onClick={() => setYm(hrShiftMonth(ym, 1))} style={{ ...hrBtn(false), width: 40, padding: 0 }}><Icon name="chevronRight" size={16}/></button>
         </div>
         <span style={{ fontSize: 12.5, fontWeight: 700, padding: "4px 10px", borderRadius: 100, background: closed ? "rgba(3,178,108,0.13)" : "rgba(254,152,0,0.15)", color: closed ? "var(--positive-text)" : "var(--warning-text)" }}>
-          {closed ? `마감됨 · ${String(rec.closedAt || "").slice(0, 10)}` : "작성 중"} · 지급일 {hrMd(payDate)}({hrDow(payDate)})
+          {closed ? `마감됨 · ${String(rec.closedAt || "").slice(0, 10)}` : "작성 중"} · 지급일 {payDates.length > 1 ? payDates.map(d => hrMd(d)).join(" · ") : `${hrMd(payDates[0] || payDate)}(${hrDow(payDates[0] || payDate)})`}
         </span>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text2)" }}>
-          급여일 매달
+          기본 급여일 매달
           <select value={payDay} onChange={e => setPayDay(Number(e.target.value))} style={{ width: 72, height: 34, padding: "0 8px" }}>
             {Array.from({ length: 31 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d === 31 ? "말일" : d}</option>)}
           </select>
@@ -32192,7 +32206,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
                       <button type="button" onClick={() => setSelId(r.empId)} aria-pressed={on} title="명세서 보기"
                         style={{ border: "none", background: "none", padding: 0, textAlign: "left", fontFamily: "inherit", cursor: "pointer", color: "inherit" }}>
                         <div style={{ fontSize: 14, fontWeight: 800, color: on ? "var(--accent-strong)" : "var(--text1)" }}>{r.name} <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text2)" }}>{r.role}</span></div>
-                        <div style={{ fontSize: 11.5, color: "var(--text3)" }}>{hrBizShort(r.biz)}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--text3)" }}>{hrBizShort(r.biz)}{r.payDate ? ` · ${hrMd(r.payDate)} 지급` : ""}</div>
                       </button>
                     </th>
                     {cell(r, "base")}{cell(r, "allow")}{cell(r, "meal")}

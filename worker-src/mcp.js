@@ -1197,7 +1197,7 @@ const hrNameKey = (s) => String(s || "").replace(/\s+/g, "");
 async function hrRead(env, ym) {
   const [emps, pays] = await Promise.all([fbGet("/frw/employees", env.FIREBASE_DB_SECRET), fbGet("/frw/payrolls", env.FIREBASE_DB_SECRET)]);
   const employees = asList(emps).map((e) => ({ id: e.id, 이름: e.name, 직급: e.role || "", 소속: e.biz || "", 입사일: e.joined || "", 퇴사일: e.leftAt || "",
-    기본급: toNumber(e.base), 수당: toNumber(e.allow), 식대: e.meal, 소득세: toNumber(e.incomeTax) }));
+    기본급: toNumber(e.base), 수당: toNumber(e.allow), 식대: e.meal, 소득세: toNumber(e.incomeTax), 급여일: e.payDay || "" }));
   const p = pays && typeof pays === "object" ? pays : {};
   return { 직원수: employees.length, 직원: employees, 급여대장달: Object.keys(p).sort(), ...(ym ? { [ym]: p[ym] || null } : {}) };
 }
@@ -1206,7 +1206,7 @@ async function hrRead(env, ym) {
 async function toolHrEmployee(a, env) {
   const rows = Array.isArray(a.rows) ? a.rows.slice(0, 60) : [];
   if (!rows.length) return errContent("rows 가 비었습니다 ([{name, base, allow, meal, incomeTax, role, biz, joined}]).");
-  const NUM = ["base", "allow", "meal", "incomeTax"], TXT = ["role", "biz", "joined", "phone", "memo"];
+  const NUM = ["base", "allow", "meal", "incomeTax", "payDay"], TXT = ["role", "biz", "joined", "phone", "memo"];
   const now = new Date().toISOString();
   const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
   const pick = (r) => { const o = {}; for (const f of NUM) if (r[f] !== undefined && r[f] !== null && r[f] !== "") o[f] = Math.round(toNumber(r[f]));
