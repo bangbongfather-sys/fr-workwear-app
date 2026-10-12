@@ -19389,7 +19389,14 @@ function QuoteWizard({ clients = [], products = [], materials = [], laborItems =
 }
 
 function App() {
-  const [tab, setTab] = useState(() => load("frw_tab", "calc"));
+  // 알림을 눌러 ?tab=hr 처럼 들어오면 그 탭부터 연다 (주소의 ?tab 은 바로 지운다)
+  const [tab, setTab] = useState(() => {
+    try {
+      const q = new URLSearchParams(window.location.search); const t = q.get("tab");
+      if (t && /^[a-z]{2,20}$/.test(t)) { q.delete("tab"); history.replaceState(null, "", window.location.pathname + (q.toString() ? `?${q}` : "") + window.location.hash); return t; }
+    } catch {}
+    return load("frw_tab", "calc");
+  });
   const [ledgerFocusClient, setLedgerFocusClient] = useState(null);
   useEffect(() => { save("frw_tab", tab); }, [tab]);
   // 탭 전환 시 마지막 스크롤 위치 유지 — 다른 탭 갔다 와도 보던 위치로 복원.
@@ -31699,6 +31706,27 @@ const hrMan = (n) => { const v = Math.round(Number(n || 0) / 10000); return v.to
 const hrMd = (ymd) => ymd ? `${Number(ymd.slice(5, 7))}월 ${Number(ymd.slice(8, 10))}일` : "";
 const hrDow = (ymd) => "일월화수목금토"[hrDate(ymd).getDay()];
 const hrNewId = () => Date.now() * 1000 + Math.floor(Math.random() * 1000);
+// 송금하기 — KB국민은행 기업뱅킹을 새 창으로 연다. 은행 사이트는 금액을 넘겨받지 못하므로
+// 받는 계좌번호(없으면 금액)를 클립보드에 복사해 두고, 이체 화면에서 붙여 넣게 한다.
+const HR_BANK_URL = "https://obiz.kbstar.com/";
+function hrSendPay(emp, name, amount) {
+  const e = emp || {};
+  const acct = [e.payBank, e.payAccount].filter(Boolean).join(" ");
+  const text = [acct, e.payHolder || name, `${Number(amount || 0).toLocaleString("ko-KR")}원`].filter(Boolean).join(" · ");
+  try { if (navigator.clipboard) navigator.clipboard.writeText(e.payAccount ? String(e.payAccount).replace(/[^\d]/g, "") : String(Math.round(amount || 0))).catch(() => {}); } catch {}
+  window.open(HR_BANK_URL, "_blank", "noopener");
+  showToast(e.payAccount ? `계좌번호를 복사했습니다 — ${text} · KB 기업뱅킹 이체 화면에 붙여 넣으세요` : `금액 ${Number(amount || 0).toLocaleString("ko-KR")}원을 복사했습니다 · 급여 계좌는 직원 정보에 넣어 두면 같이 복사됩니다`, "success");
+}
+function HrSendBtn({ emp, name, amount, small }) {
+  return (
+    <button type="button" onClick={(ev) => { ev.stopPropagation(); hrSendPay(emp, name, amount); }}
+      title={`${name} ${Number(amount || 0).toLocaleString("ko-KR")}원 — KB국민은행 기업뱅킹으로 이동 (금액·계좌 복사)`}
+      style={{ height: small ? 28 : 36, padding: small ? "0 10px" : "0 14px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit",
+        background: "#FFBC00", color: "#3C2A00", fontSize: small ? 12 : 13, fontWeight: 800, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}>
+      송금하기 ↗
+    </button>
+  );
+}
 
 // 그 달 급여대장 줄들. 마감된 달은 굳혀 둔 숫자, 아니면 지금 직원 정보로 계산.
 function hrMonthRows(emps, rec, ym, payDay) {
@@ -31791,6 +31819,8 @@ function HrEmployeeModal({ draft, setDraft, onSave, onClose, onDelete }) {
           {field("수당 (과세)", <input type="text" inputMode="numeric" value={hrWon(draft.allow)} onChange={money("allow")}/>)}
           {field("식대", <input type="text" inputMode="numeric" value={hrWon(draft.meal)} onChange={money("meal")}/>, "월 20만 원까지 비과세")}
           {field("소득세 (월)", <input type="text" inputMode="numeric" value={hrWon(draft.incomeTax)} onChange={money("incomeTax")}/>, "홈택스 간이세액표 금액")}
+          {field("급여 은행", <input type="text" value={draft.payBank || ""} onChange={set("payBank")} placeholder="국민"/>, "송금하기 때 같이 복사됩니다")}
+          {field("급여 계좌번호", <input type="text" inputMode="numeric" value={draft.payAccount || ""} onChange={e => setDraft(d => ({ ...d, payAccount: e.target.value.replace(/[^\d-]/g, "") }))} placeholder="123456-01-123456"/>)}
           {field("급여일", <select value={draft.payDay || ""} onChange={e => setDraft(d => ({ ...d, payDay: e.target.value ? Number(e.target.value) : "" }))}>
             <option value="">회사 기본일</option>
             {Array.from({ length: 31 }, (_, i) => i + 1).map(d => <option key={d} value={d}>매달 {d === 31 ? "말일" : `${d}일`}</option>)}
@@ -31936,6 +31966,31 @@ function HrOverview({ emps, lvs, pays, payDay, today, onEditEmp, onNewEmp, onLea
         {kpi("남은 월차", monthlyLeft, "일", `여름휴가 ${summerLeft}일 남음${pending.length ? ` · 승인 대기 ${pending.length}건` : ""}`)}
         {kpi("다음 급여일", hrMd(nextPay), "", `${dday === 0 ? "오늘" : `D-${dday}`} · ${hrDow(nextPay)}요일${nextPayWho ? ` · ${nextPayWho}` : ""}`, true)}
       </div>
+
+      {/* 다가오는 급여 송금 — 오늘부터 7일 안에 급여일인 사람, 금액과 송금하기 버튼 */}
+      {(() => {
+        const soon = payNext.filter(x => Math.round((hrDate(x.d) - hrDate(today)) / 86400000) <= 7).map(x => {
+          const pym = x.d.slice(0, 7);
+          const r = hrMonthRows(emps, pays[pym], pym, payDay).find(rr => rr.empId === x.e.id);
+          return { ...x, net: r ? r.calc.net : 0, left: Math.round((hrDate(x.d) - hrDate(today)) / 86400000) };
+        });
+        if (!soon.length) return null;
+        return (
+          <section className="card" style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <span className="section-header-title">급여 송금 <span className="section-sub">— 일주일 안</span></span>
+            {soon.map(x => (
+              <div key={x.e.id} style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12.5, fontWeight: 800, padding: "3px 9px", borderRadius: 100, background: x.left <= 1 ? "rgba(240,68,82,0.12)" : "var(--surface2)", color: x.left <= 1 ? "var(--negative-text)" : "var(--text2)", whiteSpace: "nowrap" }}>
+                  {x.left === 0 ? "오늘" : x.left === 1 ? "내일" : `D-${x.left}`} · {hrMd(x.d)}({hrDow(x.d)})
+                </span>
+                <span style={{ flex: 1, minWidth: 120, fontSize: 14, fontWeight: 700, color: "var(--text1)" }}>{x.e.name} <span style={{ fontWeight: 500, color: "var(--text3)", fontSize: 12.5 }}>{x.e.payBank ? `${x.e.payBank} ${x.e.payAccount || ""}` : "급여 계좌 미입력"}</span></span>
+                <b style={{ fontSize: 15, fontVariantNumeric: "tabular-nums", color: "var(--text1)" }}>{hrWon(x.net)}원</b>
+                <HrSendBtn emp={x.e} name={x.e.name} amount={x.net}/>
+              </div>
+            ))}
+          </section>
+        );
+      })()}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start" }}>
         <section className="card" style={{ flex: "999 1 560px", minWidth: 0 }}>
@@ -32208,6 +32263,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
                         <div style={{ fontSize: 14, fontWeight: 800, color: on ? "var(--accent-strong)" : "var(--text1)" }}>{r.name} <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text2)" }}>{r.role}</span></div>
                         <div style={{ fontSize: 11.5, color: "var(--text3)" }}>{hrBizShort(r.biz)}{r.payDate ? ` · ${hrMd(r.payDate)} 지급` : ""}</div>
                       </button>
+                      <div style={{ marginTop: 4 }}><HrSendBtn small emp={r.emp || emps.find(e => e.id === r.empId)} name={r.name} amount={r.calc.net}/></div>
                     </th>
                     {cell(r, "base")}{cell(r, "allow")}{cell(r, "meal")}
                     {td(hrWon(r.calc.gross), { strong: true, bg: "var(--surface2)" })}
@@ -32247,7 +32303,10 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
             </div>
             <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--accent-tonal)", borderRadius: 12, padding: "14px 18px" }}>
               <span style={{ fontSize: 15, fontWeight: 800, color: "var(--accent-strong)" }}>실수령액</span>
-              <span style={{ fontSize: 22, fontWeight: 800, color: "var(--accent-strong)", fontVariantNumeric: "tabular-nums" }}>{hrWon(sel.calc.net)}원</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color: "var(--accent-strong)", fontVariantNumeric: "tabular-nums" }}>{hrWon(sel.calc.net)}원</span>
+                <HrSendBtn emp={sel.emp || emps.find(e => e.id === sel.empId)} name={sel.name} amount={sel.calc.net}/>
+              </span>
             </div>
           </section>
           <aside className="card" style={{ flex: "1 1 280px", minWidth: 0 }}>
