@@ -1186,7 +1186,45 @@ async function toolCampusWrite(a, env) {
   if (op === "stock_adjust") return await toolStockAdjust(a, env);
   if (op === "hr_payroll") return await toolHrPayroll(a, env);
   if (op === "hr_employee") return await toolHrEmployee(a, env);
+  if (op === "note_add" || op === "daily_append") return await toolNoteSave(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
+}
+
+// ── 일정 탭 메모: 중요 메모 추가 / 하루 기록 덧붙이기 (캠퍼스 보관소에서 넘김) ──
+// notes = [{ id, title, body, category, color, pinned, clientId, tags, atts, createdAt, updatedAt }] — 앱 목록은 updatedAt 순이라 끝에 붙여도 맨 위에 보인다.
+// dailyNotes = { "YYYY-MM-DD": { text, star, atts, updatedAt } } — 그 날 글이 있으면 빈 줄 하나 띄우고 끝에 덧붙인다.
+const NOTE_CAT_COLOR = { "거래처": "#DB6B2E", "회의": "#3B82F6", "아이디어": "#8B5CF6", "이슈": "#EF4444", "기타": "#64748B" };
+async function toolNoteSave(a, env) {
+  const token = String(a.token || `${Date.now()}`).slice(0, 64);
+  const body = String(a.body ?? a.text ?? "").trim().slice(0, 20000);
+  if (!body) return errContent("내용(body)이 필요합니다.");
+  if (a.op === "note_add") {
+    const title = String(a.title || "").trim().slice(0, 120) || "(제목 없음)";
+    const category = NOTE_CAT_COLOR[a.category] ? a.category : "기타";
+    const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
+    const plan = await safeSectionWrite("notes", (d) => {
+      if (list(d).some(([, r]) => r.campusToken === token)) return { done: true, result: { 결과: "이미 반영됨" } };
+      const key = Array.isArray(d) || d == null ? String(d ? d.length : 0) : `c${Date.now()}`;
+      const ids = new Set(list(d).map(([, r]) => String(r.id))); let id = Date.now(); while (ids.has(String(id))) id++;
+      const now = Date.now();
+      const row = { id, title, body, category, color: NOTE_CAT_COLOR[category], pinned: !!a.pinned, clientId: null, tags: ["캠퍼스"], atts: [], createdAt: now, updatedAt: now, campusToken: token, fromCampus: true };
+      const apply = (dd) => { if (Array.isArray(dd) || dd == null) { const x = [...(dd || [])]; x[Number(key)] = row; return x; } return { ...dd, [key]: row }; };
+      return { patch: { [key]: row }, apply, check: (dd) => list(dd).some(([, r]) => r.campusToken === token), result: { 결과: "중요 메모 추가", 제목: title, 분류: category, 고정: !!a.pinned } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  const date = String(a.date || kstToday());
+  if (!isRealDate(date)) return errContent("date 는 YYYY-MM-DD 입니다.");
+  const plan = await safeSectionWrite("dailyNotes", (d) => {
+    const cur = (d && d[date]) || {};
+    if (cur.campusTokens && String(cur.campusTokens).split(",").includes(token)) return { done: true, result: { 결과: "이미 반영됨" } };
+    const old = String(cur.text || "").trimEnd();
+    const row = { ...cur, text: old ? `${old}\n\n${body}` : body, star: !!cur.star || !!a.star, atts: Array.isArray(cur.atts) ? cur.atts : [], updatedAt: Date.now(),
+      campusTokens: [...String(cur.campusTokens || "").split(",").filter(Boolean).slice(-9), token].join(",") };
+    const apply = (dd) => ({ ...(dd || {}), [date]: row });
+    return { patch: { [date]: row }, apply, check: (dd) => !!(dd && dd[date] && String(dd[date].campusTokens || "").split(",").includes(token)), result: { 결과: "하루 기록에 덧붙임", 날짜: date, 글자수: body.length } };
+  }, env);
+  return plan.isError ? plan : textContent(plan.result);
 }
 
 // ── 인사 관리: 직원 목록·달별 급여대장 ──
