@@ -1023,7 +1023,10 @@ async function depositInbox(env, opt = {}) {
     if (c.status !== "미입금") return; const n = String(c.name || "").trim(); if (!n) return;
     (unpaid[n] = unpaid[n] || []).push({ ym, id: c.id, total: toNumber(c.total), supply: toNumber(c.supply) });
   }));
-  const byDate = (a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`);
+  // 날짜 표기가 섞여 있어도(2026-7-5 · 2026.07.05 · 20260705) 최신순이 맞게 숫자로 맞춘 키로 비교
+  const dkey = (x) => { const m = String(x.date || "").match(/(\d{4})\D*(\d{1,2})\D*(\d{1,2})/); const t = String(x.time || "").match(/(\d{1,2})\D*(\d{2})?\D*(\d{2})?/);
+    return (m ? m[1] + m[2].padStart(2, "0") + m[3].padStart(2, "0") : "00000000") + (t ? t[1].padStart(2, "0") + (t[2] || "00") + (t[3] || "00") : "000000"); };
+  const byDate = (a, b) => dkey(b).localeCompare(dkey(a));
   const off = Math.max(0, Number(opt.offset) || 0), lim = Math.min(200, Math.max(1, Number(opt.limit) || 40));
   const bizF = opt.biz === "nj" || opt.biz === "corp" ? opt.biz : null;
   const qm = depQueryMatcher(opt.q);
@@ -1031,12 +1034,21 @@ async function depositInbox(env, opt = {}) {
     && (!qm || qm([x.name, x.memo, suggest(x.name)].filter(Boolean).join("\u0001")))).sort(byDate);
   const pending = pendAll.slice(off, off + lim)
     .map((x) => ({ id: x.id, date: x.date, time: x.time || "", name: x.name || "", amount: toNumber(x.amount), biz: x.biz === "corp" ? "corp" : "nj", memo: x.memo || "", suggest: suggest(x.name) }));
+  // 전체 보기(opt.all): 미처리·처리 구분 없이 최신순
+  let all = null, allFiltered = 0;
+  if (opt.all) {
+    const allAll = items.filter((x) => (!bizF || (x.biz === "corp" ? "corp" : "nj") === bizF)
+      && (!qm || qm([x.name, x.memo, x.client, suggest(x.name)].filter(Boolean).join("\u0001")))).sort(byDate);
+    allFiltered = allAll.length;
+    all = allAll.slice(off, off + lim).map((x) => ({ id: x.id, date: x.date, time: x.time || "", name: x.name || "", amount: toNumber(x.amount), biz: x.biz === "corp" ? "corp" : "nj", memo: x.memo || "",
+      status: x.status === "done" ? "done" : "pending", client: x.client || "", link: x.link || null, doneAt: x.doneAt || null, suggest: x.status === "done" ? "" : suggest(x.name) }));
+  }
   const done = items.filter((x) => x.status === "done").sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 15)
     .map((x) => ({ id: x.id, date: x.date, name: x.name || "", amount: toNumber(x.amount), client: x.client || "", link: x.link || null, doneAt: x.doneAt || null }));
   // 화면에 나온 입금의 추천 거래처 미입금 청구만 넘겨 응답을 작게 유지한다
-  const need = new Set(pending.map((x) => x.suggest).filter(Boolean));
+  const need = new Set([...pending, ...(all || [])].map((x) => x.suggest).filter(Boolean));
   const unpaidSmall = {}; for (const n of need) if (unpaid[n]) unpaidSmall[n] = unpaid[n].filter((u) => u.total > 0).slice(0, 6);
-  return { pendingCount: items.filter((x) => x.status === "pending").length, filtered: pendAll.length, filteredTotal: pendAll.reduce((t, x) => t + toNumber(x.amount), 0), offset: off, limit: lim, pending, done, unpaid: unpaidSmall, clientNames };
+  return { pendingCount: items.filter((x) => x.status === "pending").length, filtered: pendAll.length, filteredTotal: pendAll.reduce((t, x) => t + toNumber(x.amount), 0), offset: off, limit: lim, pending, done, ...(all ? { all, allFiltered, totalCount: items.length } : {}), unpaid: unpaidSmall, clientNames };
 }
 // 거래처 하나의 미입금 청구 (팝업에서 거래처를 바꿨을 때)
 async function unpaidOf(env, name) {
