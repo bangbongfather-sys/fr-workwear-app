@@ -25235,7 +25235,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {tab === "schedule" && (
           <>
           <ScheduleAlertSettings/>
-          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} />
+          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} taxes={taxes} />
           </>
         )}
         {tab === "news" && (
@@ -28126,7 +28126,7 @@ function WeeklyGoalBand({ items, weekKey, isThisWeek, isActive, onOpen }) {
   );
 }
 
-function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, weeklyGoals = {}, setWeeklyGoals, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab }) {
+function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, weeklyGoals = {}, setWeeklyGoals, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab, taxes = [] }) {
   const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","timetable","daily","notes","recurring"], "data-schedule-sub");
   const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
@@ -28969,6 +28969,11 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // 타임테이블에서 바로 적은 항목(ttOnly)은 그날의 시간표에만 두고 달력에는 띄우지 않는다.
   // 달력·다가오는 일정·일정 검색은 calTodos, 타임테이블·하루 기록은 todos 전체를 쓴다.
   const calTodos = todos.filter(t => !t.ttOnly);
+  // 세무 관리 탭의 납부 기한을 달력에 바로 보여 준다(일정 데이터로 복사하지 않음). 납부하면 줄긋기, 누르면 세무 탭으로.
+  const taxByDate = {};
+  (Array.isArray(taxes) ? taxes : []).forEach(r => { if (r && r.dueDate) (taxByDate[r.dueDate] = taxByDate[r.dueDate] || []).push(r); });
+  Object.values(taxByDate).forEach(l => l.sort((a, b) => (!!a.paidDate - !!b.paidDate) || String(a.taxType || "").localeCompare(String(b.taxType || ""))));
+  const goTax = (e) => { if (e) e.stopPropagation(); if (setTab) setTab("tax"); };
   const countByDate = {};
   const doneByDate = {};
   const todosByDate = {};
@@ -29387,6 +29392,24 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{isToday ? "오늘 타임테이블" : "타임테이블"}</span>
                 )}
                 <span style={{ fontSize: 12, color: "var(--text3)" }}>{selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}</span>
+                {(taxByDate[selectedDate] || []).length > 0 && (
+                  <div style={{ order: 99, flexBasis: "100%", display: "flex", flexDirection: "column", gap: 5, marginTop: 4 }}>
+                    {(taxByDate[selectedDate] || []).map(r => (
+                      <div key={r.id} onClick={goTax} title="세무 관리 탭에서 보기"
+                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 10, cursor: "pointer",
+                          background: r.paidDate ? "var(--surface2)" : "rgba(229,72,77,0.08)", border: `1px solid ${r.paidDate ? "var(--border)" : "rgba(229,72,77,0.28)"}` }}>
+                        <span aria-hidden="true" style={{ fontSize: 14 }}>💰</span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 700, color: r.paidDate ? "var(--text3)" : "var(--text1)", textDecoration: r.paidDate ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {r.taxType} 납부 기한 · {r.biz}
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{Number(r.amount || 0).toLocaleString()}원</span>
+                        <span style={{ fontSize: 10.5, fontWeight: 800, padding: "2px 7px", borderRadius: 999, color: r.paidDate ? "#00B493" : "#E5484D", background: r.paidDate ? "rgba(0,180,147,0.12)" : "rgba(229,72,77,0.12)" }}>
+                          {r.paidDate ? "납부함" : "미납"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <span style={{ flex: 1 }} />
                 {dayTodos.length > 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>{dayTodos.length}건 · 완료 {doneCnt}</span>}
                 <button onClick={() => setTtFull(v => !v)}
@@ -29679,7 +29702,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   const maxTrack = tracks.length;
                   const trackH = 76;  // px — 노션식 이벤트 카드 (제목 + 날짜 + 완료 체크)
                   const trackGap = 6;
-                  const headerH = 34; // 날짜 숫자 영역
+                  const weekHasTax = week.some(c => (taxByDate[ymd(c.d)] || []).length > 0);
+                  const headerH = 34 + (weekHasTax ? 24 : 0); // 날짜 숫자 영역 (+ 세금 기한 줄)
                   const rowH = headerH + Math.max(1, maxTrack) * (trackH + trackGap) + 8;
 
                   const goalKey = wgWeekKey(weekStart);
@@ -29726,6 +29750,18 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                               fontVariantNumeric: "tabular-nums",
                             }}>{d.getDate() === 1 && !isToday ? `${d.getMonth() + 1}월 1일` : d.getDate()}</span>
                             <span className="sched-addbtn" title="일정 추가" onClick={(e) => { e.stopPropagation(); openAdd(k); }}>+</span>
+                            {(taxByDate[k] || []).length > 0 && (() => {
+                              const tl = taxByDate[k], allPaid = tl.every(r => r.paidDate);
+                              return (
+                                <span onClick={goTax} title={tl.map(r => `${r.taxType} — ${r.biz} ${Number(r.amount || 0).toLocaleString()}원${r.paidDate ? " · 납부 " + r.paidDate : ""}`).join("\n") + "\n(누르면 세무 관리 탭)"}
+                                  style={{ position: "absolute", top: 32, left: 4, right: 4, height: 20, padding: "0 6px", borderRadius: 6, cursor: "pointer",
+                                    display: "flex", alignItems: "center", gap: 3, fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden",
+                                    color: allPaid ? "var(--text3)" : "#E5484D", background: allPaid ? "var(--surface2)" : "rgba(229,72,77,0.12)",
+                                    textDecoration: allPaid ? "line-through" : "none" }}>
+                                  <span aria-hidden="true">💰</span><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{tl[0].taxType || "세금"}{tl.length > 1 ? ` 외 ${tl.length - 1}` : ""}</span>
+                                </span>
+                              );
+                            })()}
                             {/* 하루 기록 — 기록이 있는 날은 항상 보이고(✎/★), 없는 날은 칸에 마우스를 올리면 나타난다 */}
                             {(() => {
                               const dn = (dailyNotes || {})[k];
@@ -35052,7 +35088,7 @@ function LoginScreen({ onSuccess }) {
 }
 
 // 웰컴 화면 — 로그인 직후 첫 화면
-function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
+function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [], taxes = [] }) {
   const today = new Date();
   const greeting = (() => {
     const h = today.getHours();
@@ -35226,6 +35262,24 @@ function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
           const todayKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
           const todayTodos = (todos || []).filter(t => t.date === todayKey).sort((a,b) => (a.done - b.done) || (a.createdAt - b.createdAt));
           const upcoming = (todos || []).filter(t => !t.done && t.date > todayKey).sort((a,b) => a.date.localeCompare(b.date)).slice(0, 3);
+          // 세무 관리 탭의 미납 세금 중 기한이 지났거나(최근 7일) 7일 안에 오는 것
+          const dayDiff = (ds) => Math.round((new Date(ds) - new Date(todayKey)) / 86400000);
+          const soonTaxes = (Array.isArray(taxes) ? taxes : []).filter(r => r && r.dueDate && !r.paidDate && dayDiff(r.dueDate) <= 7 && dayDiff(r.dueDate) >= -7)
+            .sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 4);
+          const taxBlock = soonTaxes.length > 0 && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px dashed var(--divider)" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#E5484D", letterSpacing: 0.5, marginBottom: 8 }}>💰 세금 기한</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {soonTaxes.map(r => { const dd = dayDiff(r.dueDate); return (
+                  <div key={r.id} onClick={() => onEnter("tax")} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", borderRadius: 8, background: "rgba(229,72,77,0.07)", border: "1px solid rgba(229,72,77,0.25)", cursor: "pointer" }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#E5484D", minWidth: 56 }}>{dd < 0 ? `${-dd}일 지남` : dd === 0 ? "오늘" : `D-${dd}`}</span>
+                    <span style={{ fontSize: 11, color: "var(--text3)", minWidth: 56 }}>{r.dueDate.slice(5).replace("-", ".")}</span>
+                    <span style={{ fontSize: 13, color: "var(--text1)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.taxType} · {r.biz}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{Number(r.amount || 0).toLocaleString()}원</span>
+                  </div>); })}
+              </div>
+            </div>
+          );
           if (todayTodos.length === 0 && upcoming.length === 0) {
             return (
               <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 24, marginTop: 16 }}>
@@ -35240,6 +35294,7 @@ function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
                 <div style={{ padding: "20px 16px", textAlign: "center", color: "var(--text3)", fontSize: 13, lineHeight: 1.7 }}>
                   오늘 등록된 일정이 없습니다.<br/>일정 탭에서 할 일을 추가해보세요.
                 </div>
+                {taxBlock}
               </div>
             );
           }
@@ -35298,6 +35353,7 @@ function WelcomeScreen({ onEnter, orders, ledgers, products, todos = [] }) {
                   </div>
                 </div>
               )}
+              {taxBlock}
             </div>
           );
         })()}
@@ -35417,6 +35473,7 @@ function Root() {
     ledgers={load("frw_ledgers", {})}
     products={load("frw_products", [])}
     todos={load("frw_todos", [])}
+    taxes={load("frw_taxes", [])}
     onEnter={(targetTab) => {
       if (targetTab) { try { localStorage.setItem("frw_tab", JSON.stringify(targetTab)); } catch {} }
       sessionStorage.setItem("nj_welcome_seen", "1");
