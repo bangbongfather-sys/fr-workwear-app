@@ -520,7 +520,10 @@ async function toolGetSection(args, env) {
     const rows = t.filter((x) => x && x.date && x.date <= hi && (x.endDate || x.date) >= lo)
       .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.createdAt || 0) - (b.createdAt || 0))
       .map((x) => ({ id: x.id, date: x.date, endDate: x.endDate || "", text: String(x.text || "").slice(0, 300), memo: String(x.memo || "").slice(0, 1500), done: !!x.done, category: x.category || "", auto: !!(x.isAuto || x.recurringId) }));
-    return textContent({ 오늘: kstToday(), 월: ym, 건수: rows.length, rows });
+    const tx = asList(await fbGet("/frw/taxes", env.FIREBASE_DB_SECRET));
+    const taxes = tx.filter((x) => x && x.dueDate && x.dueDate >= lo && x.dueDate <= hi)
+      .map((x) => ({ id: x.id, date: x.dueDate, type: x.taxType || "세금", biz: x.biz || "", amount: toNumber(x.amount), period: x.period || "", paid: x.paidDate || "" }));
+    return textContent({ 오늘: kstToday(), 월: ym, 건수: rows.length, rows, taxes });
   }
   if (section === "_todos") {
     const t = asList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)); const now = kstToday();
