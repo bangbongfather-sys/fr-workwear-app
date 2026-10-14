@@ -9781,12 +9781,19 @@ function mergeBankInbox(prev, inbox) {
 // 앱이 그 수집함을 입금내역에 합친다(팝빌과 같은 길). 은행 로그인·인증서는 쓰지 않는다.
 function BankSmsCard({ biz }) {
   const [cfg, setCfg] = useState(null);
-  const [open, setOpen] = useState(() => load("frw_bank_sms_open", false));
+  const [open, setOpen] = useState(false);
+  const wrapRef = React.useRef(null);
+  // 바깥을 누르면 닫는다
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h); document.addEventListener("touchstart", h);
+    return () => { document.removeEventListener("mousedown", h); document.removeEventListener("touchstart", h); };
+  }, [open]);
   const [busy, setBusy] = useState(false);
   const [sample, setSample] = useState("");
   const [preview, setPreview] = useState(null);
   const [hintDraft, setHintDraft] = useState(null);
-  useEffect(() => { save("frw_bank_sms_open", open); }, [open]);
   const reload = () => fetch("/api/bank/smskey/status", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => setCfg(j || { enabled: false })).catch(() => setCfg({ enabled: false }));
   useEffect(() => { reload(); }, []);
   if (!cfg) return null;
@@ -9829,7 +9836,19 @@ function BankSmsCard({ biz }) {
   );
   const btn = (primary) => ({ height: 36, padding: "0 14px", borderRadius: 9, border: primary ? "none" : "1px solid var(--border)", background: primary ? "var(--accent)" : "var(--surface)", color: primary ? "#fff" : "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" });
   return (
-    <div className="card no-print" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <span ref={wrapRef} className="no-print" style={{ position: "relative", display: "inline-flex" }}>
+      {/* 평소엔 작은 단추 하나 — 누르면 설정·기록이 아래로 펼쳐진다 */}
+      <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open}
+        title={cfg.enabled ? `은행 문자 자동 등록 켜짐 · 마지막 수신 ${ago(cfg.lastAt)}` : "은행 문자 자동 등록 (꺼짐)"}
+        style={{ height: 38, padding: "0 12px", borderRadius: 10, border: "1px solid var(--border)", background: open ? "var(--surface2)" : "var(--surface)", color: "var(--text2)",
+          fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+        <span aria-hidden="true">✉</span>문자 등록
+        <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 4, background: cfg.enabled ? "#00B493" : "var(--border)" }}/>
+        {fails.length > 0 && <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", background: "#F04452", borderRadius: 100, padding: "0 6px", lineHeight: "16px" }}>{fails.length}</span>}
+      </button>
+      {open && (
+        <div className="card" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 40, width: "min(560px, calc(100vw - 32px))", maxHeight: "72vh", overflowY: "auto",
+          padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 12px 32px rgba(0,0,0,0.22)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <span style={{ display: "inline-flex", width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: 9, background: cfg.enabled ? "rgba(0,180,147,0.13)" : "var(--surface2)", color: cfg.enabled ? "var(--positive-text)" : "var(--text3)", fontSize: 16, flexShrink: 0 }} aria-hidden="true">✉</span>
         <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -9839,9 +9858,8 @@ function BankSmsCard({ biz }) {
           </span>
         </div>
         {!cfg.enabled && <button type="button" onClick={issue} disabled={busy} style={btn(true)}>켜기</button>}
-        <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} style={btn(false)}>{open ? "접기" : cfg.enabled ? "설정·기록" : "방법 보기"}</button>
+        <button type="button" onClick={() => setOpen(false)} aria-label="닫기" style={{ ...btn(false), width: 36, padding: 0 }}>✕</button>
       </div>
-      {open && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14, borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
           {cfg.enabled && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -9894,8 +9912,9 @@ function BankSmsCard({ biz }) {
             </div>
           )}
         </div>
+        </div>
       )}
-    </div>
+    </span>
   );
 }
 
@@ -11164,7 +11183,8 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         <button onClick={() => setFilter("done")} style={chipStyle(filter === "done")}>처리완료 {done.length}건 · {fmt(doneTotal)}원</button>
         <button onClick={() => setFilter("all")} style={chipStyle(filter === "all")}>전체 {items.length}건</button>
         {filter === "nosug" && <span style={{ ...chipStyle(true), cursor: "default" }}>추천 없음 {pendingNoSug.length}건</span>}
-        <span style={{ marginLeft: "auto", position: "relative", display: "inline-flex", alignItems: "center" }}>
+        <span style={{ marginLeft: "auto", display: "inline-flex" }}><BankSmsCard biz={biz} /></span>
+        <span style={{ position: "relative", display: "inline-flex", alignItems: "center" }}>
           <span style={{ position: "absolute", left: 10, display: "inline-flex", color: "var(--text3)", pointerEvents: "none" }}><Icon name="search" size={13}/></span>
           <DebouncedSearchInput value={search} onCommit={setSearch} placeholder="거래처명·입금자 검색"
             style={{ height: 38, padding: "0 30px 0 30px", fontSize: 12.5, borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", width: 220 }}
@@ -11174,8 +11194,6 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
 
       {/* 은행 자동 수집 (팝빌 연동이 설정된 탭에만) */}
       <BankAutoCollectBar biz={biz} />
-      {/* 은행 문자 자동 등록 (아이폰 단축어) */}
-      <BankSmsCard biz={biz} />
 
       {/* 자동수집 건 중 엑셀로 이미 올린 것과 겹쳐 보이는 것 */}
       {suspects.length > 0 && (
