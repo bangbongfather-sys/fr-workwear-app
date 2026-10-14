@@ -9775,6 +9775,7 @@ function BankSmsCard({ biz }) {
   const [busy, setBusy] = useState(false);
   const [sample, setSample] = useState("");
   const [preview, setPreview] = useState(null);
+  const [hintDraft, setHintDraft] = useState(null);
   useEffect(() => { save("frw_bank_sms_open", open); }, [open]);
   const reload = () => fetch("/api/bank/smskey/status", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => setCfg(j || { enabled: false })).catch(() => setCfg({ enabled: false }));
   useEffect(() => { reload(); }, []);
@@ -9796,6 +9797,12 @@ function BankSmsCard({ biz }) {
     setBusy(true); try { await fetch("/api/bank/smskey/disable", { method: "POST" }); await reload(); showToast("문자 자동 등록을 껐습니다"); } finally { setBusy(false); }
   };
   const copy = async () => { try { await navigator.clipboard.writeText(hookUrl); showToast("주소를 복사했습니다 — 단축어에 붙여 넣으세요", "success"); } catch { showToast(hookUrl); } };
+  const saveHint = async () => {
+    const v = String(hintDraft ?? "").replace(/\D/g, "");
+    if (v && v.length < 3) { showToast("계좌번호 앞 3자리 이상 넣어 주세요"); return; }
+    const r = await fetch("/api/bank/smskey/hint", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hint: v }) }).then(r => r.json()).catch(() => ({}));
+    if (r.ok) { setHintDraft(null); await reload(); showToast(v ? `계좌 앞자리 ${v} 가 있는 문자만 받습니다` : "계좌 앞자리 조건을 풀었습니다", "success"); } else showToast(r.error || "저장하지 못했습니다");
+  };
   const tryParse = async () => {
     if (!sample.trim()) return;
     const r = await fetch("/api/bank/smskey/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sample }) }).then(r => r.json()).catch(() => ({ error: "서버 연결 실패" }));
@@ -9834,10 +9841,19 @@ function BankSmsCard({ biz }) {
               <button type="button" onClick={disable} disabled={busy} style={{ ...btn(false), color: "var(--negative-text)" }}>끄기</button>
             </div>
           )}
+          {cfg.enabled && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text2)" }}>회사 통장 번호 앞자리</span>
+              <input type="text" inputMode="numeric" value={hintDraft ?? (cfg.acctHint || "")} onChange={e => setHintDraft(e.target.value.replace(/[^\d]/g, "").slice(0, 8))}
+                placeholder="예: 123456" aria-label="회사 통장 번호 앞자리" style={{ width: 130, height: 36, fontSize: 13 }}/>
+              <button type="button" onClick={saveHint} disabled={hintDraft === null} style={btn(false)}>저장</button>
+              <span style={{ fontSize: 12, color: "var(--text3)", flex: "1 1 220px" }}>{cfg.acctHint ? `「${cfg.acctHint}」가 들어 있는 문자만 받습니다 — 다른 통장·카드 문자는 서버에서 버립니다` : "넣어 두면 이 숫자가 들어 있는 문자만 받습니다 (문자에 보이는 앞자리 그대로)"}</span>
+            </div>
+          )}
           <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {step(1, <>{cfg.enabled ? "위 「주소 복사」를 누릅니다." : "「켜기」를 누르고 나오는 주소를 복사합니다."} 이 주소는 비밀번호와 같습니다. 남에게 보내지 마세요.</>)}
             {step(2, <>아이폰 <b>단축어</b> 앱 → 아래 <b>자동화</b> → <b>+</b> → <b>메시지</b></>)}
-            {step(3, <><b>메시지 포함</b>에 <code>입금</code> 입력 (카드 승인 문자는 안 넘어가게) → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음</>)}
+            {step(3, <><b>메시지 포함</b>에 문자에 보이는 <b>회사 통장 번호 앞자리</b>(예: <code>123456</code>)를 입력 — 문자에 앞자리가 안 보이면 <code>입금</code> → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음</>)}
             {step(4, <><b>새로운 빈 자동화</b> → 동작 검색에서 <b>URL 콘텐츠 가져오기</b> 추가 → URL 칸에 복사한 주소 붙여 넣기</>)}
             {step(5, <>그 동작의 <b>›</b>를 눌러 방법 <b>POST</b>, 본문 요청 <b>JSON</b> → 필드 추가 <b>텍스트</b>: 키 <code>text</code>, 값은 키보드 위 변수에서 <b>단축어 입력</b>(메시지 내용) 선택 → 완료</>)}
             {step(6, <>KB 입출금 알림이 <b>문자(SMS)</b>로 오는지 확인합니다. 앱 푸시·카카오톡 알림은 단축어가 읽지 못합니다. 다음 입금 문자부터 여기 입금내역에 「문자」로 들어옵니다.</>)}
@@ -9861,7 +9877,7 @@ function BankSmsCard({ biz }) {
                 <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "var(--text2)", flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
                   <span style={{ color: "var(--text3)", minWidth: 80 }}>{String(l.at || "").slice(5, 16).replace("T", " ")}</span>
                   {l.ok
-                    ? (l.kind === "card" ? <span style={{ color: "var(--text3)" }}>카드 문자 — 건너뜀</span> : <span>{l.kind === "in" ? "입금" : "출금"} {won(l.amount)}원 · {l.name || "(이름 없음)"}{l.kind === "in" ? " → 입금함" : ""}</span>)
+                    ? (l.kind === "card" || l.kind === "other" ? <span style={{ color: "var(--text3)" }}>{l.kind === "card" ? "카드 문자" : "다른 계좌 문자"} — 건너뜀</span> : <span>{l.kind === "in" ? "입금" : "출금"} {won(l.amount)}원 · {l.name || "(이름 없음)"}{l.kind === "in" ? " → 입금함" : ""}</span>)
                     : <span style={{ color: "var(--negative-text)" }}>못 읽음({l.error}) · {String(l.text || "").slice(0, 60)}</span>}
                 </div>
               ))}

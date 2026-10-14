@@ -104,6 +104,12 @@ export async function handleBankSmsPublic(request, env, url) {
   } catch { return json({ error: "본문을 읽지 못했습니다" }, 400); }
   text = text.slice(0, 1000);
   const now = kstNow();
+  // 계좌 앞자리를 정해 두면 그 숫자가 들어 있는 문자만 받는다 (다른 통장·카드 문자 차단)
+  const hint = String(cfg.acctHint || "").replace(/\D/g, "");
+  if (hint && !text.replace(/[\s-]/g, "").includes(hint)) {
+    await pushLog(env, { at: now, ok: true, kind: "other", text: "" });
+    return json({ ok: true, kind: "other", skipped: "다른 계좌 문자는 건너뜁니다" });
+  }
   const p = parseBankSms(text, now.slice(0, 10));
   if (p.kind === "card") {
     await pushLog(env, { at: now, ok: true, kind: "card", text: "" });   // 카드 내용은 남기지 않는다
@@ -133,18 +139,26 @@ export async function handleBankSmsAdmin(request, env, url) {
   const p = url.pathname.replace(/\/+$/, "");
   if (p === "/api/bank/smskey/status") {
     const log = (await fbGet(env, SMS_LOG_PATH)) || [];
-    return json({ enabled: !!cfg.token, token: cfg.token || null, biz: cfg.biz || "nj", at: cfg.at || null, lastAt: cfg.lastAt || null,
+    return json({ enabled: !!cfg.token, token: cfg.token || null, biz: cfg.biz || "nj", acctHint: cfg.acctHint || "", at: cfg.at || null, lastAt: cfg.lastAt || null,
       log: (Array.isArray(log) ? log : Object.values(log)).filter(Boolean).slice(0, 15) });
   }
   if (p === "/api/bank/smskey/issue" && request.method === "POST") {
     let b = {}; try { b = await request.json(); } catch {}
-    const next = { token: randomToken(), biz: b.biz === "corp" ? "corp" : "nj", at: kstNow() };
+    const next = { token: randomToken(), biz: b.biz === "corp" ? "corp" : "nj", acctHint: cfg.acctHint || "", at: kstNow() };
     await fbPut(env, SMS_CFG_PATH, next);
     return json({ ok: true, ...next });
   }
   if (p === "/api/bank/smskey/disable" && request.method === "POST") {
     await fbPut(env, SMS_CFG_PATH, { token: "", biz: cfg.biz || "nj", at: kstNow() });
     return json({ ok: true, enabled: false });
+  }
+  // 계좌 앞자리 (숫자 3~8자리, 빈 값이면 해제)
+  if (p === "/api/bank/smskey/hint" && request.method === "POST") {
+    let b = {}; try { b = await request.json(); } catch {}
+    const hint = String(b.hint || "").replace(/\D/g, "").slice(0, 8);
+    if (hint && hint.length < 3) return json({ error: "3자리 이상 넣어 주세요" }, 400);
+    await fbPatch(env, SMS_CFG_PATH, { acctHint: hint });
+    return json({ ok: true, acctHint: hint });
   }
   // 문자 붙여 넣고 미리 읽어 보기 (저장하지 않음)
   if (p === "/api/bank/smskey/test" && request.method === "POST") {
