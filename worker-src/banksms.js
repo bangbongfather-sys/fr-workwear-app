@@ -32,6 +32,8 @@ const isMoney = (t) => /^[\d,]+원?$/.test(t) && /\d/.test(t) && (t.includes(","
 export function parseBankSms(text, nowKst) {
   const raw = String(text || "").replace(/\r/g, "").replace(/\[Web발신\]/g, " ").trim();
   if (!raw) return { error: "빈 문자" };
+  // 카드 문자(KB국민카드 승인·취소·결제 안내)는 통장 거래가 아니다 — 읽지 않고 건너뛴다
+  if (/카드|국민체크|일시불|할부|누적\s*[\d,]|승인/.test(raw) && !/잔액/.test(raw)) return { kind: "card", skip: "카드 문자" };
   const dt = raw.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s+(\d{1,2}):(\d{2})/) || raw.match(/(\d{1,2})\s*\/\s*(\d{1,2})/);
   if (!dt) return { error: "날짜(월/일)를 찾지 못함" };
   const kindM = raw.match(/(입금|출금|지급|이체출금|인출|체크카드|승인)/);
@@ -46,7 +48,7 @@ export function parseBankSms(text, nowKst) {
   let rest = raw.replace(/잔액\s*:?\s*[\d,]+원?/g, " ")
     .replace(dt[0], " ")
     .replace(acctM ? acctM[0] : "\u0000", " ")
-    .replace(/\[?\s*KB\s*(국민|국민은행|스타뱅킹)?\s*\]?/gi, " ")
+    .replace(/^\s*\[?\s*KB\s*(국민은행|국민|스타뱅킹)?\s*\]?/gim, " ")   // 맨 앞 머리표만 (이름 속 'KB국민카드'는 남김)
     .replace(/국민은행|기업은행|신한|우리|하나|농협/g, " ");
   const parts = rest.split(/\n+/).map(s => s.trim()).filter(Boolean);
   const tokens = parts.length >= 3 ? parts : rest.split(/\s+/).filter(Boolean);
@@ -103,6 +105,10 @@ export async function handleBankSmsPublic(request, env, url) {
   text = text.slice(0, 1000);
   const now = kstNow();
   const p = parseBankSms(text, now.slice(0, 10));
+  if (p.kind === "card") {
+    await pushLog(env, { at: now, ok: true, kind: "card", text: "" });   // 카드 내용은 남기지 않는다
+    return json({ ok: true, kind: "card", skipped: "카드 문자는 건너뜁니다" });
+  }
   if (p.error) {
     await pushLog(env, { at: now, ok: false, error: p.error, text: maskText(text) });
     return json({ ok: false, error: p.error });

@@ -9818,7 +9818,7 @@ function BankSmsCard({ biz }) {
         <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 2 }}>
           <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>은행 문자 자동 등록 {cfg.enabled ? <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--positive-text)", marginLeft: 4 }}>켜짐</span> : <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text3)", marginLeft: 4 }}>꺼짐</span>}</span>
           <span style={{ fontSize: 12, color: "var(--text3)" }}>
-            {cfg.enabled ? <>아이폰이 KB 입금 문자를 받으면 여기 입금내역에 자동으로 들어옵니다 · 마지막 수신 {ago(cfg.lastAt)}{fails.length ? <b style={{ color: "var(--negative-text)" }}> · 못 읽은 문자 {fails.length}건</b> : null}</> : "KB 입금 문자를 아이폰 단축어로 넘겨 자동 등록합니다 — 은행 로그인·인증서 없이, 비용 없이"}
+            {cfg.enabled ? <>아이폰이 은행 입금 문자를 받으면 여기 입금내역에 자동으로 들어옵니다 · 마지막 수신 {ago(cfg.lastAt)}{fails.length ? <b style={{ color: "var(--negative-text)" }}> · 못 읽은 문자 {fails.length}건</b> : null}</> : "KB 입금 문자를 아이폰 단축어로 넘겨 자동 등록합니다 — 은행 로그인·인증서 없이, 비용 없이"}
           </span>
         </div>
         {!cfg.enabled && <button type="button" onClick={issue} disabled={busy} style={btn(true)}>켜기</button>}
@@ -9837,7 +9837,7 @@ function BankSmsCard({ biz }) {
           <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {step(1, <>{cfg.enabled ? "위 「주소 복사」를 누릅니다." : "「켜기」를 누르고 나오는 주소를 복사합니다."} 이 주소는 비밀번호와 같습니다. 남에게 보내지 마세요.</>)}
             {step(2, <>아이폰 <b>단축어</b> 앱 → 아래 <b>자동화</b> → <b>+</b> → <b>메시지</b></>)}
-            {step(3, <><b>메시지 포함</b>에 <code>KB</code> 입력 → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음</>)}
+            {step(3, <><b>메시지 포함</b>에 <code>입금</code> 입력 (카드 승인 문자는 안 넘어가게) → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음</>)}
             {step(4, <><b>새로운 빈 자동화</b> → 동작 검색에서 <b>URL 콘텐츠 가져오기</b> 추가 → URL 칸에 복사한 주소 붙여 넣기</>)}
             {step(5, <>그 동작의 <b>›</b>를 눌러 방법 <b>POST</b>, 본문 요청 <b>JSON</b> → 필드 추가 <b>텍스트</b>: 키 <code>text</code>, 값은 키보드 위 변수에서 <b>단축어 입력</b>(메시지 내용) 선택 → 완료</>)}
             {step(6, <>KB 입출금 알림이 <b>문자(SMS)</b>로 오는지 확인합니다. 앱 푸시·카카오톡 알림은 단축어가 읽지 못합니다. 다음 입금 문자부터 여기 입금내역에 「문자」로 들어옵니다.</>)}
@@ -9848,7 +9848,9 @@ function BankSmsCard({ biz }) {
               <textarea value={sample} onChange={e => setSample(e.target.value)} rows={3} placeholder={"[Web발신]\n[KB]10/14 13:22 123456**789 홍길동 전자금융입금 550,000 잔액12,345,678"} style={{ flex: "1 1 260px", minWidth: 0, fontSize: 12.5 }}/>
               <button type="button" onClick={tryParse} style={{ ...btn(false), alignSelf: "flex-start" }}>읽어 보기</button>
             </div>
-            {preview && (preview.error
+            {preview && (preview.kind === "card"
+              ? <span style={{ fontSize: 12.5, color: "var(--text2)" }}>카드 문자로 보고 건너뜁니다 (입금내역에 안 들어감)</span>
+              : preview.error
               ? <span style={{ fontSize: 12.5, color: "var(--negative-text)" }}>못 읽음: {preview.error} — 이 문자를 Claude에게 보여 주면 읽도록 고칠 수 있습니다</span>
               : <span style={{ fontSize: 12.5, color: "var(--text1)" }}>{preview.kind === "in" ? "입금" : "출금(입금함에는 안 넣음)"} · {preview.date} {preview.time} · <b>{won(preview.amount)}원</b> · {preview.name || "(이름 없음)"}{preview.bal != null ? ` · 잔액 ${won(preview.bal)}` : ""}</span>)}
           </div>
@@ -9859,7 +9861,7 @@ function BankSmsCard({ biz }) {
                 <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "var(--text2)", flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
                   <span style={{ color: "var(--text3)", minWidth: 80 }}>{String(l.at || "").slice(5, 16).replace("T", " ")}</span>
                   {l.ok
-                    ? <span>{l.kind === "in" ? "입금" : "출금"} {won(l.amount)}원 · {l.name || "(이름 없음)"}{l.kind === "in" ? " → 입금함" : ""}</span>
+                    ? (l.kind === "card" ? <span style={{ color: "var(--text3)" }}>카드 문자 — 건너뜀</span> : <span>{l.kind === "in" ? "입금" : "출금"} {won(l.amount)}원 · {l.name || "(이름 없음)"}{l.kind === "in" ? " → 입금함" : ""}</span>)
                     : <span style={{ color: "var(--negative-text)" }}>못 읽음({l.error}) · {String(l.text || "").slice(0, 60)}</span>}
                 </div>
               ))}
