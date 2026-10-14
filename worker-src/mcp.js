@@ -1239,6 +1239,14 @@ async function toolCampusWrite(a, env) {
   if (op === "stock_adjust") return await toolStockAdjust(a, env);
   if (op === "hr_payroll") return await toolHrPayroll(a, env);
   if (op === "hr_employee") return await toolHrEmployee(a, env);
+  if (op === "bank_sms_hint") {
+    // 은행 문자 자동 등록 — 이 숫자가 들어 있는 문자만 받는다 (앱 입금내역 카드의 「회사 통장 번호 앞자리」와 같은 값)
+    const hint = String(a.hint ?? "").replace(/\D/g, "").slice(0, 8);
+    if (hint && hint.length < 3) return errContent("3자리 이상 넣어 주세요.");
+    await fbPatch("/frw_bank_sms", { acctHint: hint }, env.FIREBASE_DB_SECRET);
+    const cur = await fbGet("/frw_bank_sms", env.FIREBASE_DB_SECRET);
+    return textContent({ 결과: hint ? "계좌 앞자리 저장" : "계좌 앞자리 해제", 앞자리: (cur && cur.acctHint) || "", 문자주소: cur && cur.token ? "발급됨" : "아직 없음 (앱에서 켜기)" });
+  }
   if (op === "note_add" || op === "daily_append") return await toolNoteSave(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
 }
