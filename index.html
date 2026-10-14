@@ -9754,7 +9754,7 @@ function mergeBankInbox(prev, inbox) {
       id: ++base, date: it.date, time: it.time || "", amount: amt,
       name: name || "(입금자명 없음)", memo: String(it.memo || "").trim(),
       biz, status: "pending", client: "", link: null,
-      src: "api", ext: it.ext, acct: it.acct || "",
+      src: it.src === "sms" ? "sms" : "api", ext: it.ext, acct: it.acct || "",
       ...(it.bal != null && it.bal !== "" ? { bal: Number(it.bal) } : {}),
     };
     if (cands.length === 1) { row.dupSuspect = cands[0].id; claimed.add(cands[0].id); suspects++; }
@@ -9764,6 +9764,111 @@ function mergeBankInbox(prev, inbox) {
   if (!added && !merged) return { next: prev, added: 0, merged: 0, suspects: 0 };
   next.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id));
   return { next: { ...p, items: next, nameMap: p.nameMap || {} }, added, merged, suspects };
+}
+
+// ── 은행 문자 자동 등록 (아이폰 단축어) ──
+// 은행 입출금 문자를 아이폰 「단축어」 자동화가 서버 주소로 보내면, 서버가 읽어 입금 수집함에 넣고
+// 앱이 그 수집함을 입금내역에 합친다(팝빌과 같은 길). 은행 로그인·인증서는 쓰지 않는다.
+function BankSmsCard({ biz }) {
+  const [cfg, setCfg] = useState(null);
+  const [open, setOpen] = useState(() => load("frw_bank_sms_open", false));
+  const [busy, setBusy] = useState(false);
+  const [sample, setSample] = useState("");
+  const [preview, setPreview] = useState(null);
+  useEffect(() => { save("frw_bank_sms_open", open); }, [open]);
+  const reload = () => fetch("/api/bank/smskey/status", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => setCfg(j || { enabled: false })).catch(() => setCfg({ enabled: false }));
+  useEffect(() => { reload(); }, []);
+  if (!cfg) return null;
+  const mine = (cfg.biz || "nj") === biz;
+  if (cfg.enabled && !mine) return null;           // 다른 사업자 탭에 연결된 경우 여기선 숨김
+  if (!cfg.enabled && biz !== "nj") return null;    // 처음 설정은 나정엔터프라이즈 탭에서
+  const hookUrl = cfg.token ? `${location.origin}/api/bank/sms/${cfg.token}` : "";
+  const issue = async () => {
+    if (cfg.enabled && !window.confirm("새 주소를 만들면 지금 주소는 바로 막힙니다.\n아이폰 단축어의 주소도 바꿔야 합니다. 계속할까요?")) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/bank/smskey/issue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ biz }) }).then(r => r.json());
+      if (r.ok) { await reload(); setOpen(true); showToast("문자 받을 주소를 만들었습니다", "success"); } else showToast("주소를 만들지 못했습니다");
+    } finally { setBusy(false); }
+  };
+  const disable = async () => {
+    if (!window.confirm("끄면 단축어가 보내는 문자를 더 받지 않습니다. 계속할까요?")) return;
+    setBusy(true); try { await fetch("/api/bank/smskey/disable", { method: "POST" }); await reload(); showToast("문자 자동 등록을 껐습니다"); } finally { setBusy(false); }
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(hookUrl); showToast("주소를 복사했습니다 — 단축어에 붙여 넣으세요", "success"); } catch { showToast(hookUrl); } };
+  const tryParse = async () => {
+    if (!sample.trim()) return;
+    const r = await fetch("/api/bank/smskey/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: sample }) }).then(r => r.json()).catch(() => ({ error: "서버 연결 실패" }));
+    setPreview(r);
+  };
+  const won = (n) => Number(n || 0).toLocaleString("ko-KR");
+  const ago = (iso) => { if (!iso) return "아직 없음"; const d = new Date(iso.replace(/\+.*$/, "") + "+09:00"); const m = Math.round((Date.now() - d) / 60000); return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${iso.slice(5, 10).replace("-", "/")} ${iso.slice(11, 16)}`; };
+  const fails = (cfg.log || []).filter(l => !l.ok);
+  const step = (n, body) => (
+    <li style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+      <span style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 11, background: "var(--accent-tonal)", color: "var(--accent-strong)", fontSize: 12, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{n}</span>
+      <span style={{ fontSize: 13, color: "var(--text2)", lineHeight: 1.6 }}>{body}</span>
+    </li>
+  );
+  const btn = (primary) => ({ height: 36, padding: "0 14px", borderRadius: 9, border: primary ? "none" : "1px solid var(--border)", background: primary ? "var(--accent)" : "var(--surface)", color: primary ? "#fff" : "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" });
+  return (
+    <div className="card no-print" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: 9, background: cfg.enabled ? "rgba(0,180,147,0.13)" : "var(--surface2)", color: cfg.enabled ? "var(--positive-text)" : "var(--text3)", fontSize: 16, flexShrink: 0 }} aria-hidden="true">✉</span>
+        <div style={{ flex: 1, minWidth: 200, display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)" }}>은행 문자 자동 등록 {cfg.enabled ? <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--positive-text)", marginLeft: 4 }}>켜짐</span> : <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text3)", marginLeft: 4 }}>꺼짐</span>}</span>
+          <span style={{ fontSize: 12, color: "var(--text3)" }}>
+            {cfg.enabled ? <>아이폰이 KB 입금 문자를 받으면 여기 입금내역에 자동으로 들어옵니다 · 마지막 수신 {ago(cfg.lastAt)}{fails.length ? <b style={{ color: "var(--negative-text)" }}> · 못 읽은 문자 {fails.length}건</b> : null}</> : "KB 입금 문자를 아이폰 단축어로 넘겨 자동 등록합니다 — 은행 로그인·인증서 없이, 비용 없이"}
+          </span>
+        </div>
+        {!cfg.enabled && <button type="button" onClick={issue} disabled={busy} style={btn(true)}>켜기</button>}
+        <button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open} style={btn(false)}>{open ? "접기" : cfg.enabled ? "설정·기록" : "방법 보기"}</button>
+      </div>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, borderTop: "1px solid var(--divider)", paddingTop: 12 }}>
+          {cfg.enabled && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <code style={{ flex: "1 1 260px", minWidth: 0, fontSize: 12, padding: "9px 10px", borderRadius: 8, background: "var(--surface2)", color: "var(--text1)", overflowWrap: "anywhere" }}>{hookUrl}</code>
+              <button type="button" onClick={copy} style={btn(true)}>주소 복사</button>
+              <button type="button" onClick={issue} disabled={busy} style={btn(false)}>새 주소</button>
+              <button type="button" onClick={disable} disabled={busy} style={{ ...btn(false), color: "var(--negative-text)" }}>끄기</button>
+            </div>
+          )}
+          <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+            {step(1, <>{cfg.enabled ? "위 「주소 복사」를 누릅니다." : "「켜기」를 누르고 나오는 주소를 복사합니다."} 이 주소는 비밀번호와 같습니다. 남에게 보내지 마세요.</>)}
+            {step(2, <>아이폰 <b>단축어</b> 앱 → 아래 <b>자동화</b> → <b>+</b> → <b>메시지</b></>)}
+            {step(3, <><b>메시지 포함</b>에 <code>KB</code> 입력 → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음</>)}
+            {step(4, <><b>새로운 빈 자동화</b> → 동작 검색에서 <b>URL 콘텐츠 가져오기</b> 추가 → URL 칸에 복사한 주소 붙여 넣기</>)}
+            {step(5, <>그 동작의 <b>›</b>를 눌러 방법 <b>POST</b>, 본문 요청 <b>JSON</b> → 필드 추가 <b>텍스트</b>: 키 <code>text</code>, 값은 키보드 위 변수에서 <b>단축어 입력</b>(메시지 내용) 선택 → 완료</>)}
+            {step(6, <>KB 입출금 알림이 <b>문자(SMS)</b>로 오는지 확인합니다. 앱 푸시·카카오톡 알림은 단축어가 읽지 못합니다. 다음 입금 문자부터 여기 입금내역에 「문자」로 들어옵니다.</>)}
+          </ol>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text2)" }}>받은 문자로 미리 확인 <span style={{ fontWeight: 500, color: "var(--text3)" }}>— 예전 입금 문자를 붙여 넣으면 어떻게 읽는지 보여 줍니다 (저장하지 않음)</span></span>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <textarea value={sample} onChange={e => setSample(e.target.value)} rows={3} placeholder={"[Web발신]\n[KB]10/14 13:22 123456**789 홍길동 전자금융입금 550,000 잔액12,345,678"} style={{ flex: "1 1 260px", minWidth: 0, fontSize: 12.5 }}/>
+              <button type="button" onClick={tryParse} style={{ ...btn(false), alignSelf: "flex-start" }}>읽어 보기</button>
+            </div>
+            {preview && (preview.error
+              ? <span style={{ fontSize: 12.5, color: "var(--negative-text)" }}>못 읽음: {preview.error} — 이 문자를 Claude에게 보여 주면 읽도록 고칠 수 있습니다</span>
+              : <span style={{ fontSize: 12.5, color: "var(--text1)" }}>{preview.kind === "in" ? "입금" : "출금(입금함에는 안 넣음)"} · {preview.date} {preview.time} · <b>{won(preview.amount)}원</b> · {preview.name || "(이름 없음)"}{preview.bal != null ? ` · 잔액 ${won(preview.bal)}` : ""}</span>)}
+          </div>
+          {cfg.enabled && (cfg.log || []).length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--text2)" }}>최근 받은 문자</span>
+              {(cfg.log || []).slice(0, 10).map((l, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "var(--text2)", flexWrap: "wrap", fontVariantNumeric: "tabular-nums" }}>
+                  <span style={{ color: "var(--text3)", minWidth: 80 }}>{String(l.at || "").slice(5, 16).replace("T", " ")}</span>
+                  {l.ok
+                    ? <span>{l.kind === "in" ? "입금" : "출금"} {won(l.amount)}원 · {l.name || "(이름 없음)"}{l.kind === "in" ? " → 입금함" : ""}</span>
+                    : <span style={{ color: "var(--negative-text)" }}>못 읽음({l.error}) · {String(l.text || "").slice(0, 60)}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── 자동 수집 띠 ── 팝빌 연동이 설정된 사업자 탭에만 보인다 (설정 전에는 아무것도 안 그림)
@@ -10730,7 +10835,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
             <div className="card" style={{ padding: "28px 30px" }}>
               <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{focusDep.date.replace(/-/g, ".")} {dayLabel(focusDep.date).replace(/^\d+월 \d+일 /, "")}{focusDep.time ? ` ${focusDep.time.slice(0, 5)}` : ""}{focusDep.src === "api" ? " · 자동수집" : ""}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{focusDep.date.replace(/-/g, ".")} {dayLabel(focusDep.date).replace(/^\d+월 \d+일 /, "")}{focusDep.time ? ` ${focusDep.time.slice(0, 5)}` : ""}{focusDep.src === "api" ? " · 자동수집" : focusDep.src === "sms" ? " · 은행 문자" : ""}</div>
                   <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.9, color: "var(--text1)", marginTop: 6, wordBreak: "break-all" }}>{focusDep.name}</div>
                   {focusDep.memo && focusDep.memo !== focusDep.name && <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 4 }}>{focusDep.memo}</div>}
                 </div>
@@ -11041,6 +11146,8 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
 
       {/* 은행 자동 수집 (팝빌 연동이 설정된 탭에만) */}
       <BankAutoCollectBar biz={biz} />
+      {/* 은행 문자 자동 등록 (아이폰 단축어) */}
+      <BankSmsCard biz={biz} />
 
       {/* 자동수집 건 중 엑셀로 이미 올린 것과 겹쳐 보이는 것 */}
       {suspects.length > 0 && (
@@ -11252,8 +11359,8 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                               {(dep.time || dep.ext || dep.dupSuspect != null) && (
                                 <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, flexWrap: "wrap" }}>
                                   {dep.time && <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{dep.time.slice(0, 5)}</span>}
-                                  {dep.ext && <span title={dep.src === "api" ? "은행 자동수집으로 들어온 입금" : "엑셀로 올린 입금 — 은행 자동수집과 확인됨"}
-                                    style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--accent-tonal)", color: "var(--accent-strong)" }}>{dep.src === "api" ? "자동" : "엑셀·확인"}</span>}
+                                  {dep.ext && <span title={dep.src === "api" ? "은행 자동수집으로 들어온 입금" : dep.src === "sms" ? "은행 입금 문자로 자동 등록된 입금" : "엑셀로 올린 입금 — 은행 자동수집과 확인됨"}
+                                    style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--accent-tonal)", color: "var(--accent-strong)" }}>{dep.src === "api" ? "자동" : dep.src === "sms" ? "문자" : "엑셀·확인"}</span>}
                                   {dep.dupSuspect != null && <span style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--warning-bg)", color: "var(--warning-text)" }}>중복 의심</span>}
                                 </div>
                               )}

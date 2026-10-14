@@ -27,6 +27,7 @@ import { handleMcp } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { handleBankApi } from "./worker-src/bank.js";
+import { handleBankSmsPublic, handleBankSmsAdmin } from "./worker-src/banksms.js";
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
@@ -139,8 +140,9 @@ export default {
     }
     const isProtected = path.startsWith("/api/") || path === "/mcp" || path === "/mcp/";
     //  - /api/ics/<토큰>.ics : 캘린더 구독 — 캘린더 앱이 헤더를 못 붙여 주소의 토큰으로 검증
+    //  - /api/bank/sms/<토큰> : 아이폰 단축어가 은행 문자를 보내는 주소 — 주소의 토큰으로 검증
     const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback"
-      || path.startsWith("/api/ics/");
+      || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/");
     if (isProtected && !isPublic) {
       if (path === "/mcp" || path === "/mcp/") {
         // /mcp 는 handleMcp 안의 자체 잠금(MCP_TOKEN, ?k=)이 검증한다 — 기존 커넥터 URL 유지.
@@ -197,6 +199,9 @@ export default {
     }
 
     // 은행 입금 자동수집 (팝빌 계좌조회) — 수집함·상태·지금 수집
+    // 은행 문자 → 입금함 (공개, 토큰 검증) / 문자 주소 발급·상태 (로그인)
+    if (url.pathname.startsWith("/api/bank/sms/")) return handleBankSmsPublic(request, env, url);
+    if (url.pathname.startsWith("/api/bank/smskey/")) return handleBankSmsAdmin(request, env, url);
     if (url.pathname.startsWith("/api/bank/")) {
       return handleBankApi(request, env, url);
     }
