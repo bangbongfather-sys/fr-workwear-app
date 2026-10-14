@@ -9718,6 +9718,16 @@ const depBizLabel = (id) => (DEP_BIZ.find(o => o.id === id) || DEP_BIZ[0]).label
 //    새로 넣지 않고 그 엑셀 건에 ext·시간·계좌만 덧붙인다 (처리 상태는 그대로)
 //  - 날짜·금액만 같은 엑셀 건이 딱 1건이면 새로 넣되 dupSuspect 로 표시 → 사용자가 합치기/유지 선택
 // 돌려주는 값: { next, added, merged, suspects } — 바뀐 게 없으면 next === prev
+// 입금 목록 정렬 — 최근 날짜 먼저, 같은 날은 늦은 시각 먼저(시각 없는 줄은 그날 맨 아래), 그다음 나중에 들어온 순
+function depNewestFirst(a, b) {
+  const d = String(b.date || "").localeCompare(String(a.date || ""));
+  if (d) return d;
+  // "9:05" 처럼 앞자리 0이 없는 시각도 바르게 비교되게 HH:MM:SS 로 맞춘다
+  const hms = (t) => { const m = String(t || "").match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/); return m ? `${m[1].padStart(2, "0")}:${m[2]}:${m[3] || "00"}` : ""; };
+  const ta = hms(a.time), tb = hms(b.time);
+  if (ta !== tb) return !ta ? 1 : !tb ? -1 : tb.localeCompare(ta);
+  return (Number(b.id) || 0) - (Number(a.id) || 0);
+}
 function mergeBankInbox(prev, inbox) {
   const p = prev || {};
   const items = Array.isArray(p.items) ? p.items : [];
@@ -10144,7 +10154,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       const c = (x.client || "").trim();
       if (c) return c === name;
       return x.status !== "done" && payablesNameMatch(name, x.name);
-    }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    }).sort(depNewestFirst);
     const ar = (clientAR || {})[name] || null;
     const arBalance = ar ? (ar.entries || []).reduce((a, e) => a + (e.type === "입금" ? -1 : 1) * (parseFloat(e.amount) || 0), parseFloat(ar.opening) || 0) : null;
     return { name, months, billed, paid, unpaid, deps, arBalance };
@@ -10486,7 +10496,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   }, [qInfo, depIndex, allItems, biz]);
 
   const shownSorted = React.useMemo(
-    () => [...shown].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id)),
+    () => [...shown].sort(depNewestFirst),
     [shown]);
   // 합계: 표시 중인 항목 / 체크 선택한 항목
   const shownTotal = shownActive.reduce((s, x) => s + (parseFloat(x.amount) || 0), 0);
