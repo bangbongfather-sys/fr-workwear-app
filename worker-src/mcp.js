@@ -512,6 +512,16 @@ async function toolGetSection(args, env) {
   // 인사 관리 — 직원 목록 + 급여대장 (선택: "_hr:2026-10" 이면 그 달 기록까지)
   if (section === "_hr" || section.startsWith("_hr:")) return compact(await hrRead(env, section.slice(4) || ""));
   // 일정 전체(최근 60일~앞으로 60일, 미완료 우선) — AI 직원 조회용
+  // 캠퍼스 일정 달력: 그 달에 걸치는 일정(앞뒤 7일 여유) 전체 필드
+  if (section.startsWith("_cal:")) {
+    const ym = section.slice(5).trim(); if (!/^\d{4}-\d{2}$/.test(ym)) return errContent("_cal:YYYY-MM 형식입니다.");
+    const t = asList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET));
+    const lo = addDays(`${ym}-01`, -7), hi = addDays(`${ym}-28`, 14);
+    const rows = t.filter((x) => x && x.date && x.date <= hi && (x.endDate || x.date) >= lo)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.createdAt || 0) - (b.createdAt || 0))
+      .map((x) => ({ id: x.id, date: x.date, endDate: x.endDate || "", text: String(x.text || "").slice(0, 300), memo: String(x.memo || "").slice(0, 1500), done: !!x.done, category: x.category || "", auto: !!(x.isAuto || x.recurringId) }));
+    return textContent({ 오늘: kstToday(), 월: ym, 건수: rows.length, rows });
+  }
   if (section === "_todos") {
     const t = asList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)); const now = kstToday();
     const lo = addDays(now, -60), hi = addDays(now, 60);
@@ -787,7 +797,8 @@ async function safeSectionWrite(section, mutate, env) {
     if (plan.isError || plan.done) return plan;
     const next = plan.apply(data);              // 적용 후 섹션 전체 (지문 계산용)
     const body = {};
-    for (const [k, v] of Object.entries(plan.patch)) body[`${section}/${k}`] = v;
+    if (plan.replace) body[section] = next;               // 삭제처럼 배열을 다시 써야 할 때만(섹션 전체)
+    else for (const [k, v] of Object.entries(plan.patch)) body[`${section}/${k}`] = v;
     body[`_sigs/${section}`] = sectionSignature(next);
     await fbPatch(`/frw`, body, S);
     let bumped = false;
@@ -923,7 +934,8 @@ async function toolTodo(a, env) {
       if (list(d).some(([, r]) => r.campusToken === token)) return { done: true, result: { 결과: "이미 반영됨" } };
       const key = Array.isArray(d) || d == null ? String(d ? d.length : 0) : `c${Date.now()}`;
       const ids = new Set(list(d).map(([, r]) => String(r.id))); let id = Date.now(); while (ids.has(String(id))) id++;
-      const row = { id, date, endDate: "", text: text.slice(0, 200), memo: a.memo ? String(a.memo).slice(0, 300) : "", done: false, createdAt: Date.now(), atts: [], campusToken: token, fromCampus: true };
+      let end = a.endDate && isRealDate(String(a.endDate)) ? String(a.endDate) : ""; let start = date; if (end && end < start) { const x = start; start = end; end = x; } if (end === start) end = "";
+      const row = { id, date: start, endDate: end, text: text.slice(0, 200), memo: a.memo ? String(a.memo).slice(0, 1500) : "", done: false, createdAt: Date.now(), atts: [], campusToken: token, fromCampus: true };
       const apply = (dd) => { if (Array.isArray(dd) || dd == null) { const x = [...(dd || [])]; x[Number(key)] = row; return x; } return { ...dd, [key]: row }; };
       return { patch: { [key]: row }, apply, check: (dd) => list(dd).some(([, r]) => r.campusToken === token), result: { 결과: "일정 추가", 일정: { 날짜: date, 내용: row.text } } };
     }, env);
@@ -938,6 +950,32 @@ async function toolTodo(a, env) {
       const row = { ...cur, done, campusToken: token };
       const apply = (dd) => { if (Array.isArray(dd)) { const x = [...dd]; x[Number(k)] = row; return x; } return { ...dd, [k]: row }; };
       return { patch: { [k]: row }, apply, check: (dd) => { const r = list(dd).find(([, x]) => String(x.id) === want); return !!r && r[1].campusToken === token; }, result: { 결과: done ? "완료 체크" : "완료 해제", 내용: cur.text } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  if (a.op === "todo_update") {
+    const want = String(a.id || ""); if (!want) return errContent("고칠 일정의 id 가 필요합니다.");
+    const plan = await safeSectionWrite("todos", (d) => {
+      const hit = list(d).find(([, r]) => String(r.id) === want); if (!hit) return errContent(`일정 id=${want} 이(가) 없습니다.`);
+      const [k, cur] = hit; const row = { ...cur, campusToken: token };
+      if (a.text != null) { const tx = String(a.text).trim(); if (!tx) return errContent("내용이 비었습니다."); row.text = tx.slice(0, 200); }
+      if (a.memo != null) row.memo = String(a.memo).slice(0, 1500);
+      if (a.date != null) { if (!isRealDate(String(a.date))) return errContent("date 는 YYYY-MM-DD 입니다."); row.date = String(a.date); }
+      if (a.endDate != null) row.endDate = a.endDate && isRealDate(String(a.endDate)) ? String(a.endDate) : "";
+      if (row.endDate && row.endDate < row.date) { const x = row.date; row.date = row.endDate; row.endDate = x; } if (row.endDate === row.date) row.endDate = "";
+      if (a.done != null) row.done = !!a.done;
+      const apply = (dd) => { if (Array.isArray(dd)) { const x = [...dd]; x[Number(k)] = row; return x; } return { ...dd, [k]: row }; };
+      return { patch: { [k]: row }, apply, check: (dd) => { const r = list(dd).find(([, x]) => String(x.id) === want); return !!r && r[1].campusToken === token; }, result: { 결과: "일정 수정", 일정: { 날짜: row.date, 종료: row.endDate, 내용: row.text } } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  if (a.op === "todo_delete") {
+    const want = String(a.id || ""); if (!want) return errContent("지울 일정의 id 가 필요합니다.");
+    const plan = await safeSectionWrite("todos", (d) => {
+      const hit = list(d).find(([, r]) => String(r.id) === want); if (!hit) return { done: true, result: { 결과: "이미 없음" } };
+      const keep = list(d).map(([, r]) => r).filter((r) => String(r.id) !== want);
+      const apply = () => keep;
+      return { replace: true, patch: {}, apply, check: (dd) => !list(dd).some(([, r]) => String(r.id) === want), result: { 결과: "일정 삭제", 내용: hit[1].text } };
     }, env);
     return plan.isError ? plan : textContent(plan.result);
   }
@@ -1177,7 +1215,7 @@ async function toolCampusWrite(a, env) {
   const op = String(a.op || "");
   if (op === "intake") return await toolRecordIntake(a, env);
   if (op === "ledger_status") return await toolLedgerStatus(a, env);
-  if (op === "todo_add" || op === "todo_done") return await toolTodo(a, env);
+  if (op === "todo_add" || op === "todo_done" || op === "todo_update" || op === "todo_delete") return await toolTodo(a, env);
   if (op === "deposit_process") return await toolDepositProcess(a, env);
   if (op === "deposit_undo") return await toolDepositUndo(a, env);
   if (op === "deposit_batch") return await toolDepositBatch(a, env);
