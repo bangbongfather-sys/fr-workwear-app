@@ -509,6 +509,8 @@ async function toolGetSection(args, env) {
     return compact(await depositInbox(env, o));
   }
   if (section.startsWith("_unpaid:")) return compact(await unpaidOf(env, section.slice(8)));
+  // 공급처 미지급 정산(결제원장) — 매입 현황 자동 집계(VAT 포함) + 수동 매입 − 지급 = 미지급잔액
+  if (section.startsWith("_payables:")) return compact(await payablesOf(env, section.slice(10)));
   // 인사 관리 — 직원 목록 + 급여대장 (선택: "_hr:2026-10" 이면 그 달 기록까지)
   if (section === "_hr" || section.startsWith("_hr:")) return compact(await hrRead(env, section.slice(4) || ""));
   // 일정 전체(최근 60일~앞으로 60일, 미완료 우선) — AI 직원 조회용
@@ -1248,6 +1250,7 @@ async function toolCampusWrite(a, env) {
     return textContent({ 결과: hint ? "계좌 앞자리 저장" : "계좌 앞자리 해제", 앞자리: (cur && cur.acctHint) || "", 문자주소: cur && cur.token ? "발급됨" : "아직 없음 (앱에서 켜기)" });
   }
   if (op === "note_add" || op === "daily_append") return await toolNoteSave(a, env);
+  if (op === "payable_pay" || op === "payable_pay_delete") return await toolPayablePay(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
 }
 
@@ -1284,6 +1287,77 @@ async function toolNoteSave(a, env) {
       campusTokens: [...String(cur.campusTokens || "").split(",").filter(Boolean).slice(-9), token].join(",") };
     const apply = (dd) => ({ ...(dd || {}), [date]: row });
     return { patch: { [date]: row }, apply, check: (dd) => !!(dd && dd[date] && String(dd[date].campusTokens || "").split(",").includes(token)), result: { 결과: "하루 기록에 덧붙임", 날짜: date, 글자수: body.length } };
+  }, env);
+  return plan.isError ? plan : textContent(plan.result);
+}
+
+// ── 공급처 미지급 정산 (회사앱 매입 → 거래처 탭 → 미지급 정산과 같은 규칙) ──
+// payables = { [공급처명(fbEsc)]: { openingBalance, openingDate, payments:[{id,date,amount,memo}], manualBuys:[…] } }
+function payKeyOf(P, supplier) {
+  const keys = Object.keys(P || {});
+  const exact = keys.find((k) => fbUnesc(k) === supplier);
+  if (exact) return exact;
+  const hits = keys.filter((k) => payMatch(fbUnesc(k), supplier));
+  return hits.length === 1 ? hits[0] : (hits.length ? { many: hits.map(fbUnesc) } : null);
+}
+async function payablesOf(env, supplierRaw) {
+  const supplier = String(supplierRaw || "").trim();
+  const [P, I] = await Promise.all([fbGet("/frw/payables", env.FIREBASE_DB_SECRET), fbGet("/frw/fabricIntakes", env.FIREBASE_DB_SECRET)]);
+  if (!supplier) return { 공급처목록: Object.keys(P || {}).map(fbUnesc) };
+  const key = payKeyOf(P, supplier);
+  if (key && key.many) return { 오류: "여러 공급처가 맞습니다. 정확한 이름을 넣어 주세요.", 후보: key.many };
+  if (!key) { const cand = Object.keys(P || {}).map(fbUnesc).filter((n) => payNorm(n).includes(payNorm(supplier))); if (cand.length) return { 오류: "미지급 원장 공급처 이름을 정확히 넣어 주세요.", 후보: cand }; }
+  const name = key ? fbUnesc(key) : supplier;
+  const c = (key && P[key]) || {};
+  const openDate = c.openingDate || "", opening = Number(c.openingBalance) || 0;
+  const buys = asList(I).filter((r) => r && payMatch(r.supplier, name) && (!openDate || String(r.date || "") >= openDate)).map((r) => {
+    const q = (r.status === "반품" ? -1 : 1) * (Number(r.qty) || 0);
+    return { date: r.date || "", 품목: r.materialName || "", 수량: q, 단가: Number(r.unitPrice) || 0, 매입액: Math.round(q * (Number(r.unitPrice) || 0) * 1.1) };
+  }).filter((r) => r.매입액 !== 0);
+  const pays = asList(c.payments).map((x) => ({ id: x.id, date: x.date || "", 금액: Number(x.amount) || 0, 메모: x.memo || "", ...(x.fromCampus ? { 캠퍼스: true } : {}) }));
+  const manual = asList(c.manualBuys).map((x) => ({ id: x.id, date: x.date || "", 금액: Number(x.amount) || 0, 메모: x.memo || "" }));
+  const buyT = buys.reduce((a, r) => a + r.매입액, 0) + manual.reduce((a, r) => a + r.금액, 0), payT = pays.reduce((a, r) => a + r.금액, 0);
+  return { 공급처: name, 원장있음: !!key, 기초잔액: opening, 기초일: openDate, 매입합계: buyT, 지급합계: payT, 미지급잔액: Math.round(opening + buyT - payT),
+    지급: pays.sort((a, b) => a.date.localeCompare(b.date)), 수동매입: manual, 매입건수: buys.length, 최근매입: buys.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 40) };
+}
+async function toolPayablePay(a, env) {
+  const supplier = String(a.supplier || "").trim();
+  if (!supplier) return errContent("supplier(공급처)가 필요합니다.");
+  const P0 = await fbGet("/frw/payables", env.FIREBASE_DB_SECRET);
+  let key = payKeyOf(P0, supplier);
+  if (key && key.many) return errContent(`여러 공급처가 맞습니다: ${key.many.join(", ")}`);
+  if (a.op === "payable_pay_delete") {
+    if (!key) return errContent(`미지급 원장이 없는 공급처: ${supplier}`);
+    const id = String(a.id || "");
+    const plan = await safeSectionWrite("payables", (d) => {
+      const c = (d && d[key]) || {};
+      const list = asList(c.payments);
+      const hit = list.find((x) => String(x.id) === id);
+      if (!hit) return { done: true, result: { 결과: "이미 없음", id } };
+      const row = { ...c, payments: list.filter((x) => String(x.id) !== id) };
+      return { patch: { [key]: row }, apply: (dd) => ({ ...(dd || {}), [key]: row }), check: (dd) => !asList(dd && dd[key] && dd[key].payments).some((x) => String(x.id) === id),
+        result: { 결과: "지급 삭제", 공급처: fbUnesc(key), 일자: hit.date, 금액: Number(hit.amount) || 0, 메모: hit.memo || "" } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  const amount = Math.round(Number(String(a.amount ?? "").replace(/[,\s원]/g, "")));
+  if (!(amount > 0)) return errContent("amount(지급액)는 0보다 큰 숫자여야 합니다.");
+  const date = String(a.date || kstToday());
+  if (!isRealDate(date)) return errContent("date 는 YYYY-MM-DD 입니다.");
+  if (!key && !a.create) return errContent(`미지급 원장이 없는 공급처입니다: ${supplier}. 새로 만들려면 create:true (공급처 이름 정확히).`);
+  if (!key) key = fbEsc(supplier);
+  const token = String(a.token || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).slice(0, 64);
+  const memo = String(a.memo || "").slice(0, 120);
+  const plan = await safeSectionWrite("payables", (d) => {
+    const c = (d && d[key]) || { openingBalance: "", openingDate: "", payments: [], manualBuys: [] };
+    const list = asList(c.payments);
+    if (list.some((x) => x.campusToken === token)) return { done: true, result: { 결과: "이미 반영됨 (같은 요청)" } };
+    const ids = new Set(list.map((x) => String(x.id)));
+    let id = `cp${Date.now().toString(36)}`; while (ids.has(id)) id += "x";
+    const pay = { id, date, amount, memo, fromCampus: true, campusToken: token };
+    const row = { openingBalance: c.openingBalance ?? "", openingDate: c.openingDate ?? "", manualBuys: asList(c.manualBuys), ...c, payments: [...list, pay] };
+    return { patch: { [key]: row }, apply: (dd) => ({ ...(dd || {}), [key]: row }), check: (dd) => asList(dd && dd[key] && dd[key].payments).some((x) => x.campusToken === token),
+      result: { 결과: "지급(입금) 등록", 공급처: fbUnesc(key), id, 일자: date, 금액: amount, 메모: memo, 되돌리기: `_write {op:'payable_pay_delete', supplier, id:'${id}'}` } };
   }, env);
   return plan.isError ? plan : textContent(plan.result);
 }
