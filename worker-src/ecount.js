@@ -91,7 +91,7 @@ export async function ecountStockItems(env) {
     const pi = info.get(code) || {};
     byCode.set(code, {
       code, qty,
-      name: String(pick(r, NAME_KEYS) || pi.name || "").trim() || code,
+      name: String(pick(r, NAME_KEYS) || pi.name || "").trim(),   // 비면 앱 쪽에서 기존 이름(없으면 코드)으로 채운다
       spec: String(pick(r, SPEC_KEYS) || pi.spec || "").trim(),
       unit: String(pick(r, UNIT_KEYS) || pi.unit || "").trim(),
       cat: String(pi.cat || "").trim(),

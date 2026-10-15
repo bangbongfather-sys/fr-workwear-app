@@ -15846,6 +15846,43 @@ function stockBaseName(name) {
   return n || (name || "").trim();
 }
 
+// ── 이카운트 재고 자동 연동 띠 (재고 현황 탭) ──
+// 서버가 하루 네 번(09·11·14·16시) 이카운트에서 재고를 가져와 이 탭 데이터를 바꾼다. 여기서는 상태와 「지금 가져오기」만.
+// 연동 정보(인증키)가 등록되기 전에는 아무것도 그리지 않는다.
+function EcountSyncBar() {
+  const [st, setSt] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const reload = () => fetch("/api/ecount/status", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(setSt).catch(() => setSt(null));
+  useEffect(() => { reload(); }, []);
+  if (!st || !st.configured) return null;
+  const last = st.last || {};
+  const run = async (force) => {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/ecount/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force: !!force }) }).then(r => r.json());
+      if (r.ok) showToast(`이카운트 재고 ${Number(r["품목수"] || 0).toLocaleString()}개 반영 · 바뀐 품목 ${r["바뀐품목"] || 0}개 — 잠시 뒤 화면에 들어옵니다`, "success");
+      else if (/크게 줄어/.test(r.error || "") && window.confirm(`${r.error}\n\n그래도 이카운트 재고로 바꿀까요?`)) { setBusy(false); return run(true); }
+      else showToast(r.error || r.message || "가져오지 못했습니다");
+      await reload();
+    } catch { showToast("서버에 연결하지 못했습니다"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="card no-print" style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <span style={{ width: 8, height: 8, borderRadius: 4, background: last.ok === false ? "#F04452" : "#00B493", flexShrink: 0 }} aria-hidden="true"/>
+      <span style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, color: "var(--text2)" }}>
+        <b style={{ color: "var(--text1)" }}>이카운트 자동 연동</b>{st.test ? <span style={{ fontSize: 11, fontWeight: 800, color: "var(--warning-text)", marginLeft: 6 }}>테스트 키</span> : null}
+        <span style={{ color: "var(--text3)" }}> · 하루 네 번(9·11·14·16시) 자동 · </span>
+        {last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개</> : <span style={{ color: "var(--negative-text)" }}>마지막 시도 실패: {last.error}</span>) : "아직 가져온 적 없음"}
+      </span>
+      <button type="button" onClick={() => run(false)} disabled={busy}
+        style={{ height: 34, padding: "0 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+        {busy ? "가져오는 중…" : "지금 가져오기"}
+      </button>
+    </div>
+  );
+}
+
 function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch }) {
   const items = stock?.items || [];
   const [search, setSearch] = useState("");
@@ -16161,6 +16198,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
           </div>
         </div>
       )}
+      <EcountSyncBar/>
       {/* KPI */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
         <div className="card">

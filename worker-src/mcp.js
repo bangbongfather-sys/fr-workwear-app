@@ -1,3 +1,4 @@
+import { ecountConfigured, ecountStockItems, ecountProbe } from "./ecount.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
@@ -461,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-14-deposit-sms-button", note: "입금내역 시각순 정렬 + 은행 문자 자동 등록을 작은 「문자 등록」 단추로" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-stock", note: "이카운트 재고 자동 연동(서버·재고 탭 띠, 키 등록 전에는 꺼짐)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -493,6 +494,9 @@ async function toolGetSection(args, env) {
     if (!p.image || String(p.image).length < 50) return textContent({ id, 사진: null });
     return { content: [{ type: "text", text: JSON.stringify({ id, 이름: p.name || "", 사진: String(p.image) }) }] };
   }
+  // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
+  if (section === "_ecount:probe") return compact(await ecountProbe(env));
+  if (section === "_ecount:sync") return compact(await ecountSyncStock(env, "claude"));
   if (section === "_stock") {
     const st = await fbGet("/frw/stock", env.FIREBASE_DB_SECRET);
     const items = asList(st && st.items).map((i) => ({ 코드: i.code, 품명: i.name, 수량: toNumber(i.qty), 안전재고: i.safeQty === "" || i.safeQty == null ? null : toNumber(i.safeQty), ...(i.adjustedAt ? { 조정: i.adjustedAt, 조정사유: i.adjustNote || "" } : {}) }));
@@ -1629,4 +1633,61 @@ export async function handleMcp(request, env, url) {
   }
 
   return rpcRespond(request, id, undefined, { code: -32601, message: `Method not found: ${method}` });
+}
+
+
+// ── 이카운트 → 앱 재고(stock) 동기화 ──
+// 앱 재고 탭의 「엑셀 전체 반영」과 같은 규칙: 품목 전체 교체, 안전재고는 품목코드(없으면 이름+규격)로 이어받고,
+// 바뀌기 직전 수량을 history 에 남긴다(최근 8회). 이카운트가 정답이라 캠퍼스 실사 조정도 덮인다.
+// 안전장치: 0건이거나 품목 수가 절반 넘게 줄면 쓰지 않는다 (응답 형식이 바뀌었을 때 재고를 날리지 않게).
+const ECOUNT_STATUS_PATH = "/frw_ecount_status";
+export async function ecountSyncStock(env, by = "cron", { force = false } = {}) {
+  const S = env.FIREBASE_DB_SECRET;
+  const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+  const record = async (st) => {
+    try { await fetch(`https://${FB_HOST}${ECOUNT_STATUS_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ ...st, at, by }) }); } catch {}
+    return st;
+  };
+  if (!ecountConfigured(env)) return { ok: false, configured: false, message: "이카운트 연동 정보가 아직 등록되지 않았습니다" };
+  let got;
+  try { got = await ecountStockItems(env); } catch (e) { return record({ ok: false, error: e.message }); }
+  const fresh = got.items;
+  if (!fresh.length) return record({ ok: false, error: `이카운트 재고가 0건으로 왔습니다 (재고 행 ${got.invRows}) — 반영하지 않았습니다` });
+  let summary = null;
+  const plan = await safeSectionWrite("stock", (d) => {
+    const cur = d && typeof d === "object" ? d : {};
+    const old = asList(cur.items);
+    if (!force && old.length >= 20 && fresh.length < old.length * 0.5) {
+      return errContent(`품목 수가 ${old.length} → ${fresh.length} 로 크게 줄어 반영하지 않았습니다 (확인 후 강제 반영)`);
+    }
+    const key = (it) => String(it.code || "").trim() || `${it.name}|${it.spec || ""}`;
+    const prev = new Map(old.map((it) => [key(it), it]));
+    // 엑셀에 품목코드가 없던 옛 재고는 코드로 못 찾는다 → 이름이 같은 것으로 한 번 더 찾는다
+    const byName = new Map(old.filter((it) => !String(it.code || "").trim()).map((it) => [String(it.name || "").trim(), it]));
+    let base = Date.now();
+    const items = fresh.map((it) => {
+      const o = prev.get(key(it)) || byName.get(String(it.name || "").trim());
+      // 이미 있던 품목은 이름·규격·단위·분류를 그대로 둔다 (엑셀 때 쓰던 표기 유지 — 화면·매칭이 흔들리지 않게)
+      return { ...it, id: o && o.id != null ? o.id : ++base,
+        name: (o && o.name) || it.name || it.code, spec: o ? (o.spec || "") : (it.spec || ""), unit: (o && o.unit) || it.unit || "", cat: (o && o.cat) || it.cat || "",
+        safeQty: o && o.safeQty != null ? o.safeQty : "" };
+    });
+    let history = Array.isArray(cur.history) ? cur.history.slice() : asList(cur.history);
+    if (old.length) {
+      const qty = {}; old.forEach((it) => { qty[key(it)] = toNumber(it.qty); });
+      history.push({ updatedAt: cur.updatedAt || "", fileName: cur.fileName || "", qty });
+      if (history.length > 8) history = history.slice(-8);
+    }
+    const changed = items.filter((it) => { const o = prev.get(key(it)); return !o || toNumber(o.qty) !== toNumber(it.qty); }).length;
+    summary = { 품목수: items.length, 바뀐품목: changed, 이전품목수: old.length };
+    const next = { ...cur, items, history, updatedAt: at, fileName: "이카운트 자동 연동", source: "ecount" };
+    const patch = { items, history, updatedAt: at, fileName: "이카운트 자동 연동", source: "ecount" };
+    return { patch, apply: () => next, check: (dd) => !!dd && dd.updatedAt === at && asList(dd.items).length === items.length };
+  }, env);
+  if (plan.isError) return record({ ok: false, error: (plan.content && plan.content[0] && plan.content[0].text) || "반영 실패" });
+  return record({ ok: true, ...summary });
+}
+export async function ecountStatus(env) {
+  const st = ecountConfigured(env) ? await fbGet(ECOUNT_STATUS_PATH, env.FIREBASE_DB_SECRET).catch(() => null) : null;
+  return { configured: ecountConfigured(env), test: String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null };
 }
