@@ -211,7 +211,8 @@ export default {
         return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다 — Cloudflare 의 ECOUNT_API_KEY 와 맥에 넣은 키가 같은지 확인하세요" }), { status: 403, headers: corsHeaders });
       }
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
-      return new Response(JSON.stringify(await ecountRelayPush(env, b)), { headers: corsHeaders });
+      try { return new Response(JSON.stringify(await ecountRelayPush(env, b)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
     }
     if (url.pathname === "/api/ecount/sync" && request.method === "POST") {
       if (!ecountDirect(env)) {

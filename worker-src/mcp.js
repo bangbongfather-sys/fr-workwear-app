@@ -462,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-status", note: "이카운트 재고: 마지막 연동 결과 조회(_ecount:status)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-push-fix", note: "이카운트 재고: 이력 키 이스케이프(1101 수정)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -1654,8 +1654,8 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
   if (!got) { try { got = await ecountStockItems(env); } catch (e) { return record({ ok: false, error: e.message }); } }
   const fresh = got.items;
   if (!fresh.length) return record({ ok: false, error: `이카운트 재고가 0건으로 왔습니다 (재고 행 ${got.invRows}) — 반영하지 않았습니다` });
-  let summary = null;
-  const plan = await safeSectionWrite("stock", (d) => {
+  let summary = null, plan;
+  try { plan = await safeSectionWrite("stock", (d) => {
     const cur = d && typeof d === "object" ? d : {};
     const old = asList(cur.items);
     if (!force && old.length >= 20 && fresh.length < old.length * 0.5) {
@@ -1675,7 +1675,8 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
     });
     let history = Array.isArray(cur.history) ? cur.history.slice() : asList(cur.history);
     if (old.length) {
-      const qty = {}; old.forEach((it) => { qty[key(it)] = toNumber(it.qty); });
+      // 품목코드가 키가 된다 — "NFWF25/090" 처럼 Firebase 금지문자(/ . 등)는 앱과 같은 ~HEX 로 바꿔 저장 (안 하면 저장이 400 으로 실패)
+      const qty = {}; old.forEach((it) => { qty[fbEsc(key(it))] = toNumber(it.qty); });
       history.push({ updatedAt: cur.updatedAt || "", fileName: cur.fileName || "", qty });
       if (history.length > 8) history = history.slice(-8);
     }
@@ -1684,7 +1685,7 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
     const next = { ...cur, items, history, updatedAt: at, fileName: "이카운트 자동 연동", source: "ecount" };
     const patch = { items, history, updatedAt: at, fileName: "이카운트 자동 연동", source: "ecount" };
     return { patch, apply: () => next, check: (dd) => !!dd && dd.updatedAt === at && asList(dd.items).length === items.length };
-  }, env);
+  }, env); } catch (e) { return record({ ok: false, error: `재고 저장 실패: ${e.message}` }); }
   if (plan.isError) return record({ ok: false, error: (plan.content && plan.content[0] && plan.content[0].text) || "반영 실패" });
   return record({ ok: true, ...summary, test: !!got.test });
 }
