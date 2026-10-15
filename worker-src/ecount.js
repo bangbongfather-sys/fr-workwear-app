@@ -31,12 +31,16 @@ async function post(url, body) {
 // "실서버용 인증키입니다"/"테스트용…" 이라고 알려 주므로 그때 반대 도메인으로 한 번 더 시도한다.
 export async function ecountLogin(env) {
   if (!ecountConfigured(env)) throw new Error("이카운트 연동 정보(회사코드·사용자ID·인증키)가 아직 등록되지 않았습니다");
-  try { return await loginOnce(env, isTest(env)); }
+  // 어느 서버(테스트 sboapi / 실서버 oapi)에서 난 오류인지 붙여서 알려 준다
+  const tag = (t, e) => new Error(`[${t ? "테스트 서버" : "실서버"}] ${e.message}`);
+  const first = isTest(env);
+  try { return await loginOnce(env, first); }
   catch (e) {
     const m = String(e.message || "");
-    if (isTest(env) && /실서버/.test(m)) return await loginOnce(env, false);
-    if (!isTest(env) && /테스트/.test(m)) return await loginOnce(env, true);
-    throw e;
+    const flip = (first && /실서버/.test(m)) || (!first && /테스트/.test(m));
+    if (!flip) throw tag(first, e);
+    try { return await loginOnce(env, !first); }
+    catch (e2) { throw new Error(`${tag(!first, e2).message} (처음 시도: ${tag(first, e).message})`); }
   }
 }
 async function loginOnce(env, test) {
