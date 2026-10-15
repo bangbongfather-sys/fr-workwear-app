@@ -462,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-prodtype", note: "이카운트 품목조회 PROD_TYPE → 분류" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-probe-fix", note: "이카운트 점검 경로 오류 수정" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -495,8 +495,8 @@ async function toolGetSection(args, env) {
     return { content: [{ type: "text", text: JSON.stringify({ id, 이름: p.name || "", 사진: String(p.image) }) }] };
   }
   // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
-  if (section === "_ecount:probe") return compact(await ecountProbe(env));
-  if (section === "_ecount:sync") return compact(await ecountSyncStock(env, "claude"));
+  if (section === "_ecount:probe") return textContent(await ecountProbe(env));
+  if (section === "_ecount:sync") return textContent(await ecountSyncStock(env, "claude"));
   if (section === "_stock") {
     const st = await fbGet("/frw/stock", env.FIREBASE_DB_SECRET);
     const items = asList(st && st.items).map((i) => ({ 코드: i.code, 품명: i.name, 수량: toNumber(i.qty), 안전재고: i.safeQty === "" || i.safeQty == null ? null : toNumber(i.safeQty), ...(i.adjustedAt ? { 조정: i.adjustedAt, 조정사유: i.adjustNote || "" } : {}) }));
