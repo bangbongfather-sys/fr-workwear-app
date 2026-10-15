@@ -103,8 +103,13 @@ export async function ecountStockItems(env) {
   const s = await ecountLogin(env);
   const inv = await ecountInventoryRaw(env, s);
   const prods = await ecountProductsRaw(env, s);
+  return { ...buildStockItems(inv, prods), test: s.test };
+}
+
+// 이카운트 원본 행(재고·품목) → 재고 품목. 서버가 직접 가져온 것과 사무실 맥이 보낸 것 모두 이걸 거친다.
+export function buildStockItems(inv, prods) {
   const info = new Map();
-  for (const p of prods) {
+  for (const p of prods || []) {
     const code = String(pick(p, CODE_KEYS)).trim();
     // 품목구분 PROD_TYPE: 0 원재료 · 1 제품 · 2 반제품 · 3 상품 · 4 부재료 · 7 무형상품 (품목조회 API 문서)
     const PT = { 0: "원재료", 1: "제품", 2: "반제품", 3: "상품", 4: "부재료", 7: "무형상품" };
@@ -112,7 +117,7 @@ export async function ecountStockItems(env) {
     if (code) info.set(code, { name: String(pick(p, NAME_KEYS)).trim(), spec: String(pick(p, SPEC_KEYS)).trim(), unit: String(pick(p, UNIT_KEYS)).trim(), cat });
   }
   const byCode = new Map();
-  for (const r of inv) {
+  for (const r of inv || []) {
     const code = String(pick(r, CODE_KEYS)).trim();
     const qty = num(pick(r, QTY_KEYS));
     if (!code || !Number.isFinite(qty)) continue;
@@ -127,8 +132,9 @@ export async function ecountStockItems(env) {
       cat: String(pi.cat || "").trim(),
     });
   }
-  return { items: [...byCode.values()], invRows: inv.length, prodRows: prods.length, test: s.test };
+  return { items: [...byCode.values()], invRows: (inv || []).length, prodRows: (prods || []).length };
 }
+export { rowsOf as ecountRows };
 
 // 연결 점검 — 원본 몇 줄과 필드 이름 (필드 이름 맞추기용)
 export async function ecountProbe(env) {
