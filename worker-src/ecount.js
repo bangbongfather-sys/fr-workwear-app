@@ -62,11 +62,22 @@ const pick = (o, keys) => { for (const k of keys) if (o && o[k] != null && Strin
 const num = (v) => { const n = Number(String(v ?? "").replace(/[,\s]/g, "")); return Number.isFinite(n) ? n : NaN; };
 const kstYmd = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, "");
 
-// 재고현황 원본 행 (품목별 합계) — 결과는 PROD_CD·BAL_QTY 뿐이라 이름은 품목조회로 채운다.
+// 재고 원본 행 — 「창고별재고현황」을 먼저 쓴다. 실서버 키는 이카운트가 검증한 API 만 쓸 수 있는데
+// (API인증현황 화면: 발주서조회·창고별재고현황 검증 완료) 이게 검증돼 있다. 창고별로 나뉜 수량은 ecountStockItems 가 품목별로 합친다.
+// 실패하면 「재고현황」(품목별 합계)로 한 번 더. 결과는 PROD_CD·BAL_QTY 위주라 이름은 품목조회로 채운다.
 // ZERO_FLAG 기본값 N 이면 재고 0 품목이 빠져 와서 앱 목록에서 사라진다(안전재고 설정도) → Y 로 받는다.
 export async function ecountInventoryRaw(env, s) {
-  const j = await post(`${host(s.test, s.zone)}/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatus?SESSION_ID=${encodeURIComponent(s.session)}`, { BASE_DATE: kstYmd(), PROD_CD: "", WH_CD: "", ZERO_FLAG: "Y" });
-  return rowsOf(j);
+  const q = `?SESSION_ID=${encodeURIComponent(s.session)}`;
+  const body = { BASE_DATE: kstYmd(), PROD_CD: "", WH_CD: "", ZERO_FLAG: "Y" };
+  try {
+    const j = await post(`${host(s.test, s.zone)}/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatusByLocation${q}`, body);
+    s.invApi = "창고별재고현황";
+    return rowsOf(j);
+  } catch (e) {
+    const j = await post(`${host(s.test, s.zone)}/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatus${q}`, body);
+    s.invApi = `재고현황 (창고별 실패: ${String(e.message).slice(0, 60)})`;
+    return rowsOf(j);
+  }
 }
 // 품목 목록 원본 행 (이름·규격·단위 보충용) — 실패해도 재고는 진행
 export async function ecountProductsRaw(env, s) {
@@ -122,7 +133,7 @@ export async function ecountProbe(env) {
   try {
     const s = await ecountLogin(env); out.zone = s.zone; out.login = "성공"; out.test = s.test;
     const inv = await ecountInventoryRaw(env, s);
-    out.inventory = { rows: inv.length, keys: inv[0] ? Object.keys(inv[0]) : [], sample: inv.slice(0, 3) };
+    out.inventory = { api: s.invApi, rows: inv.length, keys: inv[0] ? Object.keys(inv[0]) : [], sample: inv.slice(0, 3) };
     const prods = await ecountProductsRaw(env, s);
     out.products = { rows: prods.length, keys: prods[0] ? Object.keys(prods[0]) : [], sample: prods.slice(0, 2) };
   } catch (e) { out.error = e.message; }
