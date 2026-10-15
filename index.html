@@ -15849,11 +15849,18 @@ function stockBaseName(name) {
 // ── 이카운트 재고 자동 연동 띠 (재고 현황 탭) ──
 // 서버가 하루 네 번(09·11·14·16시) 이카운트에서 재고를 가져와 이 탭 데이터를 바꾼다. 여기서는 상태와 「지금 가져오기」만.
 // 연동 정보(인증키)가 등록되기 전에는 아무것도 그리지 않는다.
-function EcountSyncBar() {
+function EcountSyncBar({ stamp = "" }) {
   const [st, setSt] = useState(null);
   const [busy, setBusy] = useState(false);
   const reload = () => fetch("/api/ecount/status", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(setSt).catch(() => setSt(null));
-  useEffect(() => { reload(); }, []);
+  // 사무실 맥이 보내 재고가 바뀌면(stamp) · 창으로 돌아올 때 · 5분마다 상태를 다시 읽는다 (안 그러면 처음 연 때의 실패가 계속 보임)
+  useEffect(() => { reload(); }, [stamp]);
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === "visible") reload(); };
+    document.addEventListener("visibilitychange", onVis);
+    const t = setInterval(reload, 5 * 60 * 1000);
+    return () => { document.removeEventListener("visibilitychange", onVis); clearInterval(t); };
+  }, []);
   if (!st || !st.configured) return null;
   const last = st.last || {};
   const run = async (force) => {
@@ -15873,7 +15880,7 @@ function EcountSyncBar() {
       <span style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, color: "var(--text2)" }}>
         <b style={{ color: "var(--text1)" }}>이카운트 자동 연동</b>{st.test ? <span style={{ fontSize: 11, fontWeight: 800, color: "var(--warning-text)", marginLeft: 6 }}>테스트 키</span> : null}
         <span style={{ color: "var(--text3)" }}>{st.direct ? " · 하루 네 번(9·11·14·16시) 자동 · " : " · 사무실 맥이 9·11·14·16시에 보냄 · "}</span>
-        {last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개</> : <span style={{ color: "var(--negative-text)" }}>마지막 시도 실패: {last.error}</span>) : "아직 가져온 적 없음"}
+        {last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개</> : <span style={{ color: "var(--negative-text)" }}>{last.at.slice(5).replace("-", "/")} 시도 실패: {String(last.error || "").replace(/\\u003E/g, ">").replace(/^.*"Message":"([^"]+).*$/, "$1")}</span>) : "아직 가져온 적 없음"}
       </span>
       {st.direct ? (
         <button type="button" onClick={() => run(false)} disabled={busy}
@@ -16202,7 +16209,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
           </div>
         </div>
       )}
-      <EcountSyncBar/>
+      <EcountSyncBar stamp={stock?.updatedAt || ""}/>
       {/* KPI */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
         <div className="card">
