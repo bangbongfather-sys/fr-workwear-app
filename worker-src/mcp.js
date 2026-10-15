@@ -1,4 +1,4 @@
-import { ecountConfigured, ecountStockItems, ecountProbe } from "./ecount.js";
+import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecountRows } from "./ecount.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
@@ -462,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-errtag", note: "이카운트 오류에 테스트/실서버 구분 표시" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-mac-relay", note: "이카운트 재고: 사무실 맥 중계(/api/ecount/push, ecount-relay/install.sh)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -1641,16 +1641,16 @@ export async function handleMcp(request, env, url) {
 // 바뀌기 직전 수량을 history 에 남긴다(최근 8회). 이카운트가 정답이라 캠퍼스 실사 조정도 덮인다.
 // 안전장치: 0건이거나 품목 수가 절반 넘게 줄면 쓰지 않는다 (응답 형식이 바뀌었을 때 재고를 날리지 않게).
 const ECOUNT_STATUS_PATH = "/frw_ecount_status";
-export async function ecountSyncStock(env, by = "cron", { force = false } = {}) {
+export async function ecountSyncStock(env, by = "cron", { force = false, got: given = null } = {}) {
   const S = env.FIREBASE_DB_SECRET;
   const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
   const record = async (st) => {
     try { await fetch(`https://${FB_HOST}${ECOUNT_STATUS_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ ...st, at, by }) }); } catch {}
     return st;
   };
-  if (!ecountConfigured(env)) return { ok: false, configured: false, message: "이카운트 연동 정보가 아직 등록되지 않았습니다" };
-  let got;
-  try { got = await ecountStockItems(env); } catch (e) { return record({ ok: false, error: e.message }); }
+  if (!given && !ecountConfigured(env)) return { ok: false, configured: false, message: "이카운트 연동 정보가 아직 등록되지 않았습니다" };
+  let got = given;
+  if (!got) { try { got = await ecountStockItems(env); } catch (e) { return record({ ok: false, error: e.message }); } }
   const fresh = got.items;
   if (!fresh.length) return record({ ok: false, error: `이카운트 재고가 0건으로 왔습니다 (재고 행 ${got.invRows}) — 반영하지 않았습니다` });
   let summary = null;
@@ -1690,5 +1690,27 @@ export async function ecountSyncStock(env, by = "cron", { force = false } = {}) 
 export async function ecountStatus(env) {
   const st = ecountConfigured(env) ? await fbGet(ECOUNT_STATUS_PATH, env.FIREBASE_DB_SECRET).catch(() => null) : null;
   // 테스트/실서버는 실제로 성공한 마지막 동기화 기준 (키 종류를 자동 판별하므로)
-  return { configured: ecountConfigured(env), test: st && typeof st.test === "boolean" ? st.test : String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null };
+  return { configured: ecountConfigured(env), direct: ecountDirect(env), test: st && typeof st.test === "boolean" ? st.test : String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null };
+}
+// 이카운트는 등록된 IP 에서만 API 를 받는다(테스트 서버 포함). Cloudflare 는 나가는 IP 가 계속 바뀌어
+// 직접 호출이 막히므로, 기본은 사무실 맥(등록된 고정 IP)이 받아서 보내 주는 중계 방식이다.
+// ECOUNT_DIRECT="true" 면(고정 IP 를 쓸 수 있게 되면) 서버가 직접 가져온다.
+export const ecountDirect = (env) => String(env.ECOUNT_DIRECT || "") === "true";
+
+// 사무실 맥이 보낸 이카운트 원본 → 재고 반영. body = { inv: <재고 API 응답>, prod: <품목조회 응답>, error?, api? }
+// 인증: 헤더 X-Relay-Key = SHA-256(ECOUNT_API_KEY) 16진수 — 맥과 서버가 같은 키를 갖고 있을 때만 통과.
+export async function ecountRelayKey(env) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(env.ECOUNT_API_KEY || "").trim()));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+export async function ecountRelayPush(env, body) {
+  const S = env.FIREBASE_DB_SECRET;
+  const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+  if (body && body.error) {
+    try { await fetch(`https://${FB_HOST}${ECOUNT_STATUS_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ ok: false, error: `[사무실 맥] ${String(body.error).slice(0, 300)}`, at, by: "mac" }) }); } catch {}
+    return { ok: false, recorded: true };
+  }
+  const inv = ecountRows((body && body.inv) || {}), prod = ecountRows((body && body.prod) || {});
+  const got = { ...buildStockItems(inv, prod), test: false };
+  return ecountSyncStock(env, "mac", { got });
 }

@@ -23,7 +23,7 @@ import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
-import { handleMcp, ecountSyncStock, ecountStatus } from "./worker-src/mcp.js";
+import { handleMcp, ecountSyncStock, ecountStatus, ecountDirect, ecountRelayKey, ecountRelayPush } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -142,7 +142,9 @@ export default {
     //  - /api/ics/<토큰>.ics : 캘린더 구독 — 캘린더 앱이 헤더를 못 붙여 주소의 토큰으로 검증
     //  - /api/bank/sms/<토큰> : 아이폰 단축어가 은행 문자를 보내는 주소 — 주소의 토큰으로 검증
     const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback"
-      || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/");
+      || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/")
+    //  - /api/ecount/push : 사무실 맥(이카운트 등록 IP)이 재고를 보내는 주소 — X-Relay-Key 로 검증
+      || path === "/api/ecount/push";
     if (isProtected && !isPublic) {
       if (path === "/mcp" || path === "/mcp/") {
         // /mcp 는 handleMcp 안의 자체 잠금(MCP_TOKEN, ?k=)이 검증한다 — 기존 커넥터 URL 유지.
@@ -203,7 +205,18 @@ export default {
     if (url.pathname === "/api/ecount/status") {
       return new Response(JSON.stringify(await ecountStatus(env)), { headers: corsHeaders });
     }
+    if (url.pathname === "/api/ecount/push" && request.method === "POST") {
+      const key = request.headers.get("X-Relay-Key") || "";
+      if (!env.ECOUNT_API_KEY || key !== await ecountRelayKey(env)) {
+        return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다 — Cloudflare 의 ECOUNT_API_KEY 와 맥에 넣은 키가 같은지 확인하세요" }), { status: 403, headers: corsHeaders });
+      }
+      let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
+      return new Response(JSON.stringify(await ecountRelayPush(env, b)), { headers: corsHeaders });
+    }
     if (url.pathname === "/api/ecount/sync" && request.method === "POST") {
+      if (!ecountDirect(env)) {
+        return new Response(JSON.stringify({ ok: false, error: "이카운트는 등록된 IP 에서만 열려서, 사무실 맥이 9·11·14·16시에 보내 줍니다. 지금 받으려면 사무실 맥에서 「이카운트 재고 보내기」를 실행하세요." }), { headers: corsHeaders });
+      }
       let b = {}; try { b = await request.json(); } catch {}
       const r = await ecountSyncStock(env, "app", { force: !!b.force });
       return new Response(JSON.stringify(r), { status: r.configured === false ? 503 : 200, headers: corsHeaders });
@@ -269,7 +282,7 @@ export default {
     if (event.cron === "0 0,5 * * *") {
       const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
       // 이카운트 재고 동기화 — 하루 네 번(09·11·14·16시). 연동 정보가 없으면 아무것도 안 한다.
-      ctx.waitUntil(ecountSyncStock(env, "cron").then((r) => console.log(`[scheduled] 이카운트 재고:`, r)).catch((e) => console.error(`[scheduled] 이카운트 재고 실패:`, e?.message ?? e)));
+      if (ecountDirect(env)) ctx.waitUntil(ecountSyncStock(env, "cron").then((r) => console.log(`[scheduled] 이카운트 재고:`, r)).catch((e) => console.error(`[scheduled] 이카운트 재고 실패:`, e?.message ?? e)));
       ctx.waitUntil(
         runDeadlineCheck(env, appUrl)
           .then((result) => console.log(`[scheduled] 마감 임박 점검 완료:`, result))
@@ -281,7 +294,7 @@ export default {
     // KST 11:00, 16:00 (UTC 02:00, 07:00) — Phase 4B 변경이력 폴링
     if (event.cron === "0 2,7 * * *") {
       const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
-      ctx.waitUntil(ecountSyncStock(env, "cron").then((r) => console.log(`[scheduled] 이카운트 재고:`, r)).catch((e) => console.error(`[scheduled] 이카운트 재고 실패:`, e?.message ?? e)));
+      if (ecountDirect(env)) ctx.waitUntil(ecountSyncStock(env, "cron").then((r) => console.log(`[scheduled] 이카운트 재고:`, r)).catch((e) => console.error(`[scheduled] 이카운트 재고 실패:`, e?.message ?? e)));
       ctx.waitUntil(
         runChangeHistoryPoll(env, appUrl)
           .then((result) => console.log(`[scheduled] 변경이력 폴링 완료:`, result))
