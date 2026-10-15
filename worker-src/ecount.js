@@ -12,7 +12,7 @@
 
 export const ecountConfigured = (env) => !!(env.ECOUNT_COM_CODE && env.ECOUNT_USER_ID && env.ECOUNT_API_KEY);
 const isTest = (env) => String(env.ECOUNT_TEST ?? "true") !== "false";
-const host = (env, zone) => `https://${isTest(env) ? "sboapi" : "oapi"}${zone || ""}.ecount.com`;
+const host = (test, zone) => `https://${test ? "sboapi" : "oapi"}${zone || ""}.ecount.com`;
 
 async function post(url, body) {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -26,20 +26,31 @@ async function post(url, body) {
   return j;
 }
 
-// 로그인 — { zone, session }
+// 로그인 — { zone, session, test }
+// 키가 테스트용인지 실서버용인지는 ECOUNT_TEST 로 정하지만, 반대 키를 넣었으면 이카운트가
+// "실서버용 인증키입니다"/"테스트용…" 이라고 알려 주므로 그때 반대 도메인으로 한 번 더 시도한다.
 export async function ecountLogin(env) {
   if (!ecountConfigured(env)) throw new Error("이카운트 연동 정보(회사코드·사용자ID·인증키)가 아직 등록되지 않았습니다");
+  try { return await loginOnce(env, isTest(env)); }
+  catch (e) {
+    const m = String(e.message || "");
+    if (isTest(env) && /실서버/.test(m)) return await loginOnce(env, false);
+    if (!isTest(env) && /테스트/.test(m)) return await loginOnce(env, true);
+    throw e;
+  }
+}
+async function loginOnce(env, test) {
   const COM_CODE = String(env.ECOUNT_COM_CODE).trim();
-  const z = await post(`${host(env)}/OAPI/V2/Zone`, { COM_CODE });
+  const z = await post(`${host(test)}/OAPI/V2/Zone`, { COM_CODE });
   const zone = (z.Data && (z.Data.ZONE || z.Data.Zone)) || z.ZONE;
   if (!zone) throw new Error("이카운트 Zone 을 받지 못했습니다 (회사코드 확인)");
-  const l = await post(`${host(env, zone)}/OAPI/V2/OAPILogin`, {
+  const l = await post(`${host(test, zone)}/OAPI/V2/OAPILogin`, {
     COM_CODE, USER_ID: String(env.ECOUNT_USER_ID).trim(), API_CERT_KEY: String(env.ECOUNT_API_KEY).trim(), LAN_TYPE: "ko-KR", ZONE: zone,
   });
   const d = l.Data || {};
   const session = (d.Datas && d.Datas.SESSION_ID) || d.SESSION_ID;
   if (!session) throw new Error(`이카운트 로그인 실패: ${(d.Message || d.Code || "SESSION_ID 없음")}`);
-  return { zone, session };
+  return { zone, session, test };
 }
 
 const rowsOf = (j) => {
@@ -54,13 +65,13 @@ const kstYmd = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10
 // 재고현황 원본 행 (품목별 합계) — 결과는 PROD_CD·BAL_QTY 뿐이라 이름은 품목조회로 채운다.
 // ZERO_FLAG 기본값 N 이면 재고 0 품목이 빠져 와서 앱 목록에서 사라진다(안전재고 설정도) → Y 로 받는다.
 export async function ecountInventoryRaw(env, s) {
-  const j = await post(`${host(env, s.zone)}/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatus?SESSION_ID=${encodeURIComponent(s.session)}`, { BASE_DATE: kstYmd(), PROD_CD: "", WH_CD: "", ZERO_FLAG: "Y" });
+  const j = await post(`${host(s.test, s.zone)}/OAPI/V2/InventoryBalance/GetListInventoryBalanceStatus?SESSION_ID=${encodeURIComponent(s.session)}`, { BASE_DATE: kstYmd(), PROD_CD: "", WH_CD: "", ZERO_FLAG: "Y" });
   return rowsOf(j);
 }
 // 품목 목록 원본 행 (이름·규격·단위 보충용) — 실패해도 재고는 진행
 export async function ecountProductsRaw(env, s) {
   try {
-    const j = await post(`${host(env, s.zone)}/OAPI/V2/InventoryBasic/GetBasicProductsList?SESSION_ID=${encodeURIComponent(s.session)}`, {});
+    const j = await post(`${host(s.test, s.zone)}/OAPI/V2/InventoryBasic/GetBasicProductsList?SESSION_ID=${encodeURIComponent(s.session)}`, {});
     return rowsOf(j);
   } catch { return []; }
 }
@@ -101,7 +112,7 @@ export async function ecountStockItems(env) {
       cat: String(pi.cat || "").trim(),
     });
   }
-  return { items: [...byCode.values()], invRows: inv.length, prodRows: prods.length };
+  return { items: [...byCode.values()], invRows: inv.length, prodRows: prods.length, test: s.test };
 }
 
 // 연결 점검 — 원본 몇 줄과 필드 이름 (필드 이름 맞추기용)
@@ -109,7 +120,7 @@ export async function ecountProbe(env) {
   if (!ecountConfigured(env)) return { configured: false, test: isTest(env) };
   const out = { configured: true, test: isTest(env) };
   try {
-    const s = await ecountLogin(env); out.zone = s.zone; out.login = "성공";
+    const s = await ecountLogin(env); out.zone = s.zone; out.login = "성공"; out.test = s.test;
     const inv = await ecountInventoryRaw(env, s);
     out.inventory = { rows: inv.length, keys: inv[0] ? Object.keys(inv[0]) : [], sample: inv.slice(0, 3) };
     const prods = await ecountProductsRaw(env, s);
