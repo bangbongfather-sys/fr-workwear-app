@@ -15853,43 +15853,48 @@ function EcountSyncBar({ stamp = "" }) {
   const [st, setSt] = useState(null);
   const [busy, setBusy] = useState(false);
   const reload = () => fetch("/api/ecount/status", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(setSt).catch(() => setSt(null));
-  // 사무실 맥이 보내 재고가 바뀌면(stamp) · 창으로 돌아올 때 · 5분마다 상태를 다시 읽는다 (안 그러면 처음 연 때의 실패가 계속 보임)
+  // 정해진 시간에 가져오지 않는다 — 「새로고침」(또는 Claude)이 요청할 때만. 재고가 바뀌면(stamp)·창으로 돌아오면 상태를 다시 읽는다
   useEffect(() => { reload(); }, [stamp]);
   useEffect(() => {
     const onVis = () => { if (document.visibilityState === "visible") reload(); };
     document.addEventListener("visibilitychange", onVis);
-    const t = setInterval(reload, 5 * 60 * 1000);
-    return () => { document.removeEventListener("visibilitychange", onVis); clearInterval(t); };
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
+  const pending = !!(st && st.request);
+  // 요청을 걸어 둔 동안만 10초마다 확인 (사무실 맥이 보통 1분 안에 처리)
+  useEffect(() => {
+    if (!pending) return;
+    const t = setInterval(reload, 10000);
+    return () => clearInterval(t);
+  }, [pending]);
   if (!st || !st.configured) return null;
   const last = st.last || {};
-  const run = async (force) => {
+  const run = async () => {
     setBusy(true);
     try {
-      const r = await fetch("/api/ecount/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force: !!force }) }).then(r => r.json());
-      if (r.ok) showToast(`이카운트 재고 ${Number(r["품목수"] || 0).toLocaleString()}개 반영 · 바뀐 품목 ${r["바뀐품목"] || 0}개 — 잠시 뒤 화면에 들어옵니다`, "success");
-      else if (/크게 줄어/.test(r.error || "") && window.confirm(`${r.error}\n\n그래도 이카운트 재고로 바꿀까요?`)) { setBusy(false); return run(true); }
-      else showToast(r.error || r.message || "가져오지 못했습니다");
+      const r = await fetch("/api/ecount/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then(r => r.json());
+      if (r.queued) showToast(r.message || "사무실 맥에 요청했어요", "success");
+      else if (r.ok) showToast(`이카운트 재고 ${Number(r["품목수"] || 0).toLocaleString()}개 반영 · 바뀐 품목 ${r["바뀐품목"] || 0}개`, "success");
+      else showToast(r.error || r.message || "요청하지 못했습니다");
       await reload();
     } catch { showToast("서버에 연결하지 못했습니다"); }
     finally { setBusy(false); }
   };
+  const errText = (e) => String(e || "").replace(/\\u003E/g, ">").replace(/^.*"Message":"([^"]+).*$/, "$1");
   return (
     <div className="card no-print" style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-      <span style={{ width: 8, height: 8, borderRadius: 4, background: last.ok === false ? "#F04452" : "#00B493", flexShrink: 0 }} aria-hidden="true"/>
+      <span style={{ width: 8, height: 8, borderRadius: 4, background: pending ? "#F5A623" : last.ok === false ? "#F04452" : "#00B493", flexShrink: 0 }} aria-hidden="true"/>
       <span style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, color: "var(--text2)" }}>
-        <b style={{ color: "var(--text1)" }}>이카운트 자동 연동</b>{st.test ? <span style={{ fontSize: 11, fontWeight: 800, color: "var(--warning-text)", marginLeft: 6 }}>테스트 키</span> : null}
-        <span style={{ color: "var(--text3)" }}>{st.direct ? " · 하루 네 번(9·11·14·16시) 자동 · " : " · 사무실 맥이 9·11·14·16시에 보냄 · "}</span>
-        {last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개</> : <span style={{ color: "var(--negative-text)" }}>{last.at.slice(5).replace("-", "/")} 시도 실패: {String(last.error || "").replace(/\\u003E/g, ">").replace(/^.*"Message":"([^"]+).*$/, "$1")}</span>) : "아직 가져온 적 없음"}
+        <b style={{ color: "var(--text1)" }}>이카운트 재고</b>{st.test ? <span style={{ fontSize: 11, fontWeight: 800, color: "var(--warning-text)", marginLeft: 6 }}>테스트 키</span> : null}
+        <span style={{ color: "var(--text3)" }}> · </span>
+        {pending ? <span style={{ color: "var(--warning-text)" }}>새로고침 요청됨 {String(st.request.at || "").slice(11)} — 사무실 맥이 가져오는 중 (맥이 잠자기면 깨어난 뒤)</span>
+          : last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개{last["바뀐품목"] != null ? ` · 바뀐 품목 ${last["바뀐품목"]}개` : ""}</> : <span style={{ color: "var(--negative-text)" }}>{last.at.slice(5).replace("-", "/")} 시도 실패: {errText(last.error)}</span>) : "아직 가져온 적 없음"}
       </span>
-      {st.direct ? (
-        <button type="button" onClick={() => run(false)} disabled={busy}
-          style={{ height: 34, padding: "0 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: busy ? "wait" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-          {busy ? "가져오는 중…" : "지금 가져오기"}
-        </button>
-      ) : (
-        <span style={{ fontSize: 12, color: "var(--text3)" }} title="이카운트는 등록된 IP(사무실)에서만 열려서 사무실 맥이 대신 받아 보냅니다">지금 받으려면 사무실 맥 바탕화면 「이카운트 재고 보내기」</span>
-      )}
+      <button type="button" onClick={run} disabled={busy || pending}
+        title={st.direct ? "이카운트에서 지금 가져옵니다" : "사무실 맥에 요청합니다 — 이카운트는 등록된 사무실 IP 에서만 열려요. 10분에 한 번까지"}
+        style={{ height: 34, padding: "0 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: busy ? "wait" : pending ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: pending ? 0.6 : 1 }}>
+        {busy ? "요청 중…" : pending ? "가져오는 중…" : "↻ 새로고침"}
+      </button>
     </div>
   );
 }

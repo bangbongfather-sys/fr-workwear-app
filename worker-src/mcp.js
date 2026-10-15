@@ -462,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-bar-refresh", note: "재고 탭 이카운트 띠: 상태 자동 새로고침" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-on-demand", note: "이카운트 재고: 정해진 시간 없이 새로고침 요청 때만 (앱 단추·Claude _ecount:refresh)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -497,7 +497,7 @@ async function toolGetSection(args, env) {
   // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
   if (section === "_ecount:probe") return textContent(await ecountProbe(env));
   if (section === "_ecount:status") return textContent(await ecountStatus(env));
-  if (section === "_ecount:sync") return textContent(await ecountSyncStock(env, "claude"));
+  if (section === "_ecount:sync" || section === "_ecount:refresh") return textContent(await ecountRequest(env, "claude"));
   if (section === "_stock") {
     const st = await fbGet("/frw/stock", env.FIREBASE_DB_SECRET);
     const items = asList(st && st.items).map((i) => ({ 코드: i.code, 품명: i.name, 수량: toNumber(i.qty), 안전재고: i.safeQty === "" || i.safeQty == null ? null : toNumber(i.safeQty), ...(i.adjustedAt ? { 조정: i.adjustedAt, 조정사유: i.adjustNote || "" } : {}) }));
@@ -1690,10 +1690,40 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
   return record({ ok: true, ...summary, test: !!got.test });
 }
 export async function ecountStatus(env) {
-  const st = ecountConfigured(env) ? await fbGet(ECOUNT_STATUS_PATH, env.FIREBASE_DB_SECRET).catch(() => null) : null;
+  const S = env.FIREBASE_DB_SECRET;
+  const [st, req] = ecountConfigured(env) ? await Promise.all([fbGet(ECOUNT_STATUS_PATH, S).catch(() => null), fbGet(ECOUNT_REQ_PATH, S).catch(() => null)]) : [null, null];
   // 테스트/실서버는 실제로 성공한 마지막 동기화 기준 (키 종류를 자동 판별하므로)
-  return { configured: ecountConfigured(env), direct: ecountDirect(env), test: st && typeof st.test === "boolean" ? st.test : String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null };
+  return { configured: ecountConfigured(env), direct: ecountDirect(env), test: st && typeof st.test === "boolean" ? st.test : String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null, request: liveReq(req) };
 }
+
+// ── 새로고침 요청 (정해진 시간 없이, 부를 때만) ──
+// 앱 「새로고침」 단추나 Claude 가 요청을 걸어 두면, 사무실 맥이 1분마다 확인하다가 그때만 이카운트를 조회해 보낸다.
+// 맥이 잠자기 중이면 깨어난 뒤 처리한다. 12시간 지난 요청은 버린다(어제 저녁 요청이 다음 날 아침에 도는 것 방지).
+const ECOUNT_REQ_PATH = "/frw_ecount_request";
+const REQ_TTL = 12 * 3600e3;
+const liveReq = (r) => (r && r.ts && Date.now() - Number(r.ts) < REQ_TTL ? r : null);
+const kstAtMs = (at) => Date.parse(String(at || "").replace(" ", "T") + ":00+09:00");
+export async function ecountRequest(env, by = "app") {
+  if (!ecountConfigured(env)) return { ok: false, configured: false, error: "이카운트 연동 정보가 아직 등록되지 않았습니다" };
+  if (ecountDirect(env)) return ecountSyncStock(env, by);
+  const S = env.FIREBASE_DB_SECRET;
+  const [st, req] = await Promise.all([fbGet(ECOUNT_STATUS_PATH, S).catch(() => null), fbGet(ECOUNT_REQ_PATH, S).catch(() => null)]);
+  if (liveReq(req)) return { ok: true, queued: true, already: true, message: "이미 요청돼 있어요 — 사무실 맥이 1분 안에 가져옵니다", requestedAt: req.at };
+  // 이카운트 실서버는 같은 조회를 10분에 1번만 받는다 → 막힐 요청은 걸지 않는다
+  const lastMs = st && st.at ? kstAtMs(st.at) : NaN;
+  if (Number.isFinite(lastMs) && Date.now() - lastMs < 10 * 60e3) {
+    const next = new Date(lastMs + 11 * 60e3 + 9 * 3600e3).toISOString().slice(11, 16);
+    return { ok: false, wait: true, error: `이카운트는 10분에 한 번만 조회돼요 — ${next} 이후에 다시 눌러 주세요 (마지막 ${String(st.at).slice(11)})` };
+  }
+  const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+  await fetch(`https://${FB_HOST}${ECOUNT_REQ_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ at, ts: Date.now(), by }) });
+  return { ok: true, queued: true, message: "사무실 맥에 요청했어요 — 1분 안에 재고가 들어옵니다 (맥이 켜져 있어야 해요)", requestedAt: at };
+}
+export async function ecountPending(env) {
+  const req = liveReq(await fbGet(ECOUNT_REQ_PATH, env.FIREBASE_DB_SECRET).catch(() => null));
+  return req ? { pending: true, at: req.at } : { pending: false };
+}
+const clearReq = (env) => fetch(`https://${FB_HOST}${ECOUNT_REQ_PATH}.json?auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`, { method: "DELETE" }).catch(() => {});
 // 이카운트는 등록된 IP 에서만 API 를 받는다(테스트 서버 포함). Cloudflare 는 나가는 IP 가 계속 바뀌어
 // 직접 호출이 막히므로, 기본은 사무실 맥(등록된 고정 IP)이 받아서 보내 주는 중계 방식이다.
 // ECOUNT_DIRECT="true" 면(고정 IP 를 쓸 수 있게 되면) 서버가 직접 가져온다.
@@ -1708,6 +1738,7 @@ export async function ecountRelayKey(env) {
 export async function ecountRelayPush(env, body) {
   const S = env.FIREBASE_DB_SECRET;
   const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+  await clearReq(env);   // 성공이든 실패든 요청은 처리됨 (실패는 띠에 이유가 뜨고, 다시 누르면 된다)
   if (body && body.error) {
     try { await fetch(`https://${FB_HOST}${ECOUNT_STATUS_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ ok: false, error: `[사무실 맥] ${String(body.error).slice(0, 300)}`, at, by: "mac" }) }); } catch {}
     return { ok: false, recorded: true };
