@@ -462,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-probe-fix", note: "이카운트 점검 경로 오류 수정" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-keytype", note: "이카운트 실서버/테스트 키 자동 판별" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -1685,9 +1685,10 @@ export async function ecountSyncStock(env, by = "cron", { force = false } = {}) 
     return { patch, apply: () => next, check: (dd) => !!dd && dd.updatedAt === at && asList(dd.items).length === items.length };
   }, env);
   if (plan.isError) return record({ ok: false, error: (plan.content && plan.content[0] && plan.content[0].text) || "반영 실패" });
-  return record({ ok: true, ...summary });
+  return record({ ok: true, ...summary, test: !!got.test });
 }
 export async function ecountStatus(env) {
   const st = ecountConfigured(env) ? await fbGet(ECOUNT_STATUS_PATH, env.FIREBASE_DB_SECRET).catch(() => null) : null;
-  return { configured: ecountConfigured(env), test: String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null };
+  // 테스트/실서버는 실제로 성공한 마지막 동기화 기준 (키 종류를 자동 판별하므로)
+  return { configured: ecountConfigured(env), test: st && typeof st.test === "boolean" ? st.test : String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null };
 }
