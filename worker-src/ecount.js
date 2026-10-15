@@ -80,7 +80,10 @@ export async function ecountStockItems(env) {
   const info = new Map();
   for (const p of prods) {
     const code = String(pick(p, CODE_KEYS)).trim();
-    if (code) info.set(code, { name: String(pick(p, NAME_KEYS)).trim(), spec: String(pick(p, SPEC_KEYS)).trim(), unit: String(pick(p, UNIT_KEYS)).trim(), cat: String(pick(p, CAT_KEYS)).trim() });
+    // 품목구분 PROD_TYPE: 0 원재료 · 1 제품 · 2 반제품 · 3 상품 · 4 부재료 · 7 무형상품 (품목조회 API 문서)
+    const PT = { 0: "원재료", 1: "제품", 2: "반제품", 3: "상품", 4: "부재료", 7: "무형상품" };
+    const cat = String(pick(p, CAT_KEYS)).trim() || PT[String(pick(p, ["PROD_TYPE"])).trim()] || "";
+    if (code) info.set(code, { name: String(pick(p, NAME_KEYS)).trim(), spec: String(pick(p, SPEC_KEYS)).trim(), unit: String(pick(p, UNIT_KEYS)).trim(), cat });
   }
   const byCode = new Map();
   for (const r of inv) {
