@@ -23,7 +23,7 @@ import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
-import { handleMcp } from "./worker-src/mcp.js";
+import { handleMcp, ecountSyncStock, ecountStatus } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -199,6 +199,16 @@ export default {
     }
 
     // 은행 입금 자동수집 (팝빌 계좌조회) — 수집함·상태·지금 수집
+    // 이카운트 재고 연동 — 상태 / 지금 가져오기 (로그인 필요)
+    if (url.pathname === "/api/ecount/status") {
+      return new Response(JSON.stringify(await ecountStatus(env)), { headers: corsHeaders });
+    }
+    if (url.pathname === "/api/ecount/sync" && request.method === "POST") {
+      let b = {}; try { b = await request.json(); } catch {}
+      const r = await ecountSyncStock(env, "app", { force: !!b.force });
+      return new Response(JSON.stringify(r), { status: r.configured === false ? 503 : 200, headers: corsHeaders });
+    }
+
     // 은행 문자 → 입금함 (공개, 토큰 검증) / 문자 주소 발급·상태 (로그인)
     if (url.pathname.startsWith("/api/bank/sms/")) return handleBankSmsPublic(request, env, url);
     if (url.pathname.startsWith("/api/bank/smskey/")) return handleBankSmsAdmin(request, env, url);
@@ -258,6 +268,8 @@ export default {
     // KST 09:00, 14:00 (UTC 00:00, 05:00) — Phase 4A 마감 임박 점검
     if (event.cron === "0 0,5 * * *") {
       const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
+      // 이카운트 재고 동기화 — 하루 네 번(09·11·14·16시). 연동 정보가 없으면 아무것도 안 한다.
+      ctx.waitUntil(ecountSyncStock(env, "cron").then((r) => console.log(`[scheduled] 이카운트 재고:`, r)).catch((e) => console.error(`[scheduled] 이카운트 재고 실패:`, e?.message ?? e)));
       ctx.waitUntil(
         runDeadlineCheck(env, appUrl)
           .then((result) => console.log(`[scheduled] 마감 임박 점검 완료:`, result))
@@ -269,6 +281,7 @@ export default {
     // KST 11:00, 16:00 (UTC 02:00, 07:00) — Phase 4B 변경이력 폴링
     if (event.cron === "0 2,7 * * *") {
       const appUrl = "https://fr-workwear-app.njsafety91.workers.dev";
+      ctx.waitUntil(ecountSyncStock(env, "cron").then((r) => console.log(`[scheduled] 이카운트 재고:`, r)).catch((e) => console.error(`[scheduled] 이카운트 재고 실패:`, e?.message ?? e)));
       ctx.waitUntil(
         runChangeHistoryPoll(env, appUrl)
           .then((result) => console.log(`[scheduled] 변경이력 폴링 완료:`, result))
