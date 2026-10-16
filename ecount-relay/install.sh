@@ -51,7 +51,7 @@ get() { security find-generic-password -a "$USER" -s "$1" -w 2>/dev/null; }
 COM=$(get nj-ecount-com); EUSER=$(get nj-ecount-user); KEY=$(get nj-ecount-key)
 RELAY=$(printf %s "$KEY" | shasum -a 256 | awk '{print $1}')
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$LOG"; }
-post() { curl -sS -m 90 -X POST "$APP/api/ecount/push" -H "Content-Type: application/json" -H "X-Relay-Key: $RELAY" --data-binary @-; }
+post() { curl -sS -m 90 -X POST "$APP/api/ecount/push" -H "Content-Type: application/json" -H "X-Relay-Key: $RELAY" -H "X-Relay-Dev: office-mac" --data-binary @-; }
 jstr() { printf '"%s"' "$(printf %s "$1" | tr '\n\r\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g' | cut -c1-300)"; }
 fail() { say "실패: $1"; printf '{"error":%s}' "$(jstr "$1")" | post >/dev/null 2>&1; exit 1; }
 pick() { plutil -extract "$1" raw -o - - 2>/dev/null; }
@@ -60,7 +60,7 @@ pick() { plutil -extract "$1" raw -o - - 2>/dev/null; }
 [ -n "$COM" ] && [ -n "$EUSER" ] && [ -n "$KEY" ] || fail "키체인에 이카운트 정보가 없습니다 — 설치를 다시 실행하세요"
 # check: 1분마다 launchd 가 부른다 — 회사 앱에 새로고침 요청이 있을 때만 아래로 진행 (없으면 조용히 끝)
 if [ "$1" = "check" ]; then
-  P=$(curl -sS -m 15 "$APP/api/ecount/pending" -H "X-Relay-Key: $RELAY" 2>/dev/null)
+  P=$(curl -sS -m 15 "$APP/api/ecount/pending" -H "X-Relay-Key: $RELAY" -H "X-Relay-Dev: office-mac" 2>/dev/null)
   print -r -- "$P" | grep -q '"pending":true' || exit 0
   say "새로고침 요청 받음"
 fi

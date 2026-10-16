@@ -15887,11 +15887,11 @@ function EcountSyncBar({ stamp = "" }) {
       <span style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, color: "var(--text2)" }}>
         <b style={{ color: "var(--text1)" }}>이카운트 재고</b>{st.test ? <span style={{ fontSize: 11, fontWeight: 800, color: "var(--warning-text)", marginLeft: 6 }}>테스트 키</span> : null}
         <span style={{ color: "var(--text3)" }}> · </span>
-        {pending ? <span style={{ color: "var(--warning-text)" }}>새로고침 요청됨 {String(st.request.at || "").slice(11)} — 사무실 맥이 가져오는 중 (맥이 잠자기면 깨어난 뒤)</span>
-          : last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개{last["바뀐품목"] != null ? ` · 바뀐 품목 ${last["바뀐품목"]}개` : ""}</> : <span style={{ color: "var(--negative-text)" }}>{last.at.slice(5).replace("-", "/")} 시도 실패: {errText(last.error)}</span>) : "아직 가져온 적 없음"}
+        {pending ? <span style={{ color: "var(--warning-text)" }}>새로고침 요청됨 {String(st.request.at || "").slice(11)} — {st.request.claim ? `${st.request.claim.label || "중계 컴퓨터"}에서 가져오는 중` : "사무실 맥·집 PC 중 켜져 있는 컴퓨터를 기다리는 중"}</span>
+          : last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개{last["바뀐품목"] != null ? ` · 바뀐 품목 ${last["바뀐품목"]}개` : ""}{last.by && !["cron", "app", "claude", "mac"].includes(last.by) ? ` · ${last.by}` : ""}</> : <span style={{ color: "var(--negative-text)" }}>{last.at.slice(5).replace("-", "/")} 시도 실패: {errText(last.error)}</span>) : "아직 가져온 적 없음"}
       </span>
       <button type="button" onClick={run} disabled={busy || pending}
-        title={st.direct ? "이카운트에서 지금 가져옵니다" : "사무실 맥에 요청합니다 — 이카운트는 등록된 사무실 IP 에서만 열려요. 10분에 한 번까지"}
+        title={st.direct ? "이카운트에서 지금 가져옵니다" : "사무실 맥·집 PC 에 요청합니다 — 이카운트는 등록된 IP 에서만 열려요. 10분에 한 번까지"}
         style={{ height: 34, padding: "0 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: busy ? "wait" : pending ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: pending ? 0.6 : 1 }}>
         {busy ? "요청 중…" : pending ? "가져오는 중…" : "↻ 새로고침"}
       </button>
