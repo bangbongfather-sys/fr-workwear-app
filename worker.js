@@ -23,7 +23,7 @@ import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
-import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending } from "./worker-src/mcp.js";
+import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -219,6 +219,14 @@ export default {
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await ecountRelayPush(env, b, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
+    }
+    // 출고(판매) 추정 — ?from=YYYY-MM-DD&to=YYYY-MM-DD (로그인 필요)
+    if (url.pathname === "/api/ecount/moves") {
+      const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+      const from = url.searchParams.get("from"), to = url.searchParams.get("to");
+      if (!ok(from) || !ok(to)) return new Response(JSON.stringify({ error: "from·to 날짜가 필요합니다" }), { status: 400, headers: corsHeaders });
+      try { return new Response(JSON.stringify(await stockMoves(env, from, to)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
     }
     // 새로고침 — 정해진 시간 없이, 앱의 「새로고침」 단추(또는 Claude)가 부를 때만 가져온다
     if (url.pathname === "/api/ecount/sync" && request.method === "POST") {
