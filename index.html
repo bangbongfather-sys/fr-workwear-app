@@ -15899,6 +15899,112 @@ function EcountSyncBar({ stamp = "" }) {
   );
 }
 
+// 출고(판매) 추정 — 이카운트 새로고침 사이 재고가 줄어든 만큼. 서버가 새로고침마다 직전 이카운트 수량과 비교해 쌓는다.
+const MOVE_RANGES = [
+  { k: "today", label: "오늘" }, { k: "7", label: "7일" }, { k: "30", label: "30일" }, { k: "month", label: "이번 달" }, { k: "prev", label: "지난 달" },
+];
+function moveRange(k) {
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
+  const today = kst(Date.now());
+  if (k === "today") return [today, today];
+  if (k === "month") return [today.slice(0, 8) + "01", today];
+  if (k === "prev") {
+    const [y, m] = today.split("-").map(Number);
+    const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1;
+    const last = new Date(Date.UTC(py, pm, 0)).getUTCDate();
+    const ym = `${py}-${String(pm).padStart(2, "0")}`;
+    return [`${ym}-01`, `${ym}-${String(last).padStart(2, "0")}`];
+  }
+  return [kst(Date.now() - (Number(k) - 1) * 86400e3), today];
+}
+function StockMovesCard({ stamp = "" }) {
+  const [range, setRange] = useState(() => { try { return localStorage.getItem("frw_moves_range") || "7"; } catch { return "7"; } });
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [all, setAll] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    const [from, to] = moveRange(range);
+    setErr("");
+    fetch(`/api/ecount/moves?from=${from}&to=${to}`, { cache: "no-store" })
+      .then(r => r.json()).then(j => { if (dead) return; if (j.error) { setErr(j.error); setData(null); } else setData(j); })
+      .catch(() => { if (!dead) setErr("불러오지 못했습니다"); });
+    return () => { dead = true; };
+  }, [range, stamp]);
+  const pick = (k) => { setRange(k); setAll(false); try { localStorage.setItem("frw_moves_range", k); } catch {} };
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const shortAt = (s) => String(s || "").slice(5, 16).replace("-", "/");
+  const rows = data ? data.products.filter(p => p.out > 0) : [];
+  const inOnly = data ? data.products.filter(p => p.out === 0 && p.in > 0) : [];
+  const maxOut = rows.reduce((m, p) => Math.max(m, p.out), 0) || 1;
+  const shown = all ? rows : rows.slice(0, 10);
+  return (
+    <div className="card no-print">
+      <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+        <span className="section-header-title"><Icon name="truck" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>출고 추정 <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text3)", marginLeft: 4 }}>판매량 짐작용</span></span>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {MOVE_RANGES.map(r => (
+            <button key={r.k} type="button" onClick={() => pick(r.k)}
+              style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid " + (range === r.k ? "var(--text1)" : "var(--border)"), background: range === r.k ? "var(--text1)" : "transparent", color: range === r.k ? "var(--surface)" : "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{r.label}</button>
+          ))}
+        </div>
+      </div>
+      {err ? <div style={{ fontSize: 12, color: "var(--negative-text)" }}>{err}</div>
+        : !data ? <div style={{ fontSize: 12, color: "var(--text3)" }}>불러오는 중…</div>
+        : data.syncs === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
+            이 기간에는 기록이 없어요. 이카운트 <b>↻ 새로고침</b>을 할 때마다 직전 새로고침 이후 <b>줄어든 수량(출고)</b>과 <b>늘어난 수량(입고)</b>이 쌓여요.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline", marginBottom: 12 }}>
+              <span style={{ fontSize: 13, color: "var(--text2)" }}>출고 <b style={{ fontSize: 20, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(data.totalOut)}</b>개</span>
+              <span style={{ fontSize: 13, color: "var(--text2)" }}>입고 <b style={{ fontSize: 15, color: "#00B493", fontVariantNumeric: "tabular-nums" }}>{fmt(data.totalIn)}</b>개</span>
+              <span style={{ fontSize: 12, color: "var(--text3)" }}>{data.span ? `${shortAt(data.span.from)} → ${shortAt(data.span.to)}` : ""} · 새로고침 {data.syncs}회</span>
+            </div>
+            {rows.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>줄어든 품목이 없어요.</div> : (
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {shown.map(p => (
+                  <div key={p.name} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>{p.name}</span>
+                      {p.in > 0 && <span style={{ fontSize: 11.5, color: "#00B493", fontWeight: 700, whiteSpace: "nowrap" }}>+{fmt(p.in)} 입고</span>}
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(p.out)}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>개</span></span>
+                    </div>
+                    <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", margin: "5px 0 6px" }}>
+                      <div style={{ width: `${Math.max(3, (p.out / maxOut) * 100)}%`, height: "100%", borderRadius: 2, background: "#DB6B2E" }}/>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {p.sizes.filter(z => z.out > 0).map(z => (
+                        <span key={z.code} title={`${z.code} · 출고 ${fmt(z.out)}${z.in ? ` · 입고 ${fmt(z.in)}` : ""}${z.qty != null ? ` · 지금 재고 ${fmt(z.qty)}` : ""}`}
+                          style={{ fontSize: 11, padding: "2px 7px", borderRadius: 6, background: "var(--surface2)", color: "var(--text2)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {z.size || z.code} <b style={{ color: "var(--text1)" }}>{fmt(z.out)}</b>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {rows.length > 10 && (
+                  <button type="button" onClick={() => setAll(v => !v)} style={{ marginTop: 6, padding: "8px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    {all ? "접기" : `나머지 ${rows.length - 10}개 품목 더 보기`}
+                  </button>
+                )}
+              </div>
+            )}
+            {inOnly.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "var(--text3)", lineHeight: 1.6 }}>
+                입고만 있는 품목: {inOnly.slice(0, 6).map(p => `${p.name} +${fmt(p.in)}`).join(" · ")}{inOnly.length > 6 ? ` 외 ${inOnly.length - 6}개` : ""}
+              </div>
+            )}
+            <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>
+              새로고침 사이에 줄어든 수량이라 판매 외에 샘플·불량·이카운트 수정도 섞일 수 있어요. 날짜는 새로고침한 날 기준이에요.
+            </div>
+          </>
+        )}
+    </div>
+  );
+}
+
 function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch }) {
   const items = stock?.items || [];
   const [search, setSearch] = useState("");
@@ -16238,6 +16344,8 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
           <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{valuedCount}개 품목 단가 매칭됨</div>
         </div>
       </div>
+
+      <StockMovesCard stamp={stock?.updatedAt || ""}/>
 
       {/* 엑셀 업로드 */}
       <div className="card">

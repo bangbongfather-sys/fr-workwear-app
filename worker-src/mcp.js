@@ -1665,11 +1665,11 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
   if (!got) { try { got = await ecountStockItems(env); } catch (e) { return record({ ok: false, error: e.message }); } }
   const fresh = got.items;
   if (!fresh.length) return record({ ok: false, error: `이카운트 재고가 0건으로 왔습니다 (재고 행 ${got.invRows}) — 반영하지 않았습니다` });
-  let summary = null, plan, prev = null;
+  let summary = null, plan, before = null;
   try { plan = await safeSectionWrite("stock", (d) => {
     const cur = d && typeof d === "object" ? d : {};
     const old = asList(cur.items);
-    prev = { source: cur.source, at: cur.updatedAt || "", items: old };
+    before = { source: cur.source, at: cur.updatedAt || "", items: old };
     if (!force && old.length >= 20 && fresh.length < old.length * 0.5) {
       return errContent(`품목 수가 ${old.length} → ${fresh.length} 로 크게 줄어 반영하지 않았습니다 (확인 후 강제 반영)`);
     }
@@ -1699,7 +1699,7 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
     return { patch, apply: () => next, check: (dd) => !!dd && dd.updatedAt === at && asList(dd.items).length === items.length };
   }, env); } catch (e) { return record({ ok: false, error: `재고 저장 실패: ${e.message}` }); }
   if (plan.isError) return record({ ok: false, error: (plan.content && plan.content[0] && plan.content[0].text) || "반영 실패" });
-  try { await recordStockMoves(env, fresh, prev, at, by); } catch (e) { console.error("[ecount] 출고 기록 실패:", e?.message ?? e); }
+  try { await recordStockMoves(env, fresh, before, at, by); } catch (e) { console.error("[ecount] 출고 기록 실패:", e?.message ?? e); }
   return record({ ok: true, ...summary, test: !!got.test });
 }
 export async function ecountStatus(env) {
