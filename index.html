@@ -16091,49 +16091,54 @@ function StockMovesCard({ stamp = "" }) {
 
 // ─── 판매 현황 탭 ───
 // 이카운트 OpenAPI 에 판매 「조회」가 없어서, 이카운트 판매조회 엑셀을 끌어다 놓으면 서버(/api/sales)에 쌓고 기간별로 정리한다.
-//  - 「판매조회」 전표 목록(거래처·금액합계만) → 거래처별·날짜별 매출. 품목이 한 줄씩 나오는 엑셀이면 품목·사이즈별 수량까지.
+//  - 「판매조회」 전표 목록(거래처·금액합계만) → 달력·거래처별·날짜별 매출. 품목이 한 줄씩 나오는 엑셀이면 품목·사이즈별 수량까지.
 //  - 같은 기간을 다시 올리면 그 기간을 통째로 바꾼다 (중복 없음). 재고 탭에 판매 엑셀을 놓아도 여기로 넘어온다(pendingFile).
-const SALES_RANGES = [
-  { k: "today", label: "오늘" }, { k: "7", label: "7일" }, { k: "30", label: "30일" }, { k: "month", label: "이번 달" }, { k: "prev", label: "지난 달" }, { k: "custom", label: "기간 지정" },
-];
+//  - 화면: 월 이동·기간 → 요약 한 줄 → 달력(월) 또는 날짜별 막대(그 밖의 기간) + 그날 전표 → 거래처 표 + 거래처 상세 → 품목별(품목 줄 엑셀일 때) → 올린 이력
 const addDaysYmd = (d, k) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + k); return t.toISOString().slice(0, 10); };
-function salesRange(k, custom) {
-  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
-  const today = kst(Date.now());
-  const monthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`; };
-  if (k === "today") return [today, today];
-  if (k === "month") return [today.slice(0, 8) + "01", monthEnd(today.slice(0, 7))];   // 말일까지 — 날짜를 앞당겨 끊은 전표도 보이게
-  if (k === "prev") {
-    const [y, m] = today.split("-").map(Number);
-    const ym = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`;
-    return [`${ym}-01`, monthEnd(ym)];
-  }
-  if (k === "custom") {
-    const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
-    const f = ok(custom && custom.from) ? custom.from : today.slice(0, 8) + "01", t = ok(custom && custom.to) ? custom.to : today;
-    return f <= t ? [f, t] : [t, f];
-  }
-  return [kst(Date.now() - (Number(k) - 1) * 86400e3), today];
+const kstTodayYmd = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+const ymMonthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`; };
+const ymShift = (ym, n) => { const [y, m] = ym.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+const SALES_CHIPS = [{ k: "today", label: "오늘" }, { k: "7", label: "7일" }, { k: "month", label: "이번 달" }, { k: "prev", label: "지난 달" }, { k: "year", label: "올해" }, { k: "custom", label: "기간 지정" }];
+function salesRangeOf(mode, month, custom) {
+  const today = kstTodayYmd();
+  if (mode === "month") return [`${month}-01`, ymMonthEnd(month)];
+  if (mode === "today") return [today, today];
+  if (mode === "7") return [addDaysYmd(today, -6), today];
+  if (mode === "year") return [`${today.slice(0, 4)}-01-01`, `${today.slice(0, 4)}-12-31`];
+  const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+  const f = ok(custom && custom.from) ? custom.from : today.slice(0, 8) + "01", t = ok(custom && custom.to) ? custom.to : today;
+  return f <= t ? [f, t] : [t, f];
 }
+// 1억 7,969만 / 1,797만 / 8,500원 — 큰 숫자를 짧게
+const manWon = (n) => {
+  const v = Math.round(Number(n || 0)); const a = Math.abs(v); const sign = v < 0 ? "-" : "";
+  if (a >= 1e8) { const eok = Math.floor(a / 1e8), man = Math.round((a % 1e8) / 1e4); return `${sign}${eok}억${man ? ` ${man.toLocaleString()}만` : ""}`; }
+  if (a >= 1e4) return `${sign}${Math.round(a / 1e4).toLocaleString()}만`;
+  return `${sign}${a.toLocaleString()}원`;
+};
 function SalesTab({ pendingFile = null, clearPending }) {
-  const [range, setRange] = useState(() => { try { return localStorage.getItem("frw_sales_range") || "month"; } catch { return "month"; } });
+  const today = kstTodayYmd();
+  const [mode, setMode] = useState(() => { try { return localStorage.getItem("frw_sales_mode") || "month"; } catch { return "month"; } });
+  const [month, setMonth] = useState(() => today.slice(0, 7));
   const [custom, setCustom] = useState(() => { try { return JSON.parse(localStorage.getItem("frw_sales_custom") || "null") || {}; } catch { return {}; } });
   const [data, setData] = useState(null);
   const [moves, setMoves] = useState(null);
   const [err, setErr] = useState("");
-  const [view, setView] = useState("client");
-  const [all, setAll] = useState(false);
+  const [selDay, setSelDay] = useState(null);
+  const [selClient, setSelClient] = useState(null);
+  const [clientQ, setClientQ] = useState("");
+  const [allClients, setAllClients] = useState(false);
+  const [allProducts, setAllProducts] = useState(false);
   const [preview, setPreview] = useState(null);
   const [parseErr, setParseErr] = useState("");
   const [saving, setSaving] = useState(false);
   const [tick, setTick] = useState(0);
   const [winDrag, setWinDrag] = useState(false);
   const fileRef = useRef(null);
-  const [from, to] = salesRange(range, custom);
+  const [from, to] = salesRangeOf(mode, month, custom);
+  const isMonth = mode === "month" || mode === "prev";
 
-  // 재고 탭에 떨어뜨린 판매 엑셀이 넘어온 경우
   useEffect(() => { if (pendingFile) { setPreview(pendingFile); clearPending && clearPending(); } }, [pendingFile]);
-
   useEffect(() => {
     let dead = false;
     setErr("");
@@ -16144,8 +16149,14 @@ function SalesTab({ pendingFile = null, clearPending }) {
       .then(j => { if (!dead) setMoves(j && !j.error ? j : null); }).catch(() => {});
     return () => { dead = true; };
   }, [from, to, tick]);
-  const pick = (k) => { setRange(k); setAll(false); try { localStorage.setItem("frw_sales_range", k); } catch {} };
-  const setCustomRange = (patch) => { const n = { ...custom, ...patch }; setCustom(n); try { localStorage.setItem("frw_sales_custom", JSON.stringify(n)); } catch {} };
+  useEffect(() => { setSelDay(null); setAllClients(false); setAllProducts(false); }, [from, to]);
+  const pickMode = (k) => {
+    if (k === "month") setMonth(today.slice(0, 7));
+    if (k === "prev") setMonth(ymShift(today.slice(0, 7), -1));
+    setMode(k); try { localStorage.setItem("frw_sales_mode", k); } catch {}
+  };
+  const stepMonth = (n) => { setMonth(m => ymShift(m, n)); setMode("month"); };
+  const setCustomRange = (patch) => { const nx = { ...custom, ...patch }; setCustom(nx); try { localStorage.setItem("frw_sales_custom", JSON.stringify(nx)); } catch {} };
 
   // ── 엑셀 ──
   const handleFile = async (file) => {
@@ -16155,7 +16166,7 @@ function SalesTab({ pendingFile = null, clearPending }) {
       const parsed = salesParseWorkbook(await file.arrayBuffer());
       if (!parsed) throw new Error("판매 엑셀로 읽히지 않았어요. 이카운트 「판매조회」에서 엑셀로 받은 파일인지 확인해 주세요. (일자·거래처명·품목명·금액합계 칸이 있어야 해요)");
       setPreview({ ...parsed, fileName: file.name });
-      setTimeout(() => { try { document.getElementById("sales-upload")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 100);
+      setTimeout(() => { try { document.getElementById("sales-top")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 100);
     } catch (e) { setParseErr(e.message || String(e)); setPreview(null); }
     finally { if (fileRef.current) fileRef.current.value = ""; }
   };
@@ -16184,47 +16195,93 @@ function SalesTab({ pendingFile = null, clearPending }) {
       if (r.ok) {
         showToast(`판매 ${fmt(r.count)}건 반영 (${md(r.from)}~${md(r.to)}) · 합계 ${won(r.total)}`, "success");
         setPreview(null); setTick(t => t + 1);
-        // 올린 기간이 지금 보는 기간 밖이면 그 기간으로 옮겨 준다
-        if (r.to < from || r.from > to) { setCustomRange({ from: r.from, to: r.to }); pick("custom"); }
+        if (r.to < from || r.from > to) { setMonth(r.from.slice(0, 7)); setMode("month"); }   // 올린 기간이 지금 보는 기간 밖이면 그 달로
       } else showToast(r.error || "반영하지 못했습니다");
     } catch { showToast("서버에 연결하지 못했습니다"); }
     finally { setSaving(false); }
   };
 
+  // ── 계산 ──
   const fmt = (n) => Math.round(Number(n || 0)).toLocaleString();
   const won = (n) => `${fmt(n)}원`;
   const md = (d) => String(d || "").slice(5).replace("-", "/");
+  const dow = ["일", "월", "화", "수", "목", "금", "토"];
+  const dowOf = (d) => dow[new Date(d + "T00:00:00Z").getUTCDay()];
   const t = data ? data.totals : null;
   const hasItems = !!(t && t.itemRows > 0);
-  const curView = view === "product" && !hasItems ? "client" : view;
-  const dayList = data ? data.days.slice().reverse() : [];
-  const list = !data ? [] : curView === "client" ? data.clients : curView === "product" ? data.products : dayList;
-  const valOf = (x) => curView === "product" ? x.qty : x.total;
-  const maxV = list.reduce((m, x) => Math.max(m, valOf(x)), 0) || 1;
-  const shown = all ? list : list.slice(0, 12);
-  const daysWithSales = data ? data.days.length : 0;
-  // 이 기간 중 엑셀이 안 들어온 날이 있는지 (빈 날 = 판매 없음? 아직 안 올림?)
+  const slips = data ? data.slips || [] : [];
+  const dayMap = React.useMemo(() => { const m = new Map(); (data ? data.days : []).forEach(d => m.set(d.date, d)); return m; }, [data]);
   const cov = data ? data.covered.slice().sort((a, b) => a.from.localeCompare(b.from)) : [];
+  const isCovered = (d) => cov.some(c => c.from <= d && d <= c.to);
   let covEnd = cov.length ? cov[0].to : "";
   for (const c of cov) if (c.from <= addDaysYmd(covEnd, 1) && c.to > covEnd) covEnd = c.to;
-  const fullyCovered = cov.length > 0 && cov[0].from <= from && covEnd >= to;
-  const dow = ["일", "월", "화", "수", "목", "금", "토"];
-  const dayLabel = (d) => `${md(d)} (${dow[new Date(d + "T00:00:00Z").getUTCDay()]})`;
+  const fullyCovered = cov.length > 0 && cov[0].from <= from && covEnd >= (to > today ? today : to);
+  const bestDay = data && data.days.length ? data.days.reduce((b, d) => (d.total > b.total ? d : b), data.days[0]) : null;
+  const daysWithSales = data ? data.days.length : 0;
+  const clientsAll = data ? data.clients : [];
+  const clientsShown = clientsAll.filter(c => !clientQ.trim() || searchHit(clientQ.trim().toLowerCase(), c.name));
+  const curClient = selClient && clientsAll.find(c => c.name === selClient) ? selClient : (clientsAll[0] ? clientsAll[0].name : null);
+  const clientInfo = clientsAll.find(c => c.name === curClient) || null;
+  const clientRank = clientsAll.findIndex(c => c.name === curClient) + 1;
+  const clientSlips = curClient ? slips.filter(s => s.c === curClient).slice().sort((a, b) => b.d.localeCompare(a.d)) : [];
+  const clientDaily = React.useMemo(() => {
+    if (!data || !curClient) return [];
+    const m = new Map(); slips.forEach(s => { if (s.c === curClient) m.set(s.d, (m.get(s.d) || 0) + s.total); });
+    return data.days.slice(-60).map(d => ({ date: d.date, total: m.get(d.date) || 0 }));
+  }, [data, curClient]);
+  const daySlips = selDay ? slips.filter(s => s.d === selDay).slice().sort((a, b) => b.total - a.total) : [];
+  const recentSlips = slips.slice().sort((a, b) => b.d.localeCompare(a.d) || b.total - a.total).slice(0, 8);
+  const products = data ? data.products : [];
+  const productsShown = allProducts ? products : products.slice(0, 10);
 
-  const viewBtn = (k, label) => (
-    <button key={k} type="button" onClick={() => { setView(k); setAll(false); }}
-      style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "none", background: curView === k ? "var(--surface)" : "transparent", boxShadow: curView === k ? "var(--elev-1)" : "none", color: curView === k ? "var(--text1)" : "var(--text3)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
+  // 달력 칸 — 월 보기일 때
+  const calendar = React.useMemo(() => {
+    if (!isMonth || !data) return null;
+    const first = `${month}-01`, last = ymMonthEnd(month);
+    const lead = new Date(first + "T00:00:00Z").getUTCDay();
+    const maxT = Math.max(1, ...data.days.filter(d => d.date >= first && d.date <= last).map(d => d.total));
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push(null);
+    for (let d = first; d <= last; d = addDaysYmd(d, 1)) {
+      const w = new Date(d + "T00:00:00Z").getUTCDay();
+      const hol = HR_HOLIDAYS[d] || "";
+      const off = w === 0 || w === 6 || !!hol;
+      const rec = dayMap.get(d);
+      cells.push({ d, n: Number(d.slice(8)), w, hol, off, rec, ratio: rec ? rec.total / maxT : 0, covered: isCovered(d), future: d > today });
+    }
+    while (cells.length % 7) cells.push(null);
+    return cells;
+  }, [isMonth, data, month, dayMap, cov.length]);
+
+  const chip = (k, label, on, onClick) => (
+    <button key={k} type="button" onClick={onClick}
+      style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid " + (on ? "var(--text1)" : "var(--border)"), background: on ? "var(--text1)" : "transparent", color: on ? "var(--surface)" : "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{label}</button>
   );
-  const kpi = (label, value, unit, sub, color) => (
-    <div className="card">
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
-      <div className="kpi-num" style={{ color: color || "var(--text1)" }}>{value}<span style={{ fontSize: 13, marginLeft: 2 }}>{unit}</span></div>
-      {sub && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{sub}</div>}
+  const stat = (label, value, sub) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text3)", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{value}</span>
+      {sub ? <span style={{ fontSize: 11, color: "var(--text3)", whiteSpace: "nowrap" }}>{sub}</span> : null}
     </div>
+  );
+  const slipRow = (s, i, showDate) => (
+    <div key={`${s.d}-${s.c}-${s.no || i}`} style={{ padding: "9px 0", borderTop: i === 0 ? "none" : "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+        <span style={{ minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{showDate ? <span style={{ color: "var(--text3)", fontWeight: 600, marginRight: 8 }}>{md(s.d)}</span> : null}{s.c}</span>
+        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(s.total)}</span>
+      </div>
+      {s.name ? <div style={{ fontSize: 11.5, color: "var(--text3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}{s.qty ? ` · ${fmt(s.qty)}개` : ""}</div> : null}
+    </div>
+  );
+  const uploadBtn = (primary) => (
+    <button type="button" onClick={() => fileRef.current?.click()}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", borderRadius: 10, border: primary ? "none" : "1px solid var(--border)", background: primary ? "#DB6B2E" : "var(--surface)", color: primary ? "#fff" : "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+      <Icon name="upload" size={14}/>엑셀 올리기
+    </button>
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }} id="sales-top">
       {winDrag && (
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(49,130,246,0.10)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
           <div style={{ padding: "30px 50px", borderRadius: 20, border: "3px dashed #3182F6", background: "var(--surface)", boxShadow: "var(--elev-4)", textAlign: "center" }}>
@@ -16234,148 +16291,283 @@ function SalesTab({ pendingFile = null, clearPending }) {
           </div>
         </div>
       )}
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => handleFile(e.target.files?.[0])}/>
 
-      {/* 업로드 */}
-      <div className="card" id="sales-upload">
-        <div className="section-header">
-          <span className="section-header-title"><Icon name="inbox" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>이카운트 판매조회 엑셀 올리기</span>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {data && data.lastImport && <span className="info-pill" title={data.lastImport.fileName}>마지막 {data.lastImport.at} · {data.lastImport.from}~{data.lastImport.to}</span>}
-            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => handleFile(e.target.files?.[0])}/>
-            <button className="btn-primary" onClick={() => fileRef.current?.click()} style={{ padding: "8px 16px", fontSize: 13 }}>파일 선택</button>
-          </div>
+      {/* 기간 · 업로드 */}
+      <div className="card no-print" style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <button type="button" aria-label="이전 달" onClick={() => stepMonth(-1)} style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="arrowLeft" size={14}/></button>
+          <button type="button" onClick={() => { setMode("month"); }} style={{ minWidth: 112, height: 32, padding: "0 8px", border: "none", background: "transparent", fontSize: 14.5, fontWeight: 800, color: isMonth ? "var(--text1)" : "var(--text3)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{Number(month.slice(0, 4))}년 {Number(month.slice(5))}월</button>
+          <button type="button" aria-label="다음 달" onClick={() => stepMonth(1)} style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="arrowRight" size={14}/></button>
         </div>
-        {preview ? (
-          <div style={{ padding: 14, borderRadius: 12, background: "rgba(49,130,246,0.06)", border: "1px solid rgba(49,130,246,0.3)" }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>판매 엑셀 확인 — {preview.fileName}</div>
-            <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
-              기간 <b>{preview.from} ~ {preview.to}</b>{preview.periodFromHeader ? "" : " (파일 안 날짜 기준)"} · {preview.slip ? "전표" : "품목 줄"} <b>{fmt(preview.totals.count)}건</b>
-              {preview.slip ? "" : <> · 수량 <b>{fmt(preview.totals.qty)}</b></>} · 합계 <b>{won(preview.totals.total)}</b>
-              <br/>이 기간에 이미 올린 판매 기록은 이 파일로 <b>바뀌어요</b>. 같은 기간을 다시 올려도 겹치지 않아요.
-              {preview.slip && <><br/><span style={{ color: "var(--text3)" }}>「판매조회」 전표 목록이라 거래처·날짜별 금액까지 정리돼요. 품목별 수량은 품목이 한 줄씩 나오는 엑셀이 필요해요.</span></>}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setPreview(null)} style={{ padding: "7px 14px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>취소</button>
-              <button type="button" className="btn-primary" onClick={save} disabled={saving} style={{ padding: "7px 16px", fontSize: 12 }}>{saving ? "반영 중…" : `반영 (${fmt(preview.totals.count)}건)`}</button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div onClick={() => fileRef.current?.click()}
-              style={{ padding: "22px 16px", borderRadius: 12, border: `2px dashed ${winDrag ? "#3182F6" : "var(--border)"}`, background: winDrag ? "rgba(49,130,246,0.06)" : "var(--surface2)", textAlign: "center", cursor: "pointer", transition: "all 0.15s", marginBottom: 10 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
-                <Icon name="inbox" size={16} style={{ marginRight: 8, verticalAlign: "-3px", color: "#3182F6" }}/>엑셀 파일을 여기(화면 아무 곳)로 드래그하거나 클릭해서 선택
-              </div>
-              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>.xlsx · .xls · .csv</div>
-            </div>
-            <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7 }}>
-              이카운트 <b>판매조회 → 엑셀</b>로 받은 파일을 올리면 거래처·날짜별 매출로 정리해요. 품목이 한 줄씩 나오는 판매 엑셀이면 <b>품목·사이즈별 수량</b>까지 나와요.
-              같은 기간을 다시 올리면 그 기간이 통째로 바뀌어서 겹치지 않아요.
-            </div>
-          </>
-        )}
-        {parseErr && <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(240,68,82,0.08)", border: "1px solid rgba(240,68,82,0.25)", fontSize: 12, color: "#F04452", fontWeight: 600 }}>⚠️ {parseErr}</div>}
-      </div>
-
-      {/* 기간 */}
-      <div className="card" style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {SALES_RANGES.map(r => (
-            <button key={r.k} type="button" onClick={() => pick(r.k)}
-              style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid " + (range === r.k ? "var(--text1)" : "var(--border)"), background: range === r.k ? "var(--text1)" : "transparent", color: range === r.k ? "var(--surface)" : "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{r.label}</button>
-          ))}
+          {SALES_CHIPS.map(c => chip(c.k, c.label, c.k === "month" ? (mode === "month" && month === today.slice(0, 7)) : c.k === "prev" ? (mode === "month" && month === ymShift(today.slice(0, 7), -1)) || mode === "prev" : mode === c.k, () => pickMode(c.k)))}
         </div>
-        {range === "custom" && (
+        {mode === "custom" && (
           <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--text2)" }}>
             <input type="date" value={custom.from || from} onChange={e => setCustomRange({ from: e.target.value })} style={{ height: 30, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
             ~
             <input type="date" value={custom.to || to} onChange={e => setCustomRange({ to: e.target.value })} style={{ height: 30, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
           </div>
         )}
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{from} ~ {to}</span>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {data && data.lastImport && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }} title={data.lastImport.fileName}><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: "#00B493", marginRight: 6, verticalAlign: "1px" }}/>마지막 업로드 {md(data.lastImport.at.slice(0, 10))} {data.lastImport.at.slice(11)} · {md(data.lastImport.from)}~{md(data.lastImport.to)}</span>}
+          {uploadBtn(true)}
+        </div>
       </div>
+
+      {preview && (
+        <div className="card" style={{ background: "rgba(49,130,246,0.06)", borderColor: "rgba(49,130,246,0.35)" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>판매 엑셀 확인 — {preview.fileName}</div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
+            기간 <b>{preview.from} ~ {preview.to}</b>{preview.periodFromHeader ? "" : " (파일 안 날짜 기준)"} · {preview.slip ? "전표" : "품목 줄"} <b>{fmt(preview.totals.count)}건</b>
+            {preview.slip ? "" : <> · 수량 <b>{fmt(preview.totals.qty)}</b></>} · 합계 <b>{won(preview.totals.total)}</b>
+            <br/>이 기간에 이미 올린 판매 기록은 이 파일로 <b>바뀌어요</b>. 같은 기간을 다시 올려도 겹치지 않아요.
+            {preview.slip && <><br/><span style={{ color: "var(--text3)" }}>「판매조회」 전표 목록이라 거래처·날짜별 금액까지 정리돼요. 품목별 수량은 품목이 한 줄씩 나오는 엑셀이 필요해요.</span></>}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+            <button type="button" onClick={() => setPreview(null)} style={{ padding: "7px 14px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>취소</button>
+            <button type="button" className="btn-primary" onClick={save} disabled={saving} style={{ padding: "7px 16px", fontSize: 12 }}>{saving ? "반영 중…" : `반영 (${fmt(preview.totals.count)}건)`}</button>
+          </div>
+        </div>
+      )}
+      {parseErr && <div className="card" style={{ padding: "10px 14px", background: "rgba(240,68,82,0.08)", borderColor: "rgba(240,68,82,0.25)", fontSize: 12, color: "#F04452", fontWeight: 600 }}>⚠️ {parseErr}</div>}
 
       {err ? <div className="card" style={{ fontSize: 12.5, color: "var(--negative-text)" }}>{err}</div>
       : !data ? <div className="card" style={{ fontSize: 12.5, color: "var(--text3)" }}>불러오는 중…</div>
       : (
         <>
-          {/* KPI */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
-            {kpi("매출 (부가세 포함)", fmt(t.total), "원", daysWithSales ? `판매 있는 날 ${daysWithSales}일 · 하루 평균 ${won(t.total / daysWithSales)}` : "")}
-            {kpi(t.slips > 0 && !hasItems ? "전표" : "건수", fmt(t.count), "건")}
-            {hasItems ? kpi("판매 수량", fmt(t.qty), "개", moves && moves.syncs > 0 ? `출고 추정 ${fmt(moves.totalOut)}개 → 판매 외 ${fmt(Math.max(0, moves.totalOut - t.qty))}개` : "") : null}
-            {kpi("거래처", fmt(data.clientCount), "곳", data.clients[0] ? `1위 ${data.clients[0].name} ${won(data.clients[0].total)}` : "")}
+          {/* 요약 한 줄 */}
+          <div className="card" style={{ padding: "14px 20px", display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text3)" }}>{isMonth ? `${Number(month.slice(5))}월 매출` : "기간 매출"} <span style={{ fontWeight: 500 }}>· 부가세 포함</span></span>
+              <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.02em", lineHeight: 1.15, fontVariantNumeric: "tabular-nums" }}>{manWon(t.total)}<span style={{ fontSize: 14, marginLeft: 3 }}>원</span></span>
+              <span style={{ fontSize: 11, color: "var(--text3)" }}>{won(t.total)}</span>
+            </div>
+            <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }}/>
+            {stat("하루 평균", daysWithSales ? `${manWon(t.total / daysWithSales)}원` : "—", daysWithSales ? `판매 있는 날 ${daysWithSales}일` : "")}
+            {stat(t.slips > 0 && !hasItems ? "전표" : "건수", `${fmt(t.count)}건`, t.count ? `전표당 ${manWon(t.total / t.count)}원` : "")}
+            {hasItems ? stat("판매 수량", `${fmt(t.qty)}개`, moves && moves.syncs > 0 ? `출고 추정 ${fmt(moves.totalOut)}개 · 판매 외 ${fmt(Math.max(0, moves.totalOut - t.qty))}개` : "") : null}
+            {stat("거래처", `${fmt(data.clientCount)}곳`, clientsAll[0] ? `1위 ${clientsAll[0].name} ${Math.round(clientsAll[0].total / Math.max(1, t.total) * 100)}%` : "")}
+            {bestDay ? stat("최고 매출일", `${md(bestDay.date)} (${dowOf(bestDay.date)})`, `${manWon(bestDay.total)}원 · ${bestDay.count}건`) : null}
+            <span style={{ marginLeft: "auto", fontSize: 11.5, color: fullyCovered ? "var(--text3)" : "var(--warning-text)", whiteSpace: "nowrap" }}>
+              {cov.length === 0 ? "이 기간 엑셀 없음" : fullyCovered ? `${md(cov[0].from)}~${md(covEnd)} 올림` : `${cov.map(c => `${md(c.from)}~${md(c.to)}`).join(", ")} 올림 · 나머지 날은 아직`}
+            </span>
           </div>
-          {!fullyCovered && cov.length > 0 && (
-            <div className="card" style={{ padding: "10px 16px", fontSize: 12.5, color: "var(--warning-text)", background: "rgba(255,149,0,0.05)", borderColor: "rgba(255,149,0,0.3)" }}>
-              이 기간 중 엑셀을 올린 날짜: {cov.map(c => `${md(c.from)}~${md(c.to)}`).join(", ")} — 나머지 날은 아직 안 올렸어요.
+
+          {t.count === 0 && cov.length === 0 && (
+            <div className="card" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
+                <b style={{ color: "var(--text1)" }}>이 기간 판매 기록이 없어요.</b> 이카운트 <b>판매조회 → 엑셀</b>로 받은 파일을 <b>이 화면 아무 곳에 끌어다 놓으면</b> 정리해 드려요.
+                {data.lastImport ? <span style={{ color: "var(--text3)" }}> (마지막으로 올린 기간: {data.lastImport.from} ~ {data.lastImport.to})</span> : null}
+              </div>
+              {uploadBtn(false)}
             </div>
           )}
 
-          {/* 목록 */}
-          <div className="card">
-            <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
-              <span className="section-header-title"><Icon name="barChart" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>
-                {curView === "client" ? "거래처별 매출" : curView === "product" ? "품목별 판매" : "날짜별 매출"}
-              </span>
-              <div style={{ display: "inline-flex", gap: 2, padding: 2, borderRadius: 9, background: "var(--surface2)" }}>
-                {viewBtn("client", "거래처별")}
-                {hasItems && viewBtn("product", "품목별")}
-                {viewBtn("day", "날짜별")}
-              </div>
+          {/* 달력(월) 또는 날짜별 막대 + 그날 전표 */}
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div className="card" style={{ flex: "999 1 560px", minWidth: 0 }}>
+              {isMonth && calendar ? (
+                <>
+                  <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+                    <span className="section-header-title"><Icon name="calendar" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>{Number(month.slice(5))}월 달력</span>
+                    <span style={{ fontSize: 11.5, color: "var(--text3)" }}>날짜를 누르면 그날 전표 · 색이 진할수록 매출이 커요</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 5, fontSize: 11, fontWeight: 700, color: "var(--text3)", textAlign: "center", marginBottom: 4 }}>
+                    {dow.map((x, i) => <div key={x} style={{ color: i === 0 ? "#F04452" : i === 6 ? "#3182F6" : "var(--text3)" }}>{x}</div>)}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 5 }}>
+                    {calendar.map((c, i) => {
+                      if (!c) return <div key={"e" + i} style={{ minHeight: 74, borderRadius: 10, background: "var(--surface2)", opacity: 0.5 }}/>;
+                      const sel = selDay === c.d;
+                      const has = !!c.rec;
+                      const bg = sel ? "#3182F6" : has ? `rgba(49,130,246,${(0.12 + 0.55 * Math.sqrt(c.ratio)).toFixed(2)})` : c.off ? "var(--surface2)" : "var(--surface)";
+                      const border = sel ? "1px solid #3182F6" : has && c.future ? "1px dashed rgba(49,130,246,0.6)" : !has && !c.off && !c.covered ? "1px dashed var(--border)" : "1px solid " + (has ? "transparent" : "var(--border)");
+                      const numColor = sel ? "#fff" : c.hol || c.w === 0 ? "#F04452" : c.w === 6 ? "#3182F6" : has ? "var(--text1)" : "var(--text3)";
+                      return (
+                        <button key={c.d} type="button" onClick={() => setSelDay(sel ? null : c.d)} title={c.hol || c.d}
+                          style={{ minHeight: 74, padding: "6px 5px", borderRadius: 10, border, background: bg, color: sel ? "#fff" : "var(--text1)", cursor: "pointer", fontFamily: "inherit", textAlign: "left", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 4, boxShadow: c.d === today && !sel ? "inset 0 0 0 2px #DB6B2E" : "none" }}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 4, minWidth: 0 }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 800, color: numColor }}>{c.n}</span>
+                            {c.hol ? <span style={{ fontSize: 9.5, fontWeight: 600, color: sel ? "#fff" : "#F04452", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.hol}</span> : c.d === today ? <span style={{ fontSize: 9.5, fontWeight: 700, color: sel ? "#fff" : "#DB6B2E" }}>오늘</span> : null}
+                          </div>
+                          {has ? (
+                            <div>
+                              <div style={{ fontSize: "min(13px, 2.8vw)", fontWeight: 800, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em", whiteSpace: "nowrap", color: sel ? "#fff" : "var(--text1)" }}>{manWon(c.rec.total).replace(/,/g, "")}</div>
+                              <div style={{ fontSize: 10.5, color: sel ? "rgba(255,255,255,0.8)" : "var(--text2)" }}>{c.rec.count}건{c.future ? " · 선발행" : ""}</div>
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 10.5, color: "var(--text3)" }}>{c.off ? "휴일" : c.covered ? "판매 없음" : c.future ? "" : "엑셀 없음"}</div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "var(--text3)", marginTop: 8 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "rgba(49,130,246,0.5)" }}/>판매 있음</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: "var(--surface2)", border: "1px solid var(--border)" }}/>휴일</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 11, height: 11, borderRadius: 3, border: "1px dashed var(--text3)" }}/>엑셀 아직 안 올림</span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 11, height: 11, borderRadius: 3, border: "1px dashed rgba(49,130,246,0.8)" }}/>날짜를 앞당겨 끊은 전표(선발행)</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+                    <span className="section-header-title"><Icon name="barChart" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>날짜별 매출</span>
+                    <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{from} ~ {to} · 날짜를 누르면 그날 전표</span>
+                  </div>
+                  {data.days.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>이 기간 판매 기록이 없어요.</div> : (
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      {data.days.slice().reverse().map((d, i) => {
+                        const maxT = Math.max(1, ...data.days.map(x => x.total)); const sel = selDay === d.date;
+                        return (
+                          <button key={d.date} type="button" onClick={() => setSelDay(sel ? null : d.date)} style={{ padding: "8px 6px", border: "none", borderTop: i === 0 ? "none" : "1px solid var(--border)", background: sel ? "rgba(49,130,246,0.08)" : "transparent", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>{md(d.date)} ({dowOf(d.date)})</span>
+                              <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{d.count}건</span>
+                              <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(d.total)}<span style={{ fontSize: 11, color: "var(--text3)", marginLeft: 2 }}>원</span></span>
+                            </div>
+                            <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", marginTop: 5 }}><div style={{ width: `${Math.max(2, d.total / maxT * 100)}%`, height: "100%", borderRadius: 2, background: "#3182F6" }}/></div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-            {!hasItems && t.count > 0 && curView === "client" && <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 6 }}>품목별 보기는 품목이 한 줄씩 나오는 판매 엑셀을 올리면 생겨요.</div>}
-            {t.count === 0 ? (
-              <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7, padding: "6px 0" }}>
-                이 기간 판매 기록이 없어요.{cov.length === 0 ? " 아직 이 기간의 엑셀을 올리지 않았어요." : ""}
-                {data.lastImport ? <span style={{ color: "var(--text3)" }}> (마지막으로 올린 기간: {data.lastImport.from} ~ {data.lastImport.to})</span> : null}
+
+            <div className="card" style={{ flex: "1 1 320px", minWidth: 0 }}>
+              {selDay ? (
+                <>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{Number(selDay.slice(5, 7))}월 {Number(selDay.slice(8))}일 ({dowOf(selDay)})</span>
+                    <button type="button" onClick={() => setSelDay(null)} style={{ border: "none", background: "transparent", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>닫기</button>
+                  </div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.02em", margin: "2px 0 10px", fontVariantNumeric: "tabular-nums" }}>{won(daySlips.reduce((s, x) => s + x.total, 0))}<span style={{ fontSize: 12, color: "var(--text3)", fontWeight: 600, marginLeft: 8 }}>{daySlips.length}건</span></div>
+                  {daySlips.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>{isCovered(selDay) ? "이날은 판매가 없어요." : "이날 엑셀은 아직 안 올렸어요."}</div> : daySlips.map((s, i) => slipRow(s, i, false))}
+                </>
+              ) : (
+                <>
+                  <div className="section-header"><span className="section-header-title"><Icon name="history" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>최근 전표</span><span style={{ fontSize: 11.5, color: "var(--text3)" }}>{isMonth ? "달력에서 날짜를 누르면 그날만" : "날짜를 누르면 그날만"}</span></div>
+                  {recentSlips.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>전표가 없어요.</div> : recentSlips.map((s, i) => slipRow(s, i, true))}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* 거래처 표 + 거래처 상세 */}
+          {clientsAll.length > 0 && (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+              <div className="card" style={{ flex: "999 1 560px", minWidth: 0 }}>
+                <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+                  <span className="section-header-title"><Icon name="clients" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>거래처별 매출 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 4 }}>{data.clientCount}곳</span></span>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 10px", borderRadius: 9, background: "var(--surface2)", color: "var(--text3)" }}>
+                    <Icon name="search" size={13}/>
+                    <input type="text" value={clientQ} onChange={e => { setClientQ(e.target.value); setAllClients(true); }} placeholder="거래처 검색" aria-label="거래처 검색" style={{ border: "none", background: "transparent", outline: "none", fontSize: 12.5, color: "var(--text1)", width: 130, fontFamily: "inherit" }}/>
+                  </label>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <div style={{ minWidth: 520 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 64px", gap: 8, alignItems: "center", padding: "4px 8px 6px", fontSize: 11, fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)" }}>
+                      <div>#</div><div>거래처</div><div style={{ textAlign: "right" }}>전표</div><div style={{ textAlign: "right" }}>매출</div><div style={{ textAlign: "right" }}>비중</div><div style={{ textAlign: "right" }}>마지막</div>
+                    </div>
+                    {(allClients ? clientsShown : clientsShown.slice(0, 12)).map((c) => {
+                      const rank = clientsAll.indexOf(c) + 1; const on = c.name === curClient;
+                      return (
+                        <button key={c.name} type="button" onClick={() => setSelClient(c.name)}
+                          style={{ width: "100%", display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 64px", gap: 8, alignItems: "center", padding: "9px 8px", border: "none", borderBottom: "1px solid var(--border)", borderRadius: on ? 8 : 0, background: on ? "rgba(49,130,246,0.08)" : "transparent", boxShadow: on ? "inset 3px 0 0 #3182F6" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", fontSize: 13, color: "var(--text1)" }}>
+                          <div style={{ fontWeight: 800, color: rank <= 3 ? "#DB6B2E" : "var(--text3)", fontSize: 12 }}>{rank}</div>
+                          <div style={{ fontWeight: on ? 800 : 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
+                          <div style={{ textAlign: "right", color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{c.count}</div>
+                          <div style={{ textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{fmt(c.total)}</div>
+                          <div style={{ textAlign: "right", color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{(c.total / Math.max(1, t.total) * 100).toFixed(1)}%</div>
+                          <div style={{ textAlign: "right", color: "var(--text3)", fontSize: 12 }}>{md(c.last)}</div>
+                        </button>
+                      );
+                    })}
+                    {clientsShown.length === 0 && <div style={{ padding: "12px 8px", fontSize: 12.5, color: "var(--text3)" }}>검색 결과가 없어요.</div>}
+                  </div>
+                </div>
+                {clientsShown.length > 12 && !allClients && (
+                  <button type="button" onClick={() => setAllClients(true)} style={{ marginTop: 6, padding: "8px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>나머지 {clientsShown.length - 12}곳 더 보기</button>
+                )}
               </div>
-            ) : list.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>표시할 항목이 없어요.</div> : (
+
+              {clientInfo && (
+                <div style={{ flex: "1 1 320px", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ padding: 18, borderRadius: 16, background: "var(--text1)", color: "var(--surface)", display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.65 }}>선택한 거래처</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.02em", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clientInfo.name}</div>
+                      </div>
+                      <span style={{ padding: "3px 9px", borderRadius: 999, background: clientRank <= 3 ? "#DB6B2E" : "rgba(255,255,255,0.18)", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap" }}>{clientRank}위</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                      <div><div style={{ fontSize: 10.5, opacity: 0.65 }}>매출</div><div style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{manWon(clientInfo.total)}</div></div>
+                      <div><div style={{ fontSize: 10.5, opacity: 0.65 }}>전표</div><div style={{ fontSize: 15, fontWeight: 800 }}>{clientInfo.count}건</div></div>
+                      <div><div style={{ fontSize: 10.5, opacity: 0.65 }}>전표당</div><div style={{ fontSize: 15, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{manWon(clientInfo.total / Math.max(1, clientInfo.count))}</div></div>
+                    </div>
+                    {clientDaily.length > 1 && (
+                      <div>
+                        <div style={{ display: "grid", gridTemplateColumns: `repeat(${clientDaily.length}, minmax(0, 1fr))`, gap: 2, alignItems: "end", height: 38 }}>
+                          {clientDaily.map(d => { const mx = Math.max(1, ...clientDaily.map(x => x.total)); return <div key={d.date} title={`${md(d.date)} ${won(d.total)}`} style={{ height: d.total ? `${Math.max(8, d.total / mx * 100)}%` : 2, borderRadius: 2, background: d.total ? "#5C8DF0" : "rgba(255,255,255,0.18)" }}/>; })}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, opacity: 0.65, marginTop: 4 }}><span>{md(clientDaily[0].date)}</span><span>판매 있는 날짜별</span><span>{md(clientDaily[clientDaily.length - 1].date)}</span></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="card">
+                    <div className="section-header"><span className="section-header-title">전표 {clientSlips.length}건</span><span style={{ fontSize: 11.5, color: "var(--text3)" }}>최근 순</span></div>
+                    {clientSlips.slice(0, 8).map((s, i) => (
+                      <div key={`${s.d}-${i}`} style={{ padding: "8px 0", borderTop: i === 0 ? "none" : "1px solid var(--border)", display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ width: 40, fontSize: 12, color: "var(--text3)", flexShrink: 0 }}>{md(s.d)}</span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: "var(--text2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name || "—"}</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(s.total)}</span>
+                      </div>
+                    ))}
+                    {clientSlips.length > 8 && <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 6 }}>외 {clientSlips.length - 8}건</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 품목별 (품목 줄 엑셀일 때) */}
+          {hasItems && products.length > 0 && (
+            <div className="card">
+              <div className="section-header"><span className="section-header-title"><Icon name="shirt" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>품목별 판매 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 4 }}>{data.productCount}개</span></span></div>
               <div style={{ display: "flex", flexDirection: "column" }}>
-                {shown.map((x, idx) => {
-                  const key = curView === "day" ? x.date : x.name;
-                  const title = curView === "day" ? dayLabel(x.date) : x.name;
+                {productsShown.map((x, idx) => {
+                  const mx = Math.max(1, ...products.map(p => p.qty));
                   return (
-                    <div key={key} style={{ padding: "9px 0", borderTop: idx === 0 ? "none" : "1px solid var(--border)" }}>
+                    <div key={x.name} style={{ padding: "9px 0", borderTop: idx === 0 ? "none" : "1px solid var(--border)" }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                        {curView !== "day" && <span style={{ width: 20, fontSize: 11.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{idx + 1}</span>}
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={title}>{title}</span>
-                        {curView === "client" && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{fmt(x.count)}건{x.qty ? ` · ${fmt(x.qty)}개` : ""}</span>}
-                        {curView === "product" && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{won(x.total)}</span>}
-                        {curView === "day" && x.qty ? <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{fmt(x.qty)}개</span> : null}
-                        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                          {fmt(valOf(x))}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>{curView === "product" ? "개" : "원"}</span>
-                        </span>
+                        <span style={{ width: 20, fontSize: 11.5, fontWeight: 700, color: "var(--text3)", flexShrink: 0 }}>{idx + 1}</span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.name}</span>
+                        <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{won(x.total)}</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(x.qty)}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>개</span></span>
                       </div>
-                      <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", marginTop: 5, marginLeft: curView !== "day" ? 30 : 0 }}>
-                        <div style={{ width: `${Math.max(2, (valOf(x) / maxV) * 100)}%`, height: "100%", borderRadius: 2, background: "#3182F6" }}/>
-                      </div>
-                      {curView === "product" && x.sizes && x.sizes.length > 0 && (
+                      <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", marginTop: 5, marginLeft: 30 }}><div style={{ width: `${Math.max(2, x.qty / mx * 100)}%`, height: "100%", borderRadius: 2, background: "#DB6B2E" }}/></div>
+                      {x.sizes && x.sizes.length > 0 && (
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6, marginLeft: 30 }}>
-                          {x.sizes.filter(z => z.qty).map(z => (
-                            <span key={z.size + z.code} title={`${z.code || ""} · ${won(z.total)}`} style={{ fontSize: 11, padding: "2px 7px", borderRadius: 6, background: "var(--surface2)", color: "var(--text2)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                              {z.size || z.code || "-"} <b style={{ color: "var(--text1)" }}>{fmt(z.qty)}</b>
-                            </span>
-                          ))}
+                          {x.sizes.filter(z => z.qty).map(z => <span key={z.size + z.code} title={`${z.code || ""} · ${won(z.total)}`} style={{ fontSize: 11, padding: "2px 7px", borderRadius: 6, background: "var(--surface2)", color: "var(--text2)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{z.size || z.code || "-"} <b style={{ color: "var(--text1)" }}>{fmt(z.qty)}</b></span>)}
                         </div>
                       )}
                     </div>
                   );
                 })}
-                {list.length > 12 && (
-                  <button type="button" onClick={() => setAll(v => !v)} style={{ marginTop: 6, padding: "8px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                    {all ? "접기" : `나머지 ${list.length - 12}개 더 보기`}
-                  </button>
-                )}
+                {products.length > 10 && <button type="button" onClick={() => setAllProducts(v => !v)} style={{ marginTop: 6, padding: "8px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{allProducts ? "접기" : `나머지 ${products.length - 10}개 더 보기`}</button>}
               </div>
-            )}
-            <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>매출은 이카운트 「금액합계」(부가세 포함) 기준이에요.</div>
-          </div>
+            </div>
+          )}
 
           {/* 올린 이력 */}
           {data.imports && data.imports.length > 0 && (
             <div className="card">
-              <div className="section-header"><span className="section-header-title"><Icon name="history" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>올린 엑셀</span></div>
+              <div className="section-header"><span className="section-header-title"><Icon name="inbox" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>올린 엑셀</span><span style={{ fontSize: 11.5, color: "var(--text3)" }}>매출은 이카운트 「금액합계」(부가세 포함) 기준</span></div>
               <div style={{ display: "flex", flexDirection: "column" }}>
                 {data.imports.map((im, i) => (
                   <div key={im.at + i} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "7px 0", borderTop: i === 0 ? "none" : "1px solid var(--border)", fontSize: 12.5 }}>
