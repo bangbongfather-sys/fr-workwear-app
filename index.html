@@ -11702,6 +11702,48 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
     };
   }, []);
 
+  // ── 판매 현황(이카운트 판매조회 엑셀) 연동 — 이 달 거래처별 매출을 받아 장부와 맞춰 본다 ──
+  const [salesMonth, setSalesMonth] = useState(null);   // /api/sales 응답 (선택한 달)
+  const [salesTick, setSalesTick] = useState(0);
+  useEffect(() => {
+    if (subTab !== "monthly") return;
+    let dead = false;
+    const [y, m] = selectedYM.split("-").map(Number);
+    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    fetch(`/api/sales?from=${selectedYM}-01&to=${selectedYM}-${String(last).padStart(2, "0")}`, { cache: "no-store" })
+      .then(r => r.json()).then(j => { if (!dead) setSalesMonth(j && !j.error ? j : null); }).catch(() => { if (!dead) setSalesMonth(null); });
+    return () => { dead = true; };
+  }, [selectedYM, subTab, salesTick]);
+  const salesClients = (salesMonth && salesMonth.clients) || [];
+  const salesTotal = salesMonth && salesMonth.totals ? salesMonth.totals.total : 0;
+  const salesHas = !!(salesMonth && salesMonth.totals && salesMonth.totals.count > 0);
+  // 장부 거래처 ↔ 판매 거래처 (이름 표기 차이 허용)
+  const salesOf = (name) => salesClients.find(sc => payablesNameMatch(sc.name, name)) || null;
+  // 판매 현황 → 장부: 없는 거래처는 새로 넣고, 있는 거래처는 금액만 맞춘다 (상태·메모·미수금 내역은 그대로)
+  const importFromSales = () => {
+    if (!salesHas) return;
+    const cur = monthClients.slice();
+    const adds = [], updates = [], same = [], skipped = [];
+    salesClients.forEach(sc => {
+      const total = Math.round(sc.total);
+      if (total <= 0) { skipped.push(sc.name); return; }
+      const supply = Math.round(total / 1.1), tax = total - supply;
+      const hit = cur.find(c => payablesNameMatch(c.name, sc.name));
+      if (!hit) adds.push({ id: uid(), name: sc.name, supply, tax, total, status: "미입금", memo: "판매 현황에서 가져옴", ar: [] });
+      else if (Math.round(parseFloat(hit.total) || 0) !== total) updates.push({ id: hit.id, name: hit.name, before: Math.round(parseFloat(hit.total) || 0), supply, tax, total });
+      else same.push(hit.name);
+    });
+    if (!adds.length && !updates.length) { showToast(`장부가 이미 판매 현황과 같아요 (${same.length}곳)`); return; }
+    const lines = [`${selectedYM} 판매 현황 → 장부`, ""];
+    if (adds.length) lines.push(`새로 추가 ${adds.length}곳 (미입금): ${adds.slice(0, 5).map(a => a.name).join(", ")}${adds.length > 5 ? ` 외 ${adds.length - 5}곳` : ""}`);
+    if (updates.length) lines.push(`금액 갱신 ${updates.length}곳: ${updates.slice(0, 5).map(u => `${u.name} ${u.before.toLocaleString()}→${u.total.toLocaleString()}`).join(", ")}${updates.length > 5 ? ` 외 ${updates.length - 5}곳` : ""}`);
+    if (same.length) lines.push(`그대로 ${same.length}곳`);
+    if (skipped.length) lines.push(`건너뜀(합계 0 이하) ${skipped.length}곳`);
+    lines.push("", "상태·메모·미수금 내역은 그대로 둡니다. 진행할까요?");
+    if (!window.confirm(lines.join("\n"))) return;
+    updateMonth(cs => cs.map(c => { const u = updates.find(x => x.id === c.id); return u ? { ...c, supply: u.supply, tax: u.tax, total: u.total } : c; }).concat(adds));
+    showToast(`✅ 판매 현황에서 ${adds.length}곳 추가 · ${updates.length}곳 갱신`, "success");
+  };
   const monthData = ledgers[selectedYM] || { clients: [] };
   const monthClients = monthData.clients || [];
   const filtered = monthClients.filter(c => {
@@ -12270,6 +12312,34 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
         <span style={{fontSize:11,color:"var(--text3)"}}>전체 누적: <b style={{color:"var(--text1)"}}>{Math.round(totalAcrossMonths).toLocaleString()}원</b></span>
       </div>
 
+      {/* 판매 현황 연동 띠 — 이카운트 판매조회 엑셀(판매 현황 탭)과 장부 금액 비교 + 가져오기 */}
+      {(() => {
+        const diff = salesHas ? Math.round(totalBilled - salesTotal) : 0;
+        const missing = salesHas ? salesClients.filter(sc => sc.total > 0 && !monthClients.some(c => payablesNameMatch(c.name, sc.name))).length : 0;
+        const changed = salesHas ? monthClients.filter(c => { const sc = salesOf(c.name); return sc && Math.round(sc.total) !== Math.round(parseFloat(c.total) || 0); }).length : 0;
+        const extra = salesHas ? monthClients.filter(c => c.status !== "법인 거래" && !salesOf(c.name)).length : 0;   // 장부에만 있는 거래처 (수기 청구 등)
+        const inSync = salesHas && missing === 0 && changed === 0 && extra === 0;
+        return (
+          <div className="card no-print" style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: !salesHas ? "var(--surface)" : inSync ? "rgba(0,180,147,0.06)" : "rgba(219,107,46,0.06)", borderColor: !salesHas ? "var(--border)" : inSync ? "rgba(0,180,147,0.3)" : "rgba(219,107,46,0.3)" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 4, background: !salesHas ? "var(--text3)" : inSync ? "#00B493" : "#DB6B2E", flexShrink: 0 }} aria-hidden="true"/>
+            <span style={{ flex: "1 1 260px", minWidth: 0, fontSize: 12.5, color: "var(--text2)", lineHeight: 1.6 }}>
+              <b style={{ color: "var(--text1)" }}>판매 현황</b>
+              {!salesMonth ? <span style={{ color: "var(--text3)" }}> · 불러오는 중…</span>
+              : !salesHas ? <span style={{ color: "var(--text3)" }}> · {selectedYM} 판매 엑셀이 아직 없어요 — 판매 현황 탭에 이카운트 판매조회 엑셀을 올리면 여기서 장부와 맞춰 볼 수 있어요</span>
+              : <> · 이카운트 매출 <b style={{ color: "var(--text1)" }}>{Math.round(salesTotal).toLocaleString()}원</b> ({salesMonth.clientCount}곳 · 전표 {salesMonth.totals.count}건) · 장부 청구 <b style={{ color: "var(--text1)" }}>{Math.round(totalBilled).toLocaleString()}원</b>
+                  {inSync ? <span style={{ color: "#00B493", fontWeight: 700 }}> · 장부와 같아요</span>
+                  : <span style={{ color: "#B5521E", fontWeight: 700 }}> · 차이 {diff > 0 ? "+" : ""}{diff.toLocaleString()}원{missing ? ` · 장부에 없는 거래처 ${missing}곳` : ""}{changed ? ` · 금액 다른 거래처 ${changed}곳` : ""}{extra ? ` · 장부에만 있는 거래처 ${extra}곳` : ""}</span>}</>}
+            </span>
+            {salesHas && (missing > 0 || changed > 0) && (
+              <button type="button" onClick={importFromSales} className="btn-primary" style={{ padding: "8px 14px", fontSize: 12.5, whiteSpace: "nowrap" }}>
+                <Icon name="download" size={13} style={{ marginRight: 5, verticalAlign: "-2px" }}/>판매 현황에서 가져오기
+              </button>
+            )}
+            {salesMonth && <button type="button" onClick={() => setSalesTick(t => t + 1)} title="판매 현황 다시 읽기" aria-label="판매 현황 다시 읽기" style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="refresh" size={13}/></button>}
+          </div>
+        );
+      })()}
+
       {/* ── 시안 B+A: 회수율 다크 카드 + 입금/미입금 (카드 클릭 = 필터) ──
           흰 눈금은 지난달 회수율 — 이번 달이 어디쯤인지 비교 기준이 화면 안에 있다. */}
       {(() => {
@@ -12493,6 +12563,12 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                             <Icon name="coins" size={12} style={{color:"var(--text3)",flexShrink:0}}/>
                             {clientBal > 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(240,68,82,0.12)",color:"#F04452",marginLeft:0}}>미수 {Math.round(clientBal).toLocaleString()}원</span>}
                             {clientBal < 0 && <span style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(0,180,147,0.12)",color:"#00B493",marginLeft:0}}>선납 {Math.round(Math.abs(clientBal)).toLocaleString()}원</span>}
+                            {salesHas && !isCorp && (() => {
+                              const sc = salesOf(c.name);
+                              if (!sc) return <span title="이 달 이카운트 판매 기록에 없는 거래처" style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"var(--surface2)",color:"var(--text3)"}}>판매 없음</span>;
+                              const d = Math.round(parseFloat(c.total) || 0) - Math.round(sc.total);
+                              return d === 0 ? null : <span title={`이카운트 판매 ${Math.round(sc.total).toLocaleString()}원 (전표 ${sc.count}건) — 장부와 ${Math.abs(d).toLocaleString()}원 차이`} style={{fontSize:10,fontWeight:700,padding:"2px 6px",borderRadius:4,background:"rgba(219,107,46,0.12)",color:"#B5521E"}}>판매 {Math.round(sc.total).toLocaleString()} ({d > 0 ? "+" : ""}{d.toLocaleString()})</span>;
+                            })()}
                             {isExpanded && <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:100,background:"#DB6B2E",color:"#fff"}}>선택됨</span>}
                           </span>
                         </td>
