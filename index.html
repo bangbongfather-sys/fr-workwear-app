@@ -15765,6 +15765,8 @@ function salesParseWorkbook(arrayBuffer) {
     const t = String(v || "").trim();
     let m = t.match(/(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})/);
     if (m) return ymd(+m[1], +m[2], +m[3]);
+    m = t.match(/^(\d{4})(\d{2})(\d{2})(?!\d)/);   // 이카운트 「일자-No.」 20261030-2
+    if (m) return ymd(+m[1], +m[2], +m[3]);
     m = t.match(/^(\d{1,2})\s*[.\/-]\s*(\d{1,2})(?!\d)/);
     if (m) return ymd(year, +m[1], +m[2]);
     return "";
@@ -15792,10 +15794,12 @@ function salesParseWorkbook(arrayBuffer) {
           price: find(cells, /^단가/),
           supply: find(cells, /(공급가액|공급가)/),
           vat: find(cells, /(부가세|부가가치세|^세액)/),
-          total: find(cells, /^(합계|합계금액|총액|금액|판매금액|합계액)$/),
+          total: find(cells, /^(합계|합계금액|금액합계|총액|금액|판매금액|합계액)$/),
           wh: find(cells, /(창고명|창고|출하창고)/),
         };
-        if (map.d < 0 || map.qty < 0 || map.name < 0 || (map.c < 0 && map.supply < 0 && map.total < 0)) continue;
+        // 품목 줄(수량 있음) 형식, 또는 이카운트 「판매조회」 전표 목록(거래처·금액합계만, 품목은 「○○ 외 15건」 요약) 형식
+        const slip = map.qty < 0 && map.c >= 0 && map.total >= 0;
+        if (map.d < 0 || map.name < 0 || (!slip && (map.qty < 0 || (map.c < 0 && map.supply < 0 && map.total < 0)))) continue;
         // 상단 제목 줄의 「기간 2026/10/01 ~ 2026/10/31」 — 있으면 그 기간을 통째로 바꾼다(판매 없던 날 포함)
         const top = rows.slice(0, i + 1).map(r => (r || []).join(" ")).join(" ");
         const pm = top.match(/(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})\s*~\s*(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})/);
@@ -15811,19 +15815,20 @@ function salesParseWorkbook(arrayBuffer) {
           if (!day) continue;
           lastDay = day;
           const name = String(r[map.name] || "").trim(), code = map.code >= 0 ? String(r[map.code] || "").trim() : "";
-          const qty = num(r[map.qty]);
+          const qty = slip ? 0 : num(r[map.qty]);
           if ((!name && !code) || isNaN(qty)) continue;
           const g = (key) => map[key] >= 0 ? num(r[map[key]]) : NaN;
           const supply = g("supply"), vat = g("vat"), total = g("total"), price = g("price");
           out.push({ d: day, c: map.c >= 0 ? String(r[map.c] || "").trim() : "", code, name, spec: map.spec >= 0 ? String(r[map.spec] || "").trim() : "",
             qty, price: isNaN(price) ? 0 : price, supply: isNaN(supply) ? 0 : supply, vat: isNaN(vat) ? 0 : vat,
-            total: !isNaN(total) ? total : (!isNaN(supply) ? supply + (isNaN(vat) ? 0 : vat) : 0), wh: map.wh >= 0 ? String(r[map.wh] || "").trim() : "" });
+            total: !isNaN(total) ? total : (!isNaN(supply) ? supply + (isNaN(vat) ? 0 : vat) : 0), wh: map.wh >= 0 ? String(r[map.wh] || "").trim() : "",
+            ...(slip ? { slip: true, no: (String(r[map.d] || "").match(/-\s*(\d+)\s*$/) || [])[1] || "" } : {}) });
         }
         if (!out.length) continue;
         const ds = out.map(x => x.d).sort();
         const from = pFrom && pFrom <= ds[0] ? pFrom : ds[0], to = pTo && pTo >= ds[ds.length - 1] ? pTo : ds[ds.length - 1];
         const cols = Object.entries(map).filter(([, v]) => v >= 0).map(([k]) => k);
-        return { rows: out, from, to, periodFromHeader: !!(pFrom && pTo), cols, sheet: sn,
+        return { rows: out, from, to, periodFromHeader: !!(pFrom && pTo), cols, sheet: sn, slip,
           totals: { count: out.length, qty: out.reduce((t, x) => t + x.qty, 0), total: out.reduce((t, x) => t + x.total, 0) } };
       }
     }
@@ -16084,6 +16089,154 @@ function StockMovesCard({ stamp = "" }) {
   );
 }
 
+// 이카운트 판매현황 — 엑셀(판매조회 전표 목록 / 품목 줄)을 끌어다 놓으면 서버에 쌓고 기간별로 정리해 보여 준다
+function SalesCard({ stamp = "", preview = null, onClearPreview, onPick }) {
+  const [range, setRange] = useState(() => { try { return localStorage.getItem("frw_sales_range") || "month"; } catch { return "month"; } });
+  const [data, setData] = useState(null);
+  const [moves, setMoves] = useState(null);
+  const [err, setErr] = useState("");
+  const [view, setView] = useState("client");
+  const [all, setAll] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let dead = false;
+    const [from, to] = moveRange(range);
+    setErr("");
+    fetch(`/api/sales?from=${from}&to=${to}`, { cache: "no-store" }).then(r => r.json())
+      .then(j => { if (dead) return; if (j.error) { setErr(j.error); setData(null); } else setData(j); })
+      .catch(() => { if (!dead) setErr("불러오지 못했습니다"); });
+    fetch(`/api/ecount/moves?from=${from}&to=${to}`, { cache: "no-store" }).then(r => r.json())
+      .then(j => { if (!dead) setMoves(j && !j.error ? j : null); }).catch(() => {});
+    return () => { dead = true; };
+  }, [range, stamp, tick]);
+  const pick = (k) => { setRange(k); setAll(false); try { localStorage.setItem("frw_sales_range", k); } catch {} };
+  const fmt = (n) => Math.round(Number(n || 0)).toLocaleString();
+  const won = (n) => `${fmt(n)}원`;
+  const md = (d) => String(d || "").slice(5).replace("-", "/");
+  const save = async () => {
+    if (!preview) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/sales/import", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: preview.fileName, from: preview.from, to: preview.to, rows: preview.rows }) }).then(r => r.json());
+      if (r.ok) { showToast(`판매 ${fmt(r.count)}건 반영 (${md(r.from)}~${md(r.to)}) · 합계 ${won(r.total)}`, "success"); onClearPreview && onClearPreview(); setTick(t => t + 1); }
+      else showToast(r.error || "반영하지 못했습니다");
+    } catch { showToast("서버에 연결하지 못했습니다"); }
+    finally { setSaving(false); }
+  };
+  const t = data ? data.totals : null;
+  const hasItems = t && t.itemRows > 0;
+  const curView = hasItems ? view : "client";
+  const list = !data ? [] : curView === "client" ? data.clients : data.products;
+  const maxV = list.reduce((m, x) => Math.max(m, curView === "client" ? x.total : x.qty), 0) || 1;
+  const shown = all ? list : list.slice(0, 10);
+  const [rf, rt] = moveRange(range);
+  // 이 기간 중 엑셀이 안 들어온 날이 있으면 알려 준다 (빈 날 = 판매 없음? 아직 안 올림?)
+  const cov = data ? data.covered.slice().sort((a, b) => a.from.localeCompare(b.from)) : [];
+  const fullyCovered = cov.length > 0 && cov[0].from <= rf && cov.reduce((end, c) => (c.from <= end || c.from <= addDaysYmd(end, 1)) && c.to > end ? c.to : end, cov[0].to) >= rt;
+  const chip = (k, label) => (
+    <button key={k} type="button" onClick={() => { setView(k); setAll(false); }}
+      style={{ height: 26, padding: "0 10px", borderRadius: 7, border: "none", background: curView === k ? "var(--surface)" : "transparent", boxShadow: curView === k ? "var(--elev-1)" : "none", color: curView === k ? "var(--text1)" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
+  );
+  return (
+    <div className="card no-print" id="sales-card">
+      <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+        <span className="section-header-title"><Icon name="barChart" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>판매 현황 <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text3)", marginLeft: 4 }}>이카운트 엑셀</span></span>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+          {MOVE_RANGES.map(r => (
+            <button key={r.k} type="button" onClick={() => pick(r.k)}
+              style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid " + (range === r.k ? "var(--text1)" : "var(--border)"), background: range === r.k ? "var(--text1)" : "transparent", color: range === r.k ? "var(--surface)" : "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{r.label}</button>
+          ))}
+          <button type="button" onClick={onPick} style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>엑셀 올리기</button>
+        </div>
+      </div>
+
+      {preview && (
+        <div style={{ marginBottom: 14, padding: 14, borderRadius: 12, background: "rgba(219,107,46,0.06)", border: "1px solid rgba(219,107,46,0.3)" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>판매 엑셀 확인 — {preview.fileName}</div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
+            기간 <b>{preview.from} ~ {preview.to}</b>{preview.periodFromHeader ? "" : " (파일 안 날짜 기준)"} · {preview.slip ? "전표" : "품목 줄"} <b>{fmt(preview.totals.count)}건</b>
+            {preview.slip ? "" : <> · 수량 <b>{fmt(preview.totals.qty)}</b></>} · 합계 <b>{won(preview.totals.total)}</b>
+            <br/>이 기간에 이미 올린 판매 기록은 이 파일로 <b>바뀌어요</b>. 같은 기간을 다시 올려도 겹치지 않아요.
+            {preview.slip && <><br/><span style={{ color: "var(--text3)" }}>「판매조회」 전표 목록이라 거래처·날짜별 금액만 정리돼요. 품목별 수량은 품목이 한 줄씩 나오는 엑셀이 필요해요.</span></>}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+            <button type="button" onClick={onClearPreview} style={{ padding: "7px 14px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>취소</button>
+            <button type="button" className="btn-primary" onClick={save} disabled={saving} style={{ padding: "7px 16px", fontSize: 12 }}>{saving ? "반영 중…" : `반영 (${fmt(preview.totals.count)}건)`}</button>
+          </div>
+        </div>
+      )}
+
+      {err ? <div style={{ fontSize: 12, color: "var(--negative-text)" }}>{err}</div>
+        : !data ? <div style={{ fontSize: 12, color: "var(--text3)" }}>불러오는 중…</div>
+        : t.count === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
+            이 기간 판매 기록이 없어요. 이카운트 <b>판매조회 → 엑셀</b>로 받은 파일을 <b>이 화면 아무 곳에 끌어다 놓으면</b> 정리해 드려요.
+            {data.lastImport ? <span style={{ color: "var(--text3)" }}> (마지막으로 올린 기간: {data.lastImport.from} ~ {data.lastImport.to})</span> : null}
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline", marginBottom: 6 }}>
+              <span style={{ fontSize: 13, color: "var(--text2)" }}>매출 <b style={{ fontSize: 20, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(t.total)}</b>원</span>
+              <span style={{ fontSize: 13, color: "var(--text2)" }}>{t.slips > 0 && !hasItems ? "전표" : "건수"} <b style={{ color: "var(--text1)" }}>{fmt(t.count)}</b>건</span>
+              {hasItems && <span style={{ fontSize: 13, color: "var(--text2)" }}>판매 수량 <b style={{ color: "var(--text1)" }}>{fmt(t.qty)}</b>개</span>}
+              <span style={{ fontSize: 13, color: "var(--text2)" }}>거래처 <b style={{ color: "var(--text1)" }}>{fmt(data.clientCount)}</b>곳</span>
+            </div>
+            {hasItems && moves && moves.syncs > 0 && (
+              <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>같은 기간 출고 추정 {fmt(moves.totalOut)}개 · 판매 {fmt(t.qty)}개 → 판매 외 {fmt(Math.max(0, moves.totalOut - t.qty))}개 (샘플·불량·누락 등)</div>
+            )}
+            {!fullyCovered && cov.length > 0 && (
+              <div style={{ fontSize: 12, color: "var(--warning-text)", marginBottom: 6 }}>이 기간 중 올린 엑셀: {cov.map(c => `${md(c.from)}~${md(c.to)}`).join(", ")} — 나머지 날은 아직 안 올렸어요</div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 4px" }}>
+              <div style={{ display: "inline-flex", gap: 2, padding: 2, borderRadius: 9, background: "var(--surface2)" }}>
+                {chip("client", "거래처별")}
+                {hasItems && chip("product", "품목별")}
+              </div>
+              {!hasItems && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>품목별은 품목 줄 엑셀을 올리면 생겨요</span>}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {shown.map(x => (
+                <div key={x.name} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={x.name}>{x.name}</span>
+                    {curView === "client"
+                      ? <><span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{fmt(x.count)}건{x.qty ? ` · ${fmt(x.qty)}개` : ""}</span>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(x.total)}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>원</span></span></>
+                      : <><span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{won(x.total)}</span>
+                          <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(x.qty)}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>개</span></span></>}
+                  </div>
+                  <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", marginTop: 5 }}>
+                    <div style={{ width: `${Math.max(3, ((curView === "client" ? x.total : x.qty) / maxV) * 100)}%`, height: "100%", borderRadius: 2, background: "#3182F6" }}/>
+                  </div>
+                  {curView === "product" && x.sizes && x.sizes.length > 0 && (
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                      {x.sizes.filter(z => z.qty).map(z => (
+                        <span key={z.size + z.code} title={`${z.code || ""} · ${won(z.total)}`} style={{ fontSize: 11, padding: "2px 7px", borderRadius: 6, background: "var(--surface2)", color: "var(--text2)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {z.size || z.code || "-"} <b style={{ color: "var(--text1)" }}>{fmt(z.qty)}</b>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {list.length > 10 && (
+                <button type="button" onClick={() => setAll(v => !v)} style={{ marginTop: 6, padding: "8px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  {all ? "접기" : `나머지 ${list.length - 10}개 더 보기`}
+                </button>
+              )}
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>
+              매출은 이카운트 「금액합계」(부가세 포함) 기준이에요.{data.lastImport ? ` 마지막 업로드 ${md(data.lastImport.at.slice(0, 10))} ${data.lastImport.at.slice(11)} · ${data.lastImport.from}~${data.lastImport.to}` : ""}
+            </div>
+          </>
+        )}
+    </div>
+  );
+}
+const addDaysYmd = (d, k) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + k); return t.toISOString().slice(0, 10); };
+
 function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch }) {
   const items = stock?.items || [];
   const [search, setSearch] = useState("");
@@ -16100,6 +16253,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
   const [collapsedCats, setCollapsedCats] = useState(() => new Set()); // 접힌 그룹
   const [preview, setPreview] = useState(null); // { items, fileName } — 업로드 미리보기
   const [parseErr, setParseErr] = useState("");
+  const [salesPrev, setSalesPrev] = useState(null); // 판매현황 엑셀 미리보기 (재고 엑셀과 자동 구분)
   const [winDrag, setWinDrag] = useState(false); // 파일을 화면 위로 드래그 중 (풀스크린 드롭 오버레이)
   const fileRef = useRef(null);
   const handleFileRef = useRef(null); // window 드롭 리스너에서 최신 handleFile 참조
@@ -16170,6 +16324,14 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
     setParseErr("");
     try {
       const ab = await file.arrayBuffer();
+      // 판매현황 엑셀이면 재고로 읽지 않고 판매 쪽으로 (판매 엑셀에도 「품목명·수량」 칸이 있어 재고를 통째로 바꿀 뻔한다)
+      const sales = salesParseWorkbook(ab);
+      if (sales) {
+        setPreview(null);
+        setSalesPrev({ ...sales, fileName: file.name });
+        setTimeout(() => { try { document.getElementById("sales-card")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 120);
+        return;
+      }
       const parsed = stockParseWorkbook(ab);
       if (parsed.length === 0) throw new Error("데이터 행이 없습니다");
       setPreview({ items: parsed, fileName: file.name });
@@ -16394,7 +16556,8 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(219,107,46,0.12)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
           <div style={{ padding: "30px 50px", borderRadius: 20, border: "3px dashed #DB6B2E", background: "var(--surface)", boxShadow: "var(--elev-4)", textAlign: "center" }}>
             <div style={{ marginBottom: 10 }}><Icon name="inbox" size={36} style={{ color: "#DB6B2E" }}/></div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>여기에 놓으면 재고 엑셀 업로드</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>여기에 놓으면 엑셀 업로드</div>
+            <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 4 }}>재고 엑셀 · 판매조회 엑셀 — 알아서 구분해요</div>
             <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 5 }}>.xlsx · .xls · .csv — 화면 아무 곳에나 놓으세요</div>
           </div>
         </div>
@@ -16425,6 +16588,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
       </div>
 
       <StockMovesCard stamp={stock?.updatedAt || ""}/>
+      <SalesCard stamp={stock?.updatedAt || ""} preview={salesPrev} onClearPreview={() => setSalesPrev(null)} onPick={() => fileRef.current?.click()}/>
 
       {/* 엑셀 업로드 */}
       <div className="card">

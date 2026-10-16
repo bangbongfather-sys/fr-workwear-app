@@ -1,6 +1,7 @@
 // ── 이카운트 판매현황 (엑셀로 가져오기) ──
 // 이카운트 OpenAPI 에 판매 「조회」가 없어서, 앱 재고 탭에 판매현황 엑셀을 끌어다 놓으면 앱이 읽어 여기로 보낸다.
-//   /frw_sales/<YYYY-MM-DD> = [ { d, c(거래처), code, name, spec, qty, price, supply(공급가), vat, total(합계), wh(창고) } ]
+//   /frw_sales/<YYYY-MM-DD> = [ { d, c(거래처), code, name, spec, qty, price, supply(공급가), vat, total(합계), wh(창고), slip?, no? } ]
+//   두 가지 엑셀을 받는다: 품목 줄(수량 있음) / 「판매조회」 전표 목록(slip:true — 전표당 금액합계만, 품목별 수량 없음)
 //   /frw_sales_meta        = { imports: [ { at, fileName, from, to, count, qty, total } ] }  (최근 30회)
 // 같은 기간을 다시 올리면 그 기간의 날짜들을 통째로 바꾼다 → 중복 없이 몇 번이고 다시 올려도 된다.
 
@@ -27,6 +28,7 @@ export async function salesImport(env, body) {
     const d = String(r && r.d || "");
     if (!DAY.test(d) || d < from || d > to) continue;
     const row = { d, c: str(r.c), code: str(r.code, 40), name: str(r.name, 120), spec: str(r.spec, 40), qty: n(r.qty), price: n(r.price), supply: n(r.supply), vat: n(r.vat), total: n(r.total), wh: str(r.wh, 30) };
+    if (r.slip) { row.slip = true; row.no = str(r.no, 10); }   // 「판매조회」 전표 목록 — 품목별 수량 없음 (품목명은 「○○ 외 n건」 요약)
     if (!row.name && !row.code) continue;
     (byDay[d] = byDay[d] || []).push(row);
   }
@@ -37,7 +39,7 @@ export async function salesImport(env, body) {
   if (!r.ok) return { ok: false, error: `저장 실패 (Firebase ${r.status})` };
   const rows = Object.values(byDay).flat();
   const sum = (k) => rows.reduce((t, x) => t + x[k], 0);
-  const entry = { at: kstNow(), fileName: str(body.fileName, 100), from, to, count: rows.length, qty: sum("qty"), total: sum("total") || sum("supply") };
+  const entry = { at: kstNow(), fileName: str(body.fileName, 100), from, to, count: rows.length, qty: sum("qty"), total: sum("total") || sum("supply"), kind: rows.some((x) => x.slip) ? "slip" : "item" };
   try {
     const m = await (await fetch(url(META_PATH, S))).json();
     const imports = (m && Array.isArray(m.imports) ? m.imports : []).concat(entry).slice(-30);
@@ -63,7 +65,7 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
   const byDay = (await rr.json()) || {};
   const meta = mr.ok ? await mr.json() : null;
   const groups = new Map(), clients = new Map(), days = [];
-  const tot = { count: 0, qty: 0, supply: 0, vat: 0, total: 0 };
+  const tot = { count: 0, qty: 0, supply: 0, vat: 0, total: 0, slips: 0, itemRows: 0 };
   for (const d of Object.keys(byDay).sort()) {
     const list = Array.isArray(byDay[d]) ? byDay[d] : Object.values(byDay[d] || {});
     let dq = 0, dt = 0;
@@ -72,6 +74,11 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
       const amt = r.total || r.supply || 0;
       tot.count++; tot.qty += r.qty || 0; tot.supply += r.supply || 0; tot.vat += r.vat || 0; tot.total += amt;
       dq += r.qty || 0; dt += amt;
+      const ck = r.c || "(거래처 없음)";
+      const c = clients.get(ck) || { name: ck, qty: 0, total: 0, count: 0 };
+      c.qty += r.qty || 0; c.total += amt; c.count++; clients.set(ck, c);
+      if (r.slip) { tot.slips++; continue; }      // 전표 목록은 품목별로 나눌 수 없다
+      tot.itemRows++;
       const [base, size] = splitName(r.name, r.spec, r.code);
       const g = groups.get(base) || { name: base, qty: 0, total: 0, sizes: new Map() };
       g.qty += r.qty || 0; g.total += amt;
@@ -79,9 +86,6 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
       const z = g.sizes.get(zk) || { size: size || "", code: r.code || "", qty: 0, total: 0 };
       z.qty += r.qty || 0; z.total += amt; g.sizes.set(zk, z);
       groups.set(base, g);
-      const ck = r.c || "(거래처 없음)";
-      const c = clients.get(ck) || { name: ck, qty: 0, total: 0, count: 0 };
-      c.qty += r.qty || 0; c.total += amt; c.count++; clients.set(ck, c);
     }
     days.push({ date: d, qty: dq, total: dt });
   }
