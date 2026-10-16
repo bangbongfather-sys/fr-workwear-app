@@ -209,7 +209,7 @@ export default {
     if (url.pathname === "/api/ecount/pending") {
       const key = request.headers.get("X-Relay-Key") || "";
       if (!env.ECOUNT_API_KEY || key !== await ecountRelayKey(env)) return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다" }), { status: 403, headers: corsHeaders });
-      return new Response(JSON.stringify(await ecountPending(env)), { headers: corsHeaders });
+      return new Response(JSON.stringify(await ecountPending(env, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders });
     }
     if (url.pathname === "/api/ecount/push" && request.method === "POST") {
       const key = request.headers.get("X-Relay-Key") || "";
@@ -217,7 +217,7 @@ export default {
         return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다 — Cloudflare 의 ECOUNT_API_KEY 와 맥에 넣은 키가 같은지 확인하세요" }), { status: 403, headers: corsHeaders });
       }
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
-      try { return new Response(JSON.stringify(await ecountRelayPush(env, b)), { headers: corsHeaders }); }
+      try { return new Response(JSON.stringify(await ecountRelayPush(env, b, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
     }
     // 새로고침 — 정해진 시간 없이, 앱의 「새로고침」 단추(또는 Claude)가 부를 때만 가져온다

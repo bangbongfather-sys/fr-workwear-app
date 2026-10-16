@@ -462,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-15-ecount-on-demand", note: "이카운트 재고: 정해진 시간 없이 새로고침 요청 때만 (앱 단추·Claude _ecount:refresh)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-16-ecount-home-pc", note: "이카운트 재고: 집 PC(윈도우) 중계 추가 · 요청은 먼저 잡은 한 대만 처리" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -1708,7 +1708,7 @@ export async function ecountRequest(env, by = "app") {
   if (ecountDirect(env)) return ecountSyncStock(env, by);
   const S = env.FIREBASE_DB_SECRET;
   const [st, req] = await Promise.all([fbGet(ECOUNT_STATUS_PATH, S).catch(() => null), fbGet(ECOUNT_REQ_PATH, S).catch(() => null)]);
-  if (liveReq(req)) return { ok: true, queued: true, already: true, message: "이미 요청돼 있어요 — 사무실 맥이 1분 안에 가져옵니다", requestedAt: req.at };
+  if (liveReq(req)) return { ok: true, queued: true, already: true, message: "이미 요청돼 있어요 — 켜져 있는 중계 컴퓨터가 1분 안에 가져옵니다", requestedAt: req.at };
   // 이카운트 실서버는 같은 조회를 10분에 1번만 받는다 → 막힐 요청은 걸지 않는다
   const lastMs = st && st.at ? kstAtMs(st.at) : NaN;
   if (Number.isFinite(lastMs) && Date.now() - lastMs < 10 * 60e3) {
@@ -1717,11 +1717,21 @@ export async function ecountRequest(env, by = "app") {
   }
   const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
   await fetch(`https://${FB_HOST}${ECOUNT_REQ_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ at, ts: Date.now(), by }) });
-  return { ok: true, queued: true, message: "사무실 맥에 요청했어요 — 1분 안에 재고가 들어옵니다 (맥이 켜져 있어야 해요)", requestedAt: at };
+  return { ok: true, queued: true, message: "새로고침을 요청했어요 — 사무실 맥·집 PC 중 켜져 있는 컴퓨터가 1분 안에 가져옵니다", requestedAt: at };
 }
-export async function ecountPending(env) {
-  const req = liveReq(await fbGet(ECOUNT_REQ_PATH, env.FIREBASE_DB_SECRET).catch(() => null));
-  return req ? { pending: true, at: req.at } : { pending: false };
+// 중계 컴퓨터 이름 (헤더 X-Relay-Dev) — 사무실 맥·집 PC 가 같은 요청을 둘 다 처리하지 않게 먼저 잡은 한 대만 처리한다
+const RELAY_DEVS = { "office-mac": "사무실 맥", "home-pc": "집 PC" };
+export const relayDevLabel = (dev) => RELAY_DEVS[dev] || (dev ? String(dev).slice(0, 20) : "사무실 맥");
+const CLAIM_TTL = 3 * 60e3;   // 잡은 컴퓨터가 3분 안에 못 보내면(꺼짐·끊김) 다른 컴퓨터가 이어받는다
+export async function ecountPending(env, dev = "") {
+  const S = env.FIREBASE_DB_SECRET;
+  const { etag, value } = await fbGetTagged(ECOUNT_REQ_PATH, S);
+  const req = liveReq(value);
+  if (!req) return { pending: false };
+  const c = req.claim;
+  if (c && c.dev !== dev && Date.now() - Number(c.ts) < CLAIM_TTL) return { pending: false };
+  const won = await fbPutIfMatch(ECOUNT_REQ_PATH, { ...req, claim: { dev, ts: Date.now(), label: relayDevLabel(dev) } }, etag, S);
+  return won ? { pending: true, at: req.at } : { pending: false };
 }
 const clearReq = (env) => fetch(`https://${FB_HOST}${ECOUNT_REQ_PATH}.json?auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`, { method: "DELETE" }).catch(() => {});
 // 이카운트는 등록된 IP 에서만 API 를 받는다(테스트 서버 포함). Cloudflare 는 나가는 IP 가 계속 바뀌어
@@ -1735,15 +1745,16 @@ export async function ecountRelayKey(env) {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(env.ECOUNT_API_KEY || "").trim()));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-export async function ecountRelayPush(env, body) {
+export async function ecountRelayPush(env, body, dev = "") {
+  const label = relayDevLabel(dev);
   const S = env.FIREBASE_DB_SECRET;
   const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
   await clearReq(env);   // 성공이든 실패든 요청은 처리됨 (실패는 띠에 이유가 뜨고, 다시 누르면 된다)
   if (body && body.error) {
-    try { await fetch(`https://${FB_HOST}${ECOUNT_STATUS_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ ok: false, error: `[사무실 맥] ${String(body.error).slice(0, 300)}`, at, by: "mac" }) }); } catch {}
+    try { await fetch(`https://${FB_HOST}${ECOUNT_STATUS_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ ok: false, error: `[${label}] ${String(body.error).slice(0, 300)}`, at, by: label }) }); } catch {}
     return { ok: false, recorded: true };
   }
   const inv = ecountRows((body && body.inv) || {}), prod = ecountRows((body && body.prod) || {});
   const got = { ...buildStockItems(inv, prod), test: false };
-  return ecountSyncStock(env, "mac", { got });
+  return ecountSyncStock(env, label, { got });
 }
