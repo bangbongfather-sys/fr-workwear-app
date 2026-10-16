@@ -462,7 +462,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-16-ecount-home-pc", note: "이카운트 재고: 집 PC(윈도우) 중계 추가 · 요청은 먼저 잡은 한 대만 처리" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-16-stock-moves", note: "재고: 새로고침 사이 감소=출고(판매) 추정 기록·조회(_ecount:moves)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -497,6 +497,17 @@ async function toolGetSection(args, env) {
   // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
   if (section === "_ecount:probe") return textContent(await ecountProbe(env));
   if (section === "_ecount:status") return textContent(await ecountStatus(env));
+  // 출고(판매) 추정 — "_ecount:moves" (최근 30일) / "_ecount:moves:7" / "_ecount:moves:2026-10-01~2026-10-31"
+  if (section === "_ecount:moves" || section.startsWith("_ecount:moves:")) {
+    const arg = section.slice(14).replace(/^:/, "");
+    const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    let from, to = today;
+    const m = arg.match(/^(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})$/);
+    if (m) { from = m[1]; to = m[2]; }
+    else { const n = Math.max(1, Math.min(366, Number(arg) || 30)); from = new Date(Date.now() + 9 * 3600e3 - (n - 1) * 86400e3).toISOString().slice(0, 10); }
+    const r = await stockMoves(env, from, to);
+    return { content: [{ type: "text", text: JSON.stringify({ 안내: "이카운트 새로고침 사이 재고 감소=출고(판매 추정), 증가=입고. 새로고침한 날짜 기준", ...r, products: r.products.slice(0, 60) }) }] };
+  }
   if (section === "_ecount:sync" || section === "_ecount:refresh") return textContent(await ecountRequest(env, "claude"));
   if (section === "_stock") {
     const st = await fbGet("/frw/stock", env.FIREBASE_DB_SECRET);
@@ -1654,10 +1665,11 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
   if (!got) { try { got = await ecountStockItems(env); } catch (e) { return record({ ok: false, error: e.message }); } }
   const fresh = got.items;
   if (!fresh.length) return record({ ok: false, error: `이카운트 재고가 0건으로 왔습니다 (재고 행 ${got.invRows}) — 반영하지 않았습니다` });
-  let summary = null, plan;
+  let summary = null, plan, prev = null;
   try { plan = await safeSectionWrite("stock", (d) => {
     const cur = d && typeof d === "object" ? d : {};
     const old = asList(cur.items);
+    prev = { source: cur.source, at: cur.updatedAt || "", items: old };
     if (!force && old.length >= 20 && fresh.length < old.length * 0.5) {
       return errContent(`품목 수가 ${old.length} → ${fresh.length} 로 크게 줄어 반영하지 않았습니다 (확인 후 강제 반영)`);
     }
@@ -1687,6 +1699,7 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
     return { patch, apply: () => next, check: (dd) => !!dd && dd.updatedAt === at && asList(dd.items).length === items.length };
   }, env); } catch (e) { return record({ ok: false, error: `재고 저장 실패: ${e.message}` }); }
   if (plan.isError) return record({ ok: false, error: (plan.content && plan.content[0] && plan.content[0].text) || "반영 실패" });
+  try { await recordStockMoves(env, fresh, prev, at, by); } catch (e) { console.error("[ecount] 출고 기록 실패:", e?.message ?? e); }
   return record({ ok: true, ...summary, test: !!got.test });
 }
 export async function ecountStatus(env) {
@@ -1734,6 +1747,79 @@ export async function ecountPending(env, dev = "") {
   return won ? { pending: true, at: req.at } : { pending: false };
 }
 const clearReq = (env) => fetch(`https://${FB_HOST}${ECOUNT_REQ_PATH}.json?auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`, { method: "DELETE" }).catch(() => {});
+// ── 출고·입고 추정 ──
+// 새로고침마다 「직전 이카운트 수량 → 이번 수량」 차이를 남긴다. 줄어든 만큼 = 출고(판매·샘플·불량 포함), 늘어난 만큼 = 입고(반품 포함).
+// 앱에서 손으로 고친 수량(실사 조정·엑셀)과 섞이지 않게, 기준은 늘 직전 「이카운트 원본 수량」(/frw_ecount_last)이다.
+//   /frw_ecount_last          = { at, qty: { 품목코드(이스케이프): 수량 } }
+//   /frw_stock_moves/<날짜>/<id> = { at, from, by, out: {코드: 수량}, in: {코드: 수량} }   — 날짜 = 새로고침한 날(KST)
+const ECOUNT_LAST_PATH = "/frw_ecount_last";
+const MOVES_PATH = "/frw_stock_moves";
+async function recordStockMoves(env, fresh, prev, at, by) {
+  const S = env.FIREBASE_DB_SECRET;
+  const last = await fbGet(ECOUNT_LAST_PATH, S).catch(() => null);
+  let base = null, from = "";
+  if (last && last.qty) { base = {}; for (const [k, v] of Object.entries(last.qty)) base[fbUnesc(k)] = toNumber(v); from = last.at || ""; }
+  else if (prev && prev.source === "ecount") {   // 처음 한 번: 직전 재고가 이카운트에서 온 것이면 그걸 기준으로
+    base = {}; for (const it of prev.items) if (String(it.code || "").trim()) base[String(it.code).trim()] = toNumber(it.qty);
+    from = prev.at;
+  }
+  const now = {}; for (const it of fresh) now[it.code] = toNumber(it.qty);
+  if (base) {
+    const out = {}, inn = {};
+    for (const code of new Set([...Object.keys(base), ...Object.keys(now)])) {
+      const d = (now[code] || 0) - (base[code] || 0);
+      if (d < 0) out[fbEsc(code)] = -d; else if (d > 0) inn[fbEsc(code)] = d;
+    }
+    if (Object.keys(out).length || Object.keys(inn).length) {
+      const day = at.slice(0, 10);
+      await fetch(`https://${FB_HOST}${MOVES_PATH}/${day}/${Date.now()}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ at, from, by, out, in: inn }) });
+    }
+  }
+  const qty = {}; for (const [k, v] of Object.entries(now)) qty[fbEsc(k)] = v;
+  await fetch(`https://${FB_HOST}${ECOUNT_LAST_PATH}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: JSON.stringify({ at, qty }) });
+}
+
+// 기간(KST 날짜, 양끝 포함) 출고·입고 합계 — 품목(사이즈 묶음)별·날짜별
+export async function stockMoves(env, from, to) {
+  const S = env.FIREBASE_DB_SECRET;
+  const q = `orderBy=${encodeURIComponent('"$key"')}&startAt=${encodeURIComponent(JSON.stringify(from))}&endAt=${encodeURIComponent(JSON.stringify(to))}`;
+  const r = await fetch(`https://${FB_HOST}${MOVES_PATH}.json?${q}&auth=${encodeURIComponent(S)}`);
+  if (!r.ok) throw new Error(`Firebase ${r.status}`);
+  const byDay = (await r.json()) || {};
+  const stock = await fbGet("/frw/stock", S).catch(() => null);
+  const info = new Map(asList(stock && stock.items).map((it) => [String(it.code || "").trim(), it]));
+  const per = new Map(), days = [];
+  let syncs = 0, first = "", lastAt = "";
+  for (const day of Object.keys(byDay).sort()) {
+    let dOut = 0, dIn = 0;
+    for (const e of Object.values(byDay[day] || {})) {
+      if (!e) continue;
+      syncs++; if (!first || (e.from || e.at) < first) first = e.from || e.at; if (e.at > lastAt) lastAt = e.at;
+      for (const [kind, map] of [["out", e.out], ["in", e.in]]) for (const [k, v] of Object.entries(map || {})) {
+        const code = fbUnesc(k), n = toNumber(v);
+        const row = per.get(code) || { code, out: 0, in: 0 }; row[kind] += n; per.set(code, row);
+        if (kind === "out") dOut += n; else dIn += n;
+      }
+    }
+    days.push({ date: day, out: dOut, in: dIn });
+  }
+  // 「방염 춘추복 상의(2025) [100]」 → 품목 「방염 춘추복 상의(2025)」 · 사이즈 「100」 으로 묶는다
+  const groups = new Map();
+  for (const row of per.values()) {
+    const it = info.get(row.code) || {};
+    const name = String(it.name || row.code);
+    const m = name.match(/^(.*?)\s*\[([^\]]+)\]\s*$/);
+    const base = m ? m[1] : name, size = m ? m[2] : (row.code.includes("/") ? row.code.split("/").pop() : "");
+    const g = groups.get(base) || { name: base, out: 0, in: 0, sizes: [] };
+    g.out += row.out; g.in += row.in; g.sizes.push({ code: row.code, size, out: row.out, in: row.in, qty: it.qty != null ? toNumber(it.qty) : null });
+    groups.set(base, g);
+  }
+  const products = [...groups.values()].map((g) => ({ ...g, sizes: g.sizes.sort((a, b) => String(a.size).localeCompare(String(b.size), "ko", { numeric: true })) }))
+    .sort((a, b) => b.out - a.out || b.in - a.in);
+  const sum = (k) => products.reduce((t, g) => t + g[k], 0);
+  return { from, to, syncs, span: syncs ? { from: first, to: lastAt } : null, totalOut: sum("out"), totalIn: sum("in"), products, days };
+}
+
 // 이카운트는 등록된 IP 에서만 API 를 받는다(테스트 서버 포함). Cloudflare 는 나가는 IP 가 계속 바뀌어
 // 직접 호출이 막히므로, 기본은 사무실 맥(등록된 고정 IP)이 받아서 보내 주는 중계 방식이다.
 // ECOUNT_DIRECT="true" 면(고정 IP 를 쓸 수 있게 되면) 서버가 직접 가져온다.
