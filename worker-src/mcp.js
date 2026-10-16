@@ -1,5 +1,5 @@
 import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecountRows } from "./ecount.js";
-import { salesSummary } from "./sales.js";
+import { salesSummary, salesImport } from "./sales.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
@@ -508,6 +508,11 @@ async function toolGetSection(args, env) {
     else { const k = Math.max(1, Math.min(800, Number(arg) || 30)); from = new Date(Date.now() + 9 * 3600e3 - (k - 1) * 86400e3).toISOString().slice(0, 10); }
     const r = await salesSummary(env, from, to, { top: 60 });
     return { content: [{ type: "text", text: JSON.stringify({ 안내: "이카운트 판매현황 엑셀로 올린 실제 판매. total=합계(없으면 공급가). covered=이 기간 중 엑셀이 들어온 범위 — 그 밖의 날은 아직 안 올린 것", ...r }) }] };
+  }
+  // 판매현황 줄 목록(캠퍼스 판매현황 창·AI 직원) — "_salesrows:" + JSON {from,to,q,client,name,offset,limit} → 줄마다 d(날짜)·i(그날 안 순번)
+  if (section.startsWith("_salesrows:")) {
+    let o = {}; try { o = JSON.parse(section.slice(11)); } catch { return errContent("_salesrows 인자 JSON 이 잘못됐습니다."); }
+    return { content: [{ type: "text", text: JSON.stringify(await salesRows(env, o || {})) }] };
   }
   // 출고(판매) 추정 — "_ecount:moves" (최근 30일) / "_ecount:moves:7" / "_ecount:moves:2026-10-01~2026-10-31"
   if (section === "_ecount:moves" || section.startsWith("_ecount:moves:")) {
@@ -1285,6 +1290,8 @@ async function toolCampusWrite(a, env) {
   }
   if (op === "note_add" || op === "daily_append") return await toolNoteSave(a, env);
   if (op === "payable_pay" || op === "payable_pay_delete") return await toolPayablePay(a, env);
+  if (op === "sales_import") return textContent(await salesImport(env, { fileName: a.fileName, from: a.from, to: a.to, rows: a.rows }));
+  if (op === "sales_row_update" || op === "sales_row_delete") return await toolSalesRow(a, env);
   if (op === "orders_batch" || op === "order_update" || op === "order_delete") return await toolOrders(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
 }
@@ -1324,6 +1331,70 @@ async function toolNoteSave(a, env) {
     return { patch: { [date]: row }, apply, check: (dd) => !!(dd && dd[date] && String(dd[date].campusTokens || "").split(",").includes(token)), result: { 결과: "하루 기록에 덧붙임", 날짜: date, 글자수: body.length } };
   }, env);
   return plan.isError ? plan : textContent(plan.result);
+}
+
+// ── 이카운트 판매현황 줄 (/frw_sales/<YYYY-MM-DD> = [행]) — 캠퍼스에서 보기·고치기·지우기 ──
+// 같은 기간 엑셀을 다시 올리면 그 기간이 통째로 바뀌므로, 여기서 고친 줄도 다음 업로드 때 덮인다.
+const SALES_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const salesUrl = (path, env, q = "") => `https://${FB_HOST}/frw_sales${path}.json?${q ? q + "&" : ""}auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`;
+async function salesDays(env, from, to) {
+  const q = `orderBy=${encodeURIComponent('"$key"')}&startAt=${encodeURIComponent(JSON.stringify(from))}&endAt=${encodeURIComponent(JSON.stringify(to))}`;
+  const r = await fetch(salesUrl("", env, q)); if (!r.ok) throw new Error(`Firebase ${r.status}`);
+  return (await r.json()) || {};
+}
+const salesList = (v) => (Array.isArray(v) ? v : Object.values(v || {}));
+async function salesRows(env, o) {
+  const today = kstToday();
+  const to = SALES_DAY.test(o.to || "") ? o.to : today;
+  const from = SALES_DAY.test(o.from || "") ? o.from : new Date(Date.parse(to) - 29 * 86400e3).toISOString().slice(0, 10);
+  const byDay = await salesDays(env, from, to);
+  const m = depQueryMatcher(o.q);
+  const rows = [];
+  for (const d of Object.keys(byDay).sort().reverse()) salesList(byDay[d]).forEach((r, i) => {
+    if (!r) return;
+    if (o.client && (r.c || "") !== o.client) return;
+    if (o.name && !String(r.name || "").startsWith(o.name)) return;
+    if (m && !m(`${r.c || ""} ${r.name || ""} ${r.code || ""} ${r.spec || ""}`)) return;
+    rows.push({ d, i, c: r.c || "", code: r.code || "", name: r.name || "", spec: r.spec || "", qty: r.qty || 0, price: r.price || 0, supply: r.supply || 0, vat: r.vat || 0, total: r.total || r.supply || 0, wh: r.wh || "", ...(r.slip ? { slip: true, no: r.no || "" } : {}), ...(r.edited ? { edited: r.edited } : {}) });
+  });
+  const off = Math.max(0, parseInt(o.offset) || 0), lim = Math.min(5000, Math.max(1, parseInt(o.limit) || 200));
+  return { from, to, count: rows.length, qty: rows.reduce((t, r) => t + r.qty, 0), total: rows.reduce((t, r) => t + r.total, 0), offset: off, limit: lim, rows: rows.slice(off, off + lim) };
+}
+// 줄 하나 고치기 {d, i, match:{name,c,total}, fields:{d?, c, name, code, spec, qty, price, supply, vat, total}} / 지우기 {rows:[{d,i,match}]}
+async function toolSalesRow(a, env) {
+  const same = (r, mt) => !mt || ((mt.name == null || String(r.name || "") === String(mt.name)) && (mt.c == null || String(r.c || "") === String(mt.c)) && (mt.total == null || Math.round(Number(r.total || r.supply || 0)) === Math.round(Number(mt.total))));
+  const getDay = async (d) => { const r = await fetch(salesUrl(`/${d}`, env)); if (!r.ok) throw new Error(`Firebase ${r.status}`); return salesList(await r.json()).filter(Boolean); };
+  const putDay = async (d, list) => { const r = await fetch(salesUrl(`/${d}`, env), { method: "PUT", body: JSON.stringify(list.length ? list : null) }); if (!r.ok) throw new Error(`Firebase ${r.status}`); };
+  const num = (v) => { const x = Number(String(v ?? "").replace(/[,\s원]/g, "")); return Number.isFinite(x) ? x : 0; };
+  if (a.op === "sales_row_update") {
+    const d = String(a.d || ""), i = parseInt(a.i);
+    if (!SALES_DAY.test(d) || !(i >= 0)) return errContent("d(날짜)와 i(순번)가 필요합니다.");
+    const list = await getDay(d), cur = list[i];
+    if (!cur) return errContent(`${d} 의 ${i}번 줄이 없습니다. 목록을 새로 불러와 주세요.`);
+    if (!same(cur, a.match)) return errContent("그 사이 판매 기록이 바뀌었습니다(다시 올린 엑셀 등). 목록을 새로 불러와 주세요.");
+    const F = a.fields || {}, row = { ...cur };
+    for (const k of ["c", "name", "code", "spec", "wh"]) if (F[k] != null) row[k] = String(F[k]).trim().slice(0, k === "name" ? 120 : 80);
+    for (const k of ["qty", "price", "supply", "vat", "total"]) if (F[k] != null && F[k] !== "") row[k] = num(F[k]);
+    if (!row.name && !row.code) return errContent("품목명은 비울 수 없습니다.");
+    row.edited = kstToday();
+    const nd = F.d && F.d !== d ? normalizeDate(F.d) : d;
+    if (!SALES_DAY.test(nd) || !isRealDate(nd)) return errContent("날짜가 잘못됐습니다.");
+    if (nd === d) { list[i] = row; await putDay(d, list); }
+    else { row.d = nd; const nl = await getDay(nd); nl.push(row); await putDay(nd, nl); list.splice(i, 1); await putDay(d, list); }
+    return textContent({ 결과: "판매 줄 수정", 날짜: nd, 이전: cur, 이후: row, 안내: "같은 기간 엑셀을 다시 올리면 이 수정은 덮입니다." });
+  }
+  const want = Array.isArray(a.rows) ? a.rows : [{ d: a.d, i: a.i, match: a.match }];
+  const byD = {};
+  for (const w of want) { const d = String(w && w.d || ""), i = parseInt(w && w.i); if (!SALES_DAY.test(d) || !(i >= 0)) return errContent("rows 는 [{d, i}] 입니다."); (byD[d] = byD[d] || []).push({ i, match: w.match }); }
+  const gone = [];
+  for (const [d, ws] of Object.entries(byD)) {
+    const list = await getDay(d);
+    for (const w of ws) { if (!list[w.i]) return errContent(`${d} 의 ${w.i}번 줄이 없습니다. 목록을 새로 불러와 주세요.`); if (!same(list[w.i], w.match)) return errContent(`${d} 판매 기록이 그 사이 바뀌었습니다. 목록을 새로 불러와 주세요.`); }
+    const del = new Set(ws.map((w) => w.i));
+    list.forEach((r, k) => del.has(k) && gone.push({ d, ...r }));
+    await putDay(d, list.filter((_, k) => !del.has(k)));
+  }
+  return textContent({ 결과: `판매 줄 ${gone.length}건 삭제`, 삭제: gone, 안내: "같은 기간 엑셀을 다시 올리면 다시 들어옵니다." });
 }
 
 // ── 판매 현황 (orders) ── 회사앱 대시보드 「제품별 판매 현황」과 같은 배열.
