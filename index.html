@@ -16089,19 +16089,53 @@ function StockMovesCard({ stamp = "" }) {
   );
 }
 
-// 이카운트 판매현황 — 엑셀(판매조회 전표 목록 / 품목 줄)을 끌어다 놓으면 서버에 쌓고 기간별로 정리해 보여 준다
-function SalesCard({ stamp = "", preview = null, onClearPreview, onPick }) {
+// ─── 판매 현황 탭 ───
+// 이카운트 OpenAPI 에 판매 「조회」가 없어서, 이카운트 판매조회 엑셀을 끌어다 놓으면 서버(/api/sales)에 쌓고 기간별로 정리한다.
+//  - 「판매조회」 전표 목록(거래처·금액합계만) → 거래처별·날짜별 매출. 품목이 한 줄씩 나오는 엑셀이면 품목·사이즈별 수량까지.
+//  - 같은 기간을 다시 올리면 그 기간을 통째로 바꾼다 (중복 없음). 재고 탭에 판매 엑셀을 놓아도 여기로 넘어온다(pendingFile).
+const SALES_RANGES = [
+  { k: "today", label: "오늘" }, { k: "7", label: "7일" }, { k: "30", label: "30일" }, { k: "month", label: "이번 달" }, { k: "prev", label: "지난 달" }, { k: "custom", label: "기간 지정" },
+];
+const addDaysYmd = (d, k) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + k); return t.toISOString().slice(0, 10); };
+function salesRange(k, custom) {
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
+  const today = kst(Date.now());
+  const monthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`; };
+  if (k === "today") return [today, today];
+  if (k === "month") return [today.slice(0, 8) + "01", monthEnd(today.slice(0, 7))];   // 말일까지 — 날짜를 앞당겨 끊은 전표도 보이게
+  if (k === "prev") {
+    const [y, m] = today.split("-").map(Number);
+    const ym = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`;
+    return [`${ym}-01`, monthEnd(ym)];
+  }
+  if (k === "custom") {
+    const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+    const f = ok(custom && custom.from) ? custom.from : today.slice(0, 8) + "01", t = ok(custom && custom.to) ? custom.to : today;
+    return f <= t ? [f, t] : [t, f];
+  }
+  return [kst(Date.now() - (Number(k) - 1) * 86400e3), today];
+}
+function SalesTab({ pendingFile = null, clearPending }) {
   const [range, setRange] = useState(() => { try { return localStorage.getItem("frw_sales_range") || "month"; } catch { return "month"; } });
+  const [custom, setCustom] = useState(() => { try { return JSON.parse(localStorage.getItem("frw_sales_custom") || "null") || {}; } catch { return {}; } });
   const [data, setData] = useState(null);
   const [moves, setMoves] = useState(null);
   const [err, setErr] = useState("");
   const [view, setView] = useState("client");
   const [all, setAll] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [parseErr, setParseErr] = useState("");
   const [saving, setSaving] = useState(false);
   const [tick, setTick] = useState(0);
+  const [winDrag, setWinDrag] = useState(false);
+  const fileRef = useRef(null);
+  const [from, to] = salesRange(range, custom);
+
+  // 재고 탭에 떨어뜨린 판매 엑셀이 넘어온 경우
+  useEffect(() => { if (pendingFile) { setPreview(pendingFile); clearPending && clearPending(); } }, [pendingFile]);
+
   useEffect(() => {
     let dead = false;
-    const [from, to] = moveRange(range);
     setErr("");
     fetch(`/api/sales?from=${from}&to=${to}`, { cache: "no-store" }).then(r => r.json())
       .then(j => { if (dead) return; if (j.error) { setErr(j.error); setData(null); } else setData(j); })
@@ -16109,135 +16143,257 @@ function SalesCard({ stamp = "", preview = null, onClearPreview, onPick }) {
     fetch(`/api/ecount/moves?from=${from}&to=${to}`, { cache: "no-store" }).then(r => r.json())
       .then(j => { if (!dead) setMoves(j && !j.error ? j : null); }).catch(() => {});
     return () => { dead = true; };
-  }, [range, stamp, tick]);
+  }, [from, to, tick]);
   const pick = (k) => { setRange(k); setAll(false); try { localStorage.setItem("frw_sales_range", k); } catch {} };
-  const fmt = (n) => Math.round(Number(n || 0)).toLocaleString();
-  const won = (n) => `${fmt(n)}원`;
-  const md = (d) => String(d || "").slice(5).replace("-", "/");
+  const setCustomRange = (patch) => { const n = { ...custom, ...patch }; setCustom(n); try { localStorage.setItem("frw_sales_custom", JSON.stringify(n)); } catch {} };
+
+  // ── 엑셀 ──
+  const handleFile = async (file) => {
+    if (!file) return;
+    setParseErr("");
+    try {
+      const parsed = salesParseWorkbook(await file.arrayBuffer());
+      if (!parsed) throw new Error("판매 엑셀로 읽히지 않았어요. 이카운트 「판매조회」에서 엑셀로 받은 파일인지 확인해 주세요. (일자·거래처명·품목명·금액합계 칸이 있어야 해요)");
+      setPreview({ ...parsed, fileName: file.name });
+      setTimeout(() => { try { document.getElementById("sales-upload")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 100);
+    } catch (e) { setParseErr(e.message || String(e)); setPreview(null); }
+    finally { if (fileRef.current) fileRef.current.value = ""; }
+  };
+  const handleFileRef = useRef(null); handleFileRef.current = handleFile;
+  useEffect(() => {
+    const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onDragOver = (e) => { if (!isFileDrag(e)) return; e.preventDefault(); setWinDrag(true); };
+    const onDragLeave = (e) => { if (!e.relatedTarget) setWinDrag(false); };
+    const onDrop = (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault(); setWinDrag(false);
+      const files = Array.from(e.dataTransfer.files || []);
+      const f = files.find(x => /\.(xlsx|xls|csv)$/i.test(x.name || ""));
+      if (f) handleFileRef.current?.(f);
+      else if (files.length) setParseErr("엑셀 파일(.xlsx/.xls/.csv)만 올릴 수 있습니다: " + (files[0].name || ""));
+    };
+    window.addEventListener("dragover", onDragOver); window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop);
+    return () => { window.removeEventListener("dragover", onDragOver); window.removeEventListener("dragleave", onDragLeave); window.removeEventListener("drop", onDrop); };
+  }, []);
   const save = async () => {
     if (!preview) return;
     setSaving(true);
     try {
       const r = await fetch("/api/sales/import", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileName: preview.fileName, from: preview.from, to: preview.to, rows: preview.rows }) }).then(r => r.json());
-      if (r.ok) { showToast(`판매 ${fmt(r.count)}건 반영 (${md(r.from)}~${md(r.to)}) · 합계 ${won(r.total)}`, "success"); onClearPreview && onClearPreview(); setTick(t => t + 1); }
-      else showToast(r.error || "반영하지 못했습니다");
+      if (r.ok) {
+        showToast(`판매 ${fmt(r.count)}건 반영 (${md(r.from)}~${md(r.to)}) · 합계 ${won(r.total)}`, "success");
+        setPreview(null); setTick(t => t + 1);
+        // 올린 기간이 지금 보는 기간 밖이면 그 기간으로 옮겨 준다
+        if (r.to < from || r.from > to) { setCustomRange({ from: r.from, to: r.to }); pick("custom"); }
+      } else showToast(r.error || "반영하지 못했습니다");
     } catch { showToast("서버에 연결하지 못했습니다"); }
     finally { setSaving(false); }
   };
-  const t = data ? data.totals : null;
-  const hasItems = t && t.itemRows > 0;
-  const curView = hasItems ? view : "client";
-  const list = !data ? [] : curView === "client" ? data.clients : data.products;
-  const maxV = list.reduce((m, x) => Math.max(m, curView === "client" ? x.total : x.qty), 0) || 1;
-  const shown = all ? list : list.slice(0, 10);
-  const [rf, rt] = moveRange(range);
-  // 이 기간 중 엑셀이 안 들어온 날이 있으면 알려 준다 (빈 날 = 판매 없음? 아직 안 올림?)
-  const cov = data ? data.covered.slice().sort((a, b) => a.from.localeCompare(b.from)) : [];
-  const fullyCovered = cov.length > 0 && cov[0].from <= rf && cov.reduce((end, c) => (c.from <= end || c.from <= addDaysYmd(end, 1)) && c.to > end ? c.to : end, cov[0].to) >= rt;
-  const chip = (k, label) => (
-    <button key={k} type="button" onClick={() => { setView(k); setAll(false); }}
-      style={{ height: 26, padding: "0 10px", borderRadius: 7, border: "none", background: curView === k ? "var(--surface)" : "transparent", boxShadow: curView === k ? "var(--elev-1)" : "none", color: curView === k ? "var(--text1)" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
-  );
-  return (
-    <div className="card no-print" id="sales-card">
-      <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
-        <span className="section-header-title"><Icon name="barChart" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>판매 현황 <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text3)", marginLeft: 4 }}>이카운트 엑셀</span></span>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-          {MOVE_RANGES.map(r => (
-            <button key={r.k} type="button" onClick={() => pick(r.k)}
-              style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid " + (range === r.k ? "var(--text1)" : "var(--border)"), background: range === r.k ? "var(--text1)" : "transparent", color: range === r.k ? "var(--surface)" : "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{r.label}</button>
-          ))}
-          <button type="button" onClick={onPick} style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>엑셀 올리기</button>
-        </div>
-      </div>
 
-      {preview && (
-        <div style={{ marginBottom: 14, padding: 14, borderRadius: 12, background: "rgba(219,107,46,0.06)", border: "1px solid rgba(219,107,46,0.3)" }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>판매 엑셀 확인 — {preview.fileName}</div>
-          <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
-            기간 <b>{preview.from} ~ {preview.to}</b>{preview.periodFromHeader ? "" : " (파일 안 날짜 기준)"} · {preview.slip ? "전표" : "품목 줄"} <b>{fmt(preview.totals.count)}건</b>
-            {preview.slip ? "" : <> · 수량 <b>{fmt(preview.totals.qty)}</b></>} · 합계 <b>{won(preview.totals.total)}</b>
-            <br/>이 기간에 이미 올린 판매 기록은 이 파일로 <b>바뀌어요</b>. 같은 기간을 다시 올려도 겹치지 않아요.
-            {preview.slip && <><br/><span style={{ color: "var(--text3)" }}>「판매조회」 전표 목록이라 거래처·날짜별 금액만 정리돼요. 품목별 수량은 품목이 한 줄씩 나오는 엑셀이 필요해요.</span></>}
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
-            <button type="button" onClick={onClearPreview} style={{ padding: "7px 14px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>취소</button>
-            <button type="button" className="btn-primary" onClick={save} disabled={saving} style={{ padding: "7px 16px", fontSize: 12 }}>{saving ? "반영 중…" : `반영 (${fmt(preview.totals.count)}건)`}</button>
+  const fmt = (n) => Math.round(Number(n || 0)).toLocaleString();
+  const won = (n) => `${fmt(n)}원`;
+  const md = (d) => String(d || "").slice(5).replace("-", "/");
+  const t = data ? data.totals : null;
+  const hasItems = !!(t && t.itemRows > 0);
+  const curView = view === "product" && !hasItems ? "client" : view;
+  const dayList = data ? data.days.slice().reverse() : [];
+  const list = !data ? [] : curView === "client" ? data.clients : curView === "product" ? data.products : dayList;
+  const valOf = (x) => curView === "product" ? x.qty : x.total;
+  const maxV = list.reduce((m, x) => Math.max(m, valOf(x)), 0) || 1;
+  const shown = all ? list : list.slice(0, 12);
+  const daysWithSales = data ? data.days.length : 0;
+  // 이 기간 중 엑셀이 안 들어온 날이 있는지 (빈 날 = 판매 없음? 아직 안 올림?)
+  const cov = data ? data.covered.slice().sort((a, b) => a.from.localeCompare(b.from)) : [];
+  let covEnd = cov.length ? cov[0].to : "";
+  for (const c of cov) if (c.from <= addDaysYmd(covEnd, 1) && c.to > covEnd) covEnd = c.to;
+  const fullyCovered = cov.length > 0 && cov[0].from <= from && covEnd >= to;
+  const dow = ["일", "월", "화", "수", "목", "금", "토"];
+  const dayLabel = (d) => `${md(d)} (${dow[new Date(d + "T00:00:00Z").getUTCDay()]})`;
+
+  const viewBtn = (k, label) => (
+    <button key={k} type="button" onClick={() => { setView(k); setAll(false); }}
+      style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "none", background: curView === k ? "var(--surface)" : "transparent", boxShadow: curView === k ? "var(--elev-1)" : "none", color: curView === k ? "var(--text1)" : "var(--text3)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{label}</button>
+  );
+  const kpi = (label, value, unit, sub, color) => (
+    <div className="card">
+      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{label}</div>
+      <div className="kpi-num" style={{ color: color || "var(--text1)" }}>{value}<span style={{ fontSize: 13, marginLeft: 2 }}>{unit}</span></div>
+      {sub && <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {winDrag && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(49,130,246,0.10)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+          <div style={{ padding: "30px 50px", borderRadius: 20, border: "3px dashed #3182F6", background: "var(--surface)", boxShadow: "var(--elev-4)", textAlign: "center" }}>
+            <div style={{ marginBottom: 10 }}><Icon name="inbox" size={36} style={{ color: "#3182F6" }}/></div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>여기에 놓으면 판매 엑셀 반영</div>
+            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 5 }}>이카운트 판매조회 엑셀 — 화면 아무 곳에나 놓으세요</div>
           </div>
         </div>
       )}
 
-      {err ? <div style={{ fontSize: 12, color: "var(--negative-text)" }}>{err}</div>
-        : !data ? <div style={{ fontSize: 12, color: "var(--text3)" }}>불러오는 중…</div>
-        : t.count === 0 ? (
-          <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
-            이 기간 판매 기록이 없어요. 이카운트 <b>판매조회 → 엑셀</b>로 받은 파일을 <b>이 화면 아무 곳에 끌어다 놓으면</b> 정리해 드려요.
-            {data.lastImport ? <span style={{ color: "var(--text3)" }}> (마지막으로 올린 기간: {data.lastImport.from} ~ {data.lastImport.to})</span> : null}
+      {/* 업로드 */}
+      <div className="card" id="sales-upload">
+        <div className="section-header">
+          <span className="section-header-title"><Icon name="inbox" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>이카운트 판매조회 엑셀 올리기</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {data && data.lastImport && <span className="info-pill" title={data.lastImport.fileName}>마지막 {data.lastImport.at} · {data.lastImport.from}~{data.lastImport.to}</span>}
+            <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: "none" }} onChange={e => handleFile(e.target.files?.[0])}/>
+            <button className="btn-primary" onClick={() => fileRef.current?.click()} style={{ padding: "8px 16px", fontSize: 13 }}>파일 선택</button>
+          </div>
+        </div>
+        {preview ? (
+          <div style={{ padding: 14, borderRadius: 12, background: "rgba(49,130,246,0.06)", border: "1px solid rgba(49,130,246,0.3)" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)", marginBottom: 4 }}>판매 엑셀 확인 — {preview.fileName}</div>
+            <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7 }}>
+              기간 <b>{preview.from} ~ {preview.to}</b>{preview.periodFromHeader ? "" : " (파일 안 날짜 기준)"} · {preview.slip ? "전표" : "품목 줄"} <b>{fmt(preview.totals.count)}건</b>
+              {preview.slip ? "" : <> · 수량 <b>{fmt(preview.totals.qty)}</b></>} · 합계 <b>{won(preview.totals.total)}</b>
+              <br/>이 기간에 이미 올린 판매 기록은 이 파일로 <b>바뀌어요</b>. 같은 기간을 다시 올려도 겹치지 않아요.
+              {preview.slip && <><br/><span style={{ color: "var(--text3)" }}>「판매조회」 전표 목록이라 거래처·날짜별 금액까지 정리돼요. 품목별 수량은 품목이 한 줄씩 나오는 엑셀이 필요해요.</span></>}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setPreview(null)} style={{ padding: "7px 14px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>취소</button>
+              <button type="button" className="btn-primary" onClick={save} disabled={saving} style={{ padding: "7px 16px", fontSize: 12 }}>{saving ? "반영 중…" : `반영 (${fmt(preview.totals.count)}건)`}</button>
+            </div>
           </div>
         ) : (
           <>
-            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "baseline", marginBottom: 6 }}>
-              <span style={{ fontSize: 13, color: "var(--text2)" }}>매출 <b style={{ fontSize: 20, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(t.total)}</b>원</span>
-              <span style={{ fontSize: 13, color: "var(--text2)" }}>{t.slips > 0 && !hasItems ? "전표" : "건수"} <b style={{ color: "var(--text1)" }}>{fmt(t.count)}</b>건</span>
-              {hasItems && <span style={{ fontSize: 13, color: "var(--text2)" }}>판매 수량 <b style={{ color: "var(--text1)" }}>{fmt(t.qty)}</b>개</span>}
-              <span style={{ fontSize: 13, color: "var(--text2)" }}>거래처 <b style={{ color: "var(--text1)" }}>{fmt(data.clientCount)}</b>곳</span>
-            </div>
-            {hasItems && moves && moves.syncs > 0 && (
-              <div style={{ fontSize: 12, color: "var(--text3)", marginBottom: 6 }}>같은 기간 출고 추정 {fmt(moves.totalOut)}개 · 판매 {fmt(t.qty)}개 → 판매 외 {fmt(Math.max(0, moves.totalOut - t.qty))}개 (샘플·불량·누락 등)</div>
-            )}
-            {!fullyCovered && cov.length > 0 && (
-              <div style={{ fontSize: 12, color: "var(--warning-text)", marginBottom: 6 }}>이 기간 중 올린 엑셀: {cov.map(c => `${md(c.from)}~${md(c.to)}`).join(", ")} — 나머지 날은 아직 안 올렸어요</div>
-            )}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 4px" }}>
-              <div style={{ display: "inline-flex", gap: 2, padding: 2, borderRadius: 9, background: "var(--surface2)" }}>
-                {chip("client", "거래처별")}
-                {hasItems && chip("product", "품목별")}
+            <div onClick={() => fileRef.current?.click()}
+              style={{ padding: "22px 16px", borderRadius: 12, border: `2px dashed ${winDrag ? "#3182F6" : "var(--border)"}`, background: winDrag ? "rgba(49,130,246,0.06)" : "var(--surface2)", textAlign: "center", cursor: "pointer", transition: "all 0.15s", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)" }}>
+                <Icon name="inbox" size={16} style={{ marginRight: 8, verticalAlign: "-3px", color: "#3182F6" }}/>엑셀 파일을 여기(화면 아무 곳)로 드래그하거나 클릭해서 선택
               </div>
-              {!hasItems && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>품목별은 품목 줄 엑셀을 올리면 생겨요</span>}
+              <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>.xlsx · .xls · .csv</div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {shown.map(x => (
-                <div key={x.name} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={x.name}>{x.name}</span>
-                    {curView === "client"
-                      ? <><span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{fmt(x.count)}건{x.qty ? ` · ${fmt(x.qty)}개` : ""}</span>
-                          <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(x.total)}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>원</span></span></>
-                      : <><span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{won(x.total)}</span>
-                          <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmt(x.qty)}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>개</span></span></>}
-                  </div>
-                  <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", marginTop: 5 }}>
-                    <div style={{ width: `${Math.max(3, ((curView === "client" ? x.total : x.qty) / maxV) * 100)}%`, height: "100%", borderRadius: 2, background: "#3182F6" }}/>
-                  </div>
-                  {curView === "product" && x.sizes && x.sizes.length > 0 && (
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
-                      {x.sizes.filter(z => z.qty).map(z => (
-                        <span key={z.size + z.code} title={`${z.code || ""} · ${won(z.total)}`} style={{ fontSize: 11, padding: "2px 7px", borderRadius: 6, background: "var(--surface2)", color: "var(--text2)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
-                          {z.size || z.code || "-"} <b style={{ color: "var(--text1)" }}>{fmt(z.qty)}</b>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {list.length > 10 && (
-                <button type="button" onClick={() => setAll(v => !v)} style={{ marginTop: 6, padding: "8px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                  {all ? "접기" : `나머지 ${list.length - 10}개 더 보기`}
-                </button>
-              )}
-            </div>
-            <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>
-              매출은 이카운트 「금액합계」(부가세 포함) 기준이에요.{data.lastImport ? ` 마지막 업로드 ${md(data.lastImport.at.slice(0, 10))} ${data.lastImport.at.slice(11)} · ${data.lastImport.from}~${data.lastImport.to}` : ""}
+            <div style={{ fontSize: 12, color: "var(--text2)", lineHeight: 1.7 }}>
+              이카운트 <b>판매조회 → 엑셀</b>로 받은 파일을 올리면 거래처·날짜별 매출로 정리해요. 품목이 한 줄씩 나오는 판매 엑셀이면 <b>품목·사이즈별 수량</b>까지 나와요.
+              같은 기간을 다시 올리면 그 기간이 통째로 바뀌어서 겹치지 않아요.
             </div>
           </>
         )}
+        {parseErr && <div style={{ marginTop: 10, padding: "10px 14px", borderRadius: 10, background: "rgba(240,68,82,0.08)", border: "1px solid rgba(240,68,82,0.25)", fontSize: 12, color: "#F04452", fontWeight: 600 }}>⚠️ {parseErr}</div>}
+      </div>
+
+      {/* 기간 */}
+      <div className="card" style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {SALES_RANGES.map(r => (
+            <button key={r.k} type="button" onClick={() => pick(r.k)}
+              style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid " + (range === r.k ? "var(--text1)" : "var(--border)"), background: range === r.k ? "var(--text1)" : "transparent", color: range === r.k ? "var(--surface)" : "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{r.label}</button>
+          ))}
+        </div>
+        {range === "custom" && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--text2)" }}>
+            <input type="date" value={custom.from || from} onChange={e => setCustomRange({ from: e.target.value })} style={{ height: 30, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
+            ~
+            <input type="date" value={custom.to || to} onChange={e => setCustomRange({ to: e.target.value })} style={{ height: 30, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
+          </div>
+        )}
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{from} ~ {to}</span>
+      </div>
+
+      {err ? <div className="card" style={{ fontSize: 12.5, color: "var(--negative-text)" }}>{err}</div>
+      : !data ? <div className="card" style={{ fontSize: 12.5, color: "var(--text3)" }}>불러오는 중…</div>
+      : (
+        <>
+          {/* KPI */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+            {kpi("매출 (부가세 포함)", fmt(t.total), "원", daysWithSales ? `판매 있는 날 ${daysWithSales}일 · 하루 평균 ${won(t.total / daysWithSales)}` : "")}
+            {kpi(t.slips > 0 && !hasItems ? "전표" : "건수", fmt(t.count), "건")}
+            {hasItems ? kpi("판매 수량", fmt(t.qty), "개", moves && moves.syncs > 0 ? `출고 추정 ${fmt(moves.totalOut)}개 → 판매 외 ${fmt(Math.max(0, moves.totalOut - t.qty))}개` : "") : null}
+            {kpi("거래처", fmt(data.clientCount), "곳", data.clients[0] ? `1위 ${data.clients[0].name} ${won(data.clients[0].total)}` : "")}
+          </div>
+          {!fullyCovered && cov.length > 0 && (
+            <div className="card" style={{ padding: "10px 16px", fontSize: 12.5, color: "var(--warning-text)", background: "rgba(255,149,0,0.05)", borderColor: "rgba(255,149,0,0.3)" }}>
+              이 기간 중 엑셀을 올린 날짜: {cov.map(c => `${md(c.from)}~${md(c.to)}`).join(", ")} — 나머지 날은 아직 안 올렸어요.
+            </div>
+          )}
+
+          {/* 목록 */}
+          <div className="card">
+            <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
+              <span className="section-header-title"><Icon name="barChart" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>
+                {curView === "client" ? "거래처별 매출" : curView === "product" ? "품목별 판매" : "날짜별 매출"}
+              </span>
+              <div style={{ display: "inline-flex", gap: 2, padding: 2, borderRadius: 9, background: "var(--surface2)" }}>
+                {viewBtn("client", "거래처별")}
+                {hasItems && viewBtn("product", "품목별")}
+                {viewBtn("day", "날짜별")}
+              </div>
+            </div>
+            {!hasItems && t.count > 0 && curView === "client" && <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 6 }}>품목별 보기는 품목이 한 줄씩 나오는 판매 엑셀을 올리면 생겨요.</div>}
+            {t.count === 0 ? (
+              <div style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7, padding: "6px 0" }}>
+                이 기간 판매 기록이 없어요.{cov.length === 0 ? " 아직 이 기간의 엑셀을 올리지 않았어요." : ""}
+                {data.lastImport ? <span style={{ color: "var(--text3)" }}> (마지막으로 올린 기간: {data.lastImport.from} ~ {data.lastImport.to})</span> : null}
+              </div>
+            ) : list.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>표시할 항목이 없어요.</div> : (
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {shown.map((x, idx) => {
+                  const key = curView === "day" ? x.date : x.name;
+                  const title = curView === "day" ? dayLabel(x.date) : x.name;
+                  return (
+                    <div key={key} style={{ padding: "9px 0", borderTop: idx === 0 ? "none" : "1px solid var(--border)" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                        {curView !== "day" && <span style={{ width: 20, fontSize: 11.5, fontWeight: 700, color: "var(--text3)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{idx + 1}</span>}
+                        <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={title}>{title}</span>
+                        {curView === "client" && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{fmt(x.count)}건{x.qty ? ` · ${fmt(x.qty)}개` : ""}</span>}
+                        {curView === "product" && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{won(x.total)}</span>}
+                        {curView === "day" && x.qty ? <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }}>{fmt(x.qty)}개</span> : null}
+                        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                          {fmt(valOf(x))}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 2 }}>{curView === "product" ? "개" : "원"}</span>
+                        </span>
+                      </div>
+                      <div style={{ height: 4, borderRadius: 2, background: "var(--surface2)", marginTop: 5, marginLeft: curView !== "day" ? 30 : 0 }}>
+                        <div style={{ width: `${Math.max(2, (valOf(x) / maxV) * 100)}%`, height: "100%", borderRadius: 2, background: "#3182F6" }}/>
+                      </div>
+                      {curView === "product" && x.sizes && x.sizes.length > 0 && (
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6, marginLeft: 30 }}>
+                          {x.sizes.filter(z => z.qty).map(z => (
+                            <span key={z.size + z.code} title={`${z.code || ""} · ${won(z.total)}`} style={{ fontSize: 11, padding: "2px 7px", borderRadius: 6, background: "var(--surface2)", color: "var(--text2)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                              {z.size || z.code || "-"} <b style={{ color: "var(--text1)" }}>{fmt(z.qty)}</b>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {list.length > 12 && (
+                  <button type="button" onClick={() => setAll(v => !v)} style={{ marginTop: 6, padding: "8px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    {all ? "접기" : `나머지 ${list.length - 12}개 더 보기`}
+                  </button>
+                )}
+              </div>
+            )}
+            <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>매출은 이카운트 「금액합계」(부가세 포함) 기준이에요.</div>
+          </div>
+
+          {/* 올린 이력 */}
+          {data.imports && data.imports.length > 0 && (
+            <div className="card">
+              <div className="section-header"><span className="section-header-title"><Icon name="history" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>올린 엑셀</span></div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {data.imports.map((im, i) => (
+                  <div key={im.at + i} style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", padding: "7px 0", borderTop: i === 0 ? "none" : "1px solid var(--border)", fontSize: 12.5 }}>
+                    <span style={{ color: "var(--text3)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{im.at}</span>
+                    <span style={{ flex: "1 1 160px", minWidth: 0, color: "var(--text1)", fontWeight: 600, overflowWrap: "anywhere" }} title={im.fileName}>{im.from} ~ {im.to}<span style={{ color: "var(--text3)", fontWeight: 500 }}> · {im.fileName}</span></span>
+                    <span style={{ color: "var(--text2)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmt(im.count)}건 · {won(im.total)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
-const addDaysYmd = (d, k) => { const t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + k); return t.toISOString().slice(0, 10); };
 
-function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch }) {
+function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch, onSalesFile }) {
   const items = stock?.items || [];
   const [search, setSearch] = useState("");
   const listRef = useRef(null); // 전체 재고 카드 — 통합검색 진입 시 스크롤 목적지
@@ -16253,7 +16409,6 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
   const [collapsedCats, setCollapsedCats] = useState(() => new Set()); // 접힌 그룹
   const [preview, setPreview] = useState(null); // { items, fileName } — 업로드 미리보기
   const [parseErr, setParseErr] = useState("");
-  const [salesPrev, setSalesPrev] = useState(null); // 판매현황 엑셀 미리보기 (재고 엑셀과 자동 구분)
   const [winDrag, setWinDrag] = useState(false); // 파일을 화면 위로 드래그 중 (풀스크린 드롭 오버레이)
   const fileRef = useRef(null);
   const handleFileRef = useRef(null); // window 드롭 리스너에서 최신 handleFile 참조
@@ -16324,12 +16479,12 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
     setParseErr("");
     try {
       const ab = await file.arrayBuffer();
-      // 판매현황 엑셀이면 재고로 읽지 않고 판매 쪽으로 (판매 엑셀에도 「품목명·수량」 칸이 있어 재고를 통째로 바꿀 뻔한다)
+      // 판매현황 엑셀이면 재고로 읽지 않고 판매 현황 탭으로 넘긴다 (판매 엑셀에도 「품목명·수량」 칸이 있어 재고를 통째로 바꿀 뻔한다)
       const sales = salesParseWorkbook(ab);
       if (sales) {
         setPreview(null);
-        setSalesPrev({ ...sales, fileName: file.name });
-        setTimeout(() => { try { document.getElementById("sales-card")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 120);
+        if (onSalesFile) { onSalesFile({ ...sales, fileName: file.name }); showToast("판매 엑셀이라 판매 현황 탭으로 옮겼어요"); }
+        else setParseErr("이 파일은 판매 엑셀이에요. 판매 현황 탭에 올려 주세요.");
         return;
       }
       const parsed = stockParseWorkbook(ab);
@@ -16556,8 +16711,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
         <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(219,107,46,0.12)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
           <div style={{ padding: "30px 50px", borderRadius: 20, border: "3px dashed #DB6B2E", background: "var(--surface)", boxShadow: "var(--elev-4)", textAlign: "center" }}>
             <div style={{ marginBottom: 10 }}><Icon name="inbox" size={36} style={{ color: "#DB6B2E" }}/></div>
-            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>여기에 놓으면 엑셀 업로드</div>
-            <div style={{ fontSize: 13, color: "var(--text2)", marginTop: 4 }}>재고 엑셀 · 판매조회 엑셀 — 알아서 구분해요</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)" }}>여기에 놓으면 재고 엑셀 업로드</div>
             <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 5 }}>.xlsx · .xls · .csv — 화면 아무 곳에나 놓으세요</div>
           </div>
         </div>
@@ -16588,7 +16742,6 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
       </div>
 
       <StockMovesCard stamp={stock?.updatedAt || ""}/>
-      <SalesCard stamp={stock?.updatedAt || ""} preview={salesPrev} onClearPreview={() => setSalesPrev(null)} onPick={() => fileRef.current?.click()}/>
 
       {/* 엑셀 업로드 */}
       <div className="card">
@@ -21001,6 +21154,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   // 재고 현황 — 이카운트 ERP 엑셀 업로드 스냅샷. { items:[{id,code,name,spec,unit,qty,safeQty}], updatedAt, fileName }
   const [stock, setStock] = useState(() => load("frw_stock", { items: [], updatedAt: "", fileName: "" }));
   const [stockFocusSearch, setStockFocusSearch] = useState(null); // 통합검색 → 재고 탭 진입 시 미리 채울 검색어
+  const [salesPendingFile, setSalesPendingFile] = useState(null); // 재고 탭에 떨어뜨린 판매 엑셀 → 판매 현황 탭으로
   const [monthlySales, setMonthlySales] = useState(() => load("frw_monthly_sales", {}));
   // 매입 현황 날짜별 메모: { "YYYY-MM-DD|공급처": "메모 텍스트" }
   const [purchaseDateMemos, setPurchaseDateMemos] = useState(() => load("frw_purchase_date_memos", {}));
@@ -22637,11 +22791,11 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(219,107,46,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
-  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["hr", "인사 관리", "user"], ["meeting", "회의록", "clipboard"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
+  const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["hr", "인사 관리", "user"], ["meeting", "회의록", "clipboard"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["sales", "판매 현황", "barChart"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
   // 사이드바 메뉴 그룹 (토스 핸드오프 — 평면 나열 → 그룹 헤더). TABS는 평면 유지(퀵메뉴 등 재사용)
   const TAB_GROUPS = [
     { label: "핵심", ids: ["dashboard", "calc", "quote"] },
-    { label: "운영", ids: ["pricedb", "purchase", "inventory", "stock"] },
+    { label: "운영", ids: ["pricedb", "purchase", "inventory", "stock", "sales"] },
     { label: "거래·자금", ids: ["clients", "suppliers", "ledger", "treasury", "tax", "hr"] },
     { label: "일정·외부", ids: ["schedule", "meeting", "bids", "files", "mail", "news"] },
   ];
@@ -22716,6 +22870,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     treasury: "현금 흐름·계좌·자금 계획",
     inventory: "원단 입고·매입 내역 관리",
     stock: "이카운트 엑셀 업로드 기준 재고 관리",
+    sales: "이카운트 판매조회 엑셀 기준 거래처·품목별 매출",
     clients: "거래처별 납품 단가·등급 관리",
     suppliers: "원단·부자재 공급처 정보",
     schedule: "납기·미팅·생산 일정 관리",
@@ -22787,7 +22942,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           if (!tabInfo) return null;
           const [, label, icon] = tabInfo;
           // 필 폭 절약: 하단 네비에선 축약 라벨 사용
-          const SHORT = { pricedb: "단가표", calc: "계산기", quote: "견적", purchase: "발주", dashboard: "대시보드", ledger: "장부", treasury: "자금", inventory: "매입", clients: "거래처", suppliers: "공급처", schedule: "일정", bids: "입찰", files: "파일", mail: "메일", news: "뉴스" };
+          const SHORT = { pricedb: "단가표", calc: "계산기", quote: "견적", purchase: "발주", dashboard: "대시보드", ledger: "장부", treasury: "자금", inventory: "매입", stock: "재고", sales: "판매", clients: "거래처", suppliers: "공급처", schedule: "일정", bids: "입찰", files: "파일", mail: "메일", news: "뉴스" };
           const shortLabel = SHORT[id] || label;
           const active = tab === id;
           return (
@@ -25753,7 +25908,11 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 
         {tab === "stock" && (
           <StockTab stock={stock} setStock={setStock} materials={materials} darkMode={darkMode}
-            focusSearch={stockFocusSearch} clearFocusSearch={() => setStockFocusSearch(null)} />
+            focusSearch={stockFocusSearch} clearFocusSearch={() => setStockFocusSearch(null)}
+            onSalesFile={(parsed) => { setSalesPendingFile(parsed); setTab("sales"); }} />
+        )}
+        {tab === "sales" && (
+          <SalesTab pendingFile={salesPendingFile} clearPending={() => setSalesPendingFile(null)} />
         )}
         {tab === "ledger" && (
           <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} orders={orders} darkMode={darkMode} focusClient={ledgerFocusClient} clearFocus={() => setLedgerFocusClient(null)} bankDeposits={bankDeposits} setBankDeposits={setBankDeposits} clients={clients} />

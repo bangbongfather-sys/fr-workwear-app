@@ -97,6 +97,7 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
   const covered = (meta && Array.isArray(meta.imports) ? meta.imports : [])
     .filter((i) => i && i.to >= from && i.from <= to)
     .map((i) => ({ from: i.from < from ? from : i.from, to: i.to > to ? to : i.to, at: i.at, fileName: i.fileName }));
-  const lastImport = meta && Array.isArray(meta.imports) && meta.imports.length ? meta.imports[meta.imports.length - 1] : null;
-  return { from, to, totals: tot, products: products.slice(0, top), productCount: products.length, clients: clientList.slice(0, 50), clientCount: clientList.length, days, covered, lastImport };
+  const imports = meta && Array.isArray(meta.imports) ? meta.imports : [];
+  const lastImport = imports.length ? imports[imports.length - 1] : null;
+  return { from, to, totals: tot, products: products.slice(0, top), productCount: products.length, clients: clientList.slice(0, 50), clientCount: clientList.length, days, covered, lastImport, imports: imports.slice(-10).reverse() };
 }
