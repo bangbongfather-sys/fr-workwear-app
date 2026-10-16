@@ -64,8 +64,10 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
   if (!rr.ok) throw new Error(`Firebase ${rr.status}`);
   const byDay = (await rr.json()) || {};
   const meta = mr.ok ? await mr.json() : null;
-  const groups = new Map(), clients = new Map(), days = [];
+  const groups = new Map(), clients = new Map(), days = [], slips = [];
   const tot = { count: 0, qty: 0, supply: 0, vat: 0, total: 0, slips: 0, itemRows: 0 };
+  const SLIP_CAP = 4000;   // 달력·거래처 상세용 전표 목록 (전표당 한 줄, 품목 줄 엑셀은 전표(일자·거래처)로 묶는다)
+  let dayCount = 0;
   for (const d of Object.keys(byDay).sort()) {
     const list = Array.isArray(byDay[d]) ? byDay[d] : Object.values(byDay[d] || {});
     let dq = 0, dt = 0;
@@ -75,9 +77,19 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
       tot.count++; tot.qty += r.qty || 0; tot.supply += r.supply || 0; tot.vat += r.vat || 0; tot.total += amt;
       dq += r.qty || 0; dt += amt;
       const ck = r.c || "(거래처 없음)";
-      const c = clients.get(ck) || { name: ck, qty: 0, total: 0, count: 0 };
-      c.qty += r.qty || 0; c.total += amt; c.count++; clients.set(ck, c);
-      if (r.slip) { tot.slips++; continue; }      // 전표 목록은 품목별로 나눌 수 없다
+      const c = clients.get(ck) || { name: ck, qty: 0, total: 0, count: 0, first: d, last: d };
+      c.qty += r.qty || 0; c.total += amt; c.count++; if (d > c.last) c.last = d; if (d < c.first) c.first = d; clients.set(ck, c);
+      dayCount++;
+      if (r.slip) {
+        tot.slips++;
+        if (slips.length < SLIP_CAP) slips.push({ d, c: ck, name: r.name || "", total: amt, no: r.no || "" });
+        continue;      // 전표 목록은 품목별로 나눌 수 없다
+      }
+      // 품목 줄 엑셀: 같은 날·같은 거래처를 전표 하나로 묶어 보여 준다
+      const sk = `${d}|${ck}`;
+      let sl = slips.find((x) => x.key === sk);
+      if (!sl && slips.length < SLIP_CAP) { sl = { key: sk, d, c: ck, name: r.name || "", total: 0, qty: 0, lines: 0 }; slips.push(sl); }
+      if (sl) { sl.total += amt; sl.qty += r.qty || 0; sl.lines++; if (sl.lines > 1) sl.name = `${sl.name.replace(/ 외 \d+건$/, "")} 외 ${sl.lines - 1}건`; }
       tot.itemRows++;
       const [base, size] = splitName(r.name, r.spec, r.code);
       const g = groups.get(base) || { name: base, qty: 0, total: 0, sizes: new Map() };
@@ -87,8 +99,10 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
       z.qty += r.qty || 0; z.total += amt; g.sizes.set(zk, z);
       groups.set(base, g);
     }
-    days.push({ date: d, qty: dq, total: dt });
+    days.push({ date: d, qty: dq, total: dt, count: dayCount });
+    dayCount = 0;
   }
+  for (const sl of slips) delete sl.key;
   const products = [...groups.values()]
     .map((g) => ({ name: g.name, qty: g.qty, total: g.total, sizes: [...g.sizes.values()].sort((a, b) => String(a.size).localeCompare(String(b.size), "ko", { numeric: true })) }))
     .sort((a, b) => b.qty - a.qty || b.total - a.total);
@@ -99,5 +113,5 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
     .map((i) => ({ from: i.from < from ? from : i.from, to: i.to > to ? to : i.to, at: i.at, fileName: i.fileName }));
   const imports = meta && Array.isArray(meta.imports) ? meta.imports : [];
   const lastImport = imports.length ? imports[imports.length - 1] : null;
-  return { from, to, totals: tot, products: products.slice(0, top), productCount: products.length, clients: clientList.slice(0, 50), clientCount: clientList.length, days, covered, lastImport, imports: imports.slice(-10).reverse() };
+  return { from, to, totals: tot, products: products.slice(0, top), productCount: products.length, clients: clientList.slice(0, 200), clientCount: clientList.length, days, slips, slipsTruncated: tot.count > SLIP_CAP, covered, lastImport, imports: imports.slice(-10).reverse() };
 }
