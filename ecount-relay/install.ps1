@@ -69,8 +69,10 @@ function Call($url, $body, $hdr) {
     if ($null -eq $body) { return $w.DownloadString($url) }
     $w.Headers['Content-Type'] = 'application/json'
     return $w.UploadString($url, 'POST', $body)
-  } catch [Net.WebException] {
-    if ($_.Exception.Response) { return (New-Object IO.StreamReader($_.Exception.Response.GetResponseStream(), [Text.Encoding]::UTF8)).ReadToEnd() }
+  } catch {
+    # .NET 메서드 예외는 MethodInvocationException 으로 감싸져 오므로 안쪽 WebException 을 찾는다
+    $e = $_.Exception; while ($e -and -not ($e -is [Net.WebException])) { $e = $e.InnerException }
+    if ($e -and $e.Response) { return (New-Object IO.StreamReader($e.Response.GetResponseStream(), [Text.Encoding]::UTF8)).ReadToEnd() }
     throw
   }
 }
