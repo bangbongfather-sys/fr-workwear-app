@@ -509,6 +509,14 @@ async function toolGetSection(args, env) {
     const r = await salesSummary(env, from, to, { top: 60 });
     return { content: [{ type: "text", text: JSON.stringify({ 안내: "이카운트 판매현황 엑셀로 올린 실제 판매. total=합계(없으면 공급가). covered=이 기간 중 엑셀이 들어온 범위 — 그 밖의 날은 아직 안 올린 것", ...r }) }] };
   }
+  // 판매현황 요약(캠퍼스 판매현황 창) — "_salesum:" + JSON {from,to,top,slips} : 품목 전부(top, 기본 500)·전표 목록은 slips:true 일 때만
+  if (section.startsWith("_salesum:")) {
+    let o = {}; try { o = JSON.parse(section.slice(9)); } catch { return errContent("_salesum 인자 JSON 이 잘못됐습니다."); }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(o.from || "") || !/^\d{4}-\d{2}-\d{2}$/.test(o.to || "") || o.from > o.to) return errContent("from·to(YYYY-MM-DD)가 필요합니다.");
+    const r = await salesSummary(env, o.from, o.to, { top: Math.min(2000, Math.max(1, parseInt(o.top) || 500)) });
+    if (!o.slips) delete r.slips;
+    return { content: [{ type: "text", text: JSON.stringify(r) }] };
+  }
   // 판매현황 줄 목록(캠퍼스 판매현황 창·AI 직원) — "_salesrows:" + JSON {from,to,q,client,name,offset,limit} → 줄마다 d(날짜)·i(그날 안 순번)
   if (section.startsWith("_salesrows:")) {
     let o = {}; try { o = JSON.parse(section.slice(11)); } catch { return errContent("_salesrows 인자 JSON 이 잘못됐습니다."); }
