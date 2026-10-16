@@ -1,4 +1,5 @@
 import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecountRows } from "./ecount.js";
+import { salesSummary } from "./sales.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
@@ -462,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-16-stock-moves", note: "재고: 새로고침 사이 감소=출고(판매) 추정 기록·조회(_ecount:moves)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-16-sales-import", note: "이카운트 판매현황 엑셀 가져오기(/api/sales/import) · 조회(_sales)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -497,6 +498,17 @@ async function toolGetSection(args, env) {
   // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
   if (section === "_ecount:probe") return textContent(await ecountProbe(env));
   if (section === "_ecount:status") return textContent(await ecountStatus(env));
+  // 이카운트 판매현황(엑셀로 올린 것) — "_sales" (최근 30일) / "_sales:7" / "_sales:2026-10-01~2026-10-31"
+  if (section === "_sales" || section.startsWith("_sales:")) {
+    const arg = section.slice(7);
+    const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    let from, to = today;
+    const m = arg.match(/^(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})$/);
+    if (m) { from = m[1]; to = m[2]; }
+    else { const k = Math.max(1, Math.min(800, Number(arg) || 30)); from = new Date(Date.now() + 9 * 3600e3 - (k - 1) * 86400e3).toISOString().slice(0, 10); }
+    const r = await salesSummary(env, from, to, { top: 60 });
+    return { content: [{ type: "text", text: JSON.stringify({ 안내: "이카운트 판매현황 엑셀로 올린 실제 판매. total=합계(없으면 공급가). covered=이 기간 중 엑셀이 들어온 범위 — 그 밖의 날은 아직 안 올린 것", ...r }) }] };
+  }
   // 출고(판매) 추정 — "_ecount:moves" (최근 30일) / "_ecount:moves:7" / "_ecount:moves:2026-10-01~2026-10-31"
   if (section === "_ecount:moves" || section.startsWith("_ecount:moves:")) {
     const arg = section.slice(14).replace(/^:/, "");

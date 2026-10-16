@@ -4,7 +4,7 @@
 //   /frw_sales_meta        = { imports: [ { at, fileName, from, to, count, qty, total } ] }  (최근 30회)
 // 같은 기간을 다시 올리면 그 기간의 날짜들을 통째로 바꾼다 → 중복 없이 몇 번이고 다시 올려도 된다.
 
-const FB_HOST = "nj-safety-default-rtdb.firebaseio.com";
+const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";   // mcp.js·worker.js 와 같게
 const SALES_PATH = "/frw_sales";
 const META_PATH = "/frw_sales_meta";
 const DAY = /^\d{4}-\d{2}-\d{2}$/;

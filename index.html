@@ -15752,6 +15752,85 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   );
 }
 
+// ─── 이카운트 판매현황 엑셀 ───
+// 판매현황(판매 내역) 엑셀이면 { rows, from, to, ... } 을, 아니면 null 을 돌려준다 (재고 엑셀과 가려내기용).
+// 판매 파일 표시: 「일자」·「수량」·「품목명」 칸 + 「거래처」나 금액(공급가액·합계) 칸.
+function salesParseWorkbook(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: "array" });
+  const kstYear = Number(new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 4));
+  const pad = (x) => String(x).padStart(2, "0");
+  const ymd = (y, m, d) => (y > 1990 && m >= 1 && m <= 12 && d >= 1 && d <= 31) ? `${y}-${pad(m)}-${pad(d)}` : "";
+  const toDay = (v, year) => {
+    if (typeof v === "number" && v > 20000 && v < 80000) { const t = new Date(Math.round((v - 25569) * 86400e3)); return t.toISOString().slice(0, 10); }
+    const t = String(v || "").trim();
+    let m = t.match(/(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})/);
+    if (m) return ymd(+m[1], +m[2], +m[3]);
+    m = t.match(/^(\d{1,2})\s*[.\/-]\s*(\d{1,2})(?!\d)/);
+    if (m) return ymd(year, +m[1], +m[2]);
+    return "";
+  };
+  const num = (v) => { const x = parseFloat(String(v ?? "").replace(/[,\s원]/g, "")); return isNaN(x) ? NaN : x; };
+  const find = (cells, re, not) => cells.findIndex(c => c && re.test(c) && !(not && not.test(c)));
+  for (const sn of wb.SheetNames) {
+    const ws = wb.Sheets[sn];
+    if (!ws) continue;
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    for (let i = 0; i < Math.min(rows.length, 40); i++) {
+      const rowA = (rows[i] || []).map(c => String(c).replace(/\s/g, ""));
+      const rowB = rows[i + 1] || [];
+      for (const { cells, dataStart } of [
+        { cells: rowA, dataStart: i + 1 },
+        { cells: rowA.map((c, j) => c + String(rowB[j] || "").replace(/\s/g, "")), dataStart: i + 2 },
+      ]) {
+        const map = {
+          d: find(cells, /^(일자|일자-?no\.?|전표일자|판매일자|출고일자|거래일자|날짜|월\/?일)/i),
+          qty: find(cells, /^(수량|판매수량|출고수량)$/),
+          name: find(cells, /(품목명|품명|상품명|제품명)/, /코드/),
+          c: find(cells, /(거래처명|거래처|업체명|고객명|판매처)/, /(코드|번호)/),
+          code: find(cells, /(품목코드|품번)/),
+          spec: find(cells, /^(규격|규격명)$/),
+          price: find(cells, /^단가/),
+          supply: find(cells, /(공급가액|공급가)/),
+          vat: find(cells, /(부가세|부가가치세|^세액)/),
+          total: find(cells, /^(합계|합계금액|총액|금액|판매금액|합계액)$/),
+          wh: find(cells, /(창고명|창고|출하창고)/),
+        };
+        if (map.d < 0 || map.qty < 0 || map.name < 0 || (map.c < 0 && map.supply < 0 && map.total < 0)) continue;
+        // 상단 제목 줄의 「기간 2026/10/01 ~ 2026/10/31」 — 있으면 그 기간을 통째로 바꾼다(판매 없던 날 포함)
+        const top = rows.slice(0, i + 1).map(r => (r || []).join(" ")).join(" ");
+        const pm = top.match(/(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})\s*~\s*(\d{4})\s*[.\/-]\s*(\d{1,2})\s*[.\/-]\s*(\d{1,2})/);
+        const pFrom = pm ? ymd(+pm[1], +pm[2], +pm[3]) : "", pTo = pm ? ymd(+pm[4], +pm[5], +pm[6]) : "";
+        const year = pFrom ? +pFrom.slice(0, 4) : kstYear;
+        const out = [];
+        let lastDay = "";
+        for (let k = dataStart; k < rows.length; k++) {
+          const r = rows[k] || [];
+          const head = r.slice(0, Math.max(map.d, map.name, map.c) + 1).map(x => String(x).replace(/\s/g, ""));
+          if (head.some(x => /^[\[\(]?(소계|합계|총계|일계|월계|누계|계)[\]\)]?$/.test(x)) || /계$/.test(String(r[map.d] || "").replace(/\s/g, ""))) continue;
+          const day = toDay(r[map.d], year) || (String(r[map.d] || "").trim() ? "" : lastDay);
+          if (!day) continue;
+          lastDay = day;
+          const name = String(r[map.name] || "").trim(), code = map.code >= 0 ? String(r[map.code] || "").trim() : "";
+          const qty = num(r[map.qty]);
+          if ((!name && !code) || isNaN(qty)) continue;
+          const g = (key) => map[key] >= 0 ? num(r[map[key]]) : NaN;
+          const supply = g("supply"), vat = g("vat"), total = g("total"), price = g("price");
+          out.push({ d: day, c: map.c >= 0 ? String(r[map.c] || "").trim() : "", code, name, spec: map.spec >= 0 ? String(r[map.spec] || "").trim() : "",
+            qty, price: isNaN(price) ? 0 : price, supply: isNaN(supply) ? 0 : supply, vat: isNaN(vat) ? 0 : vat,
+            total: !isNaN(total) ? total : (!isNaN(supply) ? supply + (isNaN(vat) ? 0 : vat) : 0), wh: map.wh >= 0 ? String(r[map.wh] || "").trim() : "" });
+        }
+        if (!out.length) continue;
+        const ds = out.map(x => x.d).sort();
+        const from = pFrom && pFrom <= ds[0] ? pFrom : ds[0], to = pTo && pTo >= ds[ds.length - 1] ? pTo : ds[ds.length - 1];
+        const cols = Object.entries(map).filter(([, v]) => v >= 0).map(([k]) => k);
+        return { rows: out, from, to, periodFromHeader: !!(pFrom && pTo), cols, sheet: sn,
+          totals: { count: out.length, qty: out.reduce((t, x) => t + x.qty, 0), total: out.reduce((t, x) => t + x.total, 0) } };
+      }
+    }
+  }
+  return null;
+}
+
 // ─── 재고 현황 탭 ───
 // 이카운트 ERP 재고 엑셀(.xlsx/.xls/.csv)을 업로드하면 전체 재고를 스냅샷으로 교체.
 // 헤더 행 자동 탐지(품목명+수량 계열 컬럼), 합계/소계 행 제외, 안전재고는 재업로드에도 유지.

@@ -23,6 +23,7 @@ import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
+import { salesImport, salesSummary } from "./worker-src/sales.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
@@ -219,6 +220,19 @@ export default {
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await ecountRelayPush(env, b, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
+    }
+    // 이카운트 판매현황 — 앱이 엑셀을 읽어 보낸 행 저장(POST /api/sales/import) · 기간 요약(GET /api/sales?from&to) (로그인 필요)
+    if (url.pathname === "/api/sales/import" && request.method === "POST") {
+      let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
+      try { return new Response(JSON.stringify(await salesImport(env, b)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    if (url.pathname === "/api/sales") {
+      const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+      const from = url.searchParams.get("from"), to = url.searchParams.get("to");
+      if (!ok(from) || !ok(to)) return new Response(JSON.stringify({ error: "from·to 날짜가 필요합니다" }), { status: 400, headers: corsHeaders });
+      try { return new Response(JSON.stringify(await salesSummary(env, from, to)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
     }
     // 출고(판매) 추정 — ?from=YYYY-MM-DD&to=YYYY-MM-DD (로그인 필요)
     if (url.pathname === "/api/ecount/moves") {
