@@ -511,6 +511,11 @@ async function toolGetSection(args, env) {
   if (section.startsWith("_unpaid:")) return compact(await unpaidOf(env, section.slice(8)));
   // 공급처 미지급 정산(결제원장) — 매입 현황 자동 집계(VAT 포함) + 수동 매입 − 지급 = 미지급잔액
   if (section.startsWith("_payables:")) return compact(await payablesOf(env, section.slice(10)));
+  // 판매 현황(orders) — 캠퍼스 판매현황 창·AI 직원: 필터 + 제품별·거래처별·월별 합계 + 행 페이지 (+ names: 매칭용 제품·거래처 이름)
+  if (section === "_orders" || section.startsWith("_orders:")) {
+    let o = {}; if (section.length > 8) { try { o = JSON.parse(section.slice(8)); } catch { return errContent("_orders 인자 JSON 이 잘못됐습니다."); } }
+    return compact(await ordersRead(env, o || {}));
+  }
   // 인사 관리 — 직원 목록 + 급여대장 (선택: "_hr:2026-10" 이면 그 달 기록까지)
   if (section === "_hr" || section.startsWith("_hr:")) return compact(await hrRead(env, section.slice(4) || ""));
   // 일정 전체(최근 60일~앞으로 60일, 미완료 우선) — AI 직원 조회용
@@ -1251,6 +1256,7 @@ async function toolCampusWrite(a, env) {
   }
   if (op === "note_add" || op === "daily_append") return await toolNoteSave(a, env);
   if (op === "payable_pay" || op === "payable_pay_delete") return await toolPayablePay(a, env);
+  if (op === "orders_batch" || op === "order_update" || op === "order_delete") return await toolOrders(a, env);
   return errContent(`알 수 없는 쓰기: ${op}`);
 }
 
@@ -1287,6 +1293,126 @@ async function toolNoteSave(a, env) {
       campusTokens: [...String(cur.campusTokens || "").split(",").filter(Boolean).slice(-9), token].join(",") };
     const apply = (dd) => ({ ...(dd || {}), [date]: row });
     return { patch: { [date]: row }, apply, check: (dd) => !!(dd && dd[date] && String(dd[date].campusTokens || "").split(",").includes(token)), result: { 결과: "하루 기록에 덧붙임", 날짜: date, 글자수: body.length } };
+  }, env);
+  return plan.isError ? plan : textContent(plan.result);
+}
+
+// ── 판매 현황 (orders) ── 회사앱 대시보드 「제품별 판매 현황」과 같은 배열.
+// 행 = { id, date, productName, qty, unitPrice, client, clientId, note, paymentDue, paidDate } (+ 캠퍼스: spec, supply, vat, src, campusToken, fromCampus)
+// 합계 = unitPrice × qty (앱과 같은 산식). 날짜가 12-31·수량 1·거래처 없음·100만원 이상이면 '연간 합계'로 본다(앱에 손으로 넣은 2025 연간 합계 행).
+const ordList = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r && typeof r === "object");
+const ordAmt = (r) => Math.round(toNumber(r.unitPrice) * (parseInt(r.qty) || 0));
+const ordAnnual = (r) => /-12-31$/.test(String(r.date || "")) && (parseInt(r.qty) || 0) === 1 && !String(r.client || "").trim() && toNumber(r.unitPrice) >= 1e6;
+const ordDupKey = (r) => [String(r.date || ""), searchNorm(r.client), searchNorm(r.productName), searchNorm(r.spec), parseInt(r.qty) || 0, ordAmt(r)].join("|");
+function ordView(r) {
+  return { id: r.id, date: r.date || "", productName: r.productName || "", spec: r.spec || "", qty: parseInt(r.qty) || 0, unitPrice: toNumber(r.unitPrice), amount: ordAmt(r),
+    client: r.client || "", note: r.note || "", paymentDue: r.paymentDue || "", paidDate: r.paidDate || "", ...(r.src ? { src: r.src } : {}), ...(ordAnnual(r) ? { annual: true } : {}) };
+}
+async function ordersRead(env, o) {
+  const S = env.FIREBASE_DB_SECRET;
+  const all = ordList(await fbGet("/frw/orders", S)).map(([, r]) => ordView(r));
+  const m = depQueryMatcher(o.q);
+  const from = o.from ? normalizeDate(o.from) : "", to = o.to ? normalizeDate(o.to) : "";
+  const f = all.filter((r) => {
+    if (o.annual === false && r.annual) return false;
+    if (o.annual === "only" && !r.annual) return false;
+    if (from && r.date < from) return false;
+    if (to && r.date > to) return false;
+    if (o.client && r.client !== o.client) return false;
+    if (o.product && r.productName !== o.product) return false;
+    if (o.paid === "paid" && !r.paidDate) return false;
+    if (o.paid === "unpaid" && r.paidDate) return false;
+    if (m && !m(`${r.productName} ${r.spec} ${r.client} ${r.note}`)) return false;
+    return true;
+  }).sort((a, b) => b.date.localeCompare(a.date) || String(b.id).localeCompare(String(a.id)));
+  const group = (key, rows) => { const g = {}; rows.forEach((r) => { const k = key(r) || "(없음)"; const x = g[k] || (g[k] = { name: k, qty: 0, amount: 0, count: 0 }); x.qty += r.qty; x.amount += r.amount; x.count++; }); return Object.values(g); };
+  const live = f.filter((r) => !r.annual);
+  const byProduct = group((r) => r.productName, f).sort((a, b) => b.amount - a.amount);
+  const byClient = group((r) => r.client, live).sort((a, b) => b.amount - a.amount);
+  const byMonth = group((r) => r.date.slice(0, 7), live).sort((a, b) => a.name.localeCompare(b.name));
+  const off = Math.max(0, parseInt(o.offset) || 0), lim = Math.min(1000, Math.max(1, parseInt(o.limit) || 200));
+  const out = { totalCount: all.length, filtered: f.length, amount: f.reduce((t, r) => t + r.amount, 0), qty: f.reduce((t, r) => t + r.qty, 0),
+    unpaid: f.filter((r) => !r.paidDate && !r.annual).reduce((t, r) => t + r.amount, 0), annualCount: f.filter((r) => r.annual).length,
+    byProduct: byProduct.slice(0, o.top || 300), byClient: byClient.slice(0, o.top || 300), byMonth, offset: off, limit: lim, rows: f.slice(off, off + lim) };
+  if (o.keys) out.dupKeys = all.map((r) => ordDupKey(r));
+  if (o.names) {
+    const [ps, clients, ledgers] = await Promise.all([fbGet("/frw/products", S), fbGet("/frw/clients", S), fbGet("/frw/ledgers", S)]);
+    const names = new Set();
+    asList(clients).forEach((c) => c.name && names.add(String(c.name).trim()));
+    Object.values(ledgers || {}).forEach((mm) => asList(mm && mm.clients).forEach((c) => c.name && names.add(String(c.name).trim())));
+    all.forEach((r) => r.client && names.add(r.client.trim()));
+    const pn = new Set(asList(ps).map((p) => String(p.name || "").trim()).filter(Boolean));
+    all.forEach((r) => r.productName && !r.annual && pn.add(r.productName.trim()));
+    out.productNames = [...pn].sort((a, b) => a.localeCompare(b, "ko"));
+    out.clientNames = [...names].filter(Boolean).sort((a, b) => a.localeCompare(b, "ko"));
+  }
+  return out;
+}
+async function toolOrders(a, env) {
+  const token = String(a.token || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).slice(0, 64);
+  const withRow = (d, key, row) => { if (Array.isArray(d) || d == null) { const x = [...(d || [])]; x[Number(key)] = row; return x; } return { ...d, [key]: row }; };
+  const hasToken = (d) => ordList(d).some(([, r]) => r.campusToken === token);
+  if (a.op === "orders_batch") {
+    const rows = (Array.isArray(a.rows) ? a.rows : []).slice(0, 500).map((r) => {
+      const qty = parseInt(toNumber(r.qty)) || 0, supply = toNumber(r.supply);
+      let unitPrice = toNumber(r.unitPrice); if (!unitPrice && supply && qty) unitPrice = Math.round(supply / qty * 100) / 100;
+      return { date: normalizeDate(r.date), productName: String(r.productName || "").trim().slice(0, 120), spec: String(r.spec || "").trim().slice(0, 60), qty, unitPrice,
+        client: String(r.client || "").trim().slice(0, 80), note: String(r.note || "").trim().slice(0, 200), paymentDue: r.paymentDue ? normalizeDate(r.paymentDue) : "", paidDate: r.paidDate ? normalizeDate(r.paidDate) : "",
+        ...(supply ? { supply } : {}), ...(r.vat != null && r.vat !== "" ? { vat: toNumber(r.vat) } : {}) };
+    });
+    const bad = rows.findIndex((r) => !isRealDate(r.date) || !r.productName || !r.qty);
+    if (!rows.length) return errContent("기록할 행이 없습니다.");
+    if (bad >= 0) return errContent(`${bad + 1}번째 행이 잘못됐습니다 (날짜 YYYY-MM-DD·제품명·수량 필요): ${JSON.stringify(rows[bad])}`);
+    const skipDup = a.skipDup !== false;
+    const plan = await safeSectionWrite("orders", (d) => {
+      if (hasToken(d)) return { done: true, result: { 결과: "이미 반영됨 (같은 요청)" } };
+      const list = ordList(d), seen = new Set(skipDup ? list.map(([, r]) => ordDupKey(r)) : []);
+      const ids = new Set(list.map(([, r]) => String(r.id))); let id = Date.now(); while (ids.has(String(id))) id++;
+      const base = Array.isArray(d) || d == null ? (d ? d.length : 0) : null;
+      const patch = {}; let n = 0, dup = 0;
+      rows.forEach((r) => {
+        const k = ordDupKey(r); if (skipDup && seen.has(k)) { dup++; return; } seen.add(k);
+        const key = base != null ? String(base + n) : `c${Date.now()}_${n}`;
+        while (ids.has(String(id))) id++; ids.add(String(id));
+        patch[key] = { id: id++, ...r, clientId: "", src: String(a.src || "campus").slice(0, 20), campusToken: n === 0 ? token : `${token}#${n}`, fromCampus: true };
+        n++;
+      });
+      if (!n) return { done: true, result: { 결과: "새로 넣을 행 없음 (모두 이미 있음)", 겹침: dup } };
+      const apply = (dd) => { let out = dd; for (const [k, v] of Object.entries(patch)) out = withRow(out, k, v); return out; };
+      return { patch, apply, check: hasToken, result: { 결과: `판매 ${n}건 기록`, 기록: n, 겹쳐서뺌: dup, 합계: Object.values(patch).reduce((t, r) => t + ordAmt(r), 0) } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  if (a.op === "order_update") {
+    const want = String(a.id ?? ""); if (!want) return errContent("id 가 필요합니다.");
+    const F = a.fields || {}, ch = {};
+    if (F.date != null) { const dt = normalizeDate(F.date); if (!isRealDate(dt)) return errContent("date 가 잘못됐습니다."); ch.date = dt; }
+    if (F.productName != null) { ch.productName = String(F.productName).trim().slice(0, 120); if (!ch.productName) return errContent("제품명은 비울 수 없습니다."); }
+    if (F.qty != null) { ch.qty = parseInt(toNumber(F.qty)) || 0; if (!ch.qty) return errContent("수량은 0이 아니어야 합니다."); }
+    if (F.unitPrice != null) ch.unitPrice = toNumber(F.unitPrice);
+    for (const k of ["client", "note", "spec"]) if (F[k] != null) ch[k] = String(F[k]).trim().slice(0, 200);
+    for (const k of ["paymentDue", "paidDate"]) if (F[k] != null) { const v = F[k] ? normalizeDate(F[k]) : ""; if (v && !isRealDate(v)) return errContent(`${k} 가 잘못됐습니다.`); ch[k] = v; }
+    if (!Object.keys(ch).length) return errContent("바꿀 항목(fields)이 없습니다.");
+    const plan = await safeSectionWrite("orders", (d) => {
+      const hit = ordList(d).find(([, r]) => String(r.id) === want);
+      if (!hit) return errContent(`판매 기록 id=${want} 가 없습니다.`);
+      const [key, cur] = hit;
+      if (cur.campusEdit === token) return { done: true, result: { 결과: "이미 반영됨" } };
+      const row = { ...cur, ...ch, campusEdit: token, editedAt: Date.now() };
+      return { patch: { [key]: row }, apply: (dd) => withRow(dd, key, row), check: (dd) => ordList(dd).some(([, r]) => r.campusEdit === token),
+        result: { 결과: "판매 기록 수정", 이전: ordView(cur), 이후: ordView(row) } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  // order_delete: ids 배열 — 배열 전체를 다시 써야 해서 replace
+  const ids = new Set((Array.isArray(a.ids) ? a.ids : [a.id]).filter((x) => x != null && x !== "").map(String));
+  if (!ids.size) return errContent("지울 ids 가 필요합니다.");
+  const plan = await safeSectionWrite("orders", (d) => {
+    const list = ordList(d), gone = list.filter(([, r]) => ids.has(String(r.id)));
+    if (!gone.length) return { done: true, result: { 결과: "지울 행 없음 (이미 지워짐)" } };
+    const keep = list.filter(([, r]) => !ids.has(String(r.id))).map(([, r]) => r);
+    return { replace: true, patch: {}, apply: () => keep, check: (dd) => !ordList(dd).some(([, r]) => ids.has(String(r.id))),
+      result: { 결과: `판매 ${gone.length}건 삭제`, 삭제: gone.map(([, r]) => ordView(r)) } };
   }, env);
   return plan.isError ? plan : textContent(plan.result);
 }
