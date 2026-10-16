@@ -11714,6 +11714,20 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
       .then(r => r.json()).then(j => { if (!dead) setSalesMonth(j && !j.error ? j : null); }).catch(() => { if (!dead) setSalesMonth(null); });
     return () => { dead = true; };
   }, [selectedYM, subTab, salesTick]);
+  // 예전 가져오기가 메모 칸에 남긴 「판매 현황에서 가져옴」 지우기 (메모는 사용자가 직접 쓰는 칸)
+  useEffect(() => {
+    const AUTO = "판매 현황에서 가져옴";
+    const has = Object.values(ledgers || {}).some(m => ((m && m.clients) || []).some(c => (c.memo || "").trim() === AUTO));
+    if (!has) return;
+    setLedgers(prev => {
+      const next = {};
+      for (const [ym, m] of Object.entries(prev || {})) {
+        const cs = (m && m.clients) || [];
+        next[ym] = cs.some(c => (c.memo || "").trim() === AUTO) ? { ...m, clients: cs.map(c => (c.memo || "").trim() === AUTO ? { ...c, memo: "" } : c) } : m;
+      }
+      return next;
+    });
+  }, [ledgers]);
   const salesClients = (salesMonth && salesMonth.clients) || [];
   const salesTotal = salesMonth && salesMonth.totals ? salesMonth.totals.total : 0;
   const salesHas = !!(salesMonth && salesMonth.totals && salesMonth.totals.count > 0);
@@ -11729,7 +11743,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
       if (total <= 0) { skipped.push(sc.name); return; }
       const supply = Math.round(total / 1.1), tax = total - supply;
       const hit = cur.find(c => payablesNameMatch(c.name, sc.name));
-      if (!hit) adds.push({ id: uid(), name: sc.name, supply, tax, total, status: "미입금", memo: "판매 현황에서 가져옴", ar: [] });
+      if (!hit) adds.push({ id: uid(), name: sc.name, supply, tax, total, status: "미입금", memo: "", ar: [] });
       else if (Math.round(parseFloat(hit.total) || 0) !== total) updates.push({ id: hit.id, name: hit.name, before: Math.round(parseFloat(hit.total) || 0), supply, tax, total });
       else same.push(hit.name);
     });
