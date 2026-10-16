@@ -23,7 +23,8 @@ import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
-import { handleMcp } from "./worker-src/mcp.js";
+import { salesImport, salesSummary } from "./worker-src/sales.js";
+import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -142,7 +143,9 @@ export default {
     //  - /api/ics/<토큰>.ics : 캘린더 구독 — 캘린더 앱이 헤더를 못 붙여 주소의 토큰으로 검증
     //  - /api/bank/sms/<토큰> : 아이폰 단축어가 은행 문자를 보내는 주소 — 주소의 토큰으로 검증
     const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback"
-      || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/");
+      || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/")
+    //  - /api/ecount/push · /api/ecount/pending : 사무실 맥(이카운트 등록 IP)이 요청 확인·재고 보내는 주소 — X-Relay-Key 로 검증
+      || path === "/api/ecount/push" || path === "/api/ecount/pending";
     if (isProtected && !isPublic) {
       if (path === "/mcp" || path === "/mcp/") {
         // /mcp 는 handleMcp 안의 자체 잠금(MCP_TOKEN, ?k=)이 검증한다 — 기존 커넥터 URL 유지.
@@ -199,6 +202,52 @@ export default {
     }
 
     // 은행 입금 자동수집 (팝빌 계좌조회) — 수집함·상태·지금 수집
+    // 이카운트 재고 연동 — 상태 / 지금 가져오기 (로그인 필요)
+    if (url.pathname === "/api/ecount/status") {
+      return new Response(JSON.stringify(await ecountStatus(env)), { headers: corsHeaders });
+    }
+    // 사무실 맥이 1분마다 묻는다: 새로고침 요청이 있나? (있을 때만 이카운트를 조회)
+    if (url.pathname === "/api/ecount/pending") {
+      const key = request.headers.get("X-Relay-Key") || "";
+      if (!env.ECOUNT_API_KEY || key !== await ecountRelayKey(env)) return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다" }), { status: 403, headers: corsHeaders });
+      return new Response(JSON.stringify(await ecountPending(env, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders });
+    }
+    if (url.pathname === "/api/ecount/push" && request.method === "POST") {
+      const key = request.headers.get("X-Relay-Key") || "";
+      if (!env.ECOUNT_API_KEY || key !== await ecountRelayKey(env)) {
+        return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다 — Cloudflare 의 ECOUNT_API_KEY 와 맥에 넣은 키가 같은지 확인하세요" }), { status: 403, headers: corsHeaders });
+      }
+      let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
+      try { return new Response(JSON.stringify(await ecountRelayPush(env, b, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
+    }
+    // 이카운트 판매현황 — 앱이 엑셀을 읽어 보낸 행 저장(POST /api/sales/import) · 기간 요약(GET /api/sales?from&to) (로그인 필요)
+    if (url.pathname === "/api/sales/import" && request.method === "POST") {
+      let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
+      try { return new Response(JSON.stringify(await salesImport(env, b)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    if (url.pathname === "/api/sales") {
+      const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+      const from = url.searchParams.get("from"), to = url.searchParams.get("to");
+      if (!ok(from) || !ok(to)) return new Response(JSON.stringify({ error: "from·to 날짜가 필요합니다" }), { status: 400, headers: corsHeaders });
+      try { return new Response(JSON.stringify(await salesSummary(env, from, to)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    // 출고(판매) 추정 — ?from=YYYY-MM-DD&to=YYYY-MM-DD (로그인 필요)
+    if (url.pathname === "/api/ecount/moves") {
+      const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+      const from = url.searchParams.get("from"), to = url.searchParams.get("to");
+      if (!ok(from) || !ok(to)) return new Response(JSON.stringify({ error: "from·to 날짜가 필요합니다" }), { status: 400, headers: corsHeaders });
+      try { return new Response(JSON.stringify(await stockMoves(env, from, to)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    // 새로고침 — 정해진 시간 없이, 앱의 「새로고침」 단추(또는 Claude)가 부를 때만 가져온다
+    if (url.pathname === "/api/ecount/sync" && request.method === "POST") {
+      const r = await ecountRequest(env, "app");
+      return new Response(JSON.stringify(r), { status: r.configured === false ? 503 : 200, headers: corsHeaders });
+    }
+
     // 은행 문자 → 입금함 (공개, 토큰 검증) / 문자 주소 발급·상태 (로그인)
     if (url.pathname.startsWith("/api/bank/sms/")) return handleBankSmsPublic(request, env, url);
     if (url.pathname.startsWith("/api/bank/smskey/")) return handleBankSmsAdmin(request, env, url);
