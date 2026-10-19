@@ -16217,6 +16217,13 @@ function salesRangeOf(mode, month, custom) {
   const f = ok(custom && custom.from) ? custom.from : today.slice(0, 8) + "01", t = ok(custom && custom.to) ? custom.to : today;
   return f <= t ? [f, t] : [t, f];
 }
+// N년 전 같은 날 — 그달 말일이면 그해 그달 말일로(2월 29일 등), 없는 날은 그달 말일로 맞춘다
+function salesShiftYear(ymd, n) {
+  const y = Number(ymd.slice(0, 4)) + n, m = ymd.slice(5, 7), d = Number(ymd.slice(8));
+  const ym = `${y}-${m}`, last = Number(ymMonthEnd(ym).slice(8));
+  const wasEnd = d === Number(ymMonthEnd(ymd.slice(0, 7)).slice(8));
+  return `${ym}-${String(wasEnd ? last : Math.min(d, last)).padStart(2, "0")}`;
+}
 // 비교용 「직전 기간」 — 월이면 지난달, 아니면 같은 길이의 바로 앞 기간
 function salesPrevRangeOf(mode, from, to) {
   if (mode === "month" || mode === "prev") { const pm = ymShift(from.slice(0, 7), -1); return [`${pm}-01`, ymMonthEnd(pm)]; }
@@ -16238,7 +16245,9 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
   const [month, setMonth] = useState(() => today.slice(0, 7));
   const [custom, setCustom] = useState(() => { try { return JSON.parse(localStorage.getItem("frw_sales_custom") || "null") || {}; } catch { return {}; } });
   const [data, setData] = useState(null);
-  const [prev, setPrev] = useState(null);
+  const [prev, setPrev] = useState(null);   // 비교 기간 데이터 (작년 같은 기간 / 직전 기간)
+  const [cmp, setCmp] = useState(() => { try { return localStorage.getItem("frw_sales_cmp") || "1"; } catch { return "1"; } });   // "1"·"2"·"3" = N년 전 같은 기간, "prev" = 직전 기간
+  const pickCmp = (v) => { setCmp(v); try { localStorage.setItem("frw_sales_cmp", v); } catch {} };
   const [moves, setMoves] = useState(null);
   const [err, setErr] = useState("");
   const [selDay, setSelDay] = useState(null);
@@ -16258,7 +16267,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 640);   // 좁은 화면: 막대 아래 날짜를 띄엄띄엄
   useEffect(() => { const on = () => setNarrow(window.innerWidth < 640); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
   const [from, to] = salesRangeOf(mode, month, custom);
-  const [pFrom, pTo] = salesPrevRangeOf(mode, from, to);
+  const cmpYears = cmp === "prev" ? 0 : Math.max(1, Number(cmp) || 1);
+  const [pFrom, pTo] = cmpYears ? [salesShiftYear(from, -cmpYears), salesShiftYear(to, -cmpYears)] : salesPrevRangeOf(mode, from, to);
   const isMonth = mode === "month" || mode === "prev";
 
   useEffect(() => { if (pendingFile) { setPreview(pendingFile); clearPending && clearPending(); } }, [pendingFile]);
@@ -16273,7 +16283,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
     fetch(`/api/ecount/moves?from=${from}&to=${to}`, { cache: "no-store" }).then(r => r.json())
       .then(j => { if (!dead) setMoves(j && !j.error ? j : null); }).catch(() => {});
     return () => { dead = true; };
-  }, [from, to, tick]);
+  }, [from, to, pFrom, pTo, tick]);
   useEffect(() => { setSelDay(null); setAllClients(false); setAllProducts(false); setSlipLimit(60); }, [from, to]);
   const pickSub = (id) => { setSubTab(id); try { localStorage.setItem("frw_sales_subtab", id); } catch {} };
   // 다른 창(Claude)에서 반영하고 돌아오면 다시 읽는다
@@ -16372,16 +16382,39 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
     const m = new Map(); slips.forEach(s => { if (s.c === curClient) m.set(s.d, (m.get(s.d) || 0) + s.total); });
     return data.days.slice(-60).map(d => ({ date: d.date, total: m.get(d.date) || 0 }));
   }, [data, curClient]);
-  const prevClient = prev && curClient ? (prev.clients || []).find(c => c.name === curClient) : null;
+  // 비교 기간의 거래처별 매출 — 진행 중인 기간이면 같은 날짜까지(전표로 다시 더함)
+  const prevClientMap = React.useMemo(() => {
+    const m = new Map(); if (!prev) return m;
+    const cut = to > today ? (cmpYears ? salesShiftYear(today, -cmpYears) : alignDateRaw(today)) : null;
+    if (cut && Array.isArray(prev.slips) && !prev.slipsTruncated) prev.slips.forEach(x => { if (x.d <= cut) m.set(x.c, (m.get(x.c) || 0) + x.total); });
+    else (prev.clients || []).forEach(c => m.set(c.name, c.total));
+    return m;
+  }, [prev, to, today, cmpYears]);
+  const prevClient = prev && curClient && prevClientMap.has(curClient) ? { total: prevClientMap.get(curClient) } : null;
   const daySlips = selDay ? slips.filter(s => s.d === selDay).slice().sort((a, b) => b.total - a.total) : [];
   const recentSlips = slips.slice().sort((a, b) => b.d.localeCompare(a.d) || b.total - a.total).slice(0, 8);
   const products = data ? data.products : [];
   const productsShown = allProducts ? products : products.slice(0, 10);
   // 직전 기간 대비
-  const prevTotal = prev && prev.totals ? prev.totals.total : 0;
+  const prevFullTotal = prev && prev.totals ? prev.totals.total : 0;
   const prevHas = !!(prev && prev.totals && prev.totals.count > 0);
+  // 진행 중인 기간(끝이 오늘 뒤)은 비교 기간도 「같은 날짜까지」만 더한다 — 진행 중인 달을 작년 한 달 전체와 비교하면 실제보다 나빠 보인다
+  const cmpCut = to > today ? (cmpYears ? salesShiftYear(today, -cmpYears) : alignDateRaw(today)) : null;
+  const prevToDate = cmpCut && prev && prev.days ? prev.days.filter(x => x.date <= cmpCut) : null;
+  const prevTotal = prevToDate ? prevToDate.reduce((a, x) => a + x.total, 0) : prevFullTotal;
+  const prevCount = prevToDate ? prevToDate.reduce((a, x) => a + (x.count || 0), 0) : (prev && prev.totals ? prev.totals.count : 0);
   const diffPct = prevHas && prevTotal ? (t ? (t.total - prevTotal) / Math.abs(prevTotal) * 100 : 0) : null;
-  const prevLabel = isMonth ? `${Number(pFrom.slice(5, 7))}월` : "직전 기간";
+  function alignDateRaw(d) { return isMonth ? `${pFrom.slice(0, 7)}-${d.slice(8)}` : addDaysYmd(d, -(Math.round((Date.parse(from) - Date.parse(pFrom)) / 86400e3))); }
+  const prevLabel = cmpYears
+    ? (isMonth ? `${pFrom.slice(0, 4)}년 ${Number(pFrom.slice(5, 7))}월` : mode === "year" ? `${pFrom.slice(0, 4)}년` : `${pFrom.slice(0, 4)}년 같은 기간`)
+    : (isMonth ? `${Number(pFrom.slice(5, 7))}월` : "직전 기간");
+  // 비교 기간에서 d 에 해당하는 날 (막대 겹쳐 그리기용)
+  const alignDate = (d) => cmpYears ? salesShiftYear(d, -cmpYears)
+    : isMonth ? `${pFrom.slice(0, 7)}-${d.slice(8)}`
+    : addDaysYmd(d, -(Math.round((Date.parse(from) - Date.parse(pFrom)) / 86400e3)));
+  const cmpDayMap = React.useMemo(() => { const m = new Map(); (prev && prev.days ? prev.days : []).forEach(x => m.set(x.date, x)); return m; }, [prev]);
+  const prevDays = prev && prev.days ? prev.days.length : 0;
+  const prevClients = prev && prev.clients ? prev.clients.length : 0;
 
   // 달력 칸 — 월 보기일 때
   const calendar = React.useMemo(() => {
@@ -16402,19 +16435,37 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
     return cells;
   }, [isMonth, data, month, dayMap, cov.length]);
   // 요약 탭 막대 — 월이면 1~말일 전부, 아니면 판매 있는 날만
+  // 두 달 넘는 기간(올해 등)은 날짜별 대신 월별 막대
+  const monthlyBars = !isMonth && (Date.parse(to) - Date.parse(from)) / 86400e3 > 62;
   const bars = React.useMemo(() => {
     if (!data) return [];
+    const cmpOf = (d) => { const r = cmpDayMap.get(alignDate(d)); return r ? r.total : 0; };
+    if (monthlyBars) {
+      const out = [];
+      for (let ym = from.slice(0, 7); ym <= to.slice(0, 7); ym = ymShift(ym, 1)) {
+        const ds = data.days.filter(x => x.date.slice(0, 7) === ym);
+        const pym = cmpYears ? salesShiftYear(`${ym}-01`, -cmpYears).slice(0, 7) : ymShift(ym, -Math.round(((Number(to.slice(0, 4)) * 12 + Number(to.slice(5, 7))) - (Number(from.slice(0, 4)) * 12 + Number(from.slice(5, 7)))) + 1));
+        const cs = prev && prev.days ? prev.days.filter(x => x.date.slice(0, 7) === pym) : [];
+        out.push({ d: ym, month: true, total: ds.reduce((a, x) => a + x.total, 0), count: ds.reduce((a, x) => a + x.count, 0), cmp: cs.reduce((a, x) => a + x.total, 0), off: false, future: ym > today.slice(0, 7), covered: true });
+      }
+      return out;
+    }
     if (isMonth) {
       const out = []; const last = ymMonthEnd(month);
       for (let d = `${month}-01`; d <= last; d = addDaysYmd(d, 1)) {
         const w = new Date(d + "T00:00:00Z").getUTCDay(); const rec = dayMap.get(d);
-        out.push({ d, total: rec ? rec.total : 0, count: rec ? rec.count : 0, off: w === 0 || w === 6 || !!HR_HOLIDAYS[d], future: d > today, covered: isCovered(d) });
+        out.push({ d, total: rec ? rec.total : 0, count: rec ? rec.count : 0, cmp: cmpOf(d), off: w === 0 || w === 6 || !!HR_HOLIDAYS[d], future: d > today, covered: isCovered(d) });
       }
       return out;
     }
-    return data.days.map(x => ({ d: x.date, total: x.total, count: x.count, off: false, future: x.date > today, covered: true }));
-  }, [data, isMonth, month, dayMap, cov.length]);
-  const barMax = Math.max(1, ...bars.map(b => b.total));
+    const out = [];
+    for (let d = from; d <= to && out.length < 62; d = addDaysYmd(d, 1)) {
+      const rec = dayMap.get(d); const c = cmpOf(d);
+      if (rec || c) out.push({ d, total: rec ? rec.total : 0, count: rec ? rec.count : 0, cmp: c, off: false, future: d > today, covered: true });
+    }
+    return out;
+  }, [data, prev, isMonth, monthlyBars, month, from, to, dayMap, cmpDayMap, cov.length]);
+  const barMax = Math.max(1, ...bars.map(b => Math.max(b.total, b.cmp || 0)));
 
   const chip = (k, label, on, onClick) => (
     <button key={k} type="button" onClick={onClick}
@@ -16547,29 +16598,55 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
         {kpiCard(`${isMonth ? `${Number(month.slice(5))}월` : "기간"} 매출 (부가세 포함)`, manWon(t.total), "원", <>{won(t.total)}{diffPct != null ? <> · {prevLabel} 대비 {diffPct >= 0 ? "+" : ""}{diffPct.toFixed(0)}%</> : prevHas ? "" : ` · ${prevLabel} 엑셀 없음`}</>, true)}
-        {kpiCard("하루 평균", daysWithSales ? manWon(t.total / daysWithSales) : "—", daysWithSales ? "원" : "", daysWithSales ? `판매 있는 날 ${daysWithSales}일` : "")}
-        {kpiCard(t.slips > 0 && !hasItems ? "전표" : "건수", fmt(t.count), "건", t.count ? `전표당 평균 ${manWon(t.total / t.count)}원` : "")}
-        {kpiCard("거래처", fmt(data.clientCount), "곳", clientsAll[0] ? `1위 ${clientsAll[0].name} ${Math.round(clientsAll[0].total / Math.max(1, t.total) * 100)}%` : "")}
+        {kpiCard("하루 평균", daysWithSales ? manWon(t.total / daysWithSales) : "—", daysWithSales ? "원" : "", daysWithSales ? `판매 있는 날 ${daysWithSales}일${prevHas && prevDays ? ` · ${prevLabel} ${manWon(prevFullTotal / prevDays)}원` : ""}` : "")}
+        {kpiCard(t.slips > 0 && !hasItems ? "전표" : "건수", fmt(t.count), "건", t.count ? `전표당 평균 ${manWon(t.total / t.count)}원${prevHas ? ` · ${prevLabel}${cmpCut ? " 같은 날까지" : ""} ${fmt(prevCount)}건` : ""}` : "")}
+        {kpiCard("거래처", fmt(data.clientCount), "곳", clientsAll[0] ? `1위 ${clientsAll[0].name} ${Math.round(clientsAll[0].total / Math.max(1, t.total) * 100)}%${prevHas ? ` · ${prevLabel} ${fmt(prev.clientCount || prevClients)}곳` : ""}` : "")}
       </div>
       {coverageCard}
       <div className="card">
         <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
-          <span className="section-header-title"><Icon name="barChart" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>날짜별 매출</span>
-          <span style={{ fontSize: 11.5, color: "var(--text3)" }}>막대를 누르면 그날 전표 · {isMonth ? "회색은 휴일, 연한 색은 선발행" : `${from} ~ ${to}`}</span>
+          <span className="section-header-title"><Icon name="barChart" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>{monthlyBars ? "월별 매출" : "날짜별 매출"}</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 11.5, color: "var(--text3)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "#3182F6" }}/>{isMonth ? `${month.slice(0, 4)}년 ${Number(month.slice(5))}월` : mode === "year" ? `${from.slice(0, 4)}년` : "이번 기간"}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--border)", border: "1px solid var(--text3)" }}/>{prevLabel}{prevHas ? "" : " (엑셀 없음)"}</span>
+            <span>{monthlyBars ? "막대를 누르면 그 달로" : "막대를 누르면 그날 전표"}</span>
+          </span>
         </div>
         {bars.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>이 기간 판매 기록이 없어요.</div> : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))`, gap: isMonth ? 4 : 6, alignItems: "end", height: 150, paddingTop: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))`, gap: isMonth ? 4 : 6, alignItems: "end", height: 160, paddingTop: 8 }}>
               {bars.map(b => {
-                const sel = selDay === b.d; const best = bestDay && bestDay.date === b.d;
-                const h = b.total > 0 ? `${Math.max(3, b.total / barMax * 100)}%` : 2;
+                const sel = !b.month && selDay === b.d; const best = !b.month && bestDay && bestDay.date === b.d;
+                const h = b.total > 0 ? `${Math.max(3, b.total / barMax * 100)}%` : "2px";
+                const ch = b.cmp > 0 ? `${Math.max(3, b.cmp / barMax * 100)}%` : 0;
                 const bg = b.total <= 0 ? (b.off ? "var(--border)" : b.covered ? "var(--border)" : "var(--surface2)") : sel ? "#191F28" : best ? "#DB6B2E" : b.future ? "rgba(49,130,246,0.4)" : "#3182F6";
-                return <button key={b.d} type="button" onClick={() => setSelDay(sel ? null : b.d)} title={`${md(b.d)} (${dowOf(b.d)}) ${won(b.total)} · ${b.count}건`} aria-label={`${md(b.d)} ${won(b.total)}`} style={{ height: h, minHeight: 2, borderRadius: "4px 4px 0 0", border: "none", background: bg, cursor: "pointer", padding: 0, outline: sel ? "2px solid #191F28" : "none", outlineOffset: 1 }}/>;
+                const label = b.month ? `${b.d.slice(0, 4)}년 ${Number(b.d.slice(5))}월` : `${md(b.d)} (${dowOf(b.d)})`;
+                const diff = b.cmp > 0 ? ` · ${prevLabel} ${won(b.cmp)} (${b.total >= b.cmp ? "+" : ""}${Math.round((b.total - b.cmp) / b.cmp * 100)}%)` : "";
+                const onClick = b.month ? () => { setMonth(b.d); setMode("month"); } : () => setSelDay(sel ? null : b.d);
+                return (
+                  <button key={b.d} type="button" onClick={onClick} title={`${label} ${won(b.total)} · ${b.count}건${diff}`} aria-label={`${label} ${won(b.total)}${diff}`}
+                    style={{ position: "relative", height: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", border: "none", background: "transparent", padding: 0, cursor: "pointer" }}>
+                    {ch ? <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: ch, borderRadius: "4px 4px 0 0", background: "var(--border)", boxShadow: "inset 0 0 0 1px var(--text3)", opacity: 0.55 }}/> : null}
+                    <span aria-hidden="true" style={{ position: "relative", width: ch ? "62%" : "100%", height: h, borderRadius: "4px 4px 0 0", background: bg, outline: sel ? "2px solid #191F28" : "none", outlineOffset: 1 }}/>
+                  </button>
+                );
               })}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))`, gap: isMonth ? 4 : 6, fontSize: isMonth ? "min(10.5px, 2.4vw)" : 10.5, color: "var(--text3)", textAlign: "center", marginTop: 6 }}>
-              {bars.map(b => { const n = Number(b.d.slice(8)); const show = !narrow || bars.length <= 12 || n === 1 || n % 5 === 0 || b.d === today; return <div key={b.d} style={{ color: b.d === today ? "#DB6B2E" : b.off ? "#F04452" : "var(--text3)", fontWeight: b.d === today ? 800 : 500, whiteSpace: "nowrap" }}>{show ? (isMonth || bars.length > 14 ? n : md(b.d)) : ""}</div>; })}
+              {bars.map(b => {
+                if (b.month) { const cur = b.d === today.slice(0, 7); return <div key={b.d} style={{ color: cur ? "#DB6B2E" : "var(--text3)", fontWeight: cur ? 800 : 500, whiteSpace: "nowrap" }}>{(!narrow || Number(b.d.slice(5)) % 2 === 1 || cur) ? `${Number(b.d.slice(5))}월` : ""}</div>; }
+                const n = Number(b.d.slice(8)); const show = !narrow || bars.length <= 12 || n === 1 || n % 5 === 0 || b.d === today;
+                return <div key={b.d} style={{ color: b.d === today ? "#DB6B2E" : b.off ? "#F04452" : "var(--text3)", fontWeight: b.d === today ? 800 : 500, whiteSpace: "nowrap" }}>{show ? (isMonth || bars.length > 14 ? n : md(b.d)) : ""}</div>;
+              })}
             </div>
+            {prevHas && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "var(--surface2)", fontSize: 12.5, color: "var(--text2)" }}>
+                <span>{prevLabel}{cmpCut ? <> <b>{Number(cmpCut.slice(5, 7))}/{Number(cmpCut.slice(8))}까지</b></> : ""} <b style={{ color: "var(--text1)" }}>{won(prevTotal)}</b> → 지금 <b style={{ color: "var(--text1)" }}>{won(t.total)}</b></span>
+                {diffBadge}
+                <span style={{ color: "var(--text3)" }}>{t.total >= prevTotal ? "+" : ""}{manWon(t.total - prevTotal)}원 · 전표 {fmt(prevCount)} → {fmt(t.count)}건</span>
+                {cmpCut ? <span style={{ color: "var(--text3)" }}>· {prevLabel} 전체는 {won(prevFullTotal)}{t.total < prevFullTotal ? ` (남은 기간에 ${manWon(prevFullTotal - t.total)}원 더 팔면 넘어요)` : " — 이미 넘었어요"}</span> : null}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12, color: "var(--text2)", marginTop: 10 }}>
               {bestDay && <span>최고 <b style={{ color: "var(--text1)" }}>{md(bestDay.date)} ({dowOf(bestDay.date)}) {manWon(bestDay.total)}원</b></span>}
               {bars.some(b => b.future && b.total > 0) && <span style={{ color: "var(--text3)" }}>연한 막대는 날짜를 앞당겨 끊은 전표</span>}
@@ -16732,7 +16809,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
                   </div>
                   {(allClients ? clientsShown : clientsShown.slice(0, 15)).map((c) => {
                     const rank = clientsAll.indexOf(c) + 1; const on = c.name === curClient;
-                    const pc = prev ? (prev.clients || []).find(x => x.name === c.name) : null;
+                    const pc = prevClientMap.has(c.name) ? { total: prevClientMap.get(c.name) } : null;
                     const pd = pc && pc.total ? (c.total - pc.total) / Math.abs(pc.total) * 100 : null;
                     return (
                       <button key={c.name} type="button" onClick={() => setSelClient(c.name)}
@@ -16886,6 +16963,15 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
           {SALES_CHIPS.map(c => chip(c.k, c.label, c.k === "month" ? (mode === "month" && month === today.slice(0, 7)) : c.k === "prev" ? (mode === "month" && month === ymShift(today.slice(0, 7), -1)) || mode === "prev" : mode === c.k, () => pickMode(c.k)))}
         </div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 4px 0 10px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontWeight: 700, color: "var(--text3)" }}>
+          비교
+          <select value={cmp} onChange={e => pickCmp(e.target.value)} aria-label="비교 기간" style={{ height: 26, border: "none", background: "transparent", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", padding: "0 4px", cursor: "pointer" }}>
+            <option value="1">작년 같은 기간</option>
+            <option value="2">2년 전 같은 기간</option>
+            <option value="3">3년 전 같은 기간</option>
+            <option value="prev">직전 기간</option>
+          </select>
+        </label>
         {mode === "custom" && (
           <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--text2)" }}>
             <input type="date" value={custom.from || from} onChange={e => setCustomRange({ from: e.target.value })} style={{ height: 30, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
