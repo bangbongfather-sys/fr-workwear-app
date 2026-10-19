@@ -16276,6 +16276,23 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
   }, [from, to, tick]);
   useEffect(() => { setSelDay(null); setAllClients(false); setAllProducts(false); setSlipLimit(60); }, [from, to]);
   const pickSub = (id) => { setSubTab(id); try { localStorage.setItem("frw_sales_subtab", id); } catch {} };
+  // 다른 창(Claude)에서 반영하고 돌아오면 다시 읽는다
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === "visible") setTick(t => t + 1); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+  // 「최신 내역 반영하기」 — 이카운트 API 에 판매 조회가 없어서, Claude 가 브라우저로 판매조회 화면을 읽어 넣는다.
+  // 작업 순서는 서버(_sales:guide)에 있어서 이카운트 화면이 바뀌면 거기만 고치면 된다. 기본 기간: 이번 달(월초 7일까지는 지난달부터) ~ 이번 달 말일.
+  const claudeRefresh = async () => {
+    const d = Number(today.slice(8));
+    const f = d <= 7 ? `${ymShift(today.slice(0, 7), -1)}-01` : `${today.slice(0, 8)}01`;
+    const t2 = ymMonthEnd(today.slice(0, 7));
+    const prompt = `NJ SAFETY 회사 앱 「판매 현황」에 이카운트 판매조회 최신 내역을 반영해줘 (기간 ${f} ~ ${t2}).\n먼저 NJ_SAFETY 커넥터의 get_business_section 으로 section "_sales:guide:${f}~${t2}" 를 읽고, 거기 적힌 순서대로 Chrome 에서 이카운트 판매조회를 읽어 반영한 뒤 결과를 알려줘.`;
+    try { await navigator.clipboard.writeText(prompt); } catch {}
+    window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, "_blank", "noopener");
+    showToast("Claude 창을 열었어요 — 이카운트에 로그인된 Chrome 에서 진행돼요. 요청 문구는 복사돼 있어서 Chrome 의 Claude 옆 창에 붙여 넣어도 돼요. 끝나고 이 화면으로 돌아오면 자동으로 새로 읽어요.", "success");
+  };
   const pickMode = (k) => {
     if (k === "month") setMonth(today.slice(0, 7));
     if (k === "prev") setMonth(ymShift(today.slice(0, 7), -1));
@@ -16878,6 +16895,10 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {data && data.lastImport && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }} title={data.lastImport.fileName}><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: "#00B493", marginRight: 6, verticalAlign: "1px" }}/>마지막 업로드 {md(data.lastImport.at.slice(0, 10))} {data.lastImport.at.slice(11)} · {md(data.lastImport.from)}~{md(data.lastImport.to)}</span>}
+          <button type="button" onClick={claudeRefresh} title="Claude 가 Chrome 으로 이카운트 판매조회를 읽어 최신 내역을 반영해요 (이카운트 로그인 필요)"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", borderRadius: 10, border: "none", background: "var(--text1)", color: "var(--surface)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            <Icon name="sparkles" size={14}/>최신 내역 반영하기
+          </button>
           {uploadBtn(true)}
         </div>
       </div>
