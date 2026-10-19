@@ -16043,11 +16043,19 @@ function EcountSyncBar({ stamp = "" }) {
   }, [pending]);
   if (!st || !st.configured) return null;
   const last = st.last || {};
-  const run = async () => {
+  // 중계 컴퓨터(사무실 맥·집 PC)는 1분마다 요청을 확인하며 「마지막 확인」 시각을 남긴다 → 3분 넘게 없으면 꺼짐·잠자기로 본다
+  const now = st.now || Date.now();
+  const ago = (ts) => { const m = Math.max(0, Math.round((now - ts) / 60000)); return m < 1 ? "방금" : m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
+  const relays = (st.relays || []).map(r => ({ ...r, alive: now - r.ts < 3 * 60000 }));
+  const anyAlive = relays.some(r => r.alive);
+  const waitMin = pending && st.request.ts ? Math.floor((now - Number(st.request.ts)) / 60000) : 0;
+  const stuck = pending && !st.request.claim && waitMin >= 3;
+  const run = async (cancel) => {
     setBusy(true);
     try {
-      const r = await fetch("/api/ecount/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then(r => r.json());
-      if (r.queued) showToast(r.message || "사무실 맥에 요청했어요", "success");
+      const r = await fetch("/api/ecount/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cancel ? { cancel: true } : {}) }).then(r => r.json());
+      if (r.cancelled) showToast(r.message || "요청을 취소했어요", "success");
+      else if (r.queued) showToast(anyAlive ? (r.message || "새로고침을 요청했어요") : "요청했어요 — 다만 지금 켜져 있는 중계 컴퓨터가 없어요. 사무실 맥이나 집 PC가 켜지면 가져와요", anyAlive ? "success" : undefined);
       else if (r.ok) showToast(`이카운트 재고 ${Number(r["품목수"] || 0).toLocaleString()}개 반영 · 바뀐 품목 ${r["바뀐품목"] || 0}개`, "success");
       else showToast(r.error || r.message || "요청하지 못했습니다");
       await reload();
@@ -16061,10 +16069,19 @@ function EcountSyncBar({ stamp = "" }) {
       <span style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, color: "var(--text2)" }}>
         <b style={{ color: "var(--text1)" }}>이카운트 재고</b>{st.test ? <span style={{ fontSize: 11, fontWeight: 800, color: "var(--warning-text)", marginLeft: 6 }}>테스트 키</span> : null}
         <span style={{ color: "var(--text3)" }}> · </span>
-        {pending ? <span style={{ color: "var(--warning-text)" }}>새로고침 요청됨 {String(st.request.at || "").slice(11)} — {st.request.claim ? `${st.request.claim.label || "중계 컴퓨터"}에서 가져오는 중` : "사무실 맥·집 PC 중 켜져 있는 컴퓨터를 기다리는 중"}</span>
+        {pending ? <span style={{ color: stuck ? "var(--negative-text)" : "var(--warning-text)" }}>새로고침 요청됨 {String(st.request.at || "").slice(5).replace("-", "/")} — {st.request.claim ? `${st.request.claim.label || "중계 컴퓨터"}에서 가져오는 중` : stuck ? `${waitMin >= 60 ? `${Math.round(waitMin / 60)}시간` : `${waitMin}분`}째 받아 가는 컴퓨터가 없어요. 사무실 맥이나 집 PC를 켜 주세요` : "사무실 맥·집 PC 중 켜져 있는 컴퓨터를 기다리는 중"}</span>
           : last.at ? (last.ok ? <>마지막 {last.at.slice(5).replace("-", "/")} · {Number(last["품목수"] || 0).toLocaleString()}개{last["바뀐품목"] != null ? ` · 바뀐 품목 ${last["바뀐품목"]}개` : ""}{last.by && !["cron", "app", "claude", "mac"].includes(last.by) ? ` · ${last.by}` : ""}</> : <span style={{ color: "var(--negative-text)" }}>{last.at.slice(5).replace("-", "/")} 시도 실패: {errText(last.error)}</span>) : "아직 가져온 적 없음"}
+        <span style={{ display: "block", fontSize: 11.5, color: "var(--text3)", marginTop: 2 }}>
+          중계 컴퓨터: {relays.length === 0 ? "아직 확인 기록 없음 (새 방식으로 설치한 컴퓨터만 표시돼요)" : relays.map((r, i) => (
+            <span key={r.dev}>{i ? " · " : ""}<span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 3, background: r.alive ? "#00B493" : "var(--text3)", marginRight: 4, verticalAlign: "1px" }}/>{r.label} {r.alive ? "켜짐" : `마지막 확인 ${ago(r.ts)}`}</span>
+          ))}
+        </span>
       </span>
-      <button type="button" onClick={run} disabled={busy || pending}
+      {pending && !st.request.claim && (
+        <button type="button" onClick={() => run(true)} disabled={busy}
+          style={{ height: 34, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>요청 취소</button>
+      )}
+      <button type="button" onClick={() => run(false)} disabled={busy || pending}
         title={st.direct ? "이카운트에서 지금 가져옵니다" : "사무실 맥·집 PC 에 요청합니다 — 이카운트는 등록된 IP 에서만 열려요. 10분에 한 번까지"}
         style={{ height: 34, padding: "0 14px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: busy ? "wait" : pending ? "default" : "pointer", fontFamily: "inherit", whiteSpace: "nowrap", opacity: pending ? 0.6 : 1 }}>
         {busy ? "요청 중…" : pending ? "가져오는 중…" : "↻ 새로고침"}
@@ -16108,8 +16125,8 @@ function StockMovesCard({ stamp = "" }) {
   const pick = (k) => { setRange(k); setAll(false); try { localStorage.setItem("frw_moves_range", k); } catch {} };
   const fmt = (n) => Number(n || 0).toLocaleString();
   const shortAt = (s) => String(s || "").slice(5, 16).replace("-", "/");
-  const rows = data ? data.products.filter(p => p.out > 0) : [];
-  const inOnly = data ? data.products.filter(p => p.out === 0 && p.in > 0) : [];
+  const rows = data ? (data.products || []).filter(p => p.out > 0) : [];
+  const inOnly = data ? (data.products || []).filter(p => p.out === 0 && p.in > 0) : [];
   const maxOut = rows.reduce((m, p) => Math.max(m, p.out), 0) || 1;
   const shown = all ? rows : rows.slice(0, 10);
   return (

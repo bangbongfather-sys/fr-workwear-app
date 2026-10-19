@@ -244,7 +244,8 @@ export default {
     }
     // 새로고침 — 정해진 시간 없이, 앱의 「새로고침」 단추(또는 Claude)가 부를 때만 가져온다
     if (url.pathname === "/api/ecount/sync" && request.method === "POST") {
-      const r = await ecountRequest(env, "app");
+      let b = {}; try { b = await request.json(); } catch {}
+      const r = await ecountRequest(env, "app", { cancel: !!b.cancel });
       return new Response(JSON.stringify(r), { status: r.configured === false ? 503 : 200, headers: corsHeaders });
     }
 
