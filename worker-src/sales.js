@@ -115,3 +115,29 @@ export async function salesSummary(env, from, to, { top = 80 } = {}) {
   const lastImport = imports.length ? imports[imports.length - 1] : null;
   return { from, to, totals: tot, products: products.slice(0, top), productCount: products.length, clients: clientList.slice(0, 200), clientCount: clientList.length, days, slips, slipsTruncated: tot.count > SLIP_CAP, covered, lastImport, imports: imports.slice(-10).reverse() };
 }
+
+// 거래처 주문 주기(캠퍼스 거래처 군도 · 이탈 레이더) — 기간 안 거래처마다 주문한 날짜와 그날 합계.
+// covered_to = 엑셀이 들어온 마지막 날(이 날 뒤로는 '주문 없음'이 아니라 '아직 안 올림').
+export async function salesCadence(env, from, to) {
+  const S = env.FIREBASE_DB_SECRET;
+  const q = `orderBy=${encodeURIComponent('"$key"')}&startAt=${encodeURIComponent(JSON.stringify(from))}&endAt=${encodeURIComponent(JSON.stringify(to))}`;
+  const [rr, mr] = await Promise.all([fetch(url(SALES_PATH, S, q)), fetch(url(META_PATH, S))]);
+  if (!rr.ok) throw new Error(`Firebase ${rr.status}`);
+  const byDay = (await rr.json()) || {};
+  const meta = mr.ok ? await mr.json() : null;
+  const cl = new Map();
+  for (const d of Object.keys(byDay).sort()) {
+    const list = Array.isArray(byDay[d]) ? byDay[d] : Object.values(byDay[d] || {});
+    for (const r of list) {
+      if (!r || !r.c) continue;
+      const amt = r.total || r.supply || 0;
+      if (amt <= 0) continue;                       // 반품·0원 줄은 주문으로 안 셈
+      const m = cl.get(r.c) || new Map(); m.set(d, (m.get(d) || 0) + amt); cl.set(r.c, m);
+    }
+  }
+  const imports = meta && Array.isArray(meta.imports) ? meta.imports : [];
+  const coveredTo = imports.reduce((a, i) => (i && i.to > a ? i.to : a), "");
+  const coveredFrom = imports.reduce((a, i) => (i && i.from && (!a || i.from < a) ? i.from : a), "");
+  const clients = [...cl.entries()].map(([name, m]) => ({ name, d: [...m.entries()].map(([d, t]) => [d, Math.round(t)]) }));
+  return { from, to, coveredFrom, coveredTo, clients };
+}

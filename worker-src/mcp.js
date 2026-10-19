@@ -1,5 +1,5 @@
 import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecountRows } from "./ecount.js";
-import { salesSummary, salesImport } from "./sales.js";
+import { salesSummary, salesImport, salesCadence } from "./sales.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
@@ -518,6 +518,13 @@ async function toolGetSection(args, env) {
     const r = await salesSummary(env, o.from, o.to, { top: Math.min(2000, Math.max(1, parseInt(o.top) || 500)) });
     if (!o.slips) delete r.slips;
     return { content: [{ type: "text", text: JSON.stringify(r) }] };
+  }
+  // 거래처 주문 주기(캠퍼스 이탈 레이더·섬 날씨) — "_cadence" (최근 400일) / "_cadence:YYYY-MM-DD~YYYY-MM-DD"
+  if (section === "_cadence" || section.startsWith("_cadence:")) {
+    const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    const m = section.slice(9).match(/^(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})$/);
+    const from = m ? m[1] : new Date(Date.now() + 9 * 3600e3 - 399 * 86400e3).toISOString().slice(0, 10), to = m ? m[2] : today;
+    return { content: [{ type: "text", text: JSON.stringify(await salesCadence(env, from, to)) }] };
   }
   // 판매현황 줄 목록(캠퍼스 판매현황 창·AI 직원) — "_salesrows:" + JSON {from,to,q,client,name,offset,limit} → 줄마다 d(날짜)·i(그날 안 순번)
   if (section.startsWith("_salesrows:")) {
