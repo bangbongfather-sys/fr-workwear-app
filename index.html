@@ -16597,7 +16597,16 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
   const summaryView = data && (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-        {kpiCard(`${isMonth ? `${Number(month.slice(5))}월` : "기간"} 매출 (부가세 포함)`, manWon(t.total), "원", <>{won(t.total)}{diffPct != null ? <> · {prevLabel} 대비 {diffPct >= 0 ? "+" : ""}{diffPct.toFixed(0)}%</> : prevHas ? "" : ` · ${prevLabel} 엑셀 없음`}</>, true)}
+        {kpiCard(`${isMonth ? `${Number(month.slice(5))}월` : "기간"} 매출 (부가세 포함)`, manWon(t.total), "원", <>
+          {won(t.total)}
+          {/* 비교 기간 금액을 그대로 보여 준다 (퍼센트만으로는 얼마였는지 모름) */}
+          <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(127,127,127,0.25)" }}>
+            <span>{prevLabel}{cmpCut ? ` ${Number(cmpCut.slice(5, 7))}/${Number(cmpCut.slice(8))}까지` : ""}</span>
+            {prevHas ? <><b style={{ fontSize: 14, fontWeight: 800 }}>{manWon(prevTotal)}원</b><span>({won(prevTotal)})</span>
+              {diffPct != null ? <b style={{ color: diffPct >= 0 ? "#03B26C" : "#F04452" }}>{diffPct >= 0 ? "▲" : "▼"} {Math.abs(diffPct).toFixed(0)}% · {t.total >= prevTotal ? "+" : ""}{manWon(t.total - prevTotal)}원</b> : null}</>
+              : <span>엑셀 없음</span>}
+          </span>
+        </>, true)}
         {kpiCard("하루 평균", daysWithSales ? manWon(t.total / daysWithSales) : "—", daysWithSales ? "원" : "", daysWithSales ? `판매 있는 날 ${daysWithSales}일${prevHas && prevDays ? ` · ${prevLabel} ${manWon(prevFullTotal / prevDays)}원` : ""}` : "")}
         {kpiCard(t.slips > 0 && !hasItems ? "전표" : "건수", fmt(t.count), "건", t.count ? `전표당 평균 ${manWon(t.total / t.count)}원${prevHas ? ` · ${prevLabel}${cmpCut ? " 같은 날까지" : ""} ${fmt(prevCount)}건` : ""}` : "")}
         {kpiCard("거래처", fmt(data.clientCount), "곳", clientsAll[0] ? `1위 ${clientsAll[0].name} ${Math.round(clientsAll[0].total / Math.max(1, t.total) * 100)}%${prevHas ? ` · ${prevLabel} ${fmt(prev.clientCount || prevClients)}곳` : ""}` : "")}
@@ -16683,7 +16692,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <span style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text3)" }}>{isMonth ? `${Number(month.slice(5))}월 매출` : "기간 매출"} <span style={{ fontWeight: 500 }}>· 부가세 포함</span></span>
           <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.02em", lineHeight: 1.15, fontVariantNumeric: "tabular-nums" }}>{manWon(t.total)}<span style={{ fontSize: 14, marginLeft: 3 }}>원</span>{diffBadge ? <span style={{ marginLeft: 8, verticalAlign: "middle" }}>{diffBadge}</span> : null}</span>
-          <span style={{ fontSize: 11, color: "var(--text3)" }}>{won(t.total)}</span>
+          <span style={{ fontSize: 11, color: "var(--text3)" }}>{won(t.total)}{prevHas ? ` · ${prevLabel}${cmpCut ? ` ${Number(cmpCut.slice(5, 7))}/${Number(cmpCut.slice(8))}까지` : ""} ${won(prevTotal)}` : ""}</span>
         </div>
         <div style={{ width: 1, alignSelf: "stretch", background: "var(--border)" }}/>
         {stat("하루 평균", daysWithSales ? `${manWon(t.total / daysWithSales)}원` : "—", daysWithSales ? `판매 있는 날 ${daysWithSales}일` : "")}
@@ -16976,10 +16985,10 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
           </select>
         </label>
         {mode === "custom" && (
-          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, color: "var(--text2)" }}>
-            <input type="date" value={custom.from || from} onChange={e => setCustomRange({ from: e.target.value })} style={{ height: 30, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", maxWidth: "100%", fontSize: 12.5, color: "var(--text2)" }}>
+            <input type="date" value={custom.from || from} onChange={e => setCustomRange({ from: e.target.value })} style={{ height: 30, width: 136, minWidth: 0, padding: "0 6px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
             ~
-            <input type="date" value={custom.to || to} onChange={e => setCustomRange({ to: e.target.value })} style={{ height: 30, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
+            <input type="date" value={custom.to || to} onChange={e => setCustomRange({ to: e.target.value })} style={{ height: 30, width: 136, minWidth: 0, padding: "0 6px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
           </div>
         )}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
