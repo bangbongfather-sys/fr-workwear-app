@@ -662,6 +662,9 @@ async function buildCampusSnapshot(env) {
     byMonth: depMonth,
     today: { count: today.length, nj: today.filter((d) => d.biz !== "corp").reduce((s, d) => s + toNumber(d.amount), 0), corp: today.filter((d) => d.biz === "corp").reduce((s, d) => s + toNumber(d.amount), 0) },
     recent: dep.slice(0, 12).map((d) => ({ date: d.date, time: d.time || "", name: d.name || d.client || "", amount: toNumber(d.amount), biz: d.biz === "corp" ? "corp" : "nj" })),
+    // 최근 처리된 입금(캠퍼스 입금 배 연출) — 처리 시각 최신 20건, 거래처는 처리할 때 연결한 이름
+    doneRecent: dep.filter((d) => d.status === "done" && d.doneAt).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 20)
+      .map((d) => ({ id: d.id || "", client: d.client || "", name: d.name || "", amount: toNumber(d.amount), doneAt: d.doneAt, date: d.date })),
   };
 
   // 매입: 최근 내역, 공급처별 이번 달 합계, 아직 입고 안 된(주문완료) 건 = 진행 중
