@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-19-relay-seen", note: "이카운트 중계: 컴퓨터별 마지막 확인 시각·요청 취소·대기 안내" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-19-sales-claude", note: "판매 현황: 「최신 내역 반영하기」 — Claude 브라우저 반영 안내(_sales:guide)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -499,6 +499,8 @@ async function toolGetSection(args, env) {
   if (section === "_ecount:probe") return textContent(await ecountProbe(env));
   if (section === "_ecount:status") return textContent(await ecountStatus(env));
   // 이카운트 판매현황(엑셀로 올린 것) — "_sales" (최근 30일) / "_sales:7" / "_sales:2026-10-01~2026-10-31"
+  // 판매현황 「최신 내역 반영하기」 — 앱 버튼이 연 Claude 대화가 먼저 읽는 작업 안내 ("_sales:guide" 또는 "_sales:guide:YYYY-MM-DD~YYYY-MM-DD")
+  if (section === "_sales:guide" || section.startsWith("_sales:guide:")) return textContent(await salesGuide(env, section.slice(13)));
   if (section === "_sales" || section.startsWith("_sales:")) {
     const arg = section.slice(7);
     const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
@@ -1869,6 +1871,48 @@ export async function handleMcp(request, env, url) {
 // 앱 재고 탭의 「엑셀 전체 반영」과 같은 규칙: 품목 전체 교체, 안전재고는 품목코드(없으면 이름+규격)로 이어받고,
 // 바뀌기 직전 수량을 history 에 남긴다(최근 8회). 이카운트가 정답이라 캠퍼스 실사 조정도 덮인다.
 // 안전장치: 0건이거나 품목 수가 절반 넘게 줄면 쓰지 않는다 (응답 형식이 바뀌었을 때 재고를 날리지 않게).
+// ── 판매현황 최신 반영 안내 (Claude 가 브라우저로 이카운트 판매조회를 읽어 넣을 때) ──
+// 이카운트 OpenAPI 에 판매 「조회」가 없어서, 사용자가 로그인해 둔 브라우저(Claude in Chrome 등)로 판매조회 화면을 읽는다.
+// 비밀번호는 묻지도 저장하지도 않는다. 이카운트에서는 읽기만 한다. 넣기는 _write op sales_import (그 기간을 통째로 바꿈 → 중복 없음).
+async function salesGuide(env, arg = "") {
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10);
+  const today = kst(Date.now());
+  const monthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`; };
+  let from, to;
+  const m = String(arg || "").match(/^(\d{4}-\d{2}-\d{2})~(\d{4}-\d{2}-\d{2})$/);
+  if (m) { from = m[1]; to = m[2]; }
+  else {
+    // 기본: 이번 달 1일 ~ 이번 달 말일 (월초 7일까지는 지난달 1일부터 — 지난달 마감 전표 수정분도 다시 받는다). 앞당겨 끊은 전표 때문에 끝은 말일.
+    const d = Number(today.slice(8));
+    const [y, mo] = today.split("-").map(Number);
+    const prevYm = new Date(Date.UTC(y, mo - 2, 1)).toISOString().slice(0, 7);
+    from = d <= 7 ? `${prevYm}-01` : `${today.slice(0, 8)}01`;
+    to = monthEnd(today.slice(0, 7));
+  }
+  let before = null;
+  try { const r = await salesSummary(env, from, to, { top: 0 }); before = { 전표: r.totals.count, 합계: r.totals.total, 마지막업로드: r.lastImport ? `${r.lastImport.at} (${r.lastImport.from}~${r.lastImport.to})` : null }; } catch {}
+  const at = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+  return {
+    할일: "이카운트 판매조회 화면을 브라우저로 읽어 회사 앱 「판매 현황」에 최신 내역을 반영",
+    기간: { from, to },
+    지금_앱에_있는_것: before,
+    순서: [
+      "1. 브라우저 도구(Claude in Chrome 등)로 사용자의 Chrome 에서 작업한다. 브라우저 도구가 없으면 여기서 멈추고 '컴퓨터의 Chrome 에서 Claude(Claude in Chrome 옆 창)로 다시 요청해 주세요'라고 알린다.",
+      "2. 새 탭에서 https://login.ecount.com 을 연다. 이미 로그인돼 있으면 ERP 로 들어간다. 로그인 화면이면 사용자에게 직접 로그인해 달라고 하고 기다린다 — 아이디·비밀번호를 묻거나 입력하지 않는다.",
+      "3. 메뉴 「영업관리 → 판매 → 판매조회」(또는 화면 위 메뉴 검색에 '판매조회')를 연다. 기간을 위의 from~to 로 맞추고 조회한다. 거래처·창고 조건은 비워 둔다(전체).",
+      `4. 가능하면 품목이 한 줄씩 나오는 보기(상세·품목별)로 바꿔 일자-No.·거래처명·품목명·규격·수량·단가·공급가액·부가세·합계를 읽는다. 그런 보기가 없으면 전표 목록(일자-No.·거래처명·품목명(요약)·금액합계)을 읽는다. 한 페이지에 다 안 나오면 페이지 표시 수를 최대로 하거나 모든 페이지를 넘겨 빠짐없이 읽는다. 맨 아래 합계/소계 줄은 넣지 않는다.`,
+      "5. 줄마다 값을 만든다: d=일자(YYYY-MM-DD, 「20261030-2」 → 2026-10-30), no=일자-No. 의 뒤 번호(「-2」 → \"2\"), c=거래처명, name=품목명, spec=규격, qty=수량, price=단가, supply=공급가액, vat=부가세, total=합계(또는 금액합계). 숫자는 쉼표 없이, 마이너스(반품)는 그대로 음수. 전표 목록만 읽었으면 각 줄에 slip:true 를 넣고 qty 는 0.",
+      "6. 화면의 총 건수·총 합계와 내가 읽은 줄 수·합계가 맞는지 확인한다. 안 맞으면 다시 읽는다.",
+      `7. 반영: get_business_section 의 section 에 \`_write:\` 뒤에 JSON 을 붙여 호출 — {\"op\":\"sales_import\",\"fileName\":\"Claude 판매조회 ${at}\",\"from\":\"<기간 시작>\",\"to\":\"<기간 끝>\",\"rows\":[...]}. 그 기간 안의 기존 기록은 통째로 바뀐다(중복 없음). 줄이 300개가 넘으면 날짜를 겹치지 않게 나눠 여러 번 보낸다(각 호출의 from~to 가 그 줄들의 날짜 범위를 빈틈없이 덮게).`,
+      "8. 끝나면 get_business_section 「_sales:<from>~<to>」 로 다시 읽어 사용자에게 알린다: 반영한 기간, 전표(줄) 수, 합계, 반영 전과 비교해 늘어난 건수·금액, 마이너스(반품) 전표가 있으면 그 목록.",
+    ],
+    지킬것: [
+      "이카운트에서는 읽기만 한다 — 전표를 고치거나 지우거나 새로 만들지 않는다.",
+      "비밀번호·인증번호를 묻거나 저장하지 않는다. 로그인은 사용자가 직접.",
+      "확신이 없는 값(일자·금액이 안 읽힘)은 넣지 말고 사용자에게 그 줄을 알려 준다.",
+    ],
+  };
+}
 const ECOUNT_STATUS_PATH = "/frw_ecount_status";
 export async function ecountSyncStock(env, by = "cron", { force = false, got: given = null } = {}) {
   const S = env.FIREBASE_DB_SECRET;
