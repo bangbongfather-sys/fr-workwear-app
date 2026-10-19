@@ -16635,8 +16635,11 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
             <div style={{ display: "grid", gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))`, gap: isMonth ? 4 : 6, fontSize: isMonth ? "min(10.5px, 2.4vw)" : 10.5, color: "var(--text3)", textAlign: "center", marginTop: 6 }}>
               {bars.map(b => {
                 if (b.month) { const cur = b.d === today.slice(0, 7); return <div key={b.d} style={{ color: cur ? "#DB6B2E" : "var(--text3)", fontWeight: cur ? 800 : 500, whiteSpace: "nowrap" }}>{(!narrow || Number(b.d.slice(5)) % 2 === 1 || cur) ? `${Number(b.d.slice(5))}월` : ""}</div>; }
-                const n = Number(b.d.slice(8)); const show = !narrow || bars.length <= 12 || n === 1 || n % 5 === 0 || b.d === today;
-                return <div key={b.d} style={{ color: b.d === today ? "#DB6B2E" : b.off ? "#F04452" : "var(--text3)", fontWeight: b.d === today ? 800 : 500, whiteSpace: "nowrap" }}>{show ? (isMonth || bars.length > 14 ? n : md(b.d)) : ""}</div>;
+                // 날짜 글자가 겹치지 않게: 막대가 많거나(31개 넘음) 화면이 좁으면 1일·5일 간격·오늘만, 달이 바뀌는 1일은 「11/1」
+                const n = Number(b.d.slice(8)); const dense = bars.length > 31 || (narrow && bars.length > 12);
+                const show = !dense || n === 1 || n % 5 === 0 || b.d === today;
+                const txt = !show ? "" : isMonth ? n : (n === 1 || bars.length <= 14) ? md(b.d) : n;
+                return <div key={b.d} style={{ color: b.d === today ? "#DB6B2E" : b.off ? "#F04452" : "var(--text3)", fontWeight: b.d === today || (n === 1 && !isMonth) ? 800 : 500, whiteSpace: "nowrap", overflow: "visible" }}>{txt}</div>;
               })}
             </div>
             {prevHas && (
