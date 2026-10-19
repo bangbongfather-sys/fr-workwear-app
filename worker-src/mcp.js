@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-16-ledger-memo-clean", note: "장부: 판매 현황 가져오기 메모 자동 문구 제거" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-19-relay-seen", note: "이카운트 중계: 컴퓨터별 마지막 확인 시각·요청 취소·대기 안내" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -1921,9 +1921,11 @@ export async function ecountSyncStock(env, by = "cron", { force = false, got: gi
 }
 export async function ecountStatus(env) {
   const S = env.FIREBASE_DB_SECRET;
-  const [st, req] = ecountConfigured(env) ? await Promise.all([fbGet(ECOUNT_STATUS_PATH, S).catch(() => null), fbGet(ECOUNT_REQ_PATH, S).catch(() => null)]) : [null, null];
+  const [st, req, seen] = ecountConfigured(env) ? await Promise.all([fbGet(ECOUNT_STATUS_PATH, S).catch(() => null), fbGet(ECOUNT_REQ_PATH, S).catch(() => null), fbGet(ECOUNT_SEEN_PATH, S).catch(() => null)]) : [null, null, null];
+  // 중계 컴퓨터별 마지막 확인 시각 — 1분마다 요청을 확인하므로, 몇 분 넘게 소식이 없으면 꺼졌거나 잠자기 중
+  const relays = Object.entries(seen || {}).map(([dev, ts]) => ({ dev, label: relayDevLabel(dev), ts: Number(ts) || 0 })).sort((a, b) => b.ts - a.ts);
   // 테스트/실서버는 실제로 성공한 마지막 동기화 기준 (키 종류를 자동 판별하므로)
-  return { configured: ecountConfigured(env), direct: ecountDirect(env), test: st && typeof st.test === "boolean" ? st.test : String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null, request: liveReq(req) };
+  return { configured: ecountConfigured(env), direct: ecountDirect(env), test: st && typeof st.test === "boolean" ? st.test : String(env.ECOUNT_TEST ?? "true") !== "false", last: st || null, request: liveReq(req), relays, now: Date.now() };
 }
 
 // ── 새로고침 요청 (정해진 시간 없이, 부를 때만) ──
@@ -1933,8 +1935,9 @@ const ECOUNT_REQ_PATH = "/frw_ecount_request";
 const REQ_TTL = 12 * 3600e3;
 const liveReq = (r) => (r && r.ts && Date.now() - Number(r.ts) < REQ_TTL ? r : null);
 const kstAtMs = (at) => Date.parse(String(at || "").replace(" ", "T") + ":00+09:00");
-export async function ecountRequest(env, by = "app") {
+export async function ecountRequest(env, by = "app", { cancel = false } = {}) {
   if (!ecountConfigured(env)) return { ok: false, configured: false, error: "이카운트 연동 정보가 아직 등록되지 않았습니다" };
+  if (cancel) { await clearReq(env); return { ok: true, cancelled: true, message: "새로고침 요청을 취소했어요" }; }
   if (ecountDirect(env)) return ecountSyncStock(env, by);
   const S = env.FIREBASE_DB_SECRET;
   const [st, req] = await Promise.all([fbGet(ECOUNT_STATUS_PATH, S).catch(() => null), fbGet(ECOUNT_REQ_PATH, S).catch(() => null)]);
@@ -1953,8 +1956,12 @@ export async function ecountRequest(env, by = "app") {
 const RELAY_DEVS = { "office-mac": "사무실 맥", "home-pc": "집 PC" };
 export const relayDevLabel = (dev) => RELAY_DEVS[dev] || (dev ? String(dev).slice(0, 20) : "사무실 맥");
 const CLAIM_TTL = 3 * 60e3;   // 잡은 컴퓨터가 3분 안에 못 보내면(꺼짐·끊김) 다른 컴퓨터가 이어받는다
+const ECOUNT_SEEN_PATH = "/frw_ecount_seen";   // { <dev>: 마지막으로 요청을 확인한 시각(ms) }
 export async function ecountPending(env, dev = "") {
   const S = env.FIREBASE_DB_SECRET;
+  if (dev && /^[a-z0-9-]{1,20}$/.test(dev)) {
+    try { await fetch(`https://${FB_HOST}${ECOUNT_SEEN_PATH}/${dev}.json?auth=${encodeURIComponent(S)}`, { method: "PUT", body: String(Date.now()) }); } catch {}
+  }
   const { etag, value } = await fbGetTagged(ECOUNT_REQ_PATH, S);
   const req = liveReq(value);
   if (!req) return { pending: false };
