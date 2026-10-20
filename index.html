@@ -7336,6 +7336,16 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
   const totalOrderRevenue = orders.reduce((s,o) => s + parseFloat(o.unitPrice||0)*parseInt(o.qty||1), 0);
   const computed = products.map(p => computeProduct(p, materials, laborItems)).filter(c => c.base > 0);
   const avgMarginSell = computed.length > 0 ? computed.reduce((s,c) => s + (c.finalPrice-c.beforeMargin)/c.finalPrice*100, 0)/computed.length : 0;
+  // 등급 판매 비중을 반영한 마진율 — 실제 매출이 A·B·C·D 급에 나뉘어 팔리므로 제품마다 가중 평균 단가로 마진을 낸다
+  //   원가 = 원단비 + 공임 + 관리비(beforeMargin). 그 등급 단가가 없으면 있는 등급끼리 비중을 다시 나눈다.
+  const GRADE_MIX = { A: 0.5, B: 0.2, C: 0.2, D: 0.1 };
+  const mixMargins = computed.map(c => {
+    let w = 0, p = 0;
+    for (const [g, r] of Object.entries(GRADE_MIX)) { const v = parseFloat(c.grades && c.grades[g]); if (v > 0) { w += r; p += r * v; } }
+    const price = w > 0 ? p / w : c.finalPrice;
+    return price > 0 ? (price - c.beforeMargin) / price * 100 : null;
+  }).filter(v => v != null);
+  const avgMarginMix = mixMargins.length ? mixMargins.reduce((a, v) => a + v, 0) / mixMargins.length : 0;
   const productSales = {};
   orders.forEach(o => { if (!o.productName) return; productSales[o.productName] = (productSales[o.productName]||0) + parseFloat(o.unitPrice||0)*parseInt(o.qty||1); });
   const topProduct = Object.entries(productSales).sort((a,b)=>b[1]-a[1])[0];
@@ -7661,14 +7671,17 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
         const thisMonthSales = (salesYear && salesYear[thisYM] && salesYear[thisYM].count > 0 ? salesYear[thisYM].total : 0) || (monthlyRevLedger[thisYM] || 0) || (monthlyRevOrders[thisYM] || 0);
         const cashTotal = (accounts || []).reduce((s,a) => s + (parseFloat(a.balance)||0), 0);
         const cashCount = (accounts || []).filter(a => (parseFloat(a.balance)||0) !== 0).length;
-        // 추정 순이익 = 연매출 × 평균 제품 마진율
-        const estimatedProfit = totalYearRevenue * (avgMarginSell / 100);
+        // 추정 매출이익 = 올해 매출(공급가 = 부가세 뺀 금액) × 등급 비중 반영 평균 마진율
+        //   판매 현황·장부 금액은 부가세 포함이라 ÷1.1. 직접 입력·판매 기록 달은 그대로.
+        //   인건비·임대료 같은 운영비는 빠져 있지 않다 → 순이익이 아니라 매출이익(원가 기준).
+        const yearSupply = monthValues.reduce((a, v, i) => a + ((monthSource[i] === "sales" || monthSource[i] === "ledger") ? v / 1.1 : v), 0);
+        const estimatedProfit = yearSupply * (avgMarginMix / 100);
         return (
           <div className="dash-a-row">
             {kpi("kpi_unpaid", "총 미수금", Math.round(totalUnpaidAmt).toLocaleString()+"원", unpaidCount+"곳 (장부 자동연동)", null,
               { hero: true, grow: 1.3, action: { label: "거래처별 미수금 보기", onClick: () => { save("frw_ledger_subtab", "ar"); setTab && setTab("ledger"); } } })}
             {kpi("kpi_cash", "현금 잔고", Math.round(cashTotal).toLocaleString()+"원", cashCount>0?cashCount+"개 계좌 합계":"등록된 계좌 없음", cashTotal>0?"var(--positive-text)":null, { icon: "treasury" })}
-            {kpi("kpi_profit", "추정 순이익", (totalYearRevenue>0 && avgMarginSell>0)?Math.round(estimatedProfit).toLocaleString()+"원":"—", (totalYearRevenue>0 && avgMarginSell>0)?`${thisYear}년 매출 ${Math.round(totalYearRevenue/10000).toLocaleString()}만원 × 평균 마진 ${avgMarginSell.toFixed(1)}%`:"연매출 또는 제품 마진 입력 필요", (totalYearRevenue>0 && avgMarginSell>0)?(estimatedProfit>0?"var(--positive-text)":"var(--negative-text)"):null, { icon: "coins" })}
+            {kpi("kpi_profit", "추정 매출이익", (yearSupply>0 && avgMarginMix>0)?Math.round(estimatedProfit).toLocaleString()+"원":"—", (yearSupply>0 && avgMarginMix>0)?`${thisYear}년 공급가 ${Math.round(yearSupply/10000).toLocaleString()}만원 × 마진 ${avgMarginMix.toFixed(1)}% (등급 비중 A50·B20·C20·D10 · 원가=원단+공임+관리비 · 운영비 미반영)`:"연매출 또는 제품 마진 입력 필요", (yearSupply>0 && avgMarginMix>0)?(estimatedProfit>0?"var(--positive-text)":"var(--negative-text)"):null, { icon: "coins" })}
             {(() => {
               // 환율 카드 — 값/등락/갱신시각. 로딩·오류도 카드 안에서 그대로 알린다.
               if (fxErr && !fx) return kpi("kpi_fx", "원/달러 환율", "—", `불러오지 못했습니다 · ${fxErr}`, "var(--negative-text)", { icon: "trendingUp", wideMobile: true });
