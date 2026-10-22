@@ -24,6 +24,7 @@ import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
 import { salesImport, salesSummary } from "./worker-src/sales.js";
+import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
@@ -220,6 +221,12 @@ export default {
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await ecountRelayPush(env, b, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
+    }
+    // 명세서 사진 읽기 (매입 현황 「명세서 찍어 입고」) — GET: 서버 키 있는지 / POST {images,supplier,names}: 읽은 품목 (로그인 필요)
+    if (url.pathname === "/api/intake/ocr") {
+      if (request.method !== "POST") return new Response(JSON.stringify({ configured: !!env.ANTHROPIC_API_KEY }), { headers: corsHeaders });
+      let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
+      return new Response(JSON.stringify(await invoiceOcr(env, b)), { headers: corsHeaders });
     }
     // 이카운트 판매현황 — 앱이 엑셀을 읽어 보낸 행 저장(POST /api/sales/import) · 기간 요약(GET /api/sales?from&to) (로그인 필요)
     if (url.pathname === "/api/sales/import" && request.method === "POST") {

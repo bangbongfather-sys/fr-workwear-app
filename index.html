@@ -18036,6 +18036,7 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
   // 매입 서브탭: "dashboard" (종합 대시보드) | "all" (전체) | supplier name | "summary" (총합계)
   // 다른 메인 탭 갔다 와도(컴포넌트 unmount) 보던 거래처 탭 유지 — localStorage에 저장.
   // 저장된 거래처 탭이 삭제된 경우엔 dashboard로 폴백.
+  const [invoiceOpen, setInvoiceOpen] = useState(false); // 명세서 찍어 입고 — 어느 화면(대시보드·전체·거래처 탭)에서나 연다
   const [activeSubTab, setActiveSubTab] = useState(() => {
     const saved = load("frw_purchase_active_subtab", "dashboard");
     if (saved === "dashboard" || saved === "all" || saved === "summary") return saved;
@@ -18334,6 +18335,13 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
           }}>+ 거래처 탭 추가</button>
         )}
         <div style={{flex:1}}/>
+        <button onClick={()=>setInvoiceOpen(true)} title="공장·업체 거래명세서(송장)를 찍으면 AI가 읽어 매입 현황에 입고로 등록해요"
+          style={{padding:"9px 14px",borderRadius:9,border:"1.5px solid #DB6B2E",background:"rgba(219,107,46,0.10)",color:"#DB6B2E",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}><Icon name="camera" size={15}/>명세서 찍어 입고</button>
+        {invoiceOpen && (() => {
+          const sups = Array.from(new Set(fabricIntakes.map(r => (r.supplier || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko"));
+          const cur = activeSubTab !== "dashboard" && activeSubTab !== "all" && activeSubTab !== "summary" ? activeSubTab : "";
+          return <InvoiceIntakeModal onClose={()=>setInvoiceOpen(false)} fabricIntakes={fabricIntakes} setFabricIntakes={setFabricIntakes} supplierOptions={sups} defaultSupplier={cur} laborItems={laborItems} apiKey={apiKey}/>;
+        })()}
         <button onClick={()=>setActiveSubTab("summary")} style={{
           padding:"9px 16px",border:"none",borderRadius:9,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:8,
           background:activeSubTab==="summary"?"var(--accent)":"transparent",
@@ -18737,6 +18745,252 @@ function ComboBox({ value, onChange, onPick, groups, placeholder, inputStyle, em
 }
 
 // 매입 목록 뷰 (필터 가능: 전체 또는 특정 거래처)
+// ─── 명세서 찍어 입고 (매입 현황) ───
+// 공장·업체 거래명세서(송장)를 찍거나 사진을 고르면 Claude 비전이 품목·사이즈·수량·단가를 읽는다 → 표에서 고친 뒤 등록.
+//  - 이미 「주문완료·운송중」으로 걸려 있는 같은 품목·사이즈는 그 건을 입고완료로 바꾼다(덜 오면 받은 만큼만 나눠 입고).
+//  - 없으면 새 입고완료 행. 비고에 「사이즈 ○ · 명세서 사진」. 단가가 안 적혀 있으면 이 공급처의 마지막 단가 → 공임 단가표에서 채운다.
+//  - 읽기는 서버(/api/intake/ocr, ANTHROPIC_API_KEY)로, 서버에 키가 없으면 견적 탭에 저장된 키로 바로 부른다. 사진은 어디에도 저장하지 않는다.
+const INVOICE_PROMPT_CLIENT = (supplier, names) => `사진은 공장·업체가 보낸 거래명세서(송장·납품서)입니다. ${supplier ? `보낸 곳: ${supplier}. ` : ""}표의 품목을 읽어 JSON 만 출력하세요.
+
+형식:
+{"date":"YYYY-MM-DD 또는 빈 문자열","supplier":"명세서에 적힌 공급자 상호 또는 빈 문자열","items":[{"name":"품목명","size":"사이즈(없으면 빈 문자열)","qty":수량,"unit":"벌·yard·개 등(없으면 빈 문자열)","unitPrice":단가 또는 null,"amount":금액 또는 null}],"total":합계 또는 null,"memo":"읽기 애매한 부분 한 줄(없으면 빈 문자열)"}
+
+규칙:
+- 헤더·합계·소계·부가세 줄은 items 에 넣지 않는다.
+- 사이즈가 가로로 칸칸이(90·95·100… 아래 수량) 적힌 표면, 수량이 있는 사이즈마다 item 을 하나씩 만든다. 수량 0·빈칸은 뺀다.
+- 손글씨 숫자는 자릿수를 주의해서 읽고, 수량×단가=금액이 맞는지 확인한다. 안 맞으면 memo 에 적는다.
+- 숫자는 쉼표·원 없이 숫자로.
+${names && names.length ? `- 품목명은 가능하면 이 목록의 이름으로 맞춘다(같은 물건일 때만): ${names.slice(0, 40).join(" / ")}\n` : ""}- 명세서가 아니거나 표를 못 읽으면 {"items":[],"memo":"이유"} 만 출력한다.
+- JSON 외의 글은 쓰지 않는다.`;
+function parseInvoiceJsonClient(text) {
+  const t = String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const s = t.indexOf("{"), e = t.lastIndexOf("}");
+  if (s < 0 || e < s) throw new Error("명세서 내용을 읽지 못했습니다");
+  const j = JSON.parse(t.slice(s, e + 1));
+  const num = (v) => { if (v == null || v === "") return null; const n = Number(String(v).replace(/[,\s원]/g, "")); return Number.isFinite(n) ? n : null; };
+  const items = (Array.isArray(j.items) ? j.items : []).map(x => ({ name: String(x && x.name || "").trim(), size: String(x && x.size != null ? x.size : "").trim(), qty: num(x && x.qty), unit: String(x && x.unit || "").trim(), unitPrice: num(x && x.unitPrice), amount: num(x && x.amount) })).filter(x => x.name && x.qty);
+  return { date: /^\d{4}-\d{2}-\d{2}$/.test(String(j.date || "")) ? j.date : "", supplier: String(j.supplier || "").trim(), items, total: num(j.total), memo: String(j.memo || "") };
+}
+function InvoiceIntakeModal({ onClose, fabricIntakes = [], setFabricIntakes, supplierOptions = [], defaultSupplier = "", laborItems = [], apiKey = "" }) {
+  const todayStr = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const [photos, setPhotos] = useState([]);          // [{ id, url, dataUrl }]
+  const [supplier, setSupplier] = useState(defaultSupplier || "");
+  const [date, setDate] = useState(todayStr);
+  const [reading, setReading] = useState(false);
+  const [rows, setRows] = useState(null);            // 읽은 뒤 편집 표
+  const [memo, setMemo] = useState("");
+  const [err, setErr] = useState("");
+  const camRef = useRef(null), pickRef = useRef(null);
+  const OPEN = ["주문완료", "운송중"];
+  const sameSup = (a, b) => { const x = String(a || "").replace(/\s/g, ""), y = String(b || "").replace(/\s/g, ""); return !!x && !!y && (x === y || x.includes(y) || y.includes(x)); };
+  const supRows = fabricIntakes.filter(r => sameSup(r.supplier, supplier));
+  const knownNames = Array.from(new Set(supRows.map(r => (r.materialName || "").trim()).filter(Boolean)));
+  const openRows = supRows.filter(r => OPEN.includes(r.status)).sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+  const sizeOf = (r) => { const m = `${r.note || ""} ${r.materialName || ""}`.match(/사이즈\s*(\d{2,3}|[A-Z]{1,3})|(\d{2,3})\s*사이즈/); return m ? (m[1] || m[2]) : ""; };
+  const priceFor = (name) => {
+    const last = supRows.filter(r => (r.materialName || "").trim() === name && parseFloat(r.unitPrice) > 0).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0];
+    if (last) return String(last.unitPrice);
+    const li = laborItems.find(l => (l.name || "").trim() && (name.includes((l.name || "").trim()) || (l.name || "").includes(name)));
+    return li && parseFloat(li.price) > 0 ? String(li.price) : "";
+  };
+  const normName = (n) => { const t = String(n || "").trim(); if (!t || knownNames.includes(t)) return t; const hit = knownNames.find(k => k.replace(/\s/g, "").includes(t.replace(/\s/g, ""))); return hit || t; };
+
+  const addFiles = async (files) => {
+    setErr("");
+    const list = Array.from(files || []).filter(f => f.type && f.type.startsWith("image/")).slice(0, 6 - photos.length);
+    for (const f of list) {
+      try { const dataUrl = await compressImage(f, 1600, 0.85); setPhotos(p => [...p, { id: uid(), url: dataUrl, dataUrl }]); }
+      catch { setErr("사진을 불러오지 못했습니다: " + (f.name || "")); }
+    }
+    if (camRef.current) camRef.current.value = ""; if (pickRef.current) pickRef.current.value = "";
+  };
+  // 붙여넣기(스크린샷 복사 후 Ctrl+V)도 받는다
+  useEffect(() => {
+    const onPaste = (e) => { const fs = Array.from(e.clipboardData?.files || []).filter(f => f.type.startsWith("image/")); if (fs.length) { e.preventDefault(); addFiles(fs); } };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  });
+
+  const read = async () => {
+    if (!photos.length) { setErr("명세서 사진을 먼저 찍거나 골라 주세요."); return; }
+    setReading(true); setErr("");
+    const images = photos.map(p => { const m = p.dataUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/); return m ? { type: m[1], data: m[2] } : null; }).filter(Boolean);
+    try {
+      let out = null;
+      const r = await fetch("/api/intake/ocr", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ images, supplier, names: knownNames }) }).then(r => r.json()).catch(() => null);
+      if (r && r.ok) out = r;
+      else if (r && r.code === "no_key" && apiKey.trim()) {
+        const prompt = INVOICE_PROMPT_CLIENT(supplier, knownNames) + (images.length > 1 ? `\n- 사진 ${images.length}장은 같은 명세서의 여러 쪽이거나 여러 장입니다. 모두 합쳐 items 하나로 만든다.` : "");
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
+          body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 4000, messages: [{ role: "user", content: [...images.map(im => ({ type: "image", source: { type: "base64", media_type: im.type, data: im.data } })), { type: "text", text: prompt }] }] }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error((j.error && j.error.message) || `API 오류 (HTTP ${res.status})`);
+        out = parseInvoiceJsonClient((j.content || []).filter(b => b.type === "text").map(b => b.text).join("\n"));
+      } else if (r && r.code === "no_key") throw new Error("사진 읽기에는 Claude API 키가 필요해요. 견적 관리 탭에서 API 키를 넣어 주세요.");
+      else throw new Error((r && r.error) || "서버에 연결하지 못했습니다");
+      if (!out.items.length) { setErr(out.memo ? `품목을 읽지 못했어요 — ${out.memo}` : "품목을 읽지 못했어요. 표가 잘 보이게 다시 찍어 주세요."); return; }
+      if (out.date && date === todayStr) setDate(out.date);
+      if (!supplier && out.supplier) setSupplier(supplierOptions.find(s => sameSup(s, out.supplier)) || out.supplier);
+      // 열린 주문(주문완료·운송중)과 품목·사이즈로 짝짓기 — 오래된 것부터, 한 건은 한 번만
+      const used = new Set();
+      setRows(out.items.map(it => {
+        const name = normName(it.name);
+        const size = String(it.size || "").replace(/사이즈/g, "").trim();
+        const hit = openRows.find(r => !used.has(r.id) && (r.materialName || "").trim() === name && (!size || sizeOf(r) === size));
+        if (hit) used.add(hit.id);
+        const price = it.unitPrice != null ? String(it.unitPrice) : (hit && parseFloat(hit.unitPrice) > 0 ? String(hit.unitPrice) : priceFor(name));
+        return { id: uid(), name, size, qty: String(it.qty), unit: it.unit || (hit && hit.unit) || "벌", unitPrice: price, amount: it.amount, target: hit ? String(hit.id) : "new" };
+      }));
+      setMemo(out.memo || "");
+    } catch (e) { setErr(e.message || String(e)); }
+    finally { setReading(false); }
+  };
+
+  const setRow = (id, patch) => setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
+  const valid = (rows || []).filter(r => r.name.trim() && parseFloat(r.qty) > 0);
+  const total = valid.reduce((a, r) => a + (parseFloat(r.unitPrice) || 0) * (parseFloat(r.qty) || 0), 0);
+  const qtyText = (() => { const by = {}; valid.forEach(r => { const u = r.unit || "개"; by[u] = (by[u] || 0) + parseFloat(r.qty); }); return Object.entries(by).map(([u, q]) => `${q.toLocaleString()}${u}`).join(" + "); })();
+  const register = () => {
+    if (!supplier.trim()) { setErr("공급처를 넣어 주세요."); return; }
+    if (!valid.length) { setErr("등록할 품목이 없어요."); return; }
+    const tag = "명세서 사진";
+    let received = 0, created = 0, partial = 0;
+    setFabricIntakes(prev => {
+      let next = prev.slice();
+      for (const r of valid) {
+        const q = parseFloat(r.qty);
+        const noteNew = [r.size ? `사이즈 ${r.size}` : "", tag].filter(Boolean).join(" · ");
+        const hitIdx = r.target !== "new" ? next.findIndex(x => String(x.id) === r.target && OPEN.includes(x.status)) : -1;
+        if (hitIdx >= 0) {
+          const cur = next[hitIdx]; const ordered = parseFloat(cur.qty) || 0;
+          const upd = { unitPrice: parseFloat(cur.unitPrice) > 0 ? cur.unitPrice : r.unitPrice, receivedAt: date };
+          if (q >= ordered || !ordered) { next[hitIdx] = { ...cur, ...upd, qty: String(q), status: "입고완료", note: `${cur.note || ""}${cur.note ? " · " : ""}${tag}` }; received++; }
+          else {
+            next[hitIdx] = { ...cur, qty: String(ordered - q) };
+            next.push({ ...cur, ...upd, id: uid(), qty: String(q), status: "입고완료", splitFrom: cur.id, note: `${cur.note || ""}${cur.note ? " · " : ""}부분입고 ${q}/${ordered} · ${tag}` });
+            partial++;
+          }
+        } else {
+          next.push({ id: uid(), date, supplier: supplier.trim(), inspector: "", materialName: r.name.trim(), qty: String(q), unit: r.unit || "벌", unitPrice: r.unitPrice || "", status: "입고완료", receivedAt: date, note: noteNew });
+          created++;
+        }
+      }
+      return next;
+    });
+    setTimeout(() => showToast(`명세서 입고 반영 — 기존 주문 입고 ${received}건${partial ? ` · 부분 입고 ${partial}건` : ""} · 새 입고 ${created}건`, "success"), 0);
+    onClose();
+  };
+
+  const inp = { height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 13, fontFamily: "inherit", minWidth: 0 };
+  const big = (onClick, icon, title, sub, primary) => (
+    <button type="button" onClick={onClick} style={{ flex: "1 1 150px", minHeight: 110, borderRadius: 14, border: `2px dashed ${primary ? "#DB6B2E" : "var(--border)"}`, background: primary ? "rgba(219,107,46,0.08)" : "var(--surface2)", color: "var(--text1)", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: 12 }}>
+      <Icon name={icon} size={26} style={{ color: primary ? "#DB6B2E" : "var(--text2)" }}/>
+      <b style={{ fontSize: 14 }}>{title}</b>
+      <span style={{ fontSize: 11.5, color: "var(--text3)", textAlign: "center" }}>{sub}</span>
+    </button>
+  );
+  return (
+    <div role="dialog" aria-modal="true" aria-label="명세서 찍어 입고" style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "4vh 12px", overflowY: "auto" }} onClick={e => { if (e.target === e.currentTarget && !reading) onClose(); }}>
+      <div className="card" style={{ width: "min(980px, 100%)", display: "flex", flexDirection: "column", gap: 14 }}
+        onDragOver={e => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
+        onDrop={e => { const fs = Array.from(e.dataTransfer?.files || []); if (fs.length) { e.preventDefault(); if (!rows) addFiles(fs); } }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 12, background: "rgba(219,107,46,0.12)", color: "#DB6B2E", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="camera" size={20}/></div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text3)" }}>거래명세서·송장 → 매입 현황 입고</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text1)" }}>명세서 찍어 입고</div>
+            <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 2 }}>여러 장 연속으로 찍어도 돼요 · 읽은 표를 확인하고 틀린 칸만 고친 뒤 등록하세요</div>
+          </div>
+          <button type="button" onClick={onClose} disabled={reading} aria-label="닫기" style={{ width: 34, height: 34, borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={15}/></button>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text2)", fontWeight: 700 }}>공급처
+            <input list="inv-sup-list" value={supplier} onChange={e => setSupplier(e.target.value)} placeholder="예: 구리공장(짱아)" style={{ ...inp, width: 190 }}/>
+            <datalist id="inv-sup-list">{supplierOptions.map(s => <option key={s} value={s}/>)}</datalist>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--text2)", fontWeight: 700 }}>입고일
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ ...inp, width: 150 }}/>
+          </label>
+          {supplier && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>이 공급처 입고 대기(주문완료·운송중) {openRows.length}건</span>}
+        </div>
+
+        <input ref={camRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={e => addFiles(e.target.files)}/>
+        <input ref={pickRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={e => addFiles(e.target.files)}/>
+        {!rows && (
+          <>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {big(() => camRef.current?.click(), "camera", "카메라로 찍기", "핸드폰이면 바로 카메라가 열려요", true)}
+              {big(() => pickRef.current?.click(), "image", "사진 고르기", "여러 장 · PC는 끌어다 놓거나 붙여넣기(Ctrl+V)", false)}
+            </div>
+            {photos.length > 0 && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {photos.map((p, i) => (
+                  <div key={p.id} style={{ position: "relative", width: 96, height: 120, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)", background: "var(--surface2)" }}>
+                    <img src={p.url} alt={`명세서 사진 ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }}/>
+                    <button type="button" onClick={() => setPhotos(ps => ps.filter(x => x.id !== p.id))} aria-label={`사진 ${i + 1} 빼기`} style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: 12, border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={12}/></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: "var(--text3)" }}>그림자·기울어짐이 적을수록 정확해요. 사진은 읽는 데만 쓰고 저장하지 않아요.</div>
+          </>
+        )}
+
+        {rows && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {memo && <div style={{ fontSize: 12, padding: "8px 12px", borderRadius: 9, background: "rgba(255,149,0,0.08)", color: "var(--warning-text)" }}>확인해 주세요: {memo}</div>}
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ minWidth: 760, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) 70px 80px 60px 90px 100px minmax(0,1.6fr) 32px", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text3)", padding: "0 2px" }}>
+                  <div>품목</div><div>사이즈</div><div>수량</div><div>단위</div><div>단가</div><div style={{ textAlign: "right" }}>금액</div><div>처리</div><div/>
+                </div>
+                <datalist id="inv-name-list">{knownNames.map(n => <option key={n} value={n}/>)}</datalist>
+                {rows.map(r => {
+                  const amt = (parseFloat(r.unitPrice) || 0) * (parseFloat(r.qty) || 0);
+                  const mismatch = r.amount != null && amt > 0 && Math.abs(r.amount - amt) > 1;
+                  return (
+                    <div key={r.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1.6fr) 70px 80px 60px 90px 100px minmax(0,1.6fr) 32px", gap: 6, alignItems: "center" }}>
+                      <input list="inv-name-list" value={r.name} onChange={e => setRow(r.id, { name: e.target.value })} aria-label="품목" style={inp}/>
+                      <input value={r.size} onChange={e => setRow(r.id, { size: e.target.value })} aria-label="사이즈" style={inp}/>
+                      <input type="number" value={r.qty} onChange={e => setRow(r.id, { qty: e.target.value })} aria-label="수량" style={{ ...inp, textAlign: "right" }}/>
+                      <input value={r.unit} onChange={e => setRow(r.id, { unit: e.target.value })} aria-label="단위" style={inp}/>
+                      <input type="number" value={r.unitPrice} onChange={e => setRow(r.id, { unitPrice: e.target.value })} aria-label="단가" placeholder="단가" style={{ ...inp, textAlign: "right" }}/>
+                      <div style={{ textAlign: "right", fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: mismatch ? "var(--warning-text)" : "var(--text1)" }} title={mismatch ? `명세서 금액 ${Math.round(r.amount).toLocaleString()}원과 달라요` : ""}>{amt ? Math.round(amt).toLocaleString() : "—"}{mismatch ? " ⚠" : ""}</div>
+                      <select value={r.target} onChange={e => setRow(r.id, { target: e.target.value })} aria-label="처리" style={inp}>
+                        <option value="new">새 입고로 등록</option>
+                        {openRows.map(o => <option key={o.id} value={String(o.id)}>주문 입고 처리 · {o.date} {o.materialName} {sizeOf(o) ? `${sizeOf(o)} ` : ""}{o.qty}{o.unit || ""}</option>)}
+                      </select>
+                      <button type="button" onClick={() => setRows(rs => rs.filter(x => x.id !== r.id))} aria-label="이 줄 빼기" style={{ width: 32, height: 34, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "#F04452", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={13}/></button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <button type="button" onClick={() => setRows(rs => [...rs, { id: uid(), name: "", size: "", qty: "", unit: "벌", unitPrice: "", amount: null, target: "new" }])} style={{ alignSelf: "flex-start", padding: "7px 12px", borderRadius: 8, border: "1.5px dashed var(--border)", background: "none", color: "var(--text1)", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 600 }}>+ 줄 추가</button>
+          </div>
+        )}
+
+        {err && <div style={{ padding: "10px 14px", borderRadius: 10, background: "rgba(240,68,82,0.08)", border: "1px solid rgba(240,68,82,0.25)", fontSize: 12.5, color: "#F04452", fontWeight: 600 }}>{err}</div>}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 10, borderTop: "1px solid var(--divider)" }}>
+          {rows ? (
+            <span style={{ flex: 1, minWidth: 200, fontSize: 13, color: "var(--text2)" }}>{valid.length}줄 · {qtyText || "0"} · 합계 <b style={{ color: "var(--text1)" }}>{Math.round(total).toLocaleString()}원</b> <span style={{ fontSize: 11.5, color: "#DB6B2E" }}>(부가세포함 {Math.round(total * 1.1).toLocaleString()}원)</span></span>
+          ) : <span style={{ flex: 1, minWidth: 200, fontSize: 12.5, color: "var(--text3)" }}>{photos.length ? `사진 ${photos.length}장` : "사진을 찍거나 골라 주세요 (최대 6장)"}</span>}
+          {rows && <button type="button" onClick={() => { setRows(null); setMemo(""); }} style={{ padding: "0 14px", height: 38, borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 600 }}>사진 다시</button>}
+          <button type="button" onClick={onClose} disabled={reading} style={{ padding: "0 14px", height: 38, borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 600 }}>취소</button>
+          {rows
+            ? <button type="button" className="btn-primary" onClick={register} disabled={!valid.length} style={{ padding: "0 18px", height: 38, fontSize: 13 }}>매입 현황에 입고 {valid.length}줄</button>
+            : <button type="button" className="btn-primary" onClick={read} disabled={reading || !photos.length} style={{ padding: "0 18px", height: 38, fontSize: 13, opacity: photos.length ? 1 : 0.5 }}>{reading ? "읽는 중… (10~40초)" : `명세서 읽기${photos.length ? ` (${photos.length}장)` : ""}`}</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborItems = [], purchaseDateMemos = {}, setPurchaseDateMemos, darkMode, filterSupplier, apiKey = "", purchaseSubTabs = [], setPurchaseSubTabs }) {
   const [moveTarget, setMoveTarget] = useState(""); // 선택 항목 거래처 이동 대상
   // 날짜 그룹 메모 인라인 편집 상태
