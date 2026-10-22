@@ -18037,6 +18037,16 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
   // 다른 메인 탭 갔다 와도(컴포넌트 unmount) 보던 거래처 탭 유지 — localStorage에 저장.
   // 저장된 거래처 탭이 삭제된 경우엔 dashboard로 폴백.
   const [invoiceOpen, setInvoiceOpen] = useState(false); // 명세서 찍어 입고 — 어느 화면(대시보드·전체·거래처 탭)에서나 연다
+  // 사진 읽기는 서버 Claude API 키(사용량 과금)가 있을 때만 웹앱 안에서. 없으면 NJ 캠퍼스(아티팩트 — 구독 안에서 Claude 사용)로 보낸다.
+  //   캠퍼스에서 등록한 입고는 같은 매입 현황 데이터라 바로 여기 보인다.
+  const NJ_CAMPUS_URL = "https://claude.ai/artifact/WCznNf8PJLqaDUiTzpyCqN";
+  const [ocrServer, setOcrServer] = useState(null);
+  useEffect(() => { fetch("/api/intake/ocr", { cache: "no-store" }).then(r => r.json()).then(j => setOcrServer(!!(j && j.configured))).catch(() => setOcrServer(false)); }, []);
+  const openInvoice = () => {
+    if (ocrServer) { setInvoiceOpen(true); return; }
+    window.open(NJ_CAMPUS_URL, "_blank", "noopener");
+    showToast("NJ 캠퍼스를 열었어요 — 공장 패널의 「명세서 찍어 입고」로 등록하면 여기 매입 현황에 바로 반영돼요", "success");
+  };
   const [activeSubTab, setActiveSubTab] = useState(() => {
     const saved = load("frw_purchase_active_subtab", "dashboard");
     if (saved === "dashboard" || saved === "all" || saved === "summary") return saved;
@@ -18335,8 +18345,8 @@ function InventoryTab({ fabricIntakes, setFabricIntakes, materials, laborItems =
           }}>+ 거래처 탭 추가</button>
         )}
         <div style={{flex:1}}/>
-        <button onClick={()=>setInvoiceOpen(true)} title="공장·업체 거래명세서(송장)를 찍으면 AI가 읽어 매입 현황에 입고로 등록해요"
-          style={{padding:"9px 14px",borderRadius:9,border:"1.5px solid #DB6B2E",background:"rgba(219,107,46,0.10)",color:"#DB6B2E",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}><Icon name="camera" size={15}/>명세서 찍어 입고</button>
+        <button onClick={openInvoice} title={ocrServer ? "공장·업체 거래명세서(송장)를 찍으면 AI가 읽어 매입 현황에 입고로 등록해요" : "NJ 캠퍼스에서 명세서를 찍어 등록해요 (API 요금 없음) — 등록하면 여기 바로 반영"}
+          style={{padding:"9px 14px",borderRadius:9,border:"1.5px solid #DB6B2E",background:"rgba(219,107,46,0.10)",color:"#DB6B2E",fontSize:13,fontWeight:800,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}><Icon name="camera" size={15}/>명세서 찍어 입고{ocrServer === false ? <span style={{fontSize:11,fontWeight:700,opacity:0.8}}>· 캠퍼스</span> : null}</button>
         {invoiceOpen && (() => {
           const sups = Array.from(new Set(fabricIntakes.map(r => (r.supplier || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ko"));
           const cur = activeSubTab !== "dashboard" && activeSubTab !== "all" && activeSubTab !== "summary" ? activeSubTab : "";
