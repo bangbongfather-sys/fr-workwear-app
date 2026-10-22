@@ -909,6 +909,9 @@
     .tab-btn.tab-active::after { opacity: 1; }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes salesPopIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+    @keyframes salesSheetUp { from { transform: translateY(100%); } to { transform: none; } }
+    @keyframes salesFade { from { opacity: 0; } to { opacity: 1; } }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
     /* ─── 태블릿 (1024px 이하) ─── */
@@ -16272,6 +16275,179 @@ const manWon = (n) => {
   if (a >= 1e4) return `${sign}${Math.round(a / 1e4).toLocaleString()}만`;
   return `${sign}${a.toLocaleString()}원`;
 };
+// 기간 고르기 팝업 — 월 선택(연도 넘기기 + 12달 격자) · 기간 선택(달력에서 시작일→종료일 두 번 클릭).
+// 카드가 모바일에서 overflow 로 잘라서 body 로 띄운다. 좁은 화면은 아래에서 올라오는 시트.
+const SALES_DOW = ["일", "월", "화", "수", "목", "금", "토"];
+const ymdDow = (d) => new Date(d + "T00:00:00Z").getUTCDay();
+const ymdLabel = (d) => d ? `${Number(d.slice(5, 7))}월 ${Number(d.slice(8))}일 (${SALES_DOW[ymdDow(d)]})` : "";
+function SalesPeriodPicker({ anchor, view: view0 = "month", month, from, to, onPickMonth, onPickRange, onClose }) {
+  const today = kstTodayYmd();
+  const thisYm = today.slice(0, 7);
+  const [view, setView] = useState(view0);                       // month | range
+  const [year, setYear] = useState(() => Number((view0 === "month" ? month : from).slice(0, 4)));
+  const [a, setA] = useState(view0 === "range" ? from : "");
+  const [b, setB] = useState(view0 === "range" ? to : "");
+  const [hover, setHover] = useState("");
+  const [base, setBase] = useState(() => (view0 === "range" ? from : `${month}-01`).slice(0, 7));   // 기간 달력의 첫 달
+  const [jump, setJump] = useState(false);                       // 기간 달력에서 달 고르기 격자
+  const [vw, setVw] = useState(() => window.innerWidth);
+  const boxRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    const onDown = (e) => { if (boxRef.current && !boxRef.current.contains(e.target) && !(anchor && anchor.contains(e.target))) onClose(); };
+    const onResize = () => setVw(window.innerWidth);
+    document.addEventListener("keydown", onKey); document.addEventListener("mousedown", onDown); document.addEventListener("touchstart", onDown, { passive: true });
+    window.addEventListener("resize", onResize); window.addEventListener("scroll", onResize, true);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", onDown); document.removeEventListener("touchstart", onDown); window.removeEventListener("resize", onResize); window.removeEventListener("scroll", onResize, true); };
+  }, [anchor, onClose]);
+  const sheet = vw < 640;
+  const twoMonths = !sheet && vw >= 900;
+  const accent = "#3182F6";
+  const navBtn = (label, onClick, disabled) => (
+    <button type="button" aria-label={label} disabled={disabled} onClick={onClick}
+      style={{ width: 34, height: 34, borderRadius: 10, border: "none", background: "var(--surface2)", color: disabled ? "var(--text4, var(--text3))" : "var(--text1)", opacity: disabled ? 0.35 : 1, cursor: disabled ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon name={label.includes("이전") ? "arrowLeft" : "arrowRight"} size={14}/>
+    </button>
+  );
+  const maxYear = Number(today.slice(0, 4)) + 1;
+
+  // 12달 격자 (월 선택 · 기간 달력 점프 공용)
+  const monthGrid = (selYm, onPick) => (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        {navBtn("이전 해", () => setYear(y => y - 1), year <= 2015)}
+        <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{year}년</div>
+        {navBtn("다음 해", () => setYear(y => y + 1), year >= maxYear)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+        {Array.from({ length: 12 }, (_, i) => {
+          const ym = `${year}-${String(i + 1).padStart(2, "0")}`;
+          const sel = ym === selYm, isNow = ym === thisYm, future = ym > thisYm;
+          return (
+            <button key={ym} type="button" onClick={() => onPick(ym)}
+              style={{ height: 46, borderRadius: 12, border: isNow && !sel ? `1.5px solid ${accent}` : "1.5px solid transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: sel ? 800 : 600,
+                background: sel ? accent : "var(--surface2)", color: sel ? "#fff" : future ? "var(--text3)" : "var(--text1)", transition: "background 0.15s, transform 0.1s" }}
+              onMouseEnter={e => { if (!sel) e.currentTarget.style.background = "rgba(49,130,246,0.12)"; }}
+              onMouseLeave={e => { if (!sel) e.currentTarget.style.background = "var(--surface2)"; }}>
+              {i + 1}월
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+        {[0, 1, 2, 3].map(k => {
+          const y = Number(today.slice(0, 4)) - k;
+          return <button key={y} type="button" onClick={() => setYear(y)}
+            style={{ height: 28, padding: "0 12px", borderRadius: 999, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+              background: year === y ? "var(--text1)" : "var(--surface2)", color: year === y ? "var(--surface)" : "var(--text2)" }}>{y}</button>;
+        })}
+      </div>
+    </div>
+  );
+
+  // 기간 달력 한 달
+  const lo = a && (b || hover) ? (a < (b || hover) ? a : (b || hover)) : a;
+  const hi = a && (b || hover) ? (a < (b || hover) ? (b || hover) : a) : a;
+  const pickDay = (d) => {
+    if (!a || b) { setA(d); setB(""); return; }
+    if (d < a) { setB(a); setA(d); } else setB(d);
+  };
+  const dayGrid = (ym) => {
+    const first = `${ym}-01`, last = ymMonthEnd(ym), lead = ymdDow(first);
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push(null);
+    for (let d = first; d <= last; d = addDaysYmd(d, 1)) cells.push(d);
+    return (
+      <div style={{ width: sheet ? "100%" : 280 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 4 }}>
+          {SALES_DOW.map((w, i) => <div key={w} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: i === 0 ? "#F04452" : "var(--text3)", padding: "4px 0" }}>{w}</div>)}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", rowGap: 2 }} onMouseLeave={() => setHover("")}>
+          {cells.map((d, i) => {
+            if (!d) return <div key={`e${i}`}/>;
+            const w = ymdDow(d), hol = HR_HOLIDAYS[d];
+            const isEdge = d === lo || d === hi, inRange = lo && hi && d > lo && d < hi;
+            const bandL = lo && hi && lo !== hi && (d === hi || inRange), bandR = lo && hi && lo !== hi && (d === lo || inRange);
+            return (
+              <div key={d} style={{ position: "relative", height: 38, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {(bandL || bandR) && <div style={{ position: "absolute", top: 3, bottom: 3, left: bandL ? 0 : "50%", right: bandR ? 0 : "50%", background: "rgba(49,130,246,0.13)" }}/>}
+                <button type="button" onClick={() => pickDay(d)} onMouseEnter={() => a && !b && setHover(d)} title={hol || undefined}
+                  style={{ position: "relative", width: 34, height: 34, borderRadius: 999, border: d === today && !isEdge ? `1.5px solid ${accent}` : "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontVariantNumeric: "tabular-nums",
+                    fontWeight: isEdge || d === today ? 800 : 500, background: isEdge ? accent : "transparent",
+                    color: isEdge ? "#fff" : (w === 0 || hol) ? "#F04452" : w === 6 ? "#3182F6" : d > today ? "var(--text3)" : "var(--text1)" }}>
+                  {Number(d.slice(8))}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+  const ymTitle = (ym) => `${ym.slice(0, 4)}년 ${Number(ym.slice(5))}월`;
+  const span = a ? Math.round((Date.parse(b || a) - Date.parse(a)) / 86400e3) + 1 : 0;
+
+  const body = (
+    <div ref={boxRef} role="dialog" aria-label="기간 고르기" onClick={e => e.stopPropagation()}
+      style={{ background: "var(--surface)", color: "var(--text1)", border: "1px solid var(--border)", boxShadow: "0 18px 50px rgba(0,0,0,0.28)", padding: 16,
+        ...(sheet ? { position: "fixed", left: 0, right: 0, bottom: 0, borderRadius: "22px 22px 0 0", maxHeight: "88vh", overflowY: "auto", paddingBottom: "calc(16px + env(safe-area-inset-bottom))", animation: "salesSheetUp 0.22s ease-out" }
+                 : { borderRadius: 18, animation: "salesPopIn 0.14s ease-out" }) }}>
+      {sheet && <div style={{ width: 40, height: 4, borderRadius: 2, background: "var(--border)", margin: "-4px auto 12px" }}/>}
+      {/* 월 · 기간 전환 */}
+      <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--surface2)", borderRadius: 12, marginBottom: 14 }}>
+        {[["month", "월 선택"], ["range", "기간 선택"]].map(([k, l]) => (
+          <button key={k} type="button" onClick={() => { setView(k); setJump(false); }}
+            style={{ flex: 1, height: 32, borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700,
+              background: view === k ? "var(--surface)" : "transparent", color: view === k ? "var(--text1)" : "var(--text3)", boxShadow: view === k ? "0 1px 3px rgba(0,0,0,0.12)" : "none" }}>{l}</button>
+        ))}
+      </div>
+
+      {view === "month" && (
+        <div style={{ width: sheet ? "100%" : 300 }}>
+          {monthGrid(month, (ym) => { onPickMonth(ym); onClose(); })}
+        </div>
+      )}
+
+      {view === "range" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            {navBtn("이전 달", () => setBase(m => ymShift(m, -1)), jump)}
+            <button type="button" onClick={() => { setJump(j => !j); setYear(Number(base.slice(0, 4))); }}
+              style={{ flex: 1, height: 34, border: "none", borderRadius: 10, background: jump ? "rgba(49,130,246,0.12)" : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 15, fontWeight: 800, color: jump ? accent : "var(--text1)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              {twoMonths ? `${ymTitle(base)}  –  ${ymTitle(ymShift(base, 1))}` : ymTitle(base)}
+              <span style={{ fontSize: 10, transform: jump ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▼</span>
+            </button>
+            {navBtn("다음 달", () => setBase(m => ymShift(m, 1)), jump)}
+          </div>
+          {jump ? (
+            <div style={{ width: sheet ? "100%" : twoMonths ? 584 : 280 }}>{monthGrid(base, (ym) => { setBase(ym); setJump(false); })}</div>
+          ) : (
+            <div style={{ display: "flex", gap: 24 }}>
+              {dayGrid(base)}
+              {twoMonths && dayGrid(ymShift(base, 1))}
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700, color: a ? "var(--text1)" : "var(--text3)" }}>
+              {!a ? "시작일을 누르세요" : !b ? <>{ymdLabel(a)} <span style={{ color: "var(--text3)", fontWeight: 600 }}>→ 종료일을 누르세요</span></> : <>{ymdLabel(a)} → {ymdLabel(b)} <span style={{ color: "var(--text3)", fontWeight: 600 }}>· {span}일</span></>}
+            </div>
+            <button type="button" onClick={onClose} style={{ height: 38, padding: "0 16px", borderRadius: 10, border: "none", background: "var(--surface2)", color: "var(--text2)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>취소</button>
+            <button type="button" disabled={!a} onClick={() => { onPickRange(a, b || a); onClose(); }}
+              style={{ height: 38, padding: "0 20px", borderRadius: 10, border: "none", background: a ? accent : "var(--surface2)", color: a ? "#fff" : "var(--text3)", fontSize: 13, fontWeight: 800, cursor: a ? "pointer" : "default", fontFamily: "inherit" }}>적용</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (sheet) return ReactDOM.createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.45)", animation: "salesFade 0.18s ease-out" }}>{body}</div>, document.body);
+  // 앵커 아래에 붙이고, 화면 밖으로 나가면 왼쪽으로 당긴다
+  const r = anchor ? anchor.getBoundingClientRect() : { left: 16, bottom: 80 };
+  const estW = view === "range" ? (twoMonths ? 618 : 314) : 334;
+  const left = Math.max(12, Math.min(r.left, vw - estW - 12));
+  return ReactDOM.createPortal(<div style={{ position: "fixed", zIndex: 400, top: r.bottom + 8, left }}>{body}</div>, document.body);
+}
 function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
   const today = kstTodayYmd();
   const [subTab, setSubTab] = useState(() => { try { return localStorage.getItem("frw_sales_subtab") || "summary"; } catch { return "summary"; } });
@@ -16344,6 +16520,11 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
     setMode(k); try { localStorage.setItem("frw_sales_mode", k); } catch {}
   };
   const stepMonth = (n) => { setMonth(m => ymShift(m, n)); setMode("month"); };
+  const [picker, setPicker] = useState(null);   // { view, anchor } — 년·월 / 기간 고르기 팝업
+  const openPicker = (view, e) => { const anchor = e.currentTarget; setPicker(p => p && p.view === view ? null : { view, anchor }); };
+  const closePicker = useCallback(() => setPicker(null), []);
+  const pickMonthTo = (ym) => { setMonth(ym); setMode("month"); try { localStorage.setItem("frw_sales_mode", "month"); } catch {} };
+  const pickRangeTo = (f, t) => { setCustomRange({ from: f, to: t }); setMode("custom"); try { localStorage.setItem("frw_sales_mode", "custom"); } catch {} };
   const setCustomRange = (patch) => { const nx = { ...custom, ...patch }; setCustom(nx); try { localStorage.setItem("frw_sales_custom", JSON.stringify(nx)); } catch {} };
 
   // ── 엑셀 ──
@@ -17004,11 +17185,15 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
       <div className="card no-print" style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <button type="button" aria-label="이전 달" onClick={() => stepMonth(-1)} style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="arrowLeft" size={14}/></button>
-          <button type="button" onClick={() => { setMode("month"); }} style={{ minWidth: 112, height: 32, padding: "0 8px", border: "none", background: "transparent", fontSize: 14.5, fontWeight: 800, color: isMonth ? "var(--text1)" : "var(--text3)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{Number(month.slice(0, 4))}년 {Number(month.slice(5))}월</button>
+          <button type="button" onClick={e => openPicker("month", e)} aria-haspopup="dialog" aria-expanded={!!picker} title="눌러서 다른 년·월로 이동"
+            style={{ minWidth: 124, height: 32, padding: "0 10px", border: "none", borderRadius: 9, background: picker && picker.view === "month" ? "rgba(49,130,246,0.12)" : "transparent", fontSize: 14.5, fontWeight: 800, color: picker && picker.view === "month" ? "#3182F6" : isMonth ? "var(--text1)" : "var(--text3)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s" }}>
+            {Number(month.slice(0, 4))}년 {Number(month.slice(5))}월
+            <span style={{ fontSize: 9, opacity: 0.7, transform: picker && picker.view === "month" ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▼</span>
+          </button>
           <button type="button" aria-label="다음 달" onClick={() => stepMonth(1)} style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="arrowRight" size={14}/></button>
         </div>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-          {SALES_CHIPS.map(c => chip(c.k, c.label, c.k === "month" ? (mode === "month" && month === today.slice(0, 7)) : c.k === "prev" ? (mode === "month" && month === ymShift(today.slice(0, 7), -1)) || mode === "prev" : mode === c.k, () => pickMode(c.k)))}
+          {SALES_CHIPS.map(c => chip(c.k, c.label, c.k === "month" ? (mode === "month" && month === today.slice(0, 7)) : c.k === "prev" ? (mode === "month" && month === ymShift(today.slice(0, 7), -1)) || mode === "prev" : mode === c.k, (e) => { pickMode(c.k); if (c.k === "custom") openPicker("range", e); else setPicker(null); }))}
         </div>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 4px 0 10px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontWeight: 700, color: "var(--text3)", whiteSpace: "nowrap", flexShrink: 0 }}>
           비교
@@ -17020,12 +17205,13 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
           </select>
         </label>
         {mode === "custom" && (
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", maxWidth: "100%", fontSize: 12.5, color: "var(--text2)" }}>
-            <input type="date" value={custom.from || from} onChange={e => setCustomRange({ from: e.target.value })} style={{ height: 30, width: 136, minWidth: 0, padding: "0 6px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
-            ~
-            <input type="date" value={custom.to || to} onChange={e => setCustomRange({ to: e.target.value })} style={{ height: 30, width: 136, minWidth: 0, padding: "0 6px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontFamily: "inherit", fontSize: 12.5 }}/>
-          </div>
+          <button type="button" onClick={e => openPicker("range", e)} aria-haspopup="dialog" title="눌러서 기간 바꾸기"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, height: 32, padding: "0 12px", borderRadius: 9, border: picker && picker.view === "range" ? "1.5px solid #3182F6" : "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", maxWidth: "100%" }}>
+            <Icon name="calendar" size={14} style={{ color: "#3182F6" }}/>
+            {from.replace(/-/g, ".")} <span style={{ color: "var(--text3)" }}>→</span> {from.slice(0, 4) === to.slice(0, 4) ? to.slice(5).replace("-", ".") : to.replace(/-/g, ".")}
+          </button>
         )}
+        {picker && <SalesPeriodPicker anchor={picker.anchor} view={picker.view} month={month} from={from} to={to} onPickMonth={pickMonthTo} onPickRange={pickRangeTo} onClose={closePicker}/>}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {data && data.lastImport && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }} title={data.lastImport.fileName}><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: "#00B493", marginRight: 6, verticalAlign: "1px" }}/>마지막 업로드 {md(data.lastImport.at.slice(0, 10))} {data.lastImport.at.slice(11)} · {md(data.lastImport.from)}~{md(data.lastImport.to)}</span>}
           <button type="button" onClick={claudeRefresh} title="Claude 가 Chrome 으로 이카운트 판매조회를 읽어 최신 내역을 반영해요 (이카운트 로그인 필요)"
