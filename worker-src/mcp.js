@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-20-profit-mix", note: "추정 매출이익: 공급가 × 등급 비중(A50·B20·C20·D10) 마진" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-10-22-invoice-intake", note: "매입 현황: 명세서 찍어 입고 (/api/intake/ocr)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -498,6 +498,7 @@ async function toolGetSection(args, env) {
   // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
   if (section === "_ecount:probe") return textContent(await ecountProbe(env));
   if (section === "_ecount:status") return textContent(await ecountStatus(env));
+  if (section === "_ocr:status") return textContent({ 서버키: !!env.ANTHROPIC_API_KEY, 모델: env.OCR_MODEL || "claude-sonnet-5-5" });
   // 이카운트 판매현황(엑셀로 올린 것) — "_sales" (최근 30일) / "_sales:7" / "_sales:2026-10-01~2026-10-31"
   // 판매현황 「최신 내역 반영하기」 — 앱 버튼이 연 Claude 대화가 먼저 읽는 작업 안내 ("_sales:guide" 또는 "_sales:guide:YYYY-MM-DD~YYYY-MM-DD")
   if (section === "_sales:guide" || section.startsWith("_sales:guide:")) return textContent(await salesGuide(env, section.slice(13)));
