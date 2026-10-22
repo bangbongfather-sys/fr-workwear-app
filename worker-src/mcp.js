@@ -812,6 +812,9 @@ async function toolGetPricing(args, env) {
       등급단가: gradeMap(c),
       선택등급: c.selectedGrade,
     };
+    // 시장 소비자가(단가표 하단 판매가) — 앱 getMarketPrice 와 같게 활성 요척서 값, 없으면 제품 값. 비어 있으면 넣지 않는다
+    { const as = getActiveSpec(p), mv = as && as !== p && as.marketPrice !== undefined ? as.marketPrice : p.marketPrice;
+      const mp = parseFloat(String(mv ?? "").replace(/[^\d.]/g, "")); if (mp > 0) row.시장소비자가 = round(mp); }
     if (grade) row.단가 = c.grades[grade] != null ? round(c.grades[grade]) : null;
     if (args.allSpecs && Array.isArray(p.specs) && p.specs.length > 1) {
       row.다른요척서 = p.specs.filter((s) => s !== spec).map((s) => ({ 요척서: s.name, 등급단가: gradeMap(computeProduct(p, mats, labor, s)) }));
