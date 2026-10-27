@@ -141,3 +141,28 @@ export async function salesCadence(env, from, to) {
   const clients = [...cl.entries()].map(([name, m]) => ({ name, d: [...m.entries()].map(([d, t]) => [d, Math.round(t)]) }));
   return { from, to, coveredFrom, coveredTo, clients };
 }
+
+// 재주문 레이더 표시 — 「연락함」·「나중에」(그날까지 목록에서 숨김). 맥·집 PC·핸드폰이 같이 보게 서버에 둔다.
+//   /frw_reorder_marks/<거래처(fbEsc)> = { at:"YYYY-MM-DD HH:mm", kind:"contact"|"snooze", until?:"YYYY-MM-DD", note? }
+const MARKS_PATH = "/frw_reorder_marks";
+const markKey = (name) => encodeURIComponent(String(name).replace(/[.#$\[\]\/]/g, (c) => "~" + c.charCodeAt(0).toString(16).toUpperCase()));
+const markUnkey = (k) => String(k).replace(/~([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+export async function reorderMarks(env, body) {
+  const S = env.FIREBASE_DB_SECRET;
+  if (body) {
+    const name = str(body.client, 80);
+    if (!name) return { ok: false, error: "거래처가 없습니다" };
+    let val = null;
+    if (body.kind === "contact" || body.kind === "snooze") {
+      val = { at: kstNow(), kind: body.kind, note: str(body.note, 120) };
+      if (body.kind === "snooze") { if (!DAY.test(String(body.until || ""))) return { ok: false, error: "until 날짜가 필요합니다" }; val.until = body.until; }
+    }
+    const r = await fetch(url(`${MARKS_PATH}/${markKey(name)}`, S), { method: "PUT", body: JSON.stringify(val) });
+    if (!r.ok) return { ok: false, error: `저장 실패 (Firebase ${r.status})` };
+  }
+  const r = await fetch(url(MARKS_PATH, S));
+  const raw = r.ok ? (await r.json()) || {} : {};
+  const marks = {};
+  for (const [k, v] of Object.entries(raw)) if (v) marks[markUnkey(k)] = v;
+  return { ok: true, marks };
+}
