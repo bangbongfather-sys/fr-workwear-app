@@ -563,6 +563,16 @@ async function toolGetSection(args, env) {
   if (section.startsWith("_unpaid:")) return compact(await unpaidOf(env, section.slice(8)));
   // 공급처 미지급 정산(결제원장) — 매입 현황 자동 집계(VAT 포함) + 수동 매입 − 지급 = 미지급잔액
   if (section.startsWith("_payables:")) return compact(await payablesOf(env, section.slice(10)));
+  // 발주 이력 조회(캠퍼스 견적·발주 담당): _polist 또는 _polist:<공급처/품목 검색어> — 최근 발주일 순 30건, 품목·단가 포함(본문 제외)
+  if (section === "_polist" || section.startsWith("_polist:")) {
+    const q = section.slice(8).trim().toLowerCase().replace(/\s+/g, "");
+    const hit = (p) => !q || [p.supplier && p.supplier.name, p.title, ...asList(p.items).map((i) => i.name)].some((x) => String(x || "").toLowerCase().replace(/\s+/g, "").includes(q));
+    const pos = asList(await fbGet("/frw/purchaseOrders", env.FIREBASE_DB_SECRET)).filter(hit)
+      .sort((x, y) => String(y.orderDate || y.dateStr || "").localeCompare(String(x.orderDate || x.dateStr || ""))).slice(0, 30);
+    return compact(pos.map((p) => ({ id: p.id, 제목: p.title || "", 발주일: p.orderDate || p.dateStr || "", 납기: p.deliveryDate || "", 공급처: (p.supplier && p.supplier.name) || "",
+      품목: asList(p.items).map((i) => ({ 이름: i.name || "", 단위: i.unit || "", 수량: toNumber(i.qty), 단가: toNumber(i.unitPrice), 입고: i.receivedQty ?? "", 요청: i.memo || "" })),
+      합계: toNumber(p.totalAmount), 결제조건: p.paymentTerms || "", 납품장소: p.deliveryPlace || "", 메모: p.memo || "", 캠퍼스: !!p.fromCampus })));
+  }
   // 판매 현황(orders) — 캠퍼스 판매현황 창·AI 직원: 필터 + 제품별·거래처별·월별 합계 + 행 페이지 (+ names: 매칭용 제품·거래처 이름)
   if (section === "_orders" || section.startsWith("_orders:")) {
     let o = {}; if (section.length > 8) { try { o = JSON.parse(section.slice(8)); } catch { return errContent("_orders 인자 JSON 이 잘못됐습니다."); } }
@@ -1301,6 +1311,7 @@ async function toolCampusWrite(a, env) {
   if (op === "deposit_batch") return await toolDepositBatch(a, env);
   if (op === "tax_paid") return await toolMarkTaxPaid({ id: a.id, paidDate: a.paidDate ?? "" }, env);
   if (op === "quote_save") return await toolQuoteSave(a, env);
+  if (op === "po_save") return await toolPoSave(a, env);
   if (op === "stock_adjust") return await toolStockAdjust(a, env);
   if (op === "hr_payroll") return await toolHrPayroll(a, env);
   if (op === "hr_employee") return await toolHrEmployee(a, env);
@@ -1735,6 +1746,43 @@ async function toolQuoteSave(a, env) {
     const row = { id, title: title || products.map((p) => p.name).join(", ") || "견적서", dateStr, timeStr, savedAt: Date.now(), status: "draft", quote, quoteClient: client, quoteStyle: String(a.style || "apple"), products, fromCampus: true, campusToken: token };
     const apply = (dd) => { if (Array.isArray(dd) || dd == null) { const x = [...(dd || [])]; x[Number(key)] = row; return x; } return { ...dd, [key]: row }; };
     return { patch: { [key]: row }, apply, check: (dd) => list(dd).some(([, r]) => r.campusToken === token), result: { 결과: "견적 이력에 저장", id, 제목: row.title, 거래처: client, 품목수: products.length } };
+  }, env);
+  return plan.isError ? plan : textContent(plan.result);
+}
+
+// 캠퍼스 견적·발주 담당 → 발주 관리 이력(purchaseOrders)에 앱 savePOToHistory 와 같은 모양으로 추가.
+// 공급처 정보는 공급처 목록(suppliers)에서 이름으로 찾아 채운다. 앱 목록은 발주일 순 정렬이라 끝에 붙여도 된다.
+async function toolPoSave(a, env) {
+  const token = String(a.token || `${Date.now()}`).slice(0, 64);
+  const body = String(a.body || "").trim();
+  if (!body) return errContent("발주서 본문(body)이 필요합니다.");
+  const items = (Array.isArray(a.items) ? a.items : []).slice(0, 60).map((it) => ({ name: String(it.name || "").trim().slice(0, 80), unit: String(it.unit || "").slice(0, 30), qty: toNumber(it.qty), unitPrice: toNumber(it.unitPrice), memo: String(it.memo || "").slice(0, 120) })).filter((it) => it.name && it.qty > 0);
+  if (!items.length) return errContent("품목(이름·수량)이 하나 이상 필요합니다.");
+  const supName = String(a.supplier || "").trim().slice(0, 80);
+  if (!supName) return errContent("공급처(supplier)가 필요합니다.");
+  const sups = asList(await fbGet("/frw/suppliers", env.FIREBASE_DB_SECRET));
+  const norm = (n) => String(n || "").trim().toLowerCase().replace(/\s+/g, "");
+  const found = sups.find((s) => norm(s.name) === norm(supName));
+  const supplier = found ? { name: found.name || "", contact: found.contact || "", phone: found.phone || "", email: found.email || "", address: found.address || "", paymentTerms: found.paymentTerms || "" } : { name: supName, contact: "", phone: "", email: "", address: "", paymentTerms: "" };
+  const subtotal = items.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+  const now = new Date(Date.now() + 9 * 3600 * 1000);
+  const ymd = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
+  const dateStr = ymd.replaceAll("-", ".");
+  const timeStr = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
+  const orderDate = isRealDate(String(a.orderDate || "")) ? String(a.orderDate) : ymd;
+  const deliveryDate = isRealDate(String(a.deliveryDate || "")) ? String(a.deliveryDate) : "";
+  const title = String(a.title || "").trim().slice(0, 120) || `${supplier.name} - ${items.map((it) => it.name).slice(0, 2).join(", ")}${items.length > 2 ? " 외" : ""}`;
+  const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
+  const plan = await safeSectionWrite("purchaseOrders", (d) => {
+    const dup = list(d).find(([, r]) => r.campusToken === token);
+    if (dup) return { done: true, result: { 결과: "이미 저장됨", id: dup[1].id } };
+    const key = Array.isArray(d) || d == null ? String(d ? d.length : 0) : `c${Date.now()}`;
+    const ids = new Set(list(d).map(([, r]) => String(r.id))); let id = `po${Date.now().toString(36)}`; while (ids.has(id)) id += "x";
+    const row = { id, title, dateStr, timeStr, savedAt: Date.now(), supplier, items, photos: [], orderDate, deliveryDate,
+      paymentTerms: String(a.paymentTerms || "").slice(0, 80), deliveryPlace: String(a.deliveryPlace || "").slice(0, 120), memo: String(a.memo || "").slice(0, 1000),
+      body, poStyle: String(a.style || "apple"), officialTerms: {}, totalAmount: subtotal + Math.round(subtotal * 0.1), fromCampus: true, campusToken: token };
+    const apply = (dd) => { if (Array.isArray(dd) || dd == null) { const x = [...(dd || [])]; x[Number(key)] = row; return x; } return { ...dd, [key]: row }; };
+    return { patch: { [key]: row }, apply, check: (dd) => list(dd).some(([, r]) => r.campusToken === token), result: { 결과: "발주 이력에 저장", id, 제목: title, 공급처: supplier.name, 공급처목록에있음: !!found, 품목수: items.length, 합계: row.totalAmount, 되돌리기: "회사앱 발주 관리 → 발주 이력에서 이 건 삭제" } };
   }, env);
   return plan.isError ? plan : textContent(plan.result);
 }
