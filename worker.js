@@ -23,7 +23,7 @@ import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
-import { salesImport, salesSummary } from "./worker-src/sales.js";
+import { salesImport, salesSummary, salesCadence, reorderMarks } from "./worker-src/sales.js";
 import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
@@ -232,6 +232,22 @@ export default {
     if (url.pathname === "/api/sales/import" && request.method === "POST") {
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await salesImport(env, b)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    // 거래처 주문 주기 — 재주문 레이더 (?from&to, 기본 최근 2년)
+    if (url.pathname === "/api/sales/cadence") {
+      const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+      const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+      const from = ok(url.searchParams.get("from")) ? url.searchParams.get("from") : `${Number(today.slice(0, 4)) - 2}${today.slice(4)}`;
+      const to = ok(url.searchParams.get("to")) ? url.searchParams.get("to") : today;
+      try { return new Response(JSON.stringify(await salesCadence(env, from, to)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    // 재주문 레이더 표시 — GET: 전체 / POST {client, kind:"contact"|"snooze"|null, until?}
+    if (url.pathname === "/api/sales/marks") {
+      let b = null;
+      if (request.method === "POST") { try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); } }
+      try { return new Response(JSON.stringify(await reorderMarks(env, b)), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
     }
     if (url.pathname === "/api/sales") {

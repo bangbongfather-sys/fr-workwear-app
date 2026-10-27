@@ -1524,6 +1524,10 @@ const ICON_PATHS = {
   film:       <><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></>,
   music:      <><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></>,
   paperclip:  <><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></>,
+  phone:      <><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></>,
+  message:    <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></>,
+  radar:      <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><line x1="12" y1="12" x2="18.4" y2="5.6"/><circle cx="12" cy="12" r="1"/></>,
+  command:    <><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></>,
 };
 function Icon({ name, size = 18, strokeWidth = 1.7, style, className }) {
   const path = ICON_PATHS[name];
@@ -16244,7 +16248,7 @@ const kstTodayYmd = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(
 const ymMonthEnd = (ym) => { const [y, m] = ym.split("-").map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`; };
 const ymShift = (ym, n) => { const [y, m] = ym.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return d.toISOString().slice(0, 7); };
 const SALES_CHIPS = [{ k: "today", label: "오늘" }, { k: "7", label: "7일" }, { k: "month", label: "이번 달" }, { k: "prev", label: "지난 달" }, { k: "year", label: "올해" }, { k: "custom", label: "기간 지정" }];
-const SALES_SUBTABS = { summary: { label: "요약", icon: "dashboard" }, calendar: { label: "달력", icon: "calendar" }, clients: { label: "거래처", icon: "clients" }, slips: { label: "전표", icon: "document" } };
+const SALES_SUBTABS = { summary: { label: "요약", icon: "dashboard" }, calendar: { label: "달력", icon: "calendar" }, clients: { label: "거래처", icon: "clients" }, slips: { label: "전표", icon: "document" }, radar: { label: "재주문", icon: "radar" } };
 function salesRangeOf(mode, month, custom) {
   const today = kstTodayYmd();
   if (mode === "month") return [`${month}-01`, ymMonthEnd(month)];
@@ -16448,10 +16452,459 @@ function SalesPeriodPicker({ anchor, view: view0 = "month", month, from, to, onP
   const left = Math.max(12, Math.min(r.left, vw - estW - 12));
   return ReactDOM.createPortal(<div style={{ position: "fixed", zIndex: 400, top: r.bottom + 8, left }}>{body}</div>, document.body);
 }
-function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
+// ─── 재주문 레이더 ───
+// 판매 현황(2년치)에서 거래처마다 「평소 주문 간격」을 배워, 그 간격보다 많이 늦어진 곳 · 곧 주문할 때가 된 곳 · 끊긴 곳을 나눈다.
+//  - 3일 안에 이어진 주문은 한 번으로 친다(나눠 출고). 주문 3번 미만은 주기를 몰라 「전체」에만 나온다.
+//  - 기준일 = 판매 데이터가 들어온 마지막 날(아직 안 올린 날을 「주문 없음」으로 세지 않게).
+//  - 「연락함」·「나중에」 표시는 서버(/api/sales/marks)에 둬서 맥·집 PC·핸드폰이 같이 본다.
+const radarMd = (d) => String(d || "").slice(5).replace("-", "/");
+const radarWon = (n) => { const t = manWon(n); return t.endsWith("원") ? t : t + "원"; };
+const ymdDiff = (a, b) => Math.round((Date.parse(a) - Date.parse(b)) / 86400e3);
+const quantile = (arr, q) => { if (!arr.length) return 0; const s = [...arr].sort((x, y) => x - y); const i = (s.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i); return s[lo] + (s[hi] - s[lo]) * (i - lo); };
+const RADAR_STATUS = {
+  late: { label: "늦어짐", color: "#F04452", bg: "rgba(240,68,82,0.12)" },
+  due:  { label: "곧 주문", color: "#E8890C", bg: "rgba(232,137,12,0.13)" },
+  ok:   { label: "정상", color: "#00A37A", bg: "rgba(0,163,122,0.12)" },
+  lost: { label: "끊김", color: "#8B95A1", bg: "rgba(139,149,161,0.16)" },
+  few:  { label: "주문 적음", color: "#8B95A1", bg: "rgba(139,149,161,0.12)" },
+};
+function reorderAnalyze(cad, today) {
+  const asOf = cad && cad.coveredTo && cad.coveredTo < today ? cad.coveredTo : today;
+  const out = [];
+  for (const c of (cad && cad.clients) || []) {
+    const days = (c.d || []).filter(([d]) => d <= asOf).sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    if (!days.length) continue;
+    const orders = [];
+    for (const [d, t] of days) {
+      const last = orders[orders.length - 1];
+      if (last && ymdDiff(d, last.end) <= 3) { last.total += t; last.end = d; } else orders.push({ d, end: d, total: t });
+    }
+    const n = orders.length, lastO = orders[n - 1];
+    const since = ymdDiff(asOf, lastO.end);
+    const yearFrom = addDaysYmd(asOf, -365);
+    const yearValue = orders.filter(o => o.d > yearFrom).reduce((a, o) => a + o.total, 0);
+    const prevYearValue = orders.filter(o => o.d > addDaysYmd(lastO.end, -365)).reduce((a, o) => a + o.total, 0);   // 마지막 주문 전 1년 (끊긴 곳 크기)
+    const recent = orders.slice(-8);
+    const avg = recent.reduce((a, o) => a + o.total, 0) / recent.length;
+    const row = { name: c.name, orders, n, last: lastO.end, since, yearValue, prevYearValue, avg, asOf };
+    if (n < 3) { out.push({ ...row, status: "few", gap: null }); continue; }
+    const gaps = []; for (let i = Math.max(1, n - 12); i < n; i++) gaps.push(ymdDiff(orders[i].d, orders[i - 1].d));
+    const gap = Math.max(7, Math.round(quantile(gaps, 0.5)));
+    const p75 = Math.max(gap, Math.round(quantile(gaps, 0.75)));
+    const late = Math.max(Math.round(p75 * 1.2), Math.round(gap * 1.4), gap + 10);   // 이만큼 지나면 「늦어짐」
+    const irregular = gaps.length >= 3 && (quantile(gaps, 0.75) - quantile(gaps, 0.25)) > gap * 1.2;
+    const status = since > Math.max(gap * 3, 180) ? "lost" : since >= late ? "late" : since >= gap * 0.75 ? "due" : "ok";
+    out.push({ ...row, status, gap, late, irregular, expected: addDaysYmd(lastO.end, gap), over: since - gap });
+  }
+  return { asOf, rows: out };
+}
+
+function ReorderTimeline({ orders, asOf, color }) {
+  // 최근 1년 주문을 점으로 (크기 = 금액)
+  const from = addDaysYmd(asOf, -365);
+  const list = orders.filter(o => o.end > from);
+  const max = Math.max(1, ...list.map(o => o.total));
+  return (
+    <svg viewBox="0 0 365 20" preserveAspectRatio="none" style={{ width: "100%", height: 20, display: "block" }} aria-hidden="true">
+      <line x1="0" y1="10" x2="365" y2="10" stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>
+      {[90, 181, 273].map(x => <line key={x} x1={x} y1="6" x2={x} y2="14" stroke="var(--border)" strokeWidth="1" vectorEffect="non-scaling-stroke"/>)}
+      {list.map((o, i) => { const x = Math.max(2, Math.min(363, 365 - ymdDiff(asOf, o.end))); const r = 2 + 4 * Math.sqrt(o.total / max);
+        return <ellipse key={i} cx={x} cy="10" rx={r * 0.9} ry={r} fill={color} opacity="0.85"><title>{`${o.end} · ${o.total.toLocaleString()}원`}</title></ellipse>; })}
+    </svg>
+  );
+}
+
+function ReorderRadar({ darkMode = false, clientsDb = [], onOpenClient, compact = false }) {
+  const today = kstTodayYmd();
+  const [cad, setCad] = useState(null);
+  const [marks, setMarks] = useState({});
+  const [err, setErr] = useState("");
+  const [filter, setFilter] = useState(() => { try { return localStorage.getItem("frw_radar_filter") || "late"; } catch { return "late"; } });
+  const [q, setQ] = useState("");
+  const [menu, setMenu] = useState(null);       // 「나중에」 고르는 거래처
+  const [limit, setLimit] = useState(30);
+  const load = useCallback(() => {
+    setErr("");
+    fetch("/api/sales/cadence", { cache: "no-store" }).then(r => r.json()).then(j => { if (j.error) setErr(j.error); else setCad(j); }).catch(() => setErr("불러오지 못했어요"));
+    fetch("/api/sales/marks", { cache: "no-store" }).then(r => r.json()).then(j => { if (j && j.marks) setMarks(j.marks); }).catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const pickFilter = (k) => { setFilter(k); setLimit(30); try { localStorage.setItem("frw_radar_filter", k); } catch {} };
+  const mark = async (name, kind, until) => {
+    const prevMarks = marks;
+    setMarks(m => { const n = { ...m }; if (kind) n[name] = { kind, until, at: `${today} ${new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 16)}` }; else delete n[name]; return n; });
+    setMenu(null);
+    try {
+      const j = await (await fetch("/api/sales/marks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client: name, kind, until }) })).json();
+      if (!j.ok) throw new Error(j.error || "저장 실패");
+      setMarks(j.marks || {});
+      showToast(kind === "contact" ? `${name} — 연락함으로 표시했어요` : kind === "snooze" ? `${name} — ${radarMd(until)}까지 숨겨요` : `${name} — 표시를 지웠어요`, "success");
+    } catch (e) { setMarks(prevMarks); showToast(`저장하지 못했어요: ${e.message}`, "error"); }
+  };
+
+  const { asOf, rows } = React.useMemo(() => reorderAnalyze(cad, today), [cad, today]);
+  const phoneOf = (name) => { const c = (clientsDb || []).find(x => x && x.name && payablesNameMatch(x.name, name)); return c ? { phone: String(c.phone || "").replace(/[^\d+]/g, ""), contact: c.contact || "" } : null; };
+  const markOf = (r) => {
+    const m = marks[r.name]; if (!m) return null;
+    if (m.kind === "snooze") return m.until >= today ? m : null;
+    if (m.kind === "contact") return (m.at || "").slice(0, 10) >= r.last ? m : null;   // 그 뒤로 주문이 들어왔으면 지난 표시
+    return null;
+  };
+  const hidden = (r) => { const m = markOf(r); return m && m.kind === "snooze"; };
+  const by = (st) => rows.filter(r => r.status === st && !hidden(r));
+  const late = by("late"), due = by("due"), lost = by("lost");
+  const snoozed = rows.filter(hidden);
+  const contacted = (r) => { const m = markOf(r); return m && m.kind === "contact"; };
+  const sortLate = (a, b) => (contacted(a) - contacted(b)) || (b.yearValue - a.yearValue) || (b.over - a.over);
+  let list = filter === "late" ? [...late].sort(sortLate)
+    : filter === "due" ? [...due].sort((a, b) => a.expected < b.expected ? -1 : 1)
+    : filter === "lost" ? [...lost].sort((a, b) => b.prevYearValue - a.prevYearValue)
+    : filter === "snoozed" ? [...snoozed].sort((a, b) => a.name.localeCompare(b.name, "ko"))
+    : [...rows].sort((a, b) => b.yearValue - a.yearValue);
+  if (q.trim()) list = list.filter(r => searchScore(q.trim(), [r.name]) > 0);
+  const lateValue = late.reduce((a, r) => a + r.avg, 0);
+  const lostValue = lost.reduce((a, r) => a + r.prevYearValue, 0);
+
+  if (err) return <div className="card" style={{ color: "var(--warning-text)", fontSize: 13 }}>재주문 레이더를 불러오지 못했어요 — {err} <button type="button" onClick={load} style={{ marginLeft: 8 }}>다시</button></div>;
+  if (!cad) return <div className="card" style={{ color: "var(--text3)", fontSize: 13 }}>거래처 주문 주기를 계산하는 중…</div>;
+
+  const smsBody = (name, contact) => `안녕하세요${contact ? ` ${contact}님` : ""}, NJ SAFETY입니다. ${name}에 근무복 추가로 필요하신 부분이나 재고 확인 필요하시면 편하게 말씀 주세요. 감사합니다.`;
+  const tile = (k, label, n, sub, st) => (
+    <button type="button" onClick={() => pickFilter(k)}
+      style={{ flex: compact ? "1 1 0" : "1 1 180px", minWidth: 0, textAlign: "left", padding: compact ? "10px 10px" : "14px 16px", borderRadius: 14, cursor: "pointer", fontFamily: "inherit",
+        border: filter === k ? `2px solid ${RADAR_STATUS[st].color}` : "1px solid var(--border)", background: filter === k ? RADAR_STATUS[st].bg : "var(--surface)" }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: RADAR_STATUS[st].color, display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 4, background: RADAR_STATUS[st].color }}/>{label}
+      </div>
+      <div style={{ fontSize: compact ? 22 : 26, fontWeight: 800, color: "var(--text1)", marginTop: 4, fontVariantNumeric: "tabular-nums" }}>{n}<span style={{ fontSize: 14, fontWeight: 700, marginLeft: 2 }}>곳</span></div>
+      {!compact && <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div>}
+    </button>
+  );
+  const actBtn = (label, icon, onClick, href, title) => {
+    const st = { display: "inline-flex", alignItems: "center", gap: 5, height: 30, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", textDecoration: "none" };
+    return href ? <a href={href} onClick={onClick} title={title} style={st}><Icon name={icon} size={13}/>{label}</a>
+                : <button type="button" onClick={onClick} title={title} style={st}><Icon name={icon} size={13}/>{label}</button>;
+  };
+
+  const rowView = (r) => {
+    const S = RADAR_STATUS[r.status];
+    const m = markOf(r);
+    const ph = phoneOf(r.name);
+    const pct = r.gap ? Math.min(100, (r.since / Math.max(r.late || r.gap, r.since, 1)) * 100) : 0;
+    const gapPct = r.gap ? (r.gap / Math.max(r.late || r.gap, r.since, 1)) * 100 : 0;
+    return (
+      <div key={r.name} style={{ padding: "14px 0", borderTop: "1px solid var(--border)", display: "grid", gridTemplateColumns: compact ? "1fr" : "minmax(0, 1.4fr) minmax(0, 1fr) 316px", gap: compact ? 8 : 18, alignItems: "center" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <button type="button" onClick={() => onOpenClient && onOpenClient(r.name)} title="이 거래처 매출 보기"
+              style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: 14.5, fontWeight: 800, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{r.name}</button>
+            <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 999, color: S.color, background: S.bg }}>{S.label}{r.status === "late" && r.over > 0 ? ` +${r.over}일` : ""}</span>
+            {m && <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, color: "var(--text2)", background: "var(--surface2)" }}>{m.kind === "contact" ? `✓ ${radarMd(m.at.slice(0, 10))} 연락함` : `⏰ ${radarMd(m.until)}까지 숨김`}</span>}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 4, lineHeight: 1.5 }}>
+            {r.gap ? <>보통 <b style={{ color: "var(--text1)" }}>{r.gap}일</b>마다{r.irregular ? " (들쭉날쭉)" : ""} · </> : <>주문 {r.n}번뿐이라 주기 모름 · </>}
+            마지막 {radarMd(r.last)} · <b style={{ color: r.status === "late" || r.status === "lost" ? S.color : "var(--text1)" }}>{r.since}일째</b>
+            {r.status === "due" && <> · 예상 {radarMd(r.expected)}</>}
+          </div>
+          {r.gap && (
+            <div style={{ position: "relative", height: 6, borderRadius: 3, background: "var(--surface2)", marginTop: 8, overflow: "hidden" }}>
+              <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, borderRadius: 3, background: S.color, opacity: 0.85 }}/>
+              <div title={`평소 간격 ${r.gap}일`} style={{ position: "absolute", left: `calc(${gapPct}% - 1px)`, top: -2, bottom: -2, width: 2, background: "var(--text1)", opacity: 0.55 }}/>
+            </div>
+          )}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <ReorderTimeline orders={r.orders} asOf={r.asOf} color={S.color}/>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "var(--text3)", marginTop: 3, gap: 8 }}>
+            <span style={{ whiteSpace: "nowrap" }}>1회 평균 <b style={{ color: "var(--text1)" }}>{radarWon(r.avg)}</b></span>
+            <span style={{ whiteSpace: "nowrap" }}>{r.status === "lost" ? "끊기기 전 1년" : "최근 1년"} <b style={{ color: "var(--text1)" }}>{radarWon(r.status === "lost" ? r.prevYearValue : r.yearValue)}</b></span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: compact ? "flex-start" : "flex-end", position: "relative" }}>
+          {ph && ph.phone && actBtn("전화", "phone", null, `tel:${ph.phone}`, `${ph.contact || ""} ${ph.phone}`.trim())}
+          {ph && ph.phone && actBtn("문자", "message", () => { try { navigator.clipboard.writeText(smsBody(r.name, ph.contact)); } catch {} }, `sms:${ph.phone}?body=${encodeURIComponent(smsBody(r.name, ph.contact))}`, "안부 문자 (문구도 복사돼요)")}
+          {(!m || m.kind !== "contact") && actBtn("연락함", "check", () => mark(r.name, "contact"), null, "연락했다고 표시 — 목록 아래로 내려가요")}
+          {m ? actBtn("표시 지우기", "close", () => mark(r.name, null)) : actBtn("나중에", "clock", () => setMenu(menu === r.name ? null : r.name), null, "정한 날까지 목록에서 숨겨요")}
+          {menu === r.name && (
+            <div style={{ position: "absolute", right: 0, top: 36, zIndex: 20, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, boxShadow: "var(--elev-4)", padding: 6, display: "flex", flexDirection: "column", minWidth: 150 }}>
+              {[[7, "1주 뒤에 다시"], [14, "2주 뒤에 다시"], [30, "한 달 뒤에 다시"], [90, "3달 뒤에 다시"]].map(([d, l]) => (
+                <button key={d} type="button" onClick={() => mark(r.name, "snooze", addDaysYmd(today, d))}
+                  style={{ textAlign: "left", padding: "8px 10px", border: "none", borderRadius: 8, background: "transparent", color: "var(--text1)", fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>{l} <span style={{ color: "var(--text3)" }}>· {radarMd(addDaysYmd(today, d))}</span></button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", gap: compact ? 6 : 10, flexWrap: compact ? "nowrap" : "wrap" }}>
+        {tile("late", "늦어짐", late.length, late.length ? `한 번씩만 들어와도 ${radarWon(lateValue)}` : "늦어진 곳이 없어요", "late")}
+        {tile("due", "곧 주문할 때", due.length, "평소 간격이 거의 다 됐어요", "due")}
+        {tile("lost", "끊김", lost.length, lost.length ? `끊기기 전 1년 ${radarWon(lostValue)}` : "끊긴 곳이 없어요", "lost")}
+      </div>
+      <div className="card" style={{ padding: compact ? 14 : 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+          <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--surface2)", borderRadius: 10 }}>
+            {[["late", `늦어짐 ${late.length}`], ["due", `곧 주문 ${due.length}`], ["lost", `끊김 ${lost.length}`], ["all", "전체"], ...(snoozed.length ? [["snoozed", `숨김 ${snoozed.length}`]] : [])].map(([k, l]) => (
+              <button key={k} type="button" onClick={() => pickFilter(k)}
+                style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap",
+                  background: filter === k ? "var(--surface)" : "transparent", color: filter === k ? "var(--text1)" : "var(--text3)", boxShadow: filter === k ? "0 1px 3px rgba(0,0,0,0.1)" : "none" }}>{l}</button>
+            ))}
+          </div>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="거래처 찾기" aria-label="거래처 찾기"
+            style={{ height: 34, width: 160, maxWidth: "100%", padding: "0 10px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontFamily: "inherit" }}/>
+          <span style={{ marginLeft: "auto", fontSize: 11.5, color: "var(--text3)" }} title="판매 데이터가 들어온 마지막 날을 기준으로 세요 — 아직 안 올린 날을 「주문 없음」으로 세지 않게">기준일 {radarMd(asOf)}{asOf < today ? " (판매 데이터 마지막 날)" : ""}</span>
+        </div>
+        {list.length === 0 ? (
+          <div style={{ padding: "26px 0 10px", textAlign: "center", color: "var(--text3)", fontSize: 13 }}>
+            {filter === "late" ? "🎉 늦어진 거래처가 없어요" : q ? "찾는 거래처가 없어요" : "해당하는 거래처가 없어요"}
+          </div>
+        ) : (
+          <>
+            {list.slice(0, limit).map(rowView)}
+            {list.length > limit && <button type="button" onClick={() => setLimit(n => n + 50)} style={{ width: "100%", marginTop: 8, padding: "9px 0", border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>나머지 {list.length - limit}곳 더 보기</button>}
+          </>
+        )}
+        <div style={{ marginTop: 12, fontSize: 11.5, color: "var(--text3)", lineHeight: 1.6 }}>
+          최근 2년 판매 현황에서 거래처마다 평소 주문 간격(가운데 값)을 계산해요. 3일 안에 이어진 출고는 한 번으로 치고, 주문 3번 미만인 곳은 「전체」에만 보여요. 막대의 세로선이 평소 간격이에요.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ⌘K 명령창 ───
+// Ctrl/⌘+K (또는 입력칸 밖에서 「/」) 로 연다. 한 칸에 말로 쓰면:
+//  ① 답 — 「가나산공 지난달 매출」「작년 10월 매출」「늦어진 거래처」 → 판매 현황 데이터로 바로 숫자
+//  ② 바로가기 — 탭 이동 · 새 견적 · 다크 모드 · 재고 새로고침 같은 동작
+//  ③ 검색 — 통합 검색과 같은 결과
+//  ④ Claude 에게 묻기 — 위에서 못 하는 건 claude.ai(NJ_SAFETY 커넥터)로 넘긴다 (구독 안, 추가 비용 없음)
+const CMDK_RECENT_KEY = "frw_cmdk_recent";
+const CMDK_EXAMPLES = ["이번 달 매출", "지난달 매출", "작년 10월 매출", "늦어진 거래처", "재고 새로고침", "새 견적"];
+const CMDK_SALES_WORDS = /(매출|판매|실적|얼마|전표|팔았|주문액|매상)/;
+// 말 속의 기간 → { from, to, month?, label, text(기간을 뺀 나머지) }
+function cmdkParsePeriod(q, today) {
+  const y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
+  const pad = (n) => String(n).padStart(2, "0");
+  const monthOf = (yy, mm) => { const ym = `${yy}-${pad(mm)}`; return { from: `${ym}-01`, to: ymMonthEnd(ym), month: ym, label: `${yy}년 ${mm}월` }; };
+  const mondayOf = (d) => addDaysYmd(d, -((ymdDow(d) + 6) % 7));
+  const rules = [
+    [/(\d{4})\s*년\s*(\d{1,2})\s*월/, (g) => monthOf(+g[1], +g[2])],
+    [/(재작년)\s*(\d{1,2})\s*월/, (g) => monthOf(y - 2, +g[2])],
+    [/(작년|지난\s*해|전년)\s*(\d{1,2})\s*월/, (g) => monthOf(y - 1, +g[2])],
+    [/(?:올해|금년|이번\s*해)?\s*(\d{1,2})\s*월/, (g) => +g[1] >= 1 && +g[1] <= 12 ? monthOf(+g[1] > m ? y - 1 : y, +g[1]) : null],
+    [/(\d{4})\s*년/, (g) => ({ from: `${g[1]}-01-01`, to: `${g[1]}-12-31`, label: `${g[1]}년` })],
+    [/(?:(올해|금년|작년|지난\s*해)\s*)?([1-4])\s*분기/, (g) => { const yy = g[1] && /작년|지난/.test(g[1]) ? y - 1 : y; const qn = +g[2]; return { from: `${yy}-${pad(qn * 3 - 2)}-01`, to: ymMonthEnd(`${yy}-${pad(qn * 3)}`), label: `${yy}년 ${qn}분기` }; }],
+    [/(?:(올해|금년|작년|지난\s*해)\s*)?(상반기|하반기)/, (g) => { const yy = g[1] && /작년|지난/.test(g[1]) ? y - 1 : y; return g[2] === "상반기" ? { from: `${yy}-01-01`, to: `${yy}-06-30`, label: `${yy}년 상반기` } : { from: `${yy}-07-01`, to: `${yy}-12-31`, label: `${yy}년 하반기` }; }],
+    [/오늘/, () => ({ from: today, to: today, label: "오늘" })],
+    [/그저께|그제/, () => { const d = addDaysYmd(today, -2); return { from: d, to: d, label: "그저께" }; }],
+    [/어제/, () => { const d = addDaysYmd(today, -1); return { from: d, to: d, label: "어제" }; }],
+    [/이번\s*주|금주/, () => ({ from: mondayOf(today), to: today, label: "이번 주" })],
+    [/지난\s*주|저번\s*주/, () => { const mo = addDaysYmd(mondayOf(today), -7); return { from: mo, to: addDaysYmd(mo, 6), label: "지난주" }; }],
+    [/이번\s*달|이달|금월/, () => monthOf(y, m)],
+    [/지난\s*달|저번\s*달|전월|지난달/, () => { const ym = ymShift(today.slice(0, 7), -1); return monthOf(+ym.slice(0, 4), +ym.slice(5)); }],
+    [/최근\s*(\d+)\s*(일|주|개월|달|년)/, (g) => { const n = +g[1]; const days = g[2] === "일" ? n : g[2] === "주" ? n * 7 : g[2] === "년" ? n * 365 : n * 30; return { from: addDaysYmd(today, -(days - 1)), to: today, label: `최근 ${n}${g[2]}` }; }],
+    [/재작년/, () => ({ from: `${y - 2}-01-01`, to: `${y - 2}-12-31`, label: `${y - 2}년` })],
+    [/작년|지난\s*해|전년/, () => ({ from: `${y - 1}-01-01`, to: `${y - 1}-12-31`, label: `${y - 1}년` })],
+    [/올해|금년/, () => ({ from: `${y}-01-01`, to: today, label: `${y}년` })],
+  ];
+  for (const [re, fn] of rules) {
+    const g = q.match(re); if (!g) continue;
+    const p = fn(g); if (!p) continue;
+    return { ...p, text: q.replace(g[0], " ") };
+  }
+  return null;
+}
+function cmdkParseSales(q, today) {
+  const per = cmdkParsePeriod(q, today);
+  const asks = CMDK_SALES_WORDS.test(q);
+  if (!per && !asks) return null;
+  const rest = (per ? per.text : q)
+    .replace(/(매출액|매출|판매액|판매|실적|얼마야|얼마|전표|팔았어|팔았나|팔았지|주문액|매상|합계|총액|총|금액|알려\s*줘|보여\s*줘|어때|어땠어|좀|현황|\?|!)/g, " ")
+    .replace(/(의|은|는|이|가|에서|에|랑|하고)(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+  return { ...(per || { from: `${today.slice(0, 7)}-01`, to: ymMonthEnd(today.slice(0, 7)), month: today.slice(0, 7), label: "이번 달", text: q, auto: true }), client: rest };
+}
+
+const _cmdkCache = new Map();
+const cmdkGet = (url) => { if (!_cmdkCache.has(url)) _cmdkCache.set(url, fetch(url, { cache: "no-store" }).then(r => r.json()).catch(() => null)); return _cmdkCache.get(url); };
+
+function CommandPalette({ onClose, tabs, onNav, commands, search }) {
+  const today = kstTodayYmd();
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  const [ans, setAns] = useState(null);          // { key, loading, ... }
+  const [cad, setCad] = useState(null);
+  const [recent, setRecent] = useState(() => { try { return JSON.parse(localStorage.getItem(CMDK_RECENT_KEY) || "[]"); } catch { return []; } });
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+  const keyNav = useRef(false);
+  useEffect(() => { setTimeout(() => inputRef.current && inputRef.current.focus(), 20); _cmdkCache.clear(); cmdkGet("/api/sales/cadence").then(j => j && !j.error && setCad(reorderAnalyze(j, today))); }, []);
+  const remember = (item) => {
+    const rec = { id: item.id, title: item.title, icon: item.icon, q: item.fillQ || null };
+    const nx = [rec, ...recent.filter(r => r.id !== rec.id)].slice(0, 6);
+    setRecent(nx); try { localStorage.setItem(CMDK_RECENT_KEY, JSON.stringify(nx)); } catch {}
+  };
+  const run = (item) => { if (!item) return; if (item.fill) { setQ(item.fill); setSel(0); inputRef.current && inputRef.current.focus(); return; } remember(item); onClose(); setTimeout(() => item.run(), 0); };
+
+  // ── 답 (판매) ──
+  const qs = q.trim();
+  const sq = React.useMemo(() => (qs ? cmdkParseSales(qs, today) : null), [qs]);
+  const radarAsk = /(늦어진|늦은|끊긴|끊김|재주문|이탈|주문\s*안\s*한|안\s*산|레이더)/.test(qs);
+  useEffect(() => {
+    if (!sq || radarAsk) { setAns(null); return; }
+    const to = sq.to > today ? today : sq.to;
+    if (sq.from > today) { setAns(null); return; }
+    const key = `${sq.from}|${to}|${sq.client}`;
+    setAns(a => (a && a.key === key ? a : { key, loading: true }));
+    const shift = (d) => salesShiftYear(d, -1);
+    const t = setTimeout(() => {
+      Promise.all([cmdkGet(`/api/sales?from=${sq.from}&to=${to}`), cmdkGet(`/api/sales?from=${shift(sq.from)}&to=${shift(to)}`)]).then(([cur, prev]) => {
+        if (!cur || cur.error) { setAns({ key, error: true }); return; }
+        let name = null, total = cur.totals.total, count = cur.totals.slips || cur.totals.count, pTotal = prev && !prev.error ? prev.totals.total : null;
+        if (sq.client) {
+          const best = (cur.clients || []).map(c => ({ c, s: searchScore(sq.client, [c.name]) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s || b.c.total - a.c.total)[0];
+          if (!best) {
+            const known = cad && cad.rows.find(r => searchScore(sq.client, [r.name]) > 0);
+            if (!known) { setAns({ key, none: true }); return; }
+            name = known.name; total = 0; count = 0;
+          } else { name = best.c.name; total = best.c.total; count = best.c.count; }
+          const pc = prev && !prev.error ? (prev.clients || []).find(c => c.name === name) : null;
+          pTotal = prev && !prev.error ? (pc ? pc.total : 0) : null;
+        }
+        setAns({ key, name, total, count, pTotal, to, partial: sq.to > today });
+      });
+    }, 220);
+    return () => clearTimeout(t);
+  }, [sq && sq.from, sq && sq.to, sq && sq.client, radarAsk, cad]);
+
+  const items = [];   // { section, id, icon, title, sub, run, right? }
+  const navSales = (detail) => () => { window.__frwSalesNav = detail; onNav("sales"); setTimeout(() => window.dispatchEvent(new CustomEvent("frw:sales-nav")), 60); };
+  if (qs && radarAsk && cad) {
+    const late = cad.rows.filter(r => r.status === "late").sort((a, b) => b.yearValue - a.yearValue);
+    const lost = cad.rows.filter(r => r.status === "lost");
+    items.push({ section: "답", id: "ans:radar", icon: "radar", kind: "radar", late, lost, title: `늦어진 거래처 ${late.length}곳`, run: navSales({ sub: "radar" }) });
+  } else if (qs && sq && ans && !ans.none) {
+    items.push({ section: "답", id: "ans:sales", icon: "barChart", kind: "sales", sq, ans, title: `${ans.name || "전체"} · ${sq.label} 매출`,
+      run: navSales(ans.name ? { sub: "clients", client: ans.name, ...(sq.month ? { month: sq.month } : { from: sq.from, to: sq.to }) } : { sub: "summary", ...(sq.month ? { month: sq.month } : { from: sq.from, to: sq.to }) }) });
+  }
+  // ── 바로가기 ──
+  const allCmds = [...commands, ...tabs.map(([id, label, icon]) => ({ id: `tab:${id}`, icon, title: label, sub: "화면 열기", keys: id, run: () => onNav(id) }))];
+  if (qs) {
+    allCmds.map(c => ({ c, s: searchScore(qs, [c.title, c.keys || ""]) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 6)
+      .forEach(({ c }) => items.push({ section: "바로가기", ...c }));
+    // ── 검색 ──
+    (search(qs) || []).slice(0, 8).forEach((r, i) => items.push({ section: "검색", id: `gs:${r.type}:${r.title}:${i}`, icon: r.icon, title: r.title, sub: r.sub, tag: r.type, run: r.action }));
+    // ── Claude ──
+    items.push({ section: "Claude", id: "claude", icon: "sparkles", title: `Claude 에게 묻기 — “${qs}”`, sub: "앱 데이터(NJ_SAFETY 커넥터)를 보고 답해요 · 구독 안이라 추가 비용 없음",
+      run: () => { const p = `NJ SAFETY 회사 앱 데이터(NJ_SAFETY 커넥터)를 보고 답해줘: ${qs}`; try { navigator.clipboard.writeText(p); } catch {} window.open(`https://claude.ai/new?q=${encodeURIComponent(p)}`, "_blank", "noopener"); } });
+  } else {
+    recent.forEach(r => { const c = allCmds.find(x => x.id === r.id); if (c) items.push({ section: "최근", ...c }); });
+    CMDK_EXAMPLES.forEach(ex => items.push({ section: "이렇게 써 보세요", id: `ex:${ex}`, icon: "search", title: ex, fill: ex }));
+  }
+  const cur = Math.min(sel, Math.max(items.length - 1, 0));
+  useEffect(() => { setSel(0); }, [qs]);
+  useEffect(() => { if (!keyNav.current || !listRef.current) return; const el = listRef.current.querySelector(`[data-i="${cur}"]`); if (el) el.scrollIntoView({ block: "nearest" }); keyNav.current = false; }, [cur]);
+  const onKey = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); keyNav.current = true; setSel(s => Math.min(s + 1, items.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); keyNav.current = true; setSel(s => Math.max(s - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (e.nativeEvent.isComposing) return; run(items[cur]); }
+    else if (e.key === "Escape") { e.preventDefault(); onClose(); }
+  };
+
+  const won = (n) => `${Math.round(n || 0).toLocaleString()}원`;
+  const answerCard = (it, active) => {
+    if (it.kind === "radar") return (
+      <div style={{ padding: "14px 16px", borderRadius: 14, background: active ? "rgba(240,68,82,0.10)" : "var(--surface2)", border: `1px solid ${active ? "rgba(240,68,82,0.4)" : "transparent"}` }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#F04452", display: "flex", alignItems: "center", gap: 6 }}><Icon name="radar" size={14}/>재주문 레이더</div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)", marginTop: 4 }}>늦어진 거래처 {it.late.length}곳{it.lost.length ? <span style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700 }}> · 끊김 {it.lost.length}곳</span> : null}</div>
+        {it.late.slice(0, 3).map(r => <div key={r.name} style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 4 }}><b style={{ color: "var(--text1)" }}>{r.name}</b> — 보통 {r.gap}일마다, {r.since}일째 주문 없음</div>)}
+        <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>Enter — 재주문 레이더 열기</div>
+      </div>
+    );
+    const { sq, ans } = it;
+    const diff = ans.pTotal != null && ans.pTotal > 0 ? (ans.total - ans.pTotal) / ans.pTotal * 100 : null;
+    const cr = ans.name && cad ? cad.rows.find(r => r.name === ans.name) : null;
+    const S = cr && RADAR_STATUS[cr.status];
+    return (
+      <div style={{ padding: "14px 16px", borderRadius: 14, background: active ? "rgba(49,130,246,0.10)" : "var(--surface2)", border: `1px solid ${active ? "rgba(49,130,246,0.4)" : "transparent"}` }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#3182F6", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <Icon name="barChart" size={14}/>{ans.name || "전체 매출"} · {sq.label}{ans.partial ? ` (${radarMd(ans.to)}까지)` : ""}{sq.auto && sq.client ? "" : ""}
+        </div>
+        {ans.loading ? <div style={{ fontSize: 13, color: "var(--text3)", marginTop: 8 }}>계산하는 중…</div>
+        : ans.error ? <div style={{ fontSize: 13, color: "var(--text3)", marginTop: 8 }}>판매 현황을 불러오지 못했어요</div>
+        : <>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{radarWon(ans.total)}</span>
+            <span style={{ fontSize: 12, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{won(ans.total)} · 전표 {ans.count}건</span>
+          </div>
+          {ans.pTotal != null && <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 4 }}>
+            작년 같은 기간 {radarWon(ans.pTotal)}
+            {diff != null && <b style={{ marginLeft: 6, color: diff >= 0 ? "#00A37A" : "#F04452" }}>{diff >= 0 ? "▲" : "▼"} {Math.abs(diff).toFixed(0)}%</b>}
+          </div>}
+          {cr && <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, fontWeight: 800, padding: "1px 7px", borderRadius: 999, color: S.color, background: S.bg }}>{S.label}</span>
+            마지막 주문 {radarMd(cr.last)} ({cr.since}일 전){cr.gap ? ` · 보통 ${cr.gap}일마다` : ""}
+          </div>}
+          <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>Enter — 판매 현황에서 자세히 보기{sq.auto ? " · 기간을 같이 쓰면 그 기간으로 (예: 지난달, 작년 10월)" : ""}</div>
+        </>}
+      </div>
+    );
+  };
+
+  let lastSection = null;
+  const narrow = window.innerWidth < 640;
+  return ReactDOM.createPortal(
+    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(10,12,16,0.45)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", display: "flex", justifyContent: "center", alignItems: "flex-start", paddingTop: narrow ? 0 : "11vh", animation: "salesFade 0.15s ease-out" }}>
+      <div role="dialog" aria-label="명령창" style={{ width: narrow ? "100%" : "min(660px, calc(100vw - 32px))", maxHeight: narrow ? "100%" : "76vh", display: "flex", flexDirection: "column", background: "var(--surface)", border: narrow ? "none" : "1px solid var(--border)", borderRadius: narrow ? "0 0 20px 20px" : 18, boxShadow: "0 24px 70px rgba(0,0,0,0.35)", overflow: "hidden", animation: "salesPopIn 0.16s ease-out" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 58, borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <Icon name="search" size={18} style={{ color: "var(--text3)" }}/>
+          <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKey}
+            placeholder={narrow ? "말로 물어보기 — 「지난달 매출」" : "무엇이든 — 「가나산공 지난달 매출」 「늦어진 거래처」 「새 견적」"}
+            style={{ flex: 1, minWidth: 0, height: 56, border: "none", outline: "none", background: "transparent", color: "var(--text1)", fontSize: 16, fontFamily: "inherit", boxShadow: "none", padding: 0 }}/>
+          {q && <button type="button" onClick={() => { setQ(""); inputRef.current && inputRef.current.focus(); }} aria-label="지우기" style={{ width: 26, height: 26, borderRadius: 13, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={12}/></button>}
+          <button type="button" onClick={onClose} style={{ height: 24, padding: "0 7px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{narrow ? "닫기" : "Esc"}</button>
+        </div>
+        <div ref={listRef} style={{ overflowY: "auto", padding: "6px 8px 8px", flex: 1 }}>
+          {items.length === 0 && <div style={{ padding: 24, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>찾는 게 없어요</div>}
+          {items.map((it, i) => {
+            const head = it.section !== lastSection ? it.section : null; lastSection = it.section;
+            const active = i === cur;
+            return (
+              <React.Fragment key={it.id + i}>
+                {head && <div style={{ padding: "10px 10px 4px", fontSize: 11, fontWeight: 800, color: "var(--text3)", letterSpacing: 0.3 }}>{head}</div>}
+                <div data-i={i} onMouseMove={() => { if (sel !== i) setSel(i); }} onClick={() => run(it)} style={{ cursor: "pointer", borderRadius: 12 }}>
+                  {it.kind ? answerCard(it, active) : (
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "9px 10px", borderRadius: 10, background: active ? "var(--surface2)" : "transparent" }}>
+                      <span style={{ width: 30, height: 30, borderRadius: 8, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", background: it.section === "Claude" ? "rgba(219,107,46,0.14)" : "var(--surface2)", color: it.section === "Claude" ? "#DB6B2E" : "var(--text2)", border: active ? "1px solid var(--border)" : "1px solid transparent" }}><Icon name={it.icon || "search"} size={15}/></span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 650, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
+                        {it.sub && <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sub}</div>}
+                      </div>
+                      {it.tag && <span style={{ fontSize: 10.5, padding: "2px 7px", borderRadius: 5, background: "var(--surface2)", color: "var(--text2)", fontWeight: 700, flexShrink: 0 }}>{it.tag}</span>}
+                      {active && <span style={{ fontSize: 11, color: "var(--text3)", flexShrink: 0 }}>↵</span>}
+                    </div>
+                  )}
+                </div>
+              </React.Fragment>
+            );
+          })}
+        </div>
+        {!narrow && <div style={{ display: "flex", gap: 14, padding: "8px 16px", borderTop: "1px solid var(--border)", fontSize: 11, color: "var(--text3)", flexShrink: 0 }}>
+          <span>↑↓ 이동</span><span>↵ 실행</span><span>Esc 닫기</span><span style={{ marginLeft: "auto" }}>어디서든 {/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘K" : "Ctrl+K"}</span>
+        </div>}
+      </div>
+    </div>, document.body);
+}
+
+function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsDb = [] }) {
   const today = kstTodayYmd();
   const [subTab, setSubTab] = useState(() => { try { return localStorage.getItem("frw_sales_subtab") || "summary"; } catch { return "summary"; } });
-  const subOrder = useSubtabOrder("frw_sales_subtab_order", ["summary", "calendar", "clients", "slips"], "data-sales-sub");
+  const subOrder = useSubtabOrder("frw_sales_subtab_order", ["summary", "calendar", "clients", "slips", "radar"], "data-sales-sub");
   const [mode, setMode] = useState(() => { try { return localStorage.getItem("frw_sales_mode") || "month"; } catch { return "month"; } });
   const [month, setMonth] = useState(() => today.slice(0, 7));
   const [custom, setCustom] = useState(() => { try { return JSON.parse(localStorage.getItem("frw_sales_custom") || "null") || {}; } catch { return {}; } });
@@ -16526,6 +16979,21 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
   const pickMonthTo = (ym) => { setMonth(ym); setMode("month"); try { localStorage.setItem("frw_sales_mode", "month"); } catch {} };
   const pickRangeTo = (f, t) => { setCustomRange({ from: f, to: t }); setMode("custom"); try { localStorage.setItem("frw_sales_mode", "custom"); } catch {} };
   const setCustomRange = (patch) => { const nx = { ...custom, ...patch }; setCustom(nx); try { localStorage.setItem("frw_sales_custom", JSON.stringify(nx)); } catch {} };
+  // 레이더·⌘K 에서 거래처를 열면 — 최근 1년으로 넓혀 거래처 상세를 보여 준다
+  // ⌘K 명령창에서 넘어올 때 — { sub, month | from·to, client } (탭이 새로 열리면 window.__frwSalesNav, 열려 있으면 이벤트)
+  useEffect(() => {
+    const take = () => {
+      const d = window.__frwSalesNav; window.__frwSalesNav = null;
+      if (!d) return;
+      if (d.month) pickMonthTo(d.month); else if (d.from && d.to) pickRangeTo(d.from, d.to);
+      if (d.client) { setSelClient(d.client); setClientQ(""); }
+      if (d.sub) pickSub(d.sub);
+    };
+    take();
+    window.addEventListener("frw:sales-nav", take);
+    return () => window.removeEventListener("frw:sales-nav", take);
+  }, []);
+  const openClientYear = (name) => { pickRangeTo(addDaysYmd(today, -364), today); setSelClient(name); setClientQ(""); pickSub("clients"); try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {} };
 
   // ── 엑셀 ──
   const handleFile = async (file) => {
@@ -17183,6 +17651,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
 
       {/* 기간 · 업로드 (공통) */}
       <div className="card no-print" style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        {subTab !== "radar" && <>
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <button type="button" aria-label="이전 달" onClick={() => stepMonth(-1)} style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="arrowLeft" size={14}/></button>
           <button type="button" onClick={e => openPicker("month", e)} aria-haspopup="dialog" aria-expanded={!!picker} title="눌러서 다른 년·월로 이동"
@@ -17212,6 +17681,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
           </button>
         )}
         {picker && <SalesPeriodPicker anchor={picker.anchor} view={picker.view} month={month} from={from} to={to} onPickMonth={pickMonthTo} onPickRange={pickRangeTo} onClose={closePicker}/>}
+        </>}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {data && data.lastImport && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }} title={data.lastImport.fileName}><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: "#00B493", marginRight: 6, verticalAlign: "1px" }}/>마지막 업로드 {md(data.lastImport.at.slice(0, 10))} {data.lastImport.at.slice(11)} · {md(data.lastImport.from)}~{md(data.lastImport.to)}</span>}
           <button type="button" onClick={claudeRefresh} title="Claude 가 Chrome 으로 이카운트 판매조회를 읽어 최신 내역을 반영해요 (이카운트 로그인 필요)"
@@ -17239,7 +17709,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false }) {
       )}
       {parseErr && <div className="card" style={{ padding: "10px 14px", background: "rgba(240,68,82,0.08)", borderColor: "rgba(240,68,82,0.25)", fontSize: 12, color: "#F04452", fontWeight: 600 }}>⚠️ {parseErr}</div>}
 
-      {err ? <div className="card" style={{ fontSize: 12.5, color: "var(--negative-text)" }}>{err}</div>
+      {subTab === "radar" ? <ReorderRadar darkMode={darkMode} clientsDb={clientsDb} compact={narrow} onOpenClient={openClientYear}/>
+      : err ? <div className="card" style={{ fontSize: 12.5, color: "var(--negative-text)" }}>{err}</div>
       : !data ? <div className="card" style={{ fontSize: 12.5, color: "var(--text3)" }}>불러오는 중…</div>
       : subTab === "calendar" ? calendarView : subTab === "clients" ? clientsView : subTab === "slips" ? slipsView : summaryView}
     </div>
@@ -21760,6 +22231,19 @@ function App() {
   const gsKeyNavRef = useRef(false);        // 방향키 탐색 중일 때만 scrollIntoView (호버와 구분)
   const [gsMobileOpen, setGsMobileOpen] = useState(false); // 1024px 이하 — 검색 오버레이 열림
   useEffect(() => { setGsMobileOpen(false); }, [tab]);      // 검색 결과로 탭 이동하면 오버레이 닫기
+  // ⌘K 명령창 — Ctrl/⌘+K 어디서든, 입력칸 밖에서 「/」 (한글 자판이어도 e.code 로 잡는다)
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.code === "KeyK") { e.preventDefault(); setCmdkOpen(o => !o); return; }
+      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const t = e.target; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+        e.preventDefault(); setCmdkOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [bids, setBids] = useState(() => load("frw_bids", []));
   const [todos, setTodos] = useState(() => load("frw_todos", []));
   const [notes, setNotes] = useState(() => load("frw_notes", []));
@@ -23908,6 +24392,65 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     tabBorder: "rgba(219,107,46,0.1)", tabInactive: "rgba(15,15,26,0.4)",
   };
 
+  // 통합 검색 결과 — 헤더 검색창과 ⌘K 명령창이 같이 쓴다 (관련도순)
+  const gsBuild = (q) => {
+    const res = [];
+    // score 0이면 미매칭 → 스킵. 매칭 항목은 점수와 함께 수집 후 관련도순 정렬.
+    const push = (score, item) => { if (score > 0) res.push({ ...item, score }); };
+    clients.forEach(c => push(searchScore(q, [c.name, c.contact, c.phone, c.bizNo]),
+      { type:"거래처", icon:"building", title:c.name, sub:`${c.contact||""} ${c.phone||""}`.trim()||c.bizNo||"-", action:()=>{setTab("clients"); setGlobalSearch("");} }));
+    suppliers.forEach(s => push(searchScore(q, [s.name, s.contact, s.phone, s.items]),
+      { type:"공급처", icon:"suppliers", title:s.name, sub:`${s.contact||""} ${s.phone||""}`.trim()||s.items||"-", action:()=>{setTab("suppliers"); setGlobalSearch("");} }));
+    products.forEach(p => {
+      const sp = getActiveSpec(p) || {};
+      push(searchScore(q, [p.name]),
+        { type:"제품", icon:"shirt", title:p.name, sub:`${sp.fabrics?.length||0}개 원단 / ${sp.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
+    });
+    orders.forEach(o => push(searchScore(q, [o.productName, o.client, o.note]),
+      { type:"판매", icon:"package", title:o.productName, sub:`${o.date||""} · ${o.client||""} · ${(parseFloat(o.unitPrice||0)*parseInt(o.qty||1)).toLocaleString()}원`, action:()=>{setTab("dashboard"); setGlobalSearch("");} }));
+    materials.forEach(m => push(searchScore(q, [m.name]),
+      { type:"원단", icon:"layers", title:m.name, sub:`${m.price?.toLocaleString()||0}원/${m.unit||"yard"}`, action:()=>{setTab("pricedb"); setGlobalSearch("");} }));
+    laborItems.forEach(l => push(searchScore(q, [l.name]),
+      { type:"공임", icon:"wrench", title:l.name, sub:`${l.price?.toLocaleString()||0}원`, action:()=>{setTab("pricedb"); setGlobalSearch("");} }));
+    (savedQuotes||[]).forEach(q2 => push(searchScore(q, [q2.title, q2.quoteClient]),
+      { type:"견적", icon:"document", title:q2.title||"무제", sub:`${q2.dateStr||""} · ${q2.quoteClient||""}`, action:()=>{setTab("quote"); setQuoteSubTab("history"); setGlobalSearch("");} }));
+    (purchaseOrders||[]).forEach(po => push(searchScore(q, [po.title, po.supplier?.name, po.memo]),
+      { type:"발주", icon:"purchase", title:po.title||po.supplier?.name||"(제목 없음)", sub:`${po.orderDate||""} · ${po.supplier?.name||""}`, action:()=>{setTab("purchase"); setGlobalSearch("");} }));
+    (fabricIntakes||[]).forEach(f => push(searchScore(q, [f.materialName, f.supplier]),
+      { type:"입고", icon:"inbox", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} }));
+    (bids||[]).forEach(b => push(searchScore(q, [b.title, b.agency, b.note]),
+      { type:"입찰", icon:"bids", title:b.title, sub:`${b.closeDate?`마감 ${b.closeDate}`:""}${b.agency?` · ${b.agency}`:""}${b.status?` · ${b.status}`:""}`, action:()=>{setTab("bids"); setGlobalSearch("");} }));
+    // 일정·중요메모 — 클릭 시 일정 탭의 해당 서브탭으로 진입 (서브탭은 localStorage에서 복원됨)
+    // localStorage는 새로 마운트될 때, 커스텀 이벤트는 일정 탭이 이미 열려 있을 때 서브탭 전환을 담당
+    (todos||[]).forEach(t => push(searchScore(q, [t.text, t.memo]),
+      { type:"일정", icon:"calendar", title:t.text, sub:`${t.date||""}${t.endDate?` → ${t.endDate}`:""}${t.done?" · ✓ 완료":""}`, action:()=>{save("frw_schedule_subtab","calendar"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"calendar",date:t.date}})),80);} }));
+    (notes||[]).forEach(n => push(searchScore(q, [n.title, n.body, (n.tags||[]).join(" ")]),
+      { type:"메모", icon:"clipboard", title:n.title||"(제목 없음)", sub:`${n.pinned?"★ ":""}${n.category||""}${n.body?` · ${n.body.slice(0,40)}`:""}`, action:()=>{save("frw_schedule_subtab","notes"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"notes"}})),80);} }));
+    Object.keys(dailyNotes||{}).forEach(k => { const e = (dailyNotes||{})[k] || {}; const body = (e.text||"").trim(); if (!body && !e.star) return;
+      push(searchScore(q, [body, k]),
+        { type:"하루 기록", icon:"edit", title:`${k.replace(/-/g,".")} 기록`, sub:`${e.star?"★ ":""}${body.split("\n").find(l=>l.trim())||""}`.slice(0,60), action:()=>{save("frw_schedule_subtab","daily"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"daily",date:k}})),80);} }); });
+    (taxes||[]).forEach(t => push(searchScore(q, [t.taxType, t.biz, t.period, t.memo]),
+      { type:"세무", icon:"coins", title:`${t.taxType} — ${t.biz}`, sub:`기한 ${t.dueDate||""} · ${Number(t.amount||0).toLocaleString()}원${t.paidDate?" · ✓ 완납":""}`, action:()=>{setTab("tax"); setGlobalSearch("");} }));
+    (meetings||[]).forEach(mt => push(searchScore(q, [mt.title, mt.summary, (mt.items||[]).join(" "), (mt.attendees||[]).join(" "), mt.memo]),
+      { type:"회의록", icon:"clipboard", title:mt.title||"(제목 없음)", sub:`${mt.date||""}${mt.meetingType?` · ${mt.meetingType}`:""}${mt.summary?` · ${mt.summary.slice(0,40)}`:""}`, action:()=>{setTab("meeting"); setGlobalSearch("");} }));
+    // 재고 — 클릭하면 재고 탭으로 이동 + 해당 품목이 검색된 상태로 열림
+    ((stock && stock.items) || []).forEach(it => push(searchScore(q, [it.name, it.code, it.spec]),
+      { type:"재고", icon:"layers", title:it.name,
+        sub:`재고 ${(it.qty??0).toLocaleString()}${it.unit||""}${it.qty<0?" ⚠️ 마이너스":""}${it.code?` · ${it.code}`:""}`,
+        action:()=>{ setStockFocusSearch(q); setTab("stock"); setGlobalSearch(""); } }));
+    res.sort((a, b) => b.score - a.score);
+    return res;
+  };
+  const salesNav = (detail) => { window.__frwSalesNav = detail; setTab("sales"); setTimeout(() => window.dispatchEvent(new CustomEvent("frw:sales-nav")), 60); };
+  const cmdkCommands = [
+    { id: "cmd:radar", icon: "radar", title: "재주문 레이더", sub: "늦어진 · 곧 주문할 · 끊긴 거래처", keys: "재주문 레이더 늦어진 거래처 끊긴 이탈 주문 안 한 곳", run: () => salesNav({ sub: "radar" }) },
+    { id: "cmd:sales-month", icon: "barChart", title: "이번 달 판매 현황", sub: "판매 현황 → 요약", keys: "이번 달 매출 판매 실적", run: () => salesNav({ sub: "summary", month: kstTodayYmd().slice(0, 7) }) },
+    { id: "cmd:quote-new", icon: "plus", title: "새 견적 만들기", sub: "견적 관리 → 견적 작성", keys: "새 견적 견적서 작성 만들기", run: () => { setQuoteSubTab("builder"); setTab("quote"); } },
+    { id: "cmd:stock-sync", icon: "refresh", title: "이카운트 재고 새로고침", sub: "켜져 있는 중계 컴퓨터(맥·집 PC)가 1분 안에 가져와요", keys: "재고 새로고침 이카운트 동기화 업데이트",
+      run: async () => { try { const j = await (await fetch("/api/ecount/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); showToast(j.message || j.error || (j.ok ? "새로고침을 요청했어요" : "요청하지 못했어요"), j.ok ? "success" : "error"); } catch { showToast("요청하지 못했어요", "error"); } } },
+    { id: "cmd:daily", icon: "edit", title: "오늘 하루 기록 쓰기", sub: "일정 → 하루 기록", keys: "하루 기록 일기 오늘 메모", run: () => { save("frw_schedule_subtab", "daily"); setTab("schedule"); setTimeout(() => window.dispatchEvent(new CustomEvent("frw:schedule-nav", { detail: { sub: "daily", date: kstTodayYmd() } })), 80); } },
+    { id: "cmd:dark", icon: darkMode ? "sun" : "moon", title: darkMode ? "라이트 모드로 바꾸기" : "다크 모드로 바꾸기", keys: "다크 모드 라이트 테마 어둡게 밝게 화면", run: () => setDarkMode(d => !d) },
+  ];
   const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["hr", "인사 관리", "user"], ["meeting", "회의록", "clipboard"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["sales", "판매 현황", "barChart"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
   // 사이드바 메뉴 그룹 (토스 핸드오프 — 평면 나열 → 그룹 헤더). TABS는 평면 유지(퀵메뉴 등 재사용)
   const TAB_GROUPS = [
@@ -24373,6 +24916,12 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     color: "var(--input-color)", fontFamily: "inherit",
                   }}
                 />
+                {!globalSearch && !gsMobileOpen && (
+                  <button type="button" className="cmdk-hint" onClick={() => setCmdkOpen(true)} title="명령창 — 말로 물어보기·바로가기 (어디서든 Ctrl/⌘+K)"
+                    style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", height: 26, padding: "0 8px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <Icon name="sparkles" size={12}/>{/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘K" : "Ctrl K"}
+                  </button>
+                )}
                 {(globalSearch || gsMobileOpen) && (
                   <button onClick={() => { setGlobalSearch(""); setGsMobileOpen(false); }} style={{
                     position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
@@ -24382,52 +24931,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   }}><Icon name="close" size={12}/></button>
                 )}
                 {globalSearch.trim() && (() => {
-                  const q = globalSearch.trim();
-                  const res = [];
-                  // score 0이면 미매칭 → 스킵. 매칭 항목은 점수와 함께 수집 후 관련도순 정렬.
-                  const push = (score, item) => { if (score > 0) res.push({ ...item, score }); };
-                  clients.forEach(c => push(searchScore(q, [c.name, c.contact, c.phone, c.bizNo]),
-                    { type:"거래처", icon:"building", title:c.name, sub:`${c.contact||""} ${c.phone||""}`.trim()||c.bizNo||"-", action:()=>{setTab("clients"); setGlobalSearch("");} }));
-                  suppliers.forEach(s => push(searchScore(q, [s.name, s.contact, s.phone, s.items]),
-                    { type:"공급처", icon:"suppliers", title:s.name, sub:`${s.contact||""} ${s.phone||""}`.trim()||s.items||"-", action:()=>{setTab("suppliers"); setGlobalSearch("");} }));
-                  products.forEach(p => {
-                    const sp = getActiveSpec(p) || {};
-                    push(searchScore(q, [p.name]),
-                      { type:"제품", icon:"shirt", title:p.name, sub:`${sp.fabrics?.length||0}개 원단 / ${sp.selectedGrade||"A"}급`, action:()=>{setActiveProdId(p.id); setTab("calc"); setGlobalSearch("");} });
-                  });
-                  orders.forEach(o => push(searchScore(q, [o.productName, o.client, o.note]),
-                    { type:"판매", icon:"package", title:o.productName, sub:`${o.date||""} · ${o.client||""} · ${(parseFloat(o.unitPrice||0)*parseInt(o.qty||1)).toLocaleString()}원`, action:()=>{setTab("dashboard"); setGlobalSearch("");} }));
-                  materials.forEach(m => push(searchScore(q, [m.name]),
-                    { type:"원단", icon:"layers", title:m.name, sub:`${m.price?.toLocaleString()||0}원/${m.unit||"yard"}`, action:()=>{setTab("pricedb"); setGlobalSearch("");} }));
-                  laborItems.forEach(l => push(searchScore(q, [l.name]),
-                    { type:"공임", icon:"wrench", title:l.name, sub:`${l.price?.toLocaleString()||0}원`, action:()=>{setTab("pricedb"); setGlobalSearch("");} }));
-                  (savedQuotes||[]).forEach(q2 => push(searchScore(q, [q2.title, q2.quoteClient]),
-                    { type:"견적", icon:"document", title:q2.title||"무제", sub:`${q2.dateStr||""} · ${q2.quoteClient||""}`, action:()=>{setTab("quote"); setQuoteSubTab("history"); setGlobalSearch("");} }));
-                  (purchaseOrders||[]).forEach(po => push(searchScore(q, [po.title, po.supplier?.name, po.memo]),
-                    { type:"발주", icon:"purchase", title:po.title||po.supplier?.name||"(제목 없음)", sub:`${po.orderDate||""} · ${po.supplier?.name||""}`, action:()=>{setTab("purchase"); setGlobalSearch("");} }));
-                  (fabricIntakes||[]).forEach(f => push(searchScore(q, [f.materialName, f.supplier]),
-                    { type:"입고", icon:"inbox", title:f.materialName, sub:`${f.date||""} · ${f.supplier||""} · ${f.status||""}`, action:()=>{setTab("inventory"); setGlobalSearch("");} }));
-                  (bids||[]).forEach(b => push(searchScore(q, [b.title, b.agency, b.note]),
-                    { type:"입찰", icon:"bids", title:b.title, sub:`${b.closeDate?`마감 ${b.closeDate}`:""}${b.agency?` · ${b.agency}`:""}${b.status?` · ${b.status}`:""}`, action:()=>{setTab("bids"); setGlobalSearch("");} }));
-                  // 일정·중요메모 — 클릭 시 일정 탭의 해당 서브탭으로 진입 (서브탭은 localStorage에서 복원됨)
-                  // localStorage는 새로 마운트될 때, 커스텀 이벤트는 일정 탭이 이미 열려 있을 때 서브탭 전환을 담당
-                  (todos||[]).forEach(t => push(searchScore(q, [t.text, t.memo]),
-                    { type:"일정", icon:"calendar", title:t.text, sub:`${t.date||""}${t.endDate?` → ${t.endDate}`:""}${t.done?" · ✓ 완료":""}`, action:()=>{save("frw_schedule_subtab","calendar"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"calendar",date:t.date}})),80);} }));
-                  (notes||[]).forEach(n => push(searchScore(q, [n.title, n.body, (n.tags||[]).join(" ")]),
-                    { type:"메모", icon:"clipboard", title:n.title||"(제목 없음)", sub:`${n.pinned?"★ ":""}${n.category||""}${n.body?` · ${n.body.slice(0,40)}`:""}`, action:()=>{save("frw_schedule_subtab","notes"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"notes"}})),80);} }));
-                  Object.keys(dailyNotes||{}).forEach(k => { const e = (dailyNotes||{})[k] || {}; const body = (e.text||"").trim(); if (!body && !e.star) return;
-                    push(searchScore(q, [body, k]),
-                      { type:"하루 기록", icon:"edit", title:`${k.replace(/-/g,".")} 기록`, sub:`${e.star?"★ ":""}${body.split("\n").find(l=>l.trim())||""}`.slice(0,60), action:()=>{save("frw_schedule_subtab","daily"); setTab("schedule"); setGlobalSearch(""); setTimeout(()=>window.dispatchEvent(new CustomEvent("frw:schedule-nav",{detail:{sub:"daily",date:k}})),80);} }); });
-                  (taxes||[]).forEach(t => push(searchScore(q, [t.taxType, t.biz, t.period, t.memo]),
-                    { type:"세무", icon:"coins", title:`${t.taxType} — ${t.biz}`, sub:`기한 ${t.dueDate||""} · ${Number(t.amount||0).toLocaleString()}원${t.paidDate?" · ✓ 완납":""}`, action:()=>{setTab("tax"); setGlobalSearch("");} }));
-                  (meetings||[]).forEach(mt => push(searchScore(q, [mt.title, mt.summary, (mt.items||[]).join(" "), (mt.attendees||[]).join(" "), mt.memo]),
-                    { type:"회의록", icon:"clipboard", title:mt.title||"(제목 없음)", sub:`${mt.date||""}${mt.meetingType?` · ${mt.meetingType}`:""}${mt.summary?` · ${mt.summary.slice(0,40)}`:""}`, action:()=>{setTab("meeting"); setGlobalSearch("");} }));
-                  // 재고 — 클릭하면 재고 탭으로 이동 + 해당 품목이 검색된 상태로 열림
-                  ((stock && stock.items) || []).forEach(it => push(searchScore(q, [it.name, it.code, it.spec]),
-                    { type:"재고", icon:"layers", title:it.name,
-                      sub:`재고 ${(it.qty??0).toLocaleString()}${it.unit||""}${it.qty<0?" ⚠️ 마이너스":""}${it.code?` · ${it.code}`:""}`,
-                      action:()=>{ setStockFocusSearch(globalSearch.trim()); setTab("stock"); setGlobalSearch(""); } }));
-                  res.sort((a, b) => b.score - a.score);
+                  const res = gsBuild(globalSearch.trim());
                   const limited = res.slice(0, 20);
                   gsResultsRef.current = limited; // Enter/방향키 핸들러와 공유
                   const sel = Math.min(gsSel, Math.max(limited.length - 1, 0));
@@ -24452,7 +24956,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                             </div>
                           ))}
                           <div style={{ padding: "7px 14px", display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text3)", borderTop: "1px solid var(--divider)" }}>
-                            <span>↑↓ 이동 · Enter 열기 · Esc 닫기</span>
+                            <span>↑↓ 이동 · Enter 열기 · Esc 닫기 · <b style={{ cursor: "pointer" }} onClick={() => { setGlobalSearch(""); setCmdkOpen(true); }}>Ctrl/⌘+K 말로 물어보기</b></span>
                             {res.length > 20 && <span>총 {res.length}건 중 상위 20건</span>}
                           </div>
                         </>
@@ -24463,12 +24967,10 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </div>
             </div>
             <div className="hdr-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              {/* 좁은 화면 전용 검색 버튼 — 통합 검색 오버레이 열기 (1024px 이하에서만 CSS로 표시) */}
+              {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild}/>}
+              {/* 좁은 화면 전용 검색 버튼 — ⌘K 명령창 열기 (1024px 이하에서만 CSS로 표시) */}
               <button className="gs-mobile-btn no-print" title="통합 검색"
-                onClick={() => {
-                  setGsMobileOpen(true);
-                  setTimeout(() => { const el = document.querySelector(".global-search-wrap input"); if (el) el.focus(); }, 60);
-                }}
+                onClick={() => setCmdkOpen(true)}
                 style={{
                   width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
                   background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
@@ -27029,7 +27531,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             onSalesFile={(parsed) => { setSalesPendingFile(parsed); setTab("sales"); }} />
         )}
         {tab === "sales" && (
-          <SalesTab pendingFile={salesPendingFile} clearPending={() => setSalesPendingFile(null)} darkMode={darkMode} />
+          <SalesTab pendingFile={salesPendingFile} clearPending={() => setSalesPendingFile(null)} darkMode={darkMode} clientsDb={clients} />
         )}
         {tab === "ledger" && (
           <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} orders={orders} darkMode={darkMode} focusClient={ledgerFocusClient} clearFocus={() => setLedgerFocusClient(null)} bankDeposits={bankDeposits} setBankDeposits={setBankDeposits} clients={clients} />
