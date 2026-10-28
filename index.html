@@ -16837,7 +16837,7 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
     allCmds.map(c => ({ c, s: searchScore(qs, [c.title, c.keys || ""]) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 6)
       .forEach(({ c }) => items.push({ section: "바로가기", ...c }));
     // ── 검색 ──
-    (search(qs) || []).slice(0, 8).forEach((r, i) => items.push({ section: "검색", id: `gs:${r.type}:${r.title}:${i}`, icon: r.icon, title: r.title, sub: r.sub, tag: r.type, run: r.action }));
+    (search(qs) || []).slice(0, 12).forEach((r, i) => items.push({ section: "검색", id: `gs:${r.type}:${r.title}:${i}`, icon: r.icon, title: r.title, sub: r.sub, tag: r.type, run: r.action }));
     // ── Claude ──
     items.push({ section: "Claude", id: "claude", icon: "sparkles", title: `Claude 에게 묻기 — “${qs}”`, sub: "앱 데이터(NJ_SAFETY 커넥터)를 보고 답해요 · 구독 안이라 추가 비용 없음",
       run: () => { const p = `NJ SAFETY 회사 앱 데이터(NJ_SAFETY 커넥터)를 보고 답해줘: ${qs}`; try { navigator.clipboard.writeText(p); } catch {} window.open(`https://claude.ai/new?q=${encodeURIComponent(p)}`, "_blank", "noopener"); } });
@@ -24615,11 +24615,36 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       { type:"세무", icon:"coins", title:`${t.taxType} — ${t.biz}`, sub:`기한 ${t.dueDate||""} · ${Number(t.amount||0).toLocaleString()}원${t.paidDate?" · ✓ 완납":""}`, action:()=>{setTab("tax"); setGlobalSearch("");} }));
     (meetings||[]).forEach(mt => push(searchScore(q, [mt.title, mt.summary, (mt.items||[]).join(" "), (mt.attendees||[]).join(" "), mt.memo]),
       { type:"회의록", icon:"clipboard", title:mt.title||"(제목 없음)", sub:`${mt.date||""}${mt.meetingType?` · ${mt.meetingType}`:""}${mt.summary?` · ${mt.summary.slice(0,40)}`:""}`, action:()=>{setTab("meeting"); setGlobalSearch("");} }));
-    // 재고 — 클릭하면 재고 탭으로 이동 + 해당 품목이 검색된 상태로 열림
-    ((stock && stock.items) || []).forEach(it => push(searchScore(q, [it.name, it.code, it.spec]),
-      { type:"재고", icon:"layers", title:it.name,
-        sub:`재고 ${(it.qty??0).toLocaleString()}${it.unit||""}${it.qty<0?" ⚠️ 마이너스":""}${it.code?` · ${it.code}`:""}`,
-        action:()=>{ setStockFocusSearch(q); setTab("stock"); setGlobalSearch(""); } }));
+    // 재고 — 사이즈별 품목을 제품(품명) 하나로 묶어 한 줄씩. 클릭하면 재고 탭에서 그 제품만 검색된 상태로 열림.
+    // (사이즈마다 한 줄이면 「솜점퍼」 하나에 22줄이 나와 결과 수 제한(20·8)에 밀려 (블루)·(2026) 같은 다른 제품이 잘렸다)
+    {
+      const fam = new Map();
+      ((stock && stock.items) || []).forEach(it => {
+        const sc = searchScore(q, [it.name, it.code, it.spec]); if (sc <= 0) return;
+        const label = stockBaseName(it.name) || it.name || it.code;
+        const k = label.toLowerCase().replace(/\s+/g, " ").trim();
+        const g = fam.get(k) || { label, items: [], score: 0 };
+        g.items.push(it); g.score = Math.max(g.score, sc); fam.set(k, g);
+      });
+      fam.forEach(g => {
+        if (g.items.length === 1) {
+          const it = g.items[0];
+          push(g.score, { type:"재고", icon:"layers", title:it.name,
+            sub:`재고 ${(it.qty??0).toLocaleString()}${it.unit||""}${it.qty<0?" ⚠️ 마이너스":""}${it.code?` · ${it.code}`:""}`,
+            action:()=>{ setStockFocusSearch(it.code || it.name); setTab("stock"); setGlobalSearch(""); } });
+          return;
+        }
+        const list = [...g.items].sort((a, b) => (a.name || "").localeCompare(b.name || "", "ko", { numeric: true }));
+        const sum = list.reduce((a, it) => a + (Number(it.qty) || 0), 0), minus = list.filter(it => it.qty < 0).length;
+        const sizeOf = (it) => { const m = String(it.name || "").match(/\[([^\]]+)\]\s*$/); return m ? m[1] : (String(it.code || "").split("/")[1] || "?"); };
+        // 같은 코드 묶음(NWWJ24/…)이면 코드 앞부분으로 찾아 그 제품만 보이게
+        const pre = list.map(it => String(it.code || "").split("/")[0]);
+        const focus = pre[0] && pre.every(x => x === pre[0]) ? pre[0] : g.label;
+        push(g.score, { type:"재고", icon:"layers", title:`${g.label} · 사이즈 ${list.length}종`,
+          sub:`합계 ${sum.toLocaleString()}${minus ? ` · ⚠️ 마이너스 ${minus}건` : ""} · ${list.map(it => `${sizeOf(it)} ${it.qty}`).join(" · ")}`,
+          action:()=>{ setStockFocusSearch(focus); setTab("stock"); setGlobalSearch(""); } });
+      });
+    }
     res.sort((a, b) => b.score - a.score);
     return res;
   };
