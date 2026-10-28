@@ -1801,6 +1801,23 @@ function save(key, value) {
   _kvMem.set(key, str);
   _kvQueue(key, str);
 }
+// ─── 화면 상태 기억 (창 단위) ───
+// 보던 달·검색어·필터·고른 항목을 sessionStorage 에 둔다 → 다른 탭에 다녀오거나 새로고침해도 그대로, 창(탭)을 닫으면 처음부터.
+// 서브창 안에서는 키 앞에 "side:" 가 붙어 본 화면과 따로 기억한다 (PaneCtx — App 이 서브창을 감싼다).
+// Set·Date 는 { revive } 로 되살린다 (Set 은 배열로 저장).
+const PaneCtx = React.createContext("main");
+function useViewState(key, init, { revive } = {}) {
+  const pane = React.useContext(PaneCtx);
+  const k = "frw_view:" + (pane === "side" ? "side:" : "") + key;
+  const [v, setV] = React.useState(() => {
+    try { const raw = sessionStorage.getItem(k); if (raw != null) { const x = JSON.parse(raw); return revive ? revive(x) : x; } } catch {}
+    return typeof init === "function" ? init() : init;
+  });
+  React.useEffect(() => {
+    try { if (v === undefined) sessionStorage.removeItem(k); else sessionStorage.setItem(k, JSON.stringify(v instanceof Set ? [...v] : v)); } catch {}
+  }, [k, v]);
+  return [v, setV];
+}
 // 첫 실행 시 이미 localStorage에 들어 있는 큰 값을 IndexedDB로 옮겨 공간을 비운다.
 // (이걸 안 하면 다른 작은 값 저장이 계속 실패한 채로 남는다)
 (function migrateBigLocalStorage() {
@@ -3746,11 +3763,11 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   useEffect(() => { save("frw_pdb_sheets", sheets); }, [sheets]);
   const [pdbTab, setPdbTab] = useState(() => load("frw_pdb_tab", "mat"));   // mat | lab | 탭이름
   useEffect(() => { save("frw_pdb_tab", pdbTab); }, [pdbTab]);
-  const [selKind, setSelKind] = useState("mat");   // 사용자 탭에서 마지막으로 고른 종류
-  const [selMatId, setSelMatId] = useState(null);
-  const [selLabId, setSelLabId] = useState(null);
-  const [search, setSearch] = useState("");
-  const [onlyLow, setOnlyLow] = useState(false);
+  const [selKind, setSelKind] = useViewState("pdb.kind", "mat");   // 사용자 탭에서 마지막으로 고른 종류
+  const [selMatId, setSelMatId] = useViewState("pdb.mat", null);
+  const [selLabId, setSelLabId] = useViewState("pdb.lab", null);
+  const [search, setSearch] = useViewState("pdb.search", "");
+  const [onlyLow, setOnlyLow] = useViewState("pdb.low", false);
   // 발주 조회 기간 — 목록의 '최근 발주' 표시와 카테고리 합계에 함께 적용 (기기에 기억)
   const [intakeDays, setIntakeDays] = useState(() => load("frw_pdb_intake_days", 90));
   useEffect(() => { save("frw_pdb_intake_days", intakeDays); }, [intakeDays]);
@@ -3821,9 +3838,10 @@ function PriceDB({ materials, setMaterials, laborItems, setLaborItems, stock = {
   useEffect(() => { save("frw_pdb_categories", pdbCats); }, [pdbCats]);
   const myCats = pdbCats[pdbTab] || [];
   const setMyCats = (fn) => setPdbCats(all => ({ ...all, [pdbTab]: fn(all[pdbTab] || []) }));
-  const [catFilter, setCatFilter] = useState("all");   // all | __none | 카테고리명
+  const [catFilter, setCatFilter] = useViewState("pdb.cat", "all");   // all | __none | 카테고리명
   // 탭을 옮기면 그 탭에 없는 분류가 걸린 채로 남아 빈 화면이 되므로 초기화한다
-  useEffect(() => { setCatFilter("all"); }, [pdbTab]);
+  const catFirst = useRef(true);   // 처음(새로고침 직후)엔 기억해 둔 필터를 지우지 않는다
+  useEffect(() => { if (catFirst.current) { catFirst.current = false; return; } setCatFilter("all"); }, [pdbTab]);
   // 지금 탭에 실제로 담긴 항목들
   const tabItems = [...materials.filter(m => inTab(m, pdbTab, TAB_MAT)), ...laborItems.filter(l => inTab(l, pdbTab, TAB_LAB))];
   // 칩 목록 = 이 탭에서 만든 이름 + 이 탭에서 실제로 쓰이는 이름
@@ -7129,15 +7147,15 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
   const marginRef = useRef(null); const marginInst = useRef(null);
   const dragMargin = useRef(null);
   const [marginDropInfo, setMarginDropInfo] = useState(null);
-  const [marginSorted, setMarginSorted] = useState(false);
+  const [marginSorted, setMarginSorted] = useViewState("dash.marginSorted", false);
   const [expandedChart, setExpandedChart] = useState(null); // "sales" | "pie" | "margin" | "kpis"
   // 전용 상세 페이지: null | "sales" | "orders"
-  const [detailView, setDetailView] = useState(null);
+  const [detailView, setDetailView] = useViewState("dash.detail", null);
   // 안내 토스트 (한 번만 표시) — 모든 conditional return 이전에 선언 필수 (Hooks 규칙)
   const [showResizeHint, setShowResizeHint] = useState(() => !load("frw_resize_hint_seen", false));
   // 카드 레이아웃: { key: { width: px, height: px } } — 자유 드래그 리사이즈
   const [cardLayouts, setCardLayouts] = useState(() => load("frw_card_layouts", {}));
-  const [dashSec, setDashSec] = useState("dash-sec-kpi"); // 머리 줄 알약 탭 — 마지막으로 이동한 구역
+  const [dashSec, setDashSec] = useViewState("dash.sec", "dash-sec-kpi"); // 머리 줄 알약 탭 — 마지막으로 이동한 구역
   const [hiddenKPIs, setHiddenKPIs] = useState(() => load("frw_hidden_kpis", []));
   useEffect(() => { save("frw_hidden_kpis", hiddenKPIs); }, [hiddenKPIs]);
   const hideKPI = (key, label) => {
@@ -11688,26 +11706,19 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   useEffect(() => {
     if (focusClient) setSubTab("ar");
   }, [focusClient]);
-  // 보던 위치 기억 — 다른 탭에 다녀와도 보던 달·검색·상태 필터·펼친 거래처 그대로 (본 화면·서브창 따로).
-  // 앱을 새로 열면(세션) 또는 12시간이 지나면 이번 달부터 다시 시작한다.
-  const viewKey = `frw_ledger_view_${pane}`;
-  const view0 = useRef(null);
-  if (view0.current === null) { try { const v = JSON.parse(sessionStorage.getItem(viewKey) || "null"); view0.current = v && Date.now() - (v.at || 0) < 12 * 3600e3 ? v : {}; } catch { view0.current = {}; } }
-  const [selectedYM, setSelectedYM] = useState(() => /^\d{4}-\d{2}$/.test(view0.current.ym || "") ? view0.current.ym : defaultYM);
+  // 보던 위치 기억 — 다른 탭에 다녀오거나 새로고침해도 보던 달·검색·상태 필터·펼친 거래처 그대로 (useViewState, 창을 닫으면 처음부터)
+  const [selectedYM, setSelectedYM] = useViewState("ledger.ym", defaultYM);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [search, setSearch] = useState(() => view0.current.search || "");
-  const [statusFilter, setStatusFilter] = useState(() => view0.current.status || "");
+  const [search, setSearch] = useViewState("ledger.search", "");
+  const [statusFilter, setStatusFilter] = useViewState("ledger.status", "");
   const [dragActive, setDragActive] = useState(false);
-  const [expandedClientId, setExpandedClientId] = useState(() => view0.current.expanded ?? null);
-  useEffect(() => {
-    try { sessionStorage.setItem(viewKey, JSON.stringify({ ym: selectedYM, search, status: statusFilter, expanded: expandedClientId, at: Date.now() })); } catch {}
-  }, [selectedYM, search, statusFilter, expandedClientId]);
+  const [expandedClientId, setExpandedClientId] = useViewState("ledger.expanded", null);
   const [draft, setDraft] = useState({ name:"", supply:"", tax:"", total:"", status:"미입금", memo:"" });
   const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
-  const [showPaidHistory, setShowPaidHistory] = useState(() => new Set()); // 완납 내역 펼친 거래처 id 목록
+  const [showPaidHistory, setShowPaidHistory] = useViewState("ledger.paidOpen", () => new Set(), { revive: (x) => new Set(x) }); // 완납 내역 펼친 거래처 id 목록
 
   // 거래처별 AR 헬퍼: 거래처명을 키로 사용 → 모든 월에서 공유됨
   const getAR = (clientName) => {
@@ -14361,22 +14372,22 @@ function TreasuryTab({ accounts, setAccounts, investments, setInvestments, cashF
   const [editInvId, setEditInvId] = useState(null);
   const [editInvDraft, setEditInvDraft] = useState(null);
   // 투자 현황 화면 상태
-  const [invFilter, setInvFilter] = useState("all"); // all | term(만기 있는 것) | open(만기 없는 것)
+  const [invFilter, setInvFilter] = useViewState("treasury.invFilter", "all"); // all | term(만기 있는 것) | open(만기 없는 것)
   const [invQuick, setInvQuick] = useState(null);    // { id, val } — 카드에서 평가액만 바로 고치기
   const [invBulk, setInvBulk] = useState(null);      // { [id]: 새 평가액 } — 한 번에 업데이트 패널
   const [invClose, setInvClose] = useState(null);    // { id, accountId, amount, date, addBalance } — 만기·매도 돈을 통장으로
-  const [showClosedInv, setShowClosedInv] = useState(false);
+  const [showClosedInv, setShowClosedInv] = useViewState("treasury.closedInv", false);
   const [showCfForm, setShowCfForm] = useState(false);
   const [cfDraft, setCfDraft] = useState({ accountId:"", client:"", type:"입금", amount:"", category:"", date: new Date().toISOString().slice(0,10), memo:"" });
-  const [cfClientFilter, setCfClientFilter] = useState(""); // 거래처별 합산 보기 — 선택된 거래처
+  const [cfClientFilter, setCfClientFilter] = useViewState("treasury.cfClient", ""); // 거래처별 합산 보기 — 선택된 거래처
   // ── 통장 관리 화면 상태 ──
   // 고른 통장·기간은 다음에 들어와도 그대로 (탭을 오가며 보는 화면이라)
   const [acctFocus, setAcctFocus] = useState(() => load("frw_acct_focus", "all")); // "all" | 계좌 id
   const [cfPeriod, setCfPeriod] = useState(() => load("frw_cf_period", "month"));  // month | 3m | all
-  const [cfKind, setCfKind] = useState("all");                                      // all | in | out
-  const [cfSearch, setCfSearch] = useState("");
+  const [cfKind, setCfKind] = useViewState("treasury.cfKind", "all");                                      // all | in | out
+  const [cfSearch, setCfSearch] = useViewState("treasury.cfSearch", "");
   const [cfLimit, setCfLimit] = useState(60);                                       // 피드에 그리는 건수 (더 보기로 늘림)
-  const [showCfTable, setShowCfTable] = useState(false);                            // 거래처별 전체 합산 표
+  const [showCfTable, setShowCfTable] = useViewState("treasury.cfTable", false);                            // 거래처별 전체 합산 표
   useEffect(() => { save("frw_acct_focus", acctFocus); }, [acctFocus]);
   useEffect(() => { save("frw_cf_period", cfPeriod); }, [cfPeriod]);
   // 거래처 검색 후보 — 거래처(clients)+공급처(suppliers)+기존 현금흐름 거래처명 통합
@@ -16936,7 +16947,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   const [subTab, setSubTab] = useState(() => { try { return localStorage.getItem(subKey) || "summary"; } catch { return "summary"; } });
   const subOrder = useSubtabOrder("frw_sales_subtab_order", ["summary", "calendar", "clients", "slips", "radar"], "data-sales-sub");
   const [mode, setMode] = useState(() => { try { return localStorage.getItem("frw_sales_mode") || "month"; } catch { return "month"; } });
-  const [month, setMonth] = useState(() => today.slice(0, 7));
+  const [month, setMonth] = useViewState("sales.month", () => today.slice(0, 7));
   const [custom, setCustom] = useState(() => { try { return JSON.parse(localStorage.getItem("frw_sales_custom") || "null") || {}; } catch { return {}; } });
   const [data, setData] = useState(null);
   const [prev, setPrev] = useState(null);   // 비교 기간 데이터 (작년 같은 기간 / 직전 기간)
@@ -16944,14 +16955,14 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   const pickCmp = (v) => { setCmp(v); try { localStorage.setItem("frw_sales_cmp", v); } catch {} };
   const [moves, setMoves] = useState(null);
   const [err, setErr] = useState("");
-  const [selDay, setSelDay] = useState(null);
-  const [selClient, setSelClient] = useState(null);
-  const [clientQ, setClientQ] = useState("");
-  const [slipQ, setSlipQ] = useState("");          // 전표 탭 검색 (거래처·품목)
+  const [selDay, setSelDay] = useViewState("sales.day", null);
+  const [selClient, setSelClient] = useViewState("sales.client", null);
+  const [clientQ, setClientQ] = useViewState("sales.clientQ", "");
+  const [slipQ, setSlipQ] = useViewState("sales.slipQ", "");          // 전표 탭 검색 (거래처·품목)
   const [slipLimit, setSlipLimit] = useState(60);
   const openSlips = (q = "") => { setSlipQ(q); setSlipLimit(60); pickSub("slips"); try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {} };
-  const [allClients, setAllClients] = useState(false);
-  const [allProducts, setAllProducts] = useState(false);
+  const [allClients, setAllClients] = useViewState("sales.allClients", false);
+  const [allProducts, setAllProducts] = useViewState("sales.allProducts", false);
   const [preview, setPreview] = useState(null);
   const [parseErr, setParseErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -16978,7 +16989,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
       .then(j => { if (!dead) setMoves(j && !j.error ? j : null); }).catch(() => {});
     return () => { dead = true; };
   }, [from, to, pFrom, pTo, tick]);
-  useEffect(() => { setSelDay(null); setAllClients(false); setAllProducts(false); setSlipLimit(60); }, [from, to]);
+  const rangeFirst = useRef(true);   // 처음(새로고침 직후)엔 기억해 둔 선택을 지우지 않는다 — 기간을 바꿀 때만
+  useEffect(() => { if (rangeFirst.current) { rangeFirst.current = false; return; } setSelDay(null); setAllClients(false); setAllProducts(false); setSlipLimit(60); }, [from, to]);
   const pickSub = (id) => { setSubTab(id); try { localStorage.setItem(subKey, id); } catch {} };
   // 다른 창(Claude)에서 반영하고 돌아오면 다시 읽는다
   useEffect(() => {
@@ -17750,7 +17762,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
 
 function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch, onSalesFile, pane = "main" }) {
   const items = stock?.items || [];
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useViewState("stock.search", "");
   const listRef = useRef(null); // 전체 재고 카드 — 통합검색 진입 시 스크롤 목적지
   // 통합 검색에서 재고 결과 클릭 → 검색어 미리 채우고 목록으로 스크롤
   useEffect(() => {
@@ -17759,9 +17771,9 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
     if (clearFocusSearch) clearFocusSearch();
     setTimeout(() => { try { listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {} }, 150);
   }, [focusSearch]);
-  const [sortKey, setSortKey] = useState("qtyAsc"); // qtyAsc | qtyDesc | name | value
-  const [grouped, setGrouped] = useState(true); // 종류별 묶어 보기
-  const [collapsedCats, setCollapsedCats] = useState(() => new Set()); // 접힌 그룹
+  const [sortKey, setSortKey] = useViewState("stock.sort", "qtyAsc"); // qtyAsc | qtyDesc | name | value
+  const [grouped, setGrouped] = useViewState("stock.grouped", true); // 종류별 묶어 보기
+  const [collapsedCats, setCollapsedCats] = useViewState("stock.collapsed", () => new Set(), { revive: (x) => new Set(x) }); // 접힌 그룹
   const [preview, setPreview] = useState(null); // { items, fileName } — 업로드 미리보기
   const [parseErr, setParseErr] = useState("");
   const [winDrag, setWinDrag] = useState(false); // 파일을 화면 위로 드래그 중 (풀스크린 드롭 오버레이)
@@ -21004,8 +21016,8 @@ function ClientsTab({ clients, setClients, orders, darkMode }) {
   const [newClient, setNewClient] = useState({ name: "", grade: "A", note: "" });
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-  const [search, setSearch] = useState("");
-  const [gradeFilter, setGradeFilter] = useState("ALL");
+  const [search, setSearch] = useViewState("clients.search", "");
+  const [gradeFilter, setGradeFilter] = useViewState("clients.grade", "ALL");
   const [dragActive, setDragActive] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set()); // 다중 선택용
 
@@ -21430,7 +21442,7 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
   const [newSupplier, setNewSupplier] = useState({ name: "", contact: "", phone: "", email: "", address: "", items: "", paymentTerms: "", note: "" });
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useViewState("suppliers.search", "");
 
   const filtered = suppliers.filter(s => {
     return searchHit(search, s.name, s.contact, s.items, s.note, s.phone);
@@ -21736,6 +21748,22 @@ function SidePane({ tabs, sideTab, onPick, narrow, width, setWidth, height, setH
   const [menu, setMenu] = useState(false);
   const [dragging, setDragging] = useState(false);
   const meta = tabs.find(t => t[0] === sideTab) || [sideTab, sideTab, "split"];
+  // 서브창 스크롤 위치도 화면별로 기억 (새로고침해도, 창을 닫으면 처음부터)
+  const bodyRef = useRef(null);
+  const posRef = useRef((() => { try { return JSON.parse(sessionStorage.getItem("frw_view:sideScroll") || "{}") || {}; } catch { return {}; } })());
+  useEffect(() => {
+    const el = bodyRef.current; if (!el) return;
+    const y = posRef.current[sideTab] || 0;
+    let n = 0, stop = false;
+    const iv = setInterval(() => { if (stop || ++n > 40) { clearInterval(iv); return; } el.scrollTop = y; if (Math.abs(el.scrollTop - y) <= 2) { clearInterval(iv); } }, 100);
+    el.scrollTop = y;
+    let t = null;
+    const onScroll = () => { posRef.current[sideTab] = el.scrollTop; clearTimeout(t); t = setTimeout(() => { try { sessionStorage.setItem("frw_view:sideScroll", JSON.stringify(posRef.current)); } catch {} }, 250); };
+    const quit = () => { stop = true; };
+    el.addEventListener("wheel", quit, { passive: true }); el.addEventListener("touchstart", quit, { passive: true });
+    const arm = setTimeout(() => el.addEventListener("scroll", onScroll, { passive: true }), 0);
+    return () => { clearInterval(iv); clearTimeout(arm); clearTimeout(t); el.removeEventListener("scroll", onScroll); el.removeEventListener("wheel", quit); el.removeEventListener("touchstart", quit); };
+  }, [sideTab]);
   const startDrag = (e) => {
     e.preventDefault(); setDragging(true);
     const move = (ev) => {
@@ -21798,7 +21826,7 @@ function SidePane({ tabs, sideTab, onPick, narrow, width, setWidth, height, setH
         )}
       </div>
       {/* 화면 */}
-      <div className="side-content" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: narrow ? "12px 10px 24px" : "14px 14px 28px", overscrollBehavior: "contain" }}>
+      <div ref={bodyRef} className="side-content" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: narrow ? "12px 10px 24px" : "14px 14px 28px", overscrollBehavior: "contain" }}>
         {children}
       </div>
     </div>
@@ -21819,28 +21847,42 @@ function App() {
   // 탭 전환 시 마지막 스크롤 위치 유지 — 다른 탭 갔다 와도 보던 위치로 복원.
   // 실제 스크롤러는 window(문서)라서 window.scrollY를 탭별로 기억(세션 메모리).
   // 저장 리스너는 tabRef(최신 탭)를 읽어, 복원 시 발생하는 scroll 이벤트가 이전 탭 값을 덮어쓰지 않게 함.
-  const scrollPosRef = useRef({});
+  // 새로고침해도 이어지게 창(sessionStorage)에도 적어 둔다 — 창을 닫으면 처음부터.
+  const scrollPosRef = useRef((() => { try { return JSON.parse(sessionStorage.getItem("frw_view:scroll") || "{}") || {}; } catch { return {}; } })());
   const tabRef = useRef(tab);
   tabRef.current = tab;
+  const restoringRef = useRef(false);   // 복원하는 동안엔 스크롤 이벤트로 기억값을 덮지 않는다
   useEffect(() => {
-    const onScroll = () => { scrollPosRef.current[tabRef.current] = window.scrollY || 0; };
+    let t = null;
+    const onScroll = () => {
+      if (restoringRef.current) return;
+      scrollPosRef.current[tabRef.current] = window.scrollY || 0;
+      clearTimeout(t); t = setTimeout(() => { try { sessionStorage.setItem("frw_view:scroll", JSON.stringify(scrollPosRef.current)); } catch {} }, 250);
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => { clearTimeout(t); window.removeEventListener("scroll", onScroll); };
   }, []);
+  const firstScrollRef = useRef(true);
   React.useLayoutEffect(() => {
     const y = scrollPosRef.current[tab] || 0;
+    const first = firstScrollRef.current; firstScrollRef.current = false;
     window.scrollTo(0, y);
     if (!y) return;
-    // 화면이 데이터·그림을 늦게 채우면 처음엔 그만큼 내려갈 수 없다 → 잠깐 동안 다시 맞춘다 (손으로 움직이면 멈춤)
+    // 화면이 데이터·그림을 늦게 채우면 처음엔 그만큼 내려갈 수 없다 → 닿을 때까지 잠깐 다시 맞춘다 (손으로 움직이면 멈춤).
+    // 새로고침 직후엔 데이터가 늦게 오니 더 오래(4초) 기다린다.
     let stop = false;
-    const quit = () => { stop = true; };
+    restoringRef.current = true;
+    const quit = () => { stop = true; restoringRef.current = false; };
     const evs = ["wheel", "touchstart", "keydown", "mousedown"];
     evs.forEach(ev => window.addEventListener(ev, quit, { passive: true }));
-    const timers = [60, 200, 450, 900].map(ms => setTimeout(() => {
-      if (stop || tabRef.current !== tab) return;
-      if (Math.abs((window.scrollY || 0) - y) > 2) { window.scrollTo(0, y); scrollPosRef.current[tab] = y; }
-    }, ms));
-    return () => { timers.forEach(clearTimeout); evs.forEach(ev => window.removeEventListener(ev, quit)); };
+    const until = Date.now() + (first ? 4000 : 1200);
+    let ok = 0;
+    const iv = setInterval(() => {
+      if (stop || tabRef.current !== tab || Date.now() > until) { clearInterval(iv); restoringRef.current = false; return; }
+      if (Math.abs((window.scrollY || 0) - y) > 2) { ok = 0; window.scrollTo(0, y); }
+      else if (++ok >= 3) { clearInterval(iv); restoringRef.current = false; }
+    }, 100);
+    return () => { clearInterval(iv); restoringRef.current = false; evs.forEach(ev => window.removeEventListener(ev, quit)); };
   }, [tab]);
   const DEFAULT_QUICK_TABS = ["dashboard", "calc", "quote", "ledger"];
   const [quickTabs, setQuickTabs] = useState(() => load("frw_quickmenu_tabs", DEFAULT_QUICK_TABS));
@@ -22556,7 +22598,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     }, 9000);
     return () => clearTimeout(t);
   }, []);
-  const [poSubTab, setPoSubTab] = useState("history"); // "current" | "history"
+  const [poSubTab, setPoSubTab] = useViewState("po.sub", "history"); // "current" | "history" — 새로고침해도 유지
   useEffect(() => { save("frw_po_subtab", poSubTab); }, [poSubTab]);
   const [poStatusFilter, setPoStatusFilter] = useState("all"); // 워크벤치 상태 필터: all | active | done
   const [selectedPOId, setSelectedPOId] = useState(null); // 워크벤치에서 선택된 발주
@@ -25253,7 +25295,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   width={sideWidth} setWidth={(w) => { setSideW(w); save("frw_side_w", w); }}
                   height={sideH} setHeight={(h) => { setSideH(h); save("frw_side_h", h); }}
                   onMin={() => setSideMin(true)} onClose={() => setSideTab(null)} onSwap={swapSide}>
-                  {renderTabBody(sideTab, "side")}
+                  <PaneCtx.Provider value="side">{renderTabBody(sideTab, "side")}</PaneCtx.Provider>
                 </SidePane>
               ), document.body)}
               {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild} sideIds={SIDE_TAB_IDS} onSide={openSide}/>}
@@ -29801,10 +29843,10 @@ function BidsTab({ bids, setBids, darkMode }) {
     { v: "유찰", c: "#F04452" },
   ];
   const [draft, setDraft] = useState({ title:"", agency:"", openDate:"", closeDate:"", awardDate:"", amount:"", status:"예정", url:"", note:"" });
-  const [filterStatus, setFilterStatus] = useState("");
+  const [filterStatus, setFilterStatus] = useViewState("bids.status", "");
   const [viewMode, setViewMode] = useState(() => load("frw_bids_viewmode", "list")); // list | calendar — 탭 이탈 후 복귀 시 유지
   useEffect(() => { save("frw_bids_viewmode", viewMode); }, [viewMode]);
-  const [calMonth, setCalMonth] = useState(new Date().toISOString().slice(0,7));
+  const [calMonth, setCalMonth] = useViewState("bids.calMonth", new Date().toISOString().slice(0,7));
 
   const reset = () => { setDraft({ title:"", agency:"", openDate:"", closeDate:"", awardDate:"", amount:"", status:"예정", url:"", note:"" }); setEditingId(null); setShowForm(false); };
   const saveBid = () => {
@@ -30014,7 +30056,7 @@ function NewsTab({ darkMode }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [feedKey, setFeedKey] = useState("ko-economy");
+  const [feedKey, setFeedKey] = useViewState("news.feed", "ko-economy");
   const [lastFetch, setLastFetch] = useState(null);
 
   // RSS feeds (rss2json 무료 API 경유 - CORS 우회)
@@ -30675,10 +30717,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0");
     return `${y}-${m}-${day}`;
   };
-  const [cursor, setCursor] = React.useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
-  const [selectedDate, setSelectedDate] = React.useState(() => ymd(today));
+  const [cursor, setCursor] = useViewState("schedule.cursor", () => new Date(today.getFullYear(), today.getMonth(), 1), { revive: (x) => new Date(x) });
+  const [selectedDate, setSelectedDate] = useViewState("schedule.date", () => ymd(today));
   // 주간 목표 카드가 보여 주는 주(일요일 키). 캘린더 띠를 누르면 그 주로 넘어간다.
-  const [goalWeek, setGoalWeek] = React.useState(() => wgWeekKey(ymd(today)));
+  const [goalWeek, setGoalWeek] = useViewState("schedule.goalWeek", () => wgWeekKey(ymd(today)));
   const goalCardRef = React.useRef(null);
   const goalInputRef = React.useRef(null);
   const openGoalWeek = (k) => {
@@ -30690,7 +30732,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // 타임테이블 현재 시각 표시 (1분마다 갱신)
   const [nowMin, setNowMin] = React.useState(() => { const n = new Date(); return n.getHours() * 60 + n.getMinutes(); });
   React.useEffect(() => { const iv = setInterval(() => { const n = new Date(); setNowMin(n.getHours() * 60 + n.getMinutes()); }, 60000); return () => clearInterval(iv); }, []);
-  const [search, setSearch] = React.useState(""); // 일정 검색어(내용)
+  const [search, setSearch] = useViewState("schedule.search", ""); // 일정 검색어(내용)
   // 검색 결과 클릭 → 해당 월로 이동 + 그 날짜 선택
   const jumpToDate = (ds) => { if (!ds) return; const [y, m] = ds.split("-").map(Number); setCursor(new Date(y, m - 1, 1)); setSelectedDate(ds); };
   // 통합 검색 → 일정/메모 결과 진입. 탭이 이미 열려 있으면 마운트가 안 일어나 localStorage
@@ -33665,9 +33707,9 @@ const MEETING_TYPE_COLOR = { "긴급회의": "#EF4444", "프로젝트 회의": "
 function MeetingTab({ meetings = [], setMeetings, setTodos, clients = [], darkMode }) {
   const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   const todayYmd = ymd(new Date());
-  const [search, setSearch] = React.useState("");
-  const [filterType, setFilterType] = React.useState("");
-  const [filterTag, setFilterTag] = React.useState("");
+  const [search, setSearch] = useViewState("meeting.search", "");
+  const [filterType, setFilterType] = useViewState("meeting.type", "");
+  const [filterTag, setFilterTag] = useViewState("meeting.tag", "");
   const [editing, setEditing] = React.useState(null);
   const [notionStatus, setNotionStatus] = React.useState("");   // "" | syncing | synced | error | off
   const [notionMsg, setNotionMsg] = React.useState("");
@@ -35123,9 +35165,9 @@ function TaxTab({ taxes = [], setTaxes, setTodos, darkMode, apiKey = "" }) {
   const todayYmd = ymd(new Date());
   const thisYear = String(new Date().getFullYear());
   const fmt = (n) => Number(n || 0).toLocaleString();
-  const [filterYear, setFilterYear] = React.useState(thisYear);
-  const [filterBiz, setFilterBiz] = React.useState("");
-  const [filterStatus, setFilterStatus] = React.useState(""); // "" 전체 | "unpaid" 미납 | "paid" 완납
+  const [filterYear, setFilterYear] = useViewState("tax.year", thisYear);
+  const [filterBiz, setFilterBiz] = useViewState("tax.biz", "");
+  const [filterStatus, setFilterStatus] = useViewState("tax.status", ""); // "" 전체 | "unpaid" 미납 | "paid" 완납
   const [editing, setEditing] = React.useState(null); // 레코드 draft or null
 
   // D-day: 음수면 경과. paidDate 있으면 완납.
@@ -36155,7 +36197,7 @@ function DrivePreviewInner({ file, driveApi, T, fileIcon }) {
 function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMode, T }) {
   const subtabs = companyFiles.subtabs || [];
   const localItems = companyFiles.items || {};
-  const [activeSub, setActiveSub] = React.useState(() => subtabs[0]?.id || "general");
+  const [activeSub, setActiveSub] = useViewState("files.sub", () => subtabs[0]?.id || "general");
   const [renamingId, setRenamingId] = React.useState(null);
   const [dragSubId, setDragSubId] = React.useState(null);
   const [dragOverId, setDragOverId] = React.useState(null);
@@ -36205,7 +36247,7 @@ function CompanyFilesTab({ companyFiles, setCompanyFiles, loaded = true, darkMod
   };
   const [renameValue, setRenameValue] = React.useState("");
   const [dragActive, setDragActive] = React.useState(false);
-  const [search, setSearch] = React.useState("");
+  const [search, setSearch] = useViewState("files.search", "");
   const [previewFile, setPreviewFile] = React.useState(null);
   const fileInputRef = React.useRef(null);
 
@@ -36923,8 +36965,8 @@ function MailTab({ darkMode, clients = [] }) {
   const [emails, setEmails] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [search, setSearch] = React.useState("");
-  const [activeQ, setActiveQ] = React.useState("in:inbox");
+  const [search, setSearch] = useViewState("mail.search", "");
+  const [activeQ, setActiveQ] = useViewState("mail.q", "in:inbox");
   const [viewing, setViewing] = React.useState(null);
   const [composing, setComposing] = React.useState(null); // null | { to, subject, body, replyTo }
   const tokenClientRef = React.useRef(null);
