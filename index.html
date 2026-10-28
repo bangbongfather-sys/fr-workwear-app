@@ -11688,15 +11688,23 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   useEffect(() => {
     if (focusClient) setSubTab("ar");
   }, [focusClient]);
-  const [selectedYM, setSelectedYM] = useState(defaultYM);
+  // 보던 위치 기억 — 다른 탭에 다녀와도 보던 달·검색·상태 필터·펼친 거래처 그대로 (본 화면·서브창 따로).
+  // 앱을 새로 열면(세션) 또는 12시간이 지나면 이번 달부터 다시 시작한다.
+  const viewKey = `frw_ledger_view_${pane}`;
+  const view0 = useRef(null);
+  if (view0.current === null) { try { const v = JSON.parse(sessionStorage.getItem(viewKey) || "null"); view0.current = v && Date.now() - (v.at || 0) < 12 * 3600e3 ? v : {}; } catch { view0.current = {}; } }
+  const [selectedYM, setSelectedYM] = useState(() => /^\d{4}-\d{2}$/.test(view0.current.ym || "") ? view0.current.ym : defaultYM);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [search, setSearch] = useState(() => view0.current.search || "");
+  const [statusFilter, setStatusFilter] = useState(() => view0.current.status || "");
   const [dragActive, setDragActive] = useState(false);
-  const [expandedClientId, setExpandedClientId] = useState(null);
+  const [expandedClientId, setExpandedClientId] = useState(() => view0.current.expanded ?? null);
+  useEffect(() => {
+    try { sessionStorage.setItem(viewKey, JSON.stringify({ ym: selectedYM, search, status: statusFilter, expanded: expandedClientId, at: Date.now() })); } catch {}
+  }, [selectedYM, search, statusFilter, expandedClientId]);
   const [draft, setDraft] = useState({ name:"", supply:"", tax:"", total:"", status:"미입금", memo:"" });
   const [arDraft, setArDraft] = useState({ type:"청구", desc:"", amount:"", date:"" });
   const [showPaidHistory, setShowPaidHistory] = useState(() => new Set()); // 완납 내역 펼친 거래처 id 목록
@@ -21820,7 +21828,19 @@ function App() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
   React.useLayoutEffect(() => {
-    window.scrollTo(0, scrollPosRef.current[tab] || 0);
+    const y = scrollPosRef.current[tab] || 0;
+    window.scrollTo(0, y);
+    if (!y) return;
+    // 화면이 데이터·그림을 늦게 채우면 처음엔 그만큼 내려갈 수 없다 → 잠깐 동안 다시 맞춘다 (손으로 움직이면 멈춤)
+    let stop = false;
+    const quit = () => { stop = true; };
+    const evs = ["wheel", "touchstart", "keydown", "mousedown"];
+    evs.forEach(ev => window.addEventListener(ev, quit, { passive: true }));
+    const timers = [60, 200, 450, 900].map(ms => setTimeout(() => {
+      if (stop || tabRef.current !== tab) return;
+      if (Math.abs((window.scrollY || 0) - y) > 2) { window.scrollTo(0, y); scrollPosRef.current[tab] = y; }
+    }, ms));
+    return () => { timers.forEach(clearTimeout); evs.forEach(ev => window.removeEventListener(ev, quit)); };
   }, [tab]);
   const DEFAULT_QUICK_TABS = ["dashboard", "calc", "quote", "ledger"];
   const [quickTabs, setQuickTabs] = useState(() => load("frw_quickmenu_tabs", DEFAULT_QUICK_TABS));
