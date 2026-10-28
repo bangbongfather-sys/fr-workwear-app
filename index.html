@@ -356,6 +356,7 @@
       .hdr-install { width: 36px; padding: 0 !important; justify-content: center; }
       .hdr-install .install-label-full { display: none; }
       .sync-badge .sb-label { display: none; }
+      .hdr-side-label { display: none; }
       .sync-badge:has(.sb-label), .sync-badge.sb-safety { padding: 0 !important; width: 32px; height: 32px; justify-content: center; }
       .sync-badge.sb-safety { margin-left: 6px !important; }
     }
@@ -909,6 +910,14 @@
     .tab-btn.tab-active::after { opacity: 1; }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* 서브창(분할 화면) 열린 동안 — 본 화면 최소 폭(1024px) 풀기 */
+    body.frw-split .main-content > * { min-width: 0 !important; }
+    body.frw-split-bottom .app-main { padding-bottom: calc(var(--side-h, 50vh) + 16px) !important; }
+    .sb-nav-item .sb-side-btn { opacity: 0; transition: opacity 0.15s, background 0.15s; }
+    .sb-nav-item:hover .sb-side-btn, .sb-nav-item .sb-side-btn.on { opacity: 1; }
+    .sb-nav-item .sb-side-btn:hover { background: rgba(255,255,255,0.12) !important; color: #fff !important; }
+    @media (hover: none) { .sb-nav-item .sb-side-btn { opacity: 0.75; } }
+    @keyframes sideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
     @keyframes salesPopIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
     @keyframes salesSheetUp { from { transform: translateY(100%); } to { transform: none; } }
     @keyframes salesFade { from { opacity: 0; } to { opacity: 1; } }
@@ -1527,6 +1536,9 @@ const ICON_PATHS = {
   phone:      <><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></>,
   message:    <><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></>,
   radar:      <><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><line x1="12" y1="12" x2="18.4" y2="5.6"/><circle cx="12" cy="12" r="1"/></>,
+  split:      <><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="13" y1="4" x2="13" y2="20"/></>,
+  swap:       <><polyline points="17 2 21 6 17 10"/><line x1="3" y1="6" x2="21" y2="6"/><polyline points="7 22 3 18 7 14"/><line x1="21" y1="18" x2="3" y2="18"/></>,
+  minimize:   <><line x1="5" y1="12" x2="19" y2="12"/></>,
   command:    <><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></>,
 };
 function Icon({ name, size = 18, strokeWidth = 1.7, style, className }) {
@@ -11666,11 +11678,12 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   );
 }
 
-function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, monthlySales = {}, orders = [], darkMode, focusClient, clearFocus, bankDeposits, setBankDeposits, clients = [] }) {
+function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, monthlySales = {}, orders = [], darkMode, focusClient, clearFocus, bankDeposits, setBankDeposits, clients = [], pane = "main" }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
-  const [subTab, setSubTab] = useState(() => load("frw_ledger_subtab", "monthly")); // "monthly" | "ar" — 탭 이탈 후 복귀 시 유지
-  useEffect(() => { save("frw_ledger_subtab", subTab); }, [subTab]);
+  const subKey = pane === "side" ? "frw_ledger_subtab_side" : "frw_ledger_subtab";   // 서브창은 따로 기억 (본 화면과 다른 서브탭을 볼 수 있게)
+  const [subTab, setSubTab] = useState(() => load(subKey, pane === "side" ? "deposits" : "monthly")); // "monthly" | "ar" — 탭 이탈 후 복귀 시 유지
+  useEffect(() => { save(subKey, subTab); }, [subTab]);
   // 외부에서 거래처를 지정해 들어온 경우: AR 서브탭으로 전환
   useEffect(() => {
     if (focusClient) setSubTab("ar");
@@ -16732,7 +16745,7 @@ function cmdkParseSales(q, today) {
 const _cmdkCache = new Map();
 const cmdkGet = (url) => { if (!_cmdkCache.has(url)) _cmdkCache.set(url, fetch(url, { cache: "no-store" }).then(r => r.json()).catch(() => null)); return _cmdkCache.get(url); };
 
-function CommandPalette({ onClose, tabs, onNav, commands, search }) {
+function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null, onSide }) {
   const today = kstTodayYmd();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -16792,7 +16805,15 @@ function CommandPalette({ onClose, tabs, onNav, commands, search }) {
       run: navSales(ans.name ? { sub: "clients", client: ans.name, ...(sq.month ? { month: sq.month } : { from: sq.from, to: sq.to }) } : { sub: "summary", ...(sq.month ? { month: sq.month } : { from: sq.from, to: sq.to }) }) });
   }
   // ── 바로가기 ──
-  const allCmds = [...commands, ...tabs.map(([id, label, icon]) => ({ id: `tab:${id}`, icon, title: label, sub: "화면 열기", keys: id, run: () => onNav(id) }))];
+  const canSide = (id) => !!(onSide && sideIds && sideIds.has(id));
+  const allCmds = [...commands, ...tabs.map(([id, label, icon]) => ({ id: `tab:${id}`, icon, title: label, sub: canSide(id) ? "화면 열기 · Shift+Enter 서브창에서 열기" : "화면 열기", keys: id, run: () => onNav(id), runSide: canSide(id) ? () => onSide(id) : null }))];
+  // 「서브창 장부」「옆에 입금내역」 — 서브창으로 열기
+  const sideAsk = qs && onSide && /(서브창|서브|옆에|옆창|분할|같이\s*보)/.test(qs);
+  if (sideAsk) {
+    const rest = qs.replace(/(서브창에서|서브창으로|서브창|서브|옆에|옆창|분할|같이\s*보기?|열어\s*줘|열기|띄워\s*줘?)/g, " ").trim();
+    tabs.filter(([id]) => canSide(id)).map(([id, label, icon]) => ({ id, label, icon, sc: rest ? searchScore(rest, [label, id]) : 1 })).filter(x => x.sc > 0).sort((a, b) => b.sc - a.sc).slice(0, 8)
+      .forEach(x => items.push({ section: "서브창", id: `side:${x.id}`, icon: "split", title: `서브창에서 열기 — ${x.label}`, sub: "지금 화면은 그대로 두고 옆에 띄워요", run: () => onSide(x.id) }));
+  }
   if (qs) {
     allCmds.map(c => ({ c, s: searchScore(qs, [c.title, c.keys || ""]) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 6)
       .forEach(({ c }) => items.push({ section: "바로가기", ...c }));
@@ -16811,7 +16832,7 @@ function CommandPalette({ onClose, tabs, onNav, commands, search }) {
   const onKey = (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); keyNav.current = true; setSel(s => Math.min(s + 1, items.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); keyNav.current = true; setSel(s => Math.max(s - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (e.nativeEvent.isComposing) return; run(items[cur]); }
+    else if (e.key === "Enter") { e.preventDefault(); if (e.nativeEvent.isComposing) return; const it = items[cur]; if (e.shiftKey && it && it.runSide) run({ ...it, id: `side:${it.id}`, run: it.runSide }); else run(it); }
     else if (e.key === "Escape") { e.preventDefault(); onClose(); }
   };
 
@@ -16901,9 +16922,10 @@ function CommandPalette({ onClose, tabs, onNav, commands, search }) {
     </div>, document.body);
 }
 
-function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsDb = [] }) {
+function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsDb = [], pane = "main" }) {
   const today = kstTodayYmd();
-  const [subTab, setSubTab] = useState(() => { try { return localStorage.getItem("frw_sales_subtab") || "summary"; } catch { return "summary"; } });
+  const subKey = pane === "side" ? "frw_sales_subtab_side" : "frw_sales_subtab";   // 서브창은 따로 기억
+  const [subTab, setSubTab] = useState(() => { try { return localStorage.getItem(subKey) || "summary"; } catch { return "summary"; } });
   const subOrder = useSubtabOrder("frw_sales_subtab_order", ["summary", "calendar", "clients", "slips", "radar"], "data-sales-sub");
   const [mode, setMode] = useState(() => { try { return localStorage.getItem("frw_sales_mode") || "month"; } catch { return "month"; } });
   const [month, setMonth] = useState(() => today.slice(0, 7));
@@ -16949,7 +16971,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     return () => { dead = true; };
   }, [from, to, pFrom, pTo, tick]);
   useEffect(() => { setSelDay(null); setAllClients(false); setAllProducts(false); setSlipLimit(60); }, [from, to]);
-  const pickSub = (id) => { setSubTab(id); try { localStorage.setItem("frw_sales_subtab", id); } catch {} };
+  const pickSub = (id) => { setSubTab(id); try { localStorage.setItem(subKey, id); } catch {} };
   // 다른 창(Claude)에서 반영하고 돌아오면 다시 읽는다
   useEffect(() => {
     const onVis = () => { if (document.visibilityState === "visible") setTick(t => t + 1); };
@@ -16982,6 +17004,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   // 레이더·⌘K 에서 거래처를 열면 — 최근 1년으로 넓혀 거래처 상세를 보여 준다
   // ⌘K 명령창에서 넘어올 때 — { sub, month | from·to, client } (탭이 새로 열리면 window.__frwSalesNav, 열려 있으면 이벤트)
   useEffect(() => {
+    if (pane === "side") return;   // ⌘K 이동은 본 화면만
     const take = () => {
       const d = window.__frwSalesNav; window.__frwSalesNav = null;
       if (!d) return;
@@ -17020,7 +17043,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
       if (f) handleFileRef.current?.(f);
       else if (files.length) setParseErr("엑셀 파일(.xlsx/.xls/.csv)만 올릴 수 있습니다: " + (files[0].name || ""));
     };
-    window.addEventListener("dragover", onDragOver); window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop);
+    if (pane !== "side") { window.addEventListener("dragover", onDragOver); window.addEventListener("dragleave", onDragLeave); window.addEventListener("drop", onDrop); }   // 서브창은 창 전체 끌어 놓기를 안 받는다 (본 화면과 겹치지 않게)
     return () => { window.removeEventListener("dragover", onDragOver); window.removeEventListener("dragleave", onDragLeave); window.removeEventListener("drop", onDrop); };
   }, []);
   const save = async () => {
@@ -17717,7 +17740,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   );
 }
 
-function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch, onSalesFile }) {
+function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch, onSalesFile, pane = "main" }) {
   const items = stock?.items || [];
   const [search, setSearch] = useState("");
   const listRef = useRef(null); // 전체 재고 카드 — 통합검색 진입 시 스크롤 목적지
@@ -17838,9 +17861,11 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
       if (f) handleFileRef.current?.(f);
       else if (files.length) setParseErr("엑셀 파일(.xlsx/.xls/.csv)만 업로드할 수 있습니다: " + (files[0].name || ""));
     };
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("dragleave", onDragLeave);
-    window.addEventListener("drop", onDrop);
+    if (pane !== "side") {   // 서브창은 창 전체 끌어 놓기를 안 받는다
+      window.addEventListener("dragover", onDragOver);
+      window.addEventListener("dragleave", onDragLeave);
+      window.addEventListener("drop", onDrop);
+    }
     return () => {
       window.removeEventListener("dragover", onDragOver);
       window.removeEventListener("dragleave", onDragLeave);
@@ -21695,6 +21720,83 @@ function QuoteWizard({ clients = [], products = [], materials = [], laborItems =
   );
 }
 
+// ─── 서브창 (분할 화면) ───
+// 넓은 화면: 오른쪽에 붙는 창(왼쪽 가장자리를 끌어 폭 조절). 좁은 화면(900px 미만): 아래에서 올라오는 창(위 손잡이로 높이 조절).
+// 안의 화면은 App 의 renderTabBody(…, "side") — 본 화면과 같은 데이터라 한쪽에서 고치면 다른 쪽에 바로 보인다.
+const SIDE_TAB_IDS = new Set(["pricedb", "dashboard", "inventory", "stock", "sales", "ledger", "treasury", "tax", "hr", "meeting", "clients", "suppliers", "bids", "schedule", "news", "mail", "files"]);
+function SidePane({ tabs, sideTab, onPick, narrow, width, setWidth, height, setHeight, onMin, onClose, onSwap, children }) {
+  const [menu, setMenu] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const meta = tabs.find(t => t[0] === sideTab) || [sideTab, sideTab, "split"];
+  const startDrag = (e) => {
+    e.preventDefault(); setDragging(true);
+    const move = (ev) => {
+      const x = ev.touches ? ev.touches[0].clientX : ev.clientX, y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+      if (narrow) setHeight(Math.max(0.28, Math.min(0.9, (window.innerHeight - y) / window.innerHeight)));
+      else setWidth(Math.max(360, Math.min(window.innerWidth - 620, window.innerWidth - x - 12)));
+    };
+    const up = () => {
+      setDragging(false);
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    window.addEventListener("touchmove", move, { passive: true }); window.addEventListener("touchend", up);
+  };
+  const hBtn = (icon, title, onClick) => (
+    <button type="button" onClick={onClick} title={title} aria-label={title}
+      style={{ width: 32, height: 32, borderRadius: 9, border: "none", background: "transparent", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+      onMouseEnter={e => e.currentTarget.style.background = "var(--surface2)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+      <Icon name={icon} size={15}/>
+    </button>
+  );
+  const box = narrow
+    ? { left: 0, right: 0, bottom: 0, height: `${Math.round(height * 100)}vh`, borderRadius: "20px 20px 0 0", borderBottom: "none" }
+    : { top: 12, right: 12, bottom: 12, width, borderRadius: 18 };
+  return (
+    <div className="no-print side-pane" role="complementary" aria-label={`서브창 — ${meta[1]}`}
+      style={{ position: "fixed", zIndex: 300, display: "flex", flexDirection: "column", background: "var(--bg)", border: "1px solid var(--border)", boxShadow: "0 12px 40px rgba(0,0,0,0.22)", overflow: "hidden", animation: narrow ? "salesSheetUp 0.2s ease-out" : "sideIn 0.18s ease-out", ...box }}>
+      {/* 크기 손잡이 */}
+      {narrow
+        ? <div onPointerDown={startDrag} onTouchStart={startDrag} style={{ height: 18, display: "flex", alignItems: "center", justifyContent: "center", cursor: "row-resize", touchAction: "none", flexShrink: 0 }}><div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--border)" }}/></div>
+        : <div onPointerDown={startDrag} title="끌어서 폭 조절" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 8, cursor: "col-resize", zIndex: 2, background: dragging ? "rgba(49,130,246,0.35)" : "transparent" }}
+            onMouseEnter={e => { if (!dragging) e.currentTarget.style.background = "rgba(49,130,246,0.18)"; }} onMouseLeave={e => { if (!dragging) e.currentTarget.style.background = "transparent"; }}/>}
+      {dragging && <div style={{ position: "fixed", inset: 0, zIndex: 1, cursor: narrow ? "row-resize" : "col-resize" }}/>}
+      {/* 머리 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: narrow ? "0 10px 8px 14px" : "10px 10px 10px 16px", borderBottom: "1px solid var(--border)", background: "var(--surface)", flexShrink: 0, position: "relative" }}>
+        <span style={{ fontSize: 10.5, fontWeight: 800, color: "#3182F6", background: "rgba(49,130,246,0.12)", padding: "3px 7px", borderRadius: 6, flexShrink: 0 }}>서브창</span>
+        <button type="button" onClick={() => setMenu(m => !m)} aria-haspopup="menu"
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 34, padding: "0 10px", border: "none", borderRadius: 9, background: menu ? "var(--surface2)" : "transparent", color: "var(--text1)", fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", minWidth: 0 }}>
+          <Icon name={meta[2]} size={16}/><span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta[1]}</span><span style={{ fontSize: 9, opacity: 0.6 }}>▼</span>
+        </button>
+        <span style={{ flex: 1 }}/>
+        {onSwap && hBtn("swap", "본 화면과 바꾸기", onSwap)}
+        {hBtn("minimize", "접어 두기 (화면은 그대로 기억)", onMin)}
+        {hBtn("close", "서브창 닫기", onClose)}
+        {menu && (
+          <>
+            <div onClick={() => setMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 5 }}/>
+            <div role="menu" style={{ position: "absolute", top: "100%", left: 10, marginTop: 4, zIndex: 6, width: 230, maxHeight: "60vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, boxShadow: "var(--elev-4)", padding: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", padding: "4px 8px 6px" }}>서브창에 띄울 화면</div>
+              {tabs.map(([id, label, icon]) => (
+                <button key={id} type="button" role="menuitem" onClick={() => { onPick(id); setMenu(false); }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", border: "none", borderRadius: 8, background: id === sideTab ? "rgba(49,130,246,0.10)" : "transparent", color: id === sideTab ? "#3182F6" : "var(--text1)", fontSize: 13, fontWeight: id === sideTab ? 800 : 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                  onMouseEnter={e => { if (id !== sideTab) e.currentTarget.style.background = "var(--surface2)"; }} onMouseLeave={e => { if (id !== sideTab) e.currentTarget.style.background = "transparent"; }}>
+                  <Icon name={icon} size={15}/>{label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+      {/* 화면 */}
+      <div className="side-content" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: narrow ? "12px 10px 24px" : "14px 14px 28px", overscrollBehavior: "contain" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   // 알림을 눌러 ?tab=hr 처럼 들어오면 그 탭부터 연다 (주소의 ?tab 은 바로 지운다)
   const [tab, setTab] = useState(() => {
@@ -22231,6 +22333,24 @@ function App() {
   const gsKeyNavRef = useRef(false);        // 방향키 탐색 중일 때만 scrollIntoView (호버와 구분)
   const [gsMobileOpen, setGsMobileOpen] = useState(false); // 1024px 이하 — 검색 오버레이 열림
   useEffect(() => { setGsMobileOpen(false); }, [tab]);      // 검색 결과로 탭 이동하면 오버레이 닫기
+  // ── 서브창(분할 화면) — 본 화면을 보면서 옆(핸드폰은 아래)에 다른 화면을 같이 띄운다. 같은 데이터를 쓰고, 본 화면에서 탭을 옮겨도 서브창은 그대로.
+  const [sideTab, setSideTab] = useState(() => load("frw_side_tab", null));
+  const [sideMin, setSideMin] = useState(false);
+  const [sideW, setSideW] = useState(() => load("frw_side_w", 560));
+  const [sideH, setSideH] = useState(() => load("frw_side_h", 0.5));     // 좁은 화면: 화면 높이 비율
+  const [sideMenu, setSideMenu] = useState(false);                         // 헤더 「서브창」 메뉴
+  const [vw, setVw] = useState(() => window.innerWidth);
+  useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
+  useEffect(() => { save("frw_side_tab", sideTab); }, [sideTab]);
+  const sideNarrow = vw < 900;
+  const sideWidth = Math.min(sideW, Math.max(360, vw - 620));   // 본 화면이 최소 600px 은 남게
+  const sideShown = !!sideTab && !sideMin;
+  useEffect(() => {
+    document.body.classList.toggle("frw-split", sideShown && !sideNarrow);
+    document.body.classList.toggle("frw-split-bottom", sideShown && sideNarrow);
+    document.body.style.setProperty("--side-h", `${Math.round(sideH * 100)}vh`);
+  }, [sideShown, sideNarrow, sideH]);
+  const openSide = (id) => { setSideTab(id); setSideMin(false); setSideMenu(false); };
   // ⌘K 명령창 — Ctrl/⌘+K 어디서든, 입력칸 밖에서 「/」 (한글 자판이어도 e.code 로 잡는다)
   const [cmdkOpen, setCmdkOpen] = useState(false);
   useEffect(() => {
@@ -24451,7 +24571,133 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     { id: "cmd:daily", icon: "edit", title: "오늘 하루 기록 쓰기", sub: "일정 → 하루 기록", keys: "하루 기록 일기 오늘 메모", run: () => { save("frw_schedule_subtab", "daily"); setTab("schedule"); setTimeout(() => window.dispatchEvent(new CustomEvent("frw:schedule-nav", { detail: { sub: "daily", date: kstTodayYmd() } })), 80); } },
     { id: "cmd:dark", icon: darkMode ? "sun" : "moon", title: darkMode ? "라이트 모드로 바꾸기" : "다크 모드로 바꾸기", keys: "다크 모드 라이트 테마 어둡게 밝게 화면", run: () => setDarkMode(d => !d) },
   ];
+  // 탭 화면 — 본 화면과 서브창이 같이 쓴다 (pane="side" 면 서브창 — 같은 데이터, 따로 노는 화면 상태)
+  // 단가 계산기·견적·발주는 App 안에 바로 그려져 있어 서브창에서는 못 연다 (SIDE_TABS 참고).
+  const renderTabBody = (t, pane = "main") => {
+    switch (t) {
+      case "pricedb": return (
+        <PriceDB materials={materials} setMaterials={setMaterials} laborItems={laborItems} setLaborItems={setLaborItems} stock={stock} products={products} purchaseOrders={purchaseOrders} />
+      );
+      case "dashboard": return (
+        <DashboardTab
+          products={products}
+          setProducts={setProducts}
+          materials={materials}
+          setMaterials={setMaterials}
+          laborItems={laborItems}
+          setLaborItems={setLaborItems}
+          orders={orders}
+          setOrders={setOrders}
+          monthlySales={monthlySales}
+          setMonthlySales={setMonthlySales}
+          darkMode={darkMode}
+          setTab={setTab}
+          setActiveProdId={setActiveProdId}
+          clients={clients}
+          ledgers={ledgers}
+          clientAR={clientAR}
+          accounts={accounts}
+          fabricIntakes={fabricIntakes}
+          scheduledExpenses={scheduledExpenses}
+          stock={stock}
+        />
+      );
+      case "inventory": return (
+        <InventoryTab
+          fabricIntakes={fabricIntakes}
+          setFabricIntakes={setFabricIntakes}
+          payables={payables}
+          setPayables={setPayables}
+          cashFlows={cashFlows}
+          materials={materials}
+          laborItems={laborItems}
+          purchaseSubTabs={purchaseSubTabs}
+          setPurchaseSubTabs={setPurchaseSubTabs}
+          purchaseDateMemos={purchaseDateMemos}
+          setPurchaseDateMemos={setPurchaseDateMemos}
+          focusSupplier={pane === "main" ? inventoryFocusSupplier : null}
+          clearFocusSupplier={() => setInventoryFocusSupplier(null)}
+          darkMode={darkMode}
+          apiKey={apiKey}
+        />
+      );
+      case "stock": return (
+        <StockTab stock={stock} setStock={setStock} materials={materials} darkMode={darkMode} pane={pane}
+          focusSearch={pane === "main" ? stockFocusSearch : null} clearFocusSearch={() => setStockFocusSearch(null)}
+          onSalesFile={(parsed) => { setSalesPendingFile(parsed); setTab("sales"); }} />
+      );
+      case "sales": return (
+        <SalesTab pendingFile={pane === "main" ? salesPendingFile : null} clearPending={() => setSalesPendingFile(null)} darkMode={darkMode} clientsDb={clients} pane={pane} />
+      );
+      case "ledger": return (
+        <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} orders={orders} darkMode={darkMode} focusClient={pane === "main" ? ledgerFocusClient : null} clearFocus={() => setLedgerFocusClient(null)} bankDeposits={bankDeposits} setBankDeposits={setBankDeposits} clients={clients} pane={pane} />
+      );
+      case "treasury": return (
+        <TreasuryTab
+          accounts={accounts} setAccounts={setAccounts}
+          investments={investments} setInvestments={setInvestments}
+          cashFlows={cashFlows} setCashFlows={setCashFlows}
+          scheduledExpenses={scheduledExpenses} setScheduledExpenses={setScheduledExpenses}
+          ledgers={ledgers} clientAR={clientAR} orders={orders}
+          clients={clients} suppliers={suppliers}
+          darkMode={darkMode}
+          setTab={setTab} setLedgerFocusClient={setLedgerFocusClient}
+        />
+      );
+      case "tax": return (
+        <TaxTab taxes={taxes} setTaxes={setTaxes} setTodos={setTodos} darkMode={darkMode} apiKey={apiKey} />
+      );
+      case "hr": return (
+        <HrTab employees={employees} setEmployees={setEmployees} payrolls={payrolls} setPayrolls={setPayrolls}
+          leaves={leaves} setLeaves={setLeaves} hrSettings={hrSettings} setHrSettings={setHrSettings} />
+      );
+      case "meeting": return (
+        <MeetingTab meetings={meetings} setMeetings={setMeetings} setTodos={setTodos} clients={clients} darkMode={darkMode} />
+      );
+      case "clients": return (
+        <ClientsTab
+          clients={clients}
+          setClients={setClients}
+          orders={orders}
+          darkMode={darkMode}
+        />
+      );
+      case "suppliers": return (
+        <SuppliersTab
+          suppliers={suppliers}
+          setSuppliers={setSuppliers}
+          materials={materials}
+          fabricIntakes={fabricIntakes}
+          darkMode={darkMode}
+        />
+      );
+      case "bids": return (
+        <BidsTab bids={bids} setBids={setBids} darkMode={darkMode} />
+      );
+      case "schedule": return (
+        <>
+        <ScheduleAlertSettings/>
+        <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} taxes={taxes} />
+        </>
+      );
+      case "news": return (
+        <NewsTab darkMode={darkMode} />
+      );
+      case "mail": return (
+        <MailTab darkMode={darkMode} clients={clients} />
+      );
+      case "files": return (
+        <CompanyFilesTab companyFiles={companyFiles} setCompanyFiles={setCompanyFiles} loaded={companyFilesLoaded} darkMode={darkMode} T={T} />
+      );
+    }
+    return null;
+  };
   const TABS = [["pricedb", "단가표", "pricedb"], ["calc", "단가 계산기", "calc"], ["quote", "견적 관리", "quote"], ["purchase", "발주 관리", "purchase"], ["dashboard", "경영 대시보드", "dashboard"], ["ledger", "장부", "ledger"], ["treasury", "자금 운용", "treasury"], ["tax", "세무 관리", "coins"], ["hr", "인사 관리", "user"], ["meeting", "회의록", "clipboard"], ["inventory", "매입 현황", "inventory"], ["stock", "재고 현황", "layers"], ["sales", "판매 현황", "barChart"], ["clients", "거래처별 단가", "clients"], ["suppliers", "공급처 관리", "suppliers"], ["schedule", "일정", "calendar"], ["bids", "입찰 캘린더", "bids"], ["files", "회사 필요 파일", "files"], ["mail", "메일", "mail"], ["news", "뉴스", "news"]];
+  const SIDE_TABS = TABS.filter(t => SIDE_TAB_IDS.has(t[0]));   // 서브창에 띄울 수 있는 화면
+  const swapSide = () => {
+    if (!SIDE_TAB_IDS.has(tab)) { showToast("이 화면(계산기·견적·발주)은 서브창에 못 띄워서 바꿀 수 없어요", "error"); return; }
+    const m = tab; setTab(sideTab); setSideTab(m);
+  };
   // 사이드바 메뉴 그룹 (토스 핸드오프 — 평면 나열 → 그룹 헤더). TABS는 평면 유지(퀵메뉴 등 재사용)
   const TAB_GROUPS = [
     { label: "핵심", ids: ["dashboard", "calc", "quote"] },
@@ -24778,7 +25024,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 const [, label, icon] = t;
                 const active = tab === id;
                 return (
-                  <button key={id} onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sidebarCollapsed ? label : ""} style={{
+                  <button key={id} className="sb-nav-item" onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sidebarCollapsed ? label : ""} style={{
                     display: "flex", alignItems: "center", gap: 12,
                     width: "100%", padding: sidebarCollapsed ? "11px 0" : "10px 14px",
                     border: "none", borderRadius: 10,
@@ -24799,6 +25045,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                       <Icon name={icon} size={18} strokeWidth={1.7}/>
                     </span>
                     {!sidebarCollapsed && <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>}
+                    {!sidebarCollapsed && SIDE_TAB_IDS.has(id) && (
+                      <span role="button" tabIndex={-1} className={"sb-side-btn" + (sideTab === id && !sideMin ? " on" : "")} title={sideTab === id ? "서브창에 열려 있어요" : `「${label}」 서브창에서 열기 — 지금 화면은 그대로`}
+                        onClick={e => { e.stopPropagation(); openSide(id); setMobileSidebarOpen(false); }}
+                        style={{ marginLeft: "auto", width: 26, height: 22, borderRadius: 6, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                          color: sideTab === id ? "#7DB3FF" : "#8B95A1", background: sideTab === id ? "rgba(49,130,246,0.22)" : "transparent" }}>
+                        <Icon name="split" size={13}/>
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -24880,7 +25134,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       )}
 
       {/* ── 메인 영역 ── */}
-      <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: "12px 12px 12px 12px", gap: 12 }}>
+      <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: `12px ${sideShown && !sideNarrow ? sideWidth + 24 : 12}px 12px 12px`, gap: 12 }}>
 
       {/* ── 헤더 (떠있는 카드) ── */}
       <div style={{ border: "1px solid var(--border)", borderRadius: 14, position: "sticky", top: 12, zIndex: 50, boxShadow: "0 1px 2px rgba(15,17,21,0.03), 0 2px 6px rgba(15,17,21,0.04)" }} className="no-print app-header">
@@ -24916,7 +25170,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     color: "var(--input-color)", fontFamily: "inherit",
                   }}
                 />
-                {!globalSearch && !gsMobileOpen && (
+                {!globalSearch && !gsMobileOpen && !(sideShown && !sideNarrow) && (
                   <button type="button" className="cmdk-hint" onClick={() => setCmdkOpen(true)} title="명령창 — 말로 물어보기·바로가기 (어디서든 Ctrl/⌘+K)"
                     style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", height: 26, padding: "0 8px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 5 }}>
                     <Icon name="sparkles" size={12}/>{/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘K" : "Ctrl K"}
@@ -24967,7 +25221,22 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               </div>
             </div>
             <div className="hdr-actions" style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild}/>}
+              {sideTab && SIDE_TAB_IDS.has(sideTab) && ReactDOM.createPortal(sideMin ? (
+                <div className="no-print" style={{ position: "fixed", right: 16, bottom: sideNarrow ? 104 : 20, zIndex: 300, display: "flex", alignItems: "center", gap: 2, padding: 4, borderRadius: 999, background: "var(--text1)", color: "var(--surface)", boxShadow: "0 8px 24px rgba(0,0,0,0.25)", animation: "salesPopIn 0.15s ease-out" }}>
+                  <button type="button" onClick={() => setSideMin(false)} title="서브창 다시 펼치기" style={{ display: "inline-flex", alignItems: "center", gap: 7, height: 36, padding: "0 12px 0 10px", border: "none", borderRadius: 999, background: "transparent", color: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    <Icon name="split" size={15}/>서브창 · {(TABS.find(t => t[0] === sideTab) || [])[1]}
+                  </button>
+                  <button type="button" onClick={() => setSideTab(null)} title="서브창 닫기" aria-label="서브창 닫기" style={{ width: 30, height: 30, borderRadius: 15, border: "none", background: "rgba(255,255,255,0.14)", color: "inherit", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={12}/></button>
+                </div>
+              ) : (
+                <SidePane tabs={SIDE_TABS} sideTab={sideTab} onPick={setSideTab} narrow={sideNarrow}
+                  width={sideWidth} setWidth={(w) => { setSideW(w); save("frw_side_w", w); }}
+                  height={sideH} setHeight={(h) => { setSideH(h); save("frw_side_h", h); }}
+                  onMin={() => setSideMin(true)} onClose={() => setSideTab(null)} onSwap={swapSide}>
+                  {renderTabBody(sideTab, "side")}
+                </SidePane>
+              ), document.body)}
+              {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild} sideIds={SIDE_TAB_IDS} onSide={openSide}/>}
               {/* 좁은 화면 전용 검색 버튼 — ⌘K 명령창 열기 (1024px 이하에서만 CSS로 표시) */}
               <button className="gs-mobile-btn no-print" title="통합 검색"
                 onClick={() => setCmdkOpen(true)}
@@ -24976,6 +25245,30 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
                   color: "var(--text1)", alignItems: "center", justifyContent: "center", flexShrink: 0,
                 }}><Icon name="search" size={16}/></button>
+              {/* 서브창 — 지금 화면은 그대로 두고 옆(핸드폰은 아래)에 다른 화면 띄우기 */}
+              <div style={{ position: "relative", flexShrink: 0 }} className="no-print">
+                <button type="button" onClick={() => { if (sideTab && sideMin) { setSideMin(false); return; } setSideMenu(m => !m); }} title="서브창 — 보면서 작업하기" aria-haspopup="menu"
+                  style={{ height: 36, padding: "0 12px", borderRadius: 18, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6,
+                    background: sideShown || sideMenu ? "rgba(49,130,246,0.14)" : (darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)"), color: sideShown || sideMenu ? "#3182F6" : "var(--text1)" }}>
+                  <Icon name="split" size={15}/>{!(sideShown && !sideNarrow) && <span className="hdr-side-label">서브창</span>}
+                </button>
+                {sideMenu && (
+                  <>
+                    <div onClick={() => setSideMenu(false)} style={{ position: "fixed", inset: 0, zIndex: 900 }}/>
+                    <div role="menu" style={{ position: "absolute", top: "100%", right: 0, marginTop: 8, zIndex: 901, width: 250, maxHeight: "70vh", overflowY: "auto", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, boxShadow: "var(--elev-4)", padding: 6, animation: "salesPopIn 0.14s ease-out" }}>
+                      <div style={{ fontSize: 11.5, color: "var(--text3)", padding: "6px 8px 8px", lineHeight: 1.5 }}>지금 화면은 그대로 두고 <b style={{ color: "var(--text2)" }}>{sideNarrow ? "아래" : "오른쪽"}</b>에 띄워요</div>
+                      {SIDE_TABS.map(([id, label, icon]) => (
+                        <button key={id} type="button" role="menuitem" onClick={() => openSide(id)}
+                          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", border: "none", borderRadius: 8, background: id === sideTab ? "rgba(49,130,246,0.10)" : "transparent", color: id === sideTab ? "#3182F6" : "var(--text1)", fontSize: 13, fontWeight: id === sideTab ? 800 : 600, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                          onMouseEnter={e => { if (id !== sideTab) e.currentTarget.style.background = "var(--surface2)"; }} onMouseLeave={e => { if (id !== sideTab) e.currentTarget.style.background = "transparent"; }}>
+                          <Icon name={icon} size={15}/>{label}{id === tab && <span style={{ marginLeft: "auto", fontSize: 10.5, color: "var(--text3)", fontWeight: 600 }}>지금 화면</span>}
+                        </button>
+                      ))}
+                      {sideTab && <button type="button" onClick={() => { setSideTab(null); setSideMenu(false); }} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 10px", marginTop: 4, borderTop: "1px solid var(--border)", border: "none", borderRadius: 8, background: "transparent", color: "#F04452", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}><Icon name="close" size={14}/>서브창 닫기</button>}
+                    </div>
+                  </>
+                )}
+              </div>
               {!installed && (
                 <button onClick={promptInstall} title="앱처럼 바탕화면에 설치" aria-label="앱 설치" className="no-print hdr-install"
                   style={{
@@ -25037,9 +25330,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         })()}
 
         {/* ── 단가표 탭 ── */}
-        {tab === "pricedb" && (
-          <PriceDB materials={materials} setMaterials={setMaterials} laborItems={laborItems} setLaborItems={setLaborItems} stock={stock} products={products} purchaseOrders={purchaseOrders} />
-        )}
+        {renderTabBody(tab)}
 
         {/* ── 계산기 탭 ── */}
         {tab === "calc" && (
@@ -27477,123 +27768,6 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             )}
           </div>
         )}
-
-        {/* 경영 대시보드 */}
-        {tab === "dashboard" && (
-          <DashboardTab
-            products={products}
-            setProducts={setProducts}
-            materials={materials}
-            setMaterials={setMaterials}
-            laborItems={laborItems}
-            setLaborItems={setLaborItems}
-            orders={orders}
-            setOrders={setOrders}
-            monthlySales={monthlySales}
-            setMonthlySales={setMonthlySales}
-            darkMode={darkMode}
-            setTab={setTab}
-            setActiveProdId={setActiveProdId}
-            clients={clients}
-            ledgers={ledgers}
-            clientAR={clientAR}
-            accounts={accounts}
-            fabricIntakes={fabricIntakes}
-            scheduledExpenses={scheduledExpenses}
-            stock={stock}
-          />
-        )}
-
-        {/* 원단 입고현황 */}
-        {tab === "inventory" && (
-          <InventoryTab
-            fabricIntakes={fabricIntakes}
-            setFabricIntakes={setFabricIntakes}
-            payables={payables}
-            setPayables={setPayables}
-            cashFlows={cashFlows}
-            materials={materials}
-            laborItems={laborItems}
-            purchaseSubTabs={purchaseSubTabs}
-            setPurchaseSubTabs={setPurchaseSubTabs}
-            purchaseDateMemos={purchaseDateMemos}
-            setPurchaseDateMemos={setPurchaseDateMemos}
-            focusSupplier={inventoryFocusSupplier}
-            clearFocusSupplier={() => setInventoryFocusSupplier(null)}
-            darkMode={darkMode}
-            apiKey={apiKey}
-          />
-        )}
-
-        {tab === "stock" && (
-          <StockTab stock={stock} setStock={setStock} materials={materials} darkMode={darkMode}
-            focusSearch={stockFocusSearch} clearFocusSearch={() => setStockFocusSearch(null)}
-            onSalesFile={(parsed) => { setSalesPendingFile(parsed); setTab("sales"); }} />
-        )}
-        {tab === "sales" && (
-          <SalesTab pendingFile={salesPendingFile} clearPending={() => setSalesPendingFile(null)} darkMode={darkMode} clientsDb={clients} />
-        )}
-        {tab === "ledger" && (
-          <LedgerTab ledgers={ledgers} setLedgers={setLedgers} clientAR={clientAR} setClientAR={setClientAR} yearlyRevenue={yearlyRevenue} setYearlyRevenue={setYearlyRevenue} monthlySales={monthlySales} orders={orders} darkMode={darkMode} focusClient={ledgerFocusClient} clearFocus={() => setLedgerFocusClient(null)} bankDeposits={bankDeposits} setBankDeposits={setBankDeposits} clients={clients} />
-        )}
-        {tab === "treasury" && (
-          <TreasuryTab
-            accounts={accounts} setAccounts={setAccounts}
-            investments={investments} setInvestments={setInvestments}
-            cashFlows={cashFlows} setCashFlows={setCashFlows}
-            scheduledExpenses={scheduledExpenses} setScheduledExpenses={setScheduledExpenses}
-            ledgers={ledgers} clientAR={clientAR} orders={orders}
-            clients={clients} suppliers={suppliers}
-            darkMode={darkMode}
-            setTab={setTab} setLedgerFocusClient={setLedgerFocusClient}
-          />
-        )}
-        {tab === "tax" && (
-          <TaxTab taxes={taxes} setTaxes={setTaxes} setTodos={setTodos} darkMode={darkMode} apiKey={apiKey} />
-        )}
-        {tab === "hr" && (
-          <HrTab employees={employees} setEmployees={setEmployees} payrolls={payrolls} setPayrolls={setPayrolls}
-            leaves={leaves} setLeaves={setLeaves} hrSettings={hrSettings} setHrSettings={setHrSettings} />
-        )}
-        {tab === "meeting" && (
-          <MeetingTab meetings={meetings} setMeetings={setMeetings} setTodos={setTodos} clients={clients} darkMode={darkMode} />
-        )}
-        {tab === "clients" && (
-          <ClientsTab
-            clients={clients}
-            setClients={setClients}
-            orders={orders}
-            darkMode={darkMode}
-          />
-        )}
-        {tab === "suppliers" && (
-          <SuppliersTab
-            suppliers={suppliers}
-            setSuppliers={setSuppliers}
-            materials={materials}
-            fabricIntakes={fabricIntakes}
-            darkMode={darkMode}
-          />
-        )}
-        {tab === "bids" && (
-          <BidsTab bids={bids} setBids={setBids} darkMode={darkMode} />
-        )}
-        {tab === "schedule" && (
-          <>
-          <ScheduleAlertSettings/>
-          <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} taxes={taxes} />
-          </>
-        )}
-        {tab === "news" && (
-          <NewsTab darkMode={darkMode} />
-        )}
-        {tab === "mail" && (
-          <MailTab darkMode={darkMode} clients={clients} />
-        )}
-        {tab === "files" && (
-          <CompanyFilesTab companyFiles={companyFiles} setCompanyFiles={setCompanyFiles} loaded={companyFilesLoaded} darkMode={darkMode} T={T} />
-        )}
-
 
         {/* 발주서 작성 */}
         {tab === "purchase" && poSubTab === "current" && (
