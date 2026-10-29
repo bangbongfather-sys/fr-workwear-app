@@ -30291,6 +30291,7 @@ function NewsTab({ darkMode }) {
   const [error, setError] = useState("");
   const [feedKey, setFeedKey] = useViewState("news.feed", "ko-economy");
   const [lastFetch, setLastFetch] = useState(null);
+  const [via, setVia] = useState("");   // 어디서 받아 왔는지 (naver | google | bing | rss2json)
 
   // RSS 피드 — 서버(/api/news, worker-src/news.js 의 NEWS_FEEDS)가 같은 주소를 받아 준다. url 은 서버가 안 될 때 rss2json 예비용.
   const FEEDS = {
@@ -30311,17 +30312,18 @@ function NewsTab({ darkMode }) {
       if (cache && cache.ts && (now - cache.ts) < 3600000) {
         setItems(cache.items);
         setLastFetch(new Date(cache.ts));
+        setVia(cache.via || "");
         setLoading(false);
         return;
       }
       const feed = FEEDS[key];
       // ① 우리 서버가 구글 뉴스를 직접 받아 준다 (/api/news) — rss2json 이 막혀 「Load failed」 나던 문제
       // ② 서버가 안 되면 예전처럼 rss2json 으로 한 번 더
-      let newItems = null, firstErr = "";
+      let newItems = null, firstErr = "", viaUsed = "";
       try {
         const r = await fetch(`/api/news?feed=${encodeURIComponent(key)}${opts.fresh ? "&fresh=1" : ""}`, { cache: "no-store" });
         const j = await r.json();
-        if (j && j.ok && Array.isArray(j.items)) newItems = j.items;
+        if (j && j.ok && Array.isArray(j.items)) { newItems = j.items; viaUsed = j.via || ""; setVia(viaUsed); }
         else firstErr = (j && j.error) || `서버 ${r.status}`;
       } catch (e) { firstErr = e.message; }
       if (!newItems) {
@@ -30330,11 +30332,12 @@ function NewsTab({ darkMode }) {
           const data = await res.json();
           if (data.status !== "ok") throw new Error(data.message || "Feed load failed");
           newItems = (data.items || []).map(it => ({ title: it.title, link: it.link, date: it.pubDate, desc: (it.description || "").replace(/<[^>]+>/g, "").slice(0, 200), source: it.author || "" }));
+          viaUsed = "rss2json"; setVia(viaUsed);
         } catch (e) { throw new Error(firstErr || e.message); }
       }
       setItems(newItems);
       setLastFetch(new Date());
-      save(cacheKey, { ts: now, items: newItems });
+      save(cacheKey, { ts: now, items: newItems, via: viaUsed });
     } catch (e) {
       setError("뉴스를 불러올 수 없습니다: " + e.message);
       setItems([]);
@@ -30358,7 +30361,7 @@ function NewsTab({ darkMode }) {
           <div style={{flex:1}}/>
           <button onClick={()=>{ const cacheKey = `frw_news_${feedKey}`; save(cacheKey, null); fetchFeed(feedKey, { fresh: true }); }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--text2)",cursor:"pointer",fontSize:12,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}><Icon name="refresh" size={13}/>새로고침</button>
         </div>
-        {lastFetch && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>마지막 갱신: {lastFetch.toLocaleString("ko-KR")} (1시간 캐시)</div>}
+        {lastFetch && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>마지막 갱신: {lastFetch.toLocaleString("ko-KR")} (1시간 캐시){via ? ` · 출처: ${({ naver: "네이버 뉴스", google: "구글 뉴스", bing: "빙 뉴스", rss2json: "구글 뉴스(rss2json)" })[via] || via}` : ""}</div>}
         {loading ? (
           <div style={{textAlign:"center",padding:"40px 24px",color:"var(--text3)",fontSize:14,display:"inline-flex",alignItems:"center",justifyContent:"center",gap:8,width:"100%"}}><Icon name="refresh" size={14} style={{animation:"spin 1.4s linear infinite"}}/>뉴스 불러오는 중...</div>
         ) : error ? (

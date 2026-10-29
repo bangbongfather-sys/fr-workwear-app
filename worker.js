@@ -237,7 +237,7 @@ export default {
     }
     // 뉴스 탭 — 구글 뉴스 RSS 를 서버가 직접 받아 JSON 으로 (?feed=ko-economy | fr-safety | fr-industry | global-fr, &fresh=1 이면 캐시 무시)
     if (url.pathname === "/api/news") {
-      try { const r = await newsFeed(url.searchParams.get("feed") || "ko-economy", { fresh: url.searchParams.get("fresh") === "1" }); return new Response(JSON.stringify(r), { status: r.ok ? 200 : 502, headers: corsHeaders }); }
+      try { const r = await newsFeed(url.searchParams.get("feed") || "ko-economy", { fresh: url.searchParams.get("fresh") === "1", env }); return new Response(JSON.stringify(r), { status: r.ok ? 200 : 502, headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 502, headers: corsHeaders }); }
     }
     // 거래처 주문 주기 — 재주문 레이더 (?from&to, 기본 최근 2년)
