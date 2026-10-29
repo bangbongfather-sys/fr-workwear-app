@@ -927,7 +927,7 @@
       --positive-text: #5BE39A; --negative-text: #FF8A93; --warning-text: #FFC062; --info-text: #5ED8D8;
       --positive-bg: rgba(52,211,153,0.18); --negative-bg: rgba(255,110,120,0.18); --warning-bg: rgba(255,176,60,0.18); --info-bg: rgba(60,200,200,0.18);
       --glass-card: rgba(16,18,26,calc(0.2 + var(--glass-tint, 0.35) * 0.55));
-      --glass-pop: rgba(22,24,32,0.94);
+      --glass-pop: rgba(22,24,32,0.97);
       background: #121318;
     }
     body.glass::before { content: ""; position: fixed; inset: -2%; z-index: -2; background: var(--glass-bg) center / cover no-repeat; pointer-events: none; }
@@ -958,6 +958,16 @@
     body.glass div[style*="background: var(--text1)"] [style*="color: var(--surface)"] { color: #fff !important; }
     body.glass .dash-a-tabs button.on, body.glass .dash-kpi:not(.dash-kpi-hero) .dash-kpi-action { background: rgba(255,255,255,0.94) !important; color: #15161a !important; }
     body.glass [role="dialog"], body.glass [role="menu"] { -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5); }
+    /* 클래스·인라인으로 그린 떠 있는 판(일정 호버 미리보기 · 검색 결과 · 그림자 있는 절대위치 팝오버)도 진한 유리로 — 투명하면 뒤 글씨와 겹쳐 보였다 */
+    body.glass .sched-peek,
+    body.glass .global-search-wrap > div[style*="position: absolute"],
+    body.glass .global-search-wrap.gs-open,
+    body.glass [style*="position: absolute"][style*="var(--surface)"][style*="box-shadow"],
+    body.glass [style*="position: fixed"][style*="var(--surface)"][style*="box-shadow"] {
+      background: linear-gradient(160deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02)), rgba(20,22,30,0.985) !important; border-color: rgba(255,255,255,0.18) !important;
+      -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5);
+      box-shadow: 0 18px 48px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.12) !important; }
+    body.glass .sched-eventbar:hover { z-index: 60; }
     body.glass .card:hover { box-shadow: 0 18px 44px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.28); }
     body.glass .kpi-card:hover { transform: translateY(-4px); }
     body.glass .card .card { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14); }
