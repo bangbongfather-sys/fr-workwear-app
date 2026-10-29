@@ -28,6 +28,7 @@ import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
 import { handleFxApi } from "./worker-src/fx.js";
+import { newsFeed } from "./worker-src/news.js";
 import { handleBankApi } from "./worker-src/bank.js";
 import { handleBankSmsPublic, handleBankSmsAdmin } from "./worker-src/banksms.js";
 
@@ -233,6 +234,11 @@ export default {
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await salesImport(env, b)), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    // 뉴스 탭 — 구글 뉴스 RSS 를 서버가 직접 받아 JSON 으로 (?feed=ko-economy | fr-safety | fr-industry | global-fr, &fresh=1 이면 캐시 무시)
+    if (url.pathname === "/api/news") {
+      try { const r = await newsFeed(url.searchParams.get("feed") || "ko-economy", { fresh: url.searchParams.get("fresh") === "1" }); return new Response(JSON.stringify(r), { status: r.ok ? 200 : 502, headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 502, headers: corsHeaders }); }
     }
     // 거래처 주문 주기 — 재주문 레이더 (?from&to, 기본 최근 2년)
     if (url.pathname === "/api/sales/cadence") {

@@ -30292,7 +30292,7 @@ function NewsTab({ darkMode }) {
   const [feedKey, setFeedKey] = useViewState("news.feed", "ko-economy");
   const [lastFetch, setLastFetch] = useState(null);
 
-  // RSS feeds (rss2json 무료 API 경유 - CORS 우회)
+  // RSS 피드 — 서버(/api/news, worker-src/news.js 의 NEWS_FEEDS)가 같은 주소를 받아 준다. url 은 서버가 안 될 때 rss2json 예비용.
   const FEEDS = {
     "ko-economy": { name: "한국 경제 뉴스", url: "https://news.google.com/rss/search?q=경제+OR+제조업+OR+수출&hl=ko&gl=KR&ceid=KR:ko" },
     "fr-safety": { name: "방염/방화복 동향", url: "https://news.google.com/rss/search?q=방염+OR+난연+OR+방화복+OR+소방복+OR+산업안전&hl=ko&gl=KR&ceid=KR:ko" },
@@ -30300,7 +30300,7 @@ function NewsTab({ darkMode }) {
     "global-fr": { name: "Global FR Industry", url: "https://news.google.com/rss/search?q=flame+resistant+workwear+OR+FR+clothing&hl=en&gl=US&ceid=US:en" },
   };
 
-  const fetchFeed = async (key) => {
+  const fetchFeed = async (key, opts = {}) => {
     setLoading(true);
     setError("");
     try {
@@ -30315,17 +30315,23 @@ function NewsTab({ darkMode }) {
         return;
       }
       const feed = FEEDS[key];
-      const url = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.status !== "ok") throw new Error(data.message || "Feed load failed");
-      const newItems = (data.items || []).map(it => ({
-        title: it.title,
-        link: it.link,
-        date: it.pubDate,
-        desc: (it.description || "").replace(/<[^>]+>/g, "").slice(0, 200),
-        source: it.author || "",
-      }));
+      // ① 우리 서버가 구글 뉴스를 직접 받아 준다 (/api/news) — rss2json 이 막혀 「Load failed」 나던 문제
+      // ② 서버가 안 되면 예전처럼 rss2json 으로 한 번 더
+      let newItems = null, firstErr = "";
+      try {
+        const r = await fetch(`/api/news?feed=${encodeURIComponent(key)}${opts.fresh ? "&fresh=1" : ""}`, { cache: "no-store" });
+        const j = await r.json();
+        if (j && j.ok && Array.isArray(j.items)) newItems = j.items;
+        else firstErr = (j && j.error) || `서버 ${r.status}`;
+      } catch (e) { firstErr = e.message; }
+      if (!newItems) {
+        try {
+          const res = await fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feed.url)}`);
+          const data = await res.json();
+          if (data.status !== "ok") throw new Error(data.message || "Feed load failed");
+          newItems = (data.items || []).map(it => ({ title: it.title, link: it.link, date: it.pubDate, desc: (it.description || "").replace(/<[^>]+>/g, "").slice(0, 200), source: it.author || "" }));
+        } catch (e) { throw new Error(firstErr || e.message); }
+      }
       setItems(newItems);
       setLastFetch(new Date());
       save(cacheKey, { ts: now, items: newItems });
@@ -30350,7 +30356,7 @@ function NewsTab({ darkMode }) {
             ))}
           </div>
           <div style={{flex:1}}/>
-          <button onClick={()=>{ const cacheKey = `frw_news_${feedKey}`; save(cacheKey, null); fetchFeed(feedKey); }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--text2)",cursor:"pointer",fontSize:12,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}><Icon name="refresh" size={13}/>새로고침</button>
+          <button onClick={()=>{ const cacheKey = `frw_news_${feedKey}`; save(cacheKey, null); fetchFeed(feedKey, { fresh: true }); }} style={{padding:"6px 12px",borderRadius:8,border:"1px solid var(--border)",background:"none",color:"var(--text2)",cursor:"pointer",fontSize:12,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}><Icon name="refresh" size={13}/>새로고침</button>
         </div>
         {lastFetch && <div style={{fontSize:11,color:"var(--text3)",marginBottom:10}}>마지막 갱신: {lastFetch.toLocaleString("ko-KR")} (1시간 캐시)</div>}
         {loading ? (
@@ -30380,7 +30386,7 @@ function NewsTab({ darkMode }) {
           </div>
         )}
         <div style={{fontSize:11,color:"var(--text3)",marginTop:14,padding:"10px 12px",background:"var(--surface2)",borderRadius:8,lineHeight:1.6}}>
-          ℹ️ 뉴스는 Google News RSS를 rss2json 서비스를 통해 가져옵니다. 1시간 단위로 자동 갱신되며, 새로고침 버튼으로 즉시 갱신할 수 있습니다.
+          ℹ️ 뉴스는 Google News RSS를 회사 서버가 직접 받아 옵니다. 1시간 단위로 자동 갱신되며, 새로고침 버튼으로 즉시 갱신할 수 있습니다.
         </div>
       </div>
     </div>
