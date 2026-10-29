@@ -910,6 +910,92 @@
     .tab-btn.tab-active::after { opacity: 1; }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* ─── 글래스 테마 (풍경 배경 + 반투명 유리 카드) ───
+       다크 변수를 바탕으로 표면을 반투명하게 바꾼다. 유리 효과(backdrop-filter)는 카드에 직접 걸지 않고 ::before 에 건다 —
+       요소 자체에 걸면 그 안의 position:fixed 팝업이 카드 안에 갇힌다. 진하기는 --glass-tint(0~1, 「유리 진하기」). */
+    body.glass {
+      --bg: transparent;
+      --surface: rgba(255,255,255,0.12); --surface2: rgba(255,255,255,0.075);
+      --border: rgba(255,255,255,0.16); --divider: rgba(255,255,255,0.10);
+      --text1: #ffffff; --text2: rgba(255,255,255,0.84); --text3: rgba(255,255,255,0.62);
+      --input-bg: rgba(255,255,255,0.08); --input-color: #ffffff; --placeholder: rgba(255,255,255,0.45);
+      --row-bg: rgba(255,255,255,0.05); --row-border: rgba(255,255,255,0.10);
+      --td-border: rgba(255,255,255,0.08);
+      --header-bg: transparent; --header-border: rgba(255,255,255,0.14);
+      --chip-bg: rgba(255,255,255,0.10); --chip-color: rgba(255,255,255,0.86); --chip-hover-bg: rgba(255,255,255,0.18); --chip-hover-color: #fff;
+      --ghost-bg: rgba(255,255,255,0.08); --ghost-color: rgba(255,255,255,0.86); --ghost-border: rgba(255,255,255,0.16); --empty-color: rgba(255,255,255,0.32);
+      --positive-text: #5BE39A; --negative-text: #FF8A93; --warning-text: #FFC062; --info-text: #5ED8D8;
+      --positive-bg: rgba(52,211,153,0.18); --negative-bg: rgba(255,110,120,0.18); --warning-bg: rgba(255,176,60,0.18); --info-bg: rgba(60,200,200,0.18);
+      --glass-card: rgba(16,18,26,calc(0.2 + var(--glass-tint, 0.35) * 0.55));
+      --glass-pop: rgba(22,24,32,0.94);
+      background: #121318;
+    }
+    body.glass::before { content: ""; position: fixed; inset: -2%; z-index: -2; background: var(--glass-bg) center / cover no-repeat; pointer-events: none; }
+    body.glass::after { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background: linear-gradient(180deg, rgba(6,8,14,calc(0.06 + var(--glass-tint, 0.35) * 0.24)) 0%, rgba(6,8,14,calc(var(--glass-tint, 0.35) * 0.12)) 50%, rgba(6,8,14,calc(0.1 + var(--glass-tint, 0.35) * 0.24)) 100%); }
+    body.glass select option { background: #1d1f27; color: #fff; }
+
+    /* 유리 표면 — 카드 · 사이드바 · 헤더 · 서브창 */
+    body.glass .card, body.glass .app-sidebar, body.glass .app-header, body.glass .side-pane { isolation: isolate; }
+    body.glass .card { position: relative; background: transparent; border: 1px solid rgba(255,255,255,0.16); border-radius: 22px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.20); transition: box-shadow .28s, transform .28s cubic-bezier(.2,.8,.2,1); }
+    body.glass .card::before, body.glass .app-sidebar::before, body.glass .app-header::before, body.glass .side-pane::before {
+      content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+      background: linear-gradient(160deg, rgba(255,255,255,0.15), rgba(255,255,255,0.03) 55%, rgba(255,255,255,0.06)), var(--glass-card);
+      -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); }
+    /* 자기 색이 있는 카드(입금 완료·미수금 같은 색 타일)는 그 색을 살리고 흐림만 */
+    body.glass .card[style*="background"]::before { background: rgba(16,18,26,0.18); }
+    /* 흰 바탕 버튼(선택된 서브탭·반전 버튼)은 글씨를 어둡게 — 글래스에선 글씨색 변수가 흰색이라 안 보였다 */
+    body.glass button[style*="background: rgb(255, 255, 255)"], body.glass button[style*="background: rgb(255, 255, 255)"] *,
+    body.glass button[style*="background: var(--text1)"], body.glass button[style*="background: var(--text1)"] *,
+    body.glass a[style*="background: var(--text1)"], body.glass a[style*="background: var(--text1)"] * { color: #15161a !important; }
+    /* 흰 바탕 판(밝은 테마용 강조 카드)은 유리로 — 흰 글씨가 묻히지 않게 */
+    body.glass div[style*="background: rgb(255, 255, 255)"] { background: rgba(255,255,255,0.13) !important; }
+    /* 반전 판(바탕=글씨색, 글씨=바탕색) — 글래스에선 밝은 유리 + 흰 글씨 */
+    body.glass div[style*="background: var(--text1)"], body.glass span[style*="background: var(--text1)"] {
+      background: linear-gradient(160deg, rgba(255,255,255,0.26), rgba(255,255,255,0.10)) !important; color: #fff !important;
+      border: 1px solid rgba(255,255,255,0.22); box-shadow: inset 0 1px 0 rgba(255,255,255,0.25); }
+    body.glass div[style*="background: var(--text1)"] [style*="color: var(--surface)"] { color: #fff !important; }
+    body.glass .dash-a-tabs button.on, body.glass .dash-kpi:not(.dash-kpi-hero) .dash-kpi-action { background: rgba(255,255,255,0.94) !important; color: #15161a !important; }
+    body.glass [role="dialog"], body.glass [role="menu"] { -webkit-backdrop-filter: blur(28px) saturate(1.5); backdrop-filter: blur(28px) saturate(1.5); }
+    body.glass .card:hover { box-shadow: 0 18px 44px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.28); }
+    body.glass .kpi-card:hover { transform: translateY(-4px); }
+    body.glass .card .card { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14); }
+    body.glass .card .card::before { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(255,255,255,0.05); }
+
+    body.glass .app-sidebar { background: transparent !important; border: 1px solid rgba(255,255,255,0.16) !important; box-shadow: 0 16px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18) !important; border-radius: 26px !important; }
+    body.glass .app-sidebar::before { background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)), rgba(12,14,20,calc(0.25 + var(--glass-tint, 0.35) * 0.5)); }
+    /* 접힌 사이드바 = 영상의 떠 있는 독 — 동그란 아이콘 버튼 */
+    body.glass .app-sidebar.collapsed .sb-nav-item { width: 44px !important; height: 44px; padding: 0 !important; margin: 2px auto; border-radius: 50% !important; justify-content: center !important; background: rgba(255,255,255,0.06) !important; }
+    body.glass .app-sidebar.collapsed .sb-nav-item:hover { background: rgba(255,255,255,0.16) !important; }
+    body.glass .app-sidebar .sb-nav-item[data-active="1"] { background: rgba(255,255,255,0.92) !important; color: #15161a !important; box-shadow: 0 4px 14px rgba(0,0,0,0.25) !important; }
+    body.glass .app-sidebar .sb-nav-item[data-active="1"] span { color: #15161a !important; }
+
+    body.glass .app-header { background: transparent !important; border-color: rgba(255,255,255,0.14) !important; border-radius: 22px !important; box-shadow: 0 10px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.16) !important; }
+    body.glass .side-pane { background: transparent !important; border-color: rgba(255,255,255,0.18) !important; }
+    body.glass .side-pane::before { background: rgba(14,16,24,calc(0.45 + var(--glass-tint, 0.35) * 0.4)); -webkit-backdrop-filter: blur(30px) saturate(1.5); backdrop-filter: blur(30px) saturate(1.5); }
+    body.glass .side-pane > div { background: transparent !important; }
+
+    /* 팝업·메뉴·모달 — 내용 위에 뜨는 건 진한 유리로 (읽기 쉽게) */
+    body.glass [role="dialog"], body.glass [role="menu"], body.glass [style*="var(--elev-4)"], body.glass [style*="var(--elev-3)"],
+    body.glass [style*="position: fixed"][style*="inset: 0"] > div[style*="var(--surface)"] {
+      background-color: var(--glass-pop) !important; border-color: rgba(255,255,255,0.16) !important; }
+
+    /* 페이지 제목 — 배경 위에서 또렷하게 */
+    body.glass .page-header h1 { font-size: 30px !important; text-shadow: 0 2px 16px rgba(0,0,0,0.35); }
+    body.glass .page-header div { text-shadow: 0 1px 8px rgba(0,0,0,0.35); }
+
+    /* 영상의 가운데 알약 메뉴 */
+    .glass-pills { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+    .glass-pill { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.14); transition: background .18s, transform .18s, color .18s; }
+    .glass-pill:hover { background: rgba(255,255,255,0.18); transform: translateY(-1px); }
+    .glass-pill.on { background: rgba(255,255,255,0.94); color: #15161a; border-color: transparent; box-shadow: 0 6px 18px rgba(0,0,0,0.25); }
+    body.glass .mobile-bottomnav { background: rgba(14,16,24,0.5) !important; border: 1px solid rgba(255,255,255,0.16); }
+    body.glass .app-header { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+    body.glass-nav .global-search-wrap { display: none !important; }
+    body.glass-nav .gs-mobile-btn { display: flex !important; }
     /* 서브창(분할 화면) 열린 동안 — 본 화면 최소 폭(1024px) 풀기 */
     body.frw-split .main-content > * { min-width: 0 !important; }
     body.frw-split-bottom .app-main { padding-bottom: calc(var(--side-h, 50vh) + 16px) !important; }
@@ -21743,6 +21829,53 @@ function QuoteWizard({ clients = [], products = [], materials = [], laborItems =
 // ─── 서브창 (분할 화면) ───
 // 넓은 화면: 오른쪽에 붙는 창(왼쪽 가장자리를 끌어 폭 조절). 좁은 화면(900px 미만): 아래에서 올라오는 창(위 손잡이로 높이 조절).
 // 안의 화면은 App 의 renderTabBody(…, "side") — 본 화면과 같은 데이터라 한쪽에서 고치면 다른 쪽에 바로 보인다.
+// ─── 글래스 테마 배경 ───
+// 사진 파일 없이 앱이 직접 그리는 풍경(SVG) — 하늘 그라데이션 · 해/달 빛 · 겹겹 산능선 · 안개 · 가장자리 어둡게.
+// 「내 사진」을 올리면 그걸 쓴다(frw_glass_photo). 결과는 body 의 --glass-bg 로 들어가 body::before 가 깐다.
+const GLASS_PRESETS = {
+  sunset: { label: "노을 진 산", sky: [["#1b2136", 0], ["#433f5c", 0.34], ["#a86f6c", 0.58], ["#ee9f63", 0.72], ["#f6d39b", 0.8]], sun: { x: 0.63, y: 0.72, r: 0.42, c: "#ffd59a" }, ridges: ["#80677a", "#5c4a62", "#3a3047", "#1c1823"], haze: "#f3c7a0" },
+  dawn:   { label: "새벽 호수", sky: [["#0e1730", 0], ["#273864", 0.38], ["#7487bb", 0.66], ["#e5b6c3", 0.8]], sun: { x: 0.34, y: 0.74, r: 0.36, c: "#ffe0ea" }, ridges: ["#5a6694", "#404b78", "#2a3157", "#141a33"], haze: "#d9c3dc", lake: true },
+  forest: { label: "안개 숲", sky: [["#0d1a1b", 0], ["#284745", 0.4], ["#7c9f96", 0.68], ["#cfe0d4", 0.8]], sun: { x: 0.72, y: 0.68, r: 0.4, c: "#effae9" }, ridges: ["#55746a", "#3a594f", "#253f37", "#11211d"], haze: "#dbe9df" },
+  night:  { label: "밤하늘", sky: [["#04060d", 0], ["#0c1330", 0.5], ["#202d5a", 0.78], ["#384879", 0.86]], sun: { x: 0.78, y: 0.22, r: 0.1, c: "#eef1ff" }, ridges: ["#1d2648", "#161d3a", "#0f142b", "#070a18"], haze: "#5a6aa8", stars: true },
+};
+function _glassRand(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function _glassRidge(rnd, W, H, baseY, amp, rough) {
+  const ph = [rnd() * 6.28, rnd() * 6.28, rnd() * 6.28, rnd() * 6.28];
+  const pts = [];
+  for (let i = 0; i <= 80; i++) {
+    const t = i / 80;
+    const v = Math.sin(t * 2.6 + ph[0]) * 0.55 + Math.sin(t * 6.1 + ph[1]) * 0.28 + Math.sin(t * 13.7 + ph[2]) * 0.12 * rough + Math.sin(t * 29 + ph[3]) * 0.05 * rough + (rnd() - 0.5) * 0.05 * rough;
+    pts.push(`${(t * W).toFixed(1)} ${(baseY - v * amp).toFixed(1)}`);
+  }
+  return `M0 ${H} L${pts.join(" L")} L${W} ${H} Z`;
+}
+function glassWallpaper(id) {
+  const P = GLASS_PRESETS[id] || GLASS_PRESETS.sunset;
+  const W = 1600, H = 1000, rnd = _glassRand(id.length * 7919 + 13);
+  const stops = (arr) => arr.map(([c, o]) => `<stop offset="${o}" stop-color="${c}"/>`).join("");
+  const ridgeY = [600, 670, 760, 860], amps = [90, 75, 60, 45], rough = [0.6, 0.9, 1.1, 1.3];
+  let ridges = "";
+  P.ridges.forEach((c, i) => {
+    ridges += `<path d="${_glassRidge(rnd, W, H, ridgeY[i], amps[i], rough[i])}" fill="${c}"/>`;
+    if (i < 3) ridges += `<rect x="0" y="${ridgeY[i] - 40}" width="${W}" height="${H}" fill="url(#haze)" opacity="${0.22 - i * 0.05}"/>`;
+  });
+  let stars = "";
+  if (P.stars) for (let i = 0; i < 140; i++) stars += `<circle cx="${(rnd() * W).toFixed(0)}" cy="${(rnd() * 560).toFixed(0)}" r="${(rnd() * 1.3 + 0.3).toFixed(2)}" fill="#fff" opacity="${(rnd() * 0.7 + 0.2).toFixed(2)}"/>`;
+  const lake = P.lake ? `<rect x="0" y="830" width="${W}" height="170" fill="url(#lake)"/><rect x="${P.sun.x * W - 120}" y="840" width="240" height="160" fill="url(#glint)" opacity="0.5"/>` : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">${stops(P.sky)}</linearGradient>
+<radialGradient id="sun" cx="${P.sun.x}" cy="${P.sun.y}" r="${P.sun.r}"><stop offset="0" stop-color="${P.sun.c}" stop-opacity="0.95"/><stop offset="0.12" stop-color="${P.sun.c}" stop-opacity="0.55"/><stop offset="1" stop-color="${P.sun.c}" stop-opacity="0"/></radialGradient>
+<linearGradient id="haze" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${P.haze}" stop-opacity="0"/><stop offset="0.08" stop-color="${P.haze}" stop-opacity="0.9"/><stop offset="0.3" stop-color="${P.haze}" stop-opacity="0"/></linearGradient>
+<linearGradient id="lake" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${P.sky[P.sky.length - 1][0]}" stop-opacity="0.55"/><stop offset="1" stop-color="${P.ridges[3]}" stop-opacity="0.95"/></linearGradient>
+<linearGradient id="glint" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${P.sun.c}" stop-opacity="0.8"/><stop offset="1" stop-color="${P.sun.c}" stop-opacity="0"/></linearGradient>
+<radialGradient id="vig" cx="0.5" cy="0.45" r="0.75"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.4"/></radialGradient>
+</defs>
+<rect width="${W}" height="${H}" fill="url(#sky)"/>${stars}<rect width="${W}" height="${H}" fill="url(#sun)"/>${ridges}${lake}<rect width="${W}" height="${H}" fill="url(#vig)"/>
+</svg>`;
+  return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}")`;
+}
+
 const SIDE_TAB_IDS = new Set(["pricedb", "dashboard", "inventory", "stock", "sales", "ledger", "treasury", "tax", "hr", "meeting", "clients", "suppliers", "bids", "schedule", "news", "mail", "files"]);
 function SidePane({ tabs, sideTab, onPick, narrow, width, setWidth, height, setHeight, onMin, onClose, onSwap, children }) {
   const [menu, setMenu] = useState(false);
@@ -21921,6 +22054,25 @@ function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
   const [darkMode, setDarkMode] = useState(() => load("frw_dark", false));
+  // ── 글래스 테마 (풍경 배경 + 유리 카드) — 다크를 바탕으로 한다. 처음엔 켜진 채로 시작(끄면 기억).
+  const [glass, setGlass] = useState(() => load("frw_glass", true));
+  const [glassBg, setGlassBg] = useState(() => load("frw_glass_bg", "sunset"));      // sunset | dawn | forest | night | photo
+  const [glassTint, setGlassTint] = useState(() => load("frw_glass_tint", 0.35));    // 유리 진하기 0~1
+  const [glassPhoto, setGlassPhoto] = useState(() => load("frw_glass_photo", ""));   // 내 사진 (줄인 dataURL)
+  const [themeMenu, setThemeMenu] = useState(false);
+  useEffect(() => { save("frw_glass", glass); document.body.classList.toggle("glass", glass); if (glass && !darkMode) setDarkMode(true); }, [glass]);
+  useEffect(() => {
+    save("frw_glass_bg", glassBg);
+    document.body.style.setProperty("--glass-bg", glassBg === "photo" && glassPhoto ? `url("${glassPhoto}")` : glassWallpaper(glassBg === "photo" ? "sunset" : glassBg));
+  }, [glassBg, glassPhoto]);
+  useEffect(() => { save("frw_glass_tint", glassTint); document.body.style.setProperty("--glass-tint", String(glassTint)); }, [glassTint]);
+  const pickTheme = (t) => { setGlass(t === "glass"); setDarkMode(t !== "light"); };
+  const theme = glass ? "glass" : darkMode ? "dark" : "light";
+  const onGlassPhoto = async (file) => {
+    if (!file) return;
+    try { const url = await compressImage(file, 1920, 0.82); save("frw_glass_photo", url); setGlassPhoto(url); setGlassBg("photo"); showToast("배경 사진을 바꿨어요", "success"); }
+    catch { showToast("사진을 읽지 못했어요 (이미지 파일만 돼요)", "error"); }
+  };
   const [materials, setMaterials] = useState(() => load("frw_materials", INIT_MATERIALS));
   const [laborItems, setLaborItems] = useState(() => load("frw_labor", INIT_LABOR));
   const [products, setProducts] = useState(() => {
@@ -22405,6 +22557,9 @@ function App() {
   useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
   useEffect(() => { save("frw_side_tab", sideTab); }, [sideTab]);
   const sideNarrow = vw < 900;
+  // 넓은 화면 + 글래스: 영상처럼 위 가운데 알약 메뉴(자주 쓰는 화면), 검색은 아이콘(⌘K)으로
+  const glassNav = glass && vw >= 1180;
+  useEffect(() => { document.body.classList.toggle("glass-nav", glassNav); }, [glassNav]);
   const sideWidth = Math.min(sideW, Math.max(360, vw - 620));   // 본 화면이 최소 600px 은 남게
   const sideShown = !!sideTab && !sideMin;
   useEffect(() => {
@@ -24656,7 +24811,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     { id: "cmd:stock-sync", icon: "refresh", title: "이카운트 재고 새로고침", sub: "켜져 있는 중계 컴퓨터(맥·집 PC)가 1분 안에 가져와요", keys: "재고 새로고침 이카운트 동기화 업데이트",
       run: async () => { try { const j = await (await fetch("/api/ecount/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json(); showToast(j.message || j.error || (j.ok ? "새로고침을 요청했어요" : "요청하지 못했어요"), j.ok ? "success" : "error"); } catch { showToast("요청하지 못했어요", "error"); } } },
     { id: "cmd:daily", icon: "edit", title: "오늘 하루 기록 쓰기", sub: "일정 → 하루 기록", keys: "하루 기록 일기 오늘 메모", run: () => { save("frw_schedule_subtab", "daily"); setTab("schedule"); setTimeout(() => window.dispatchEvent(new CustomEvent("frw:schedule-nav", { detail: { sub: "daily", date: kstTodayYmd() } })), 80); } },
-    { id: "cmd:dark", icon: darkMode ? "sun" : "moon", title: darkMode ? "라이트 모드로 바꾸기" : "다크 모드로 바꾸기", keys: "다크 모드 라이트 테마 어둡게 밝게 화면", run: () => setDarkMode(d => !d) },
+    { id: "cmd:dark", icon: darkMode && !glass ? "sun" : "moon", title: darkMode && !glass ? "라이트 모드로 바꾸기" : "다크 모드로 바꾸기", keys: "다크 모드 라이트 테마 어둡게 밝게 화면", run: () => pickTheme(darkMode && !glass ? "light" : "dark") },
+    { id: "cmd:glass", icon: "sparkles", title: glass ? "글래스 테마 끄기 (다크로)" : "글래스 테마 켜기", sub: "풍경 배경 + 유리 카드", keys: "글래스 유리 배경 테마 풍경", run: () => pickTheme(glass ? "dark" : "glass") },
   ];
   // 탭 화면 — 본 화면과 서브창이 같이 쓴다 (pane="side" 면 서브창 — 같은 데이터, 따로 노는 화면 상태)
   // 단가 계산기·견적·발주는 App 안에 바로 그려져 있어 서브창에서는 못 연다 (SIDE_TABS 참고).
@@ -25059,7 +25215,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       <div className={`mobile-sidebar-backdrop no-print${mobileSidebarOpen ? " show" : ""}`} onClick={() => setMobileSidebarOpen(false)} />
 
       {/* ── 사이드바 ── */}
-      <aside className={`app-sidebar no-print${mobileSidebarOpen ? " mobile-open" : ""}`} style={{
+      <aside className={`app-sidebar no-print${mobileSidebarOpen ? " mobile-open" : ""}${sidebarCollapsed ? " collapsed" : ""}`} style={{
         width: sidebarCollapsed ? 68 : 232,
         flexShrink: 0,
         background: "#17181A",
@@ -25111,7 +25267,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 const [, label, icon] = t;
                 const active = tab === id;
                 return (
-                  <button key={id} className="sb-nav-item" onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sidebarCollapsed ? label : ""} style={{
+                  <button key={id} className="sb-nav-item" data-active={active ? "1" : "0"} onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sidebarCollapsed ? label : ""} style={{
                     display: "flex", alignItems: "center", gap: 12,
                     width: "100%", padding: sidebarCollapsed ? "11px 0" : "10px 14px",
                     border: "none", borderRadius: 10,
@@ -25236,6 +25392,14 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               padding: 0,
             }}><Icon name="menu" size={20}/></button>
             <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
+              {glassNav && (
+                <nav className="glass-pills no-print" aria-label="자주 쓰는 화면" style={{ margin: "0 auto" }}>
+                  {[...quickTabs, ...(quickTabs.includes(tab) ? [] : [tab])].map(id => {
+                    const t = TABS.find(x => x[0] === id); if (!t) return null;
+                    return <button key={id} type="button" className={"glass-pill" + (tab === id ? " on" : "")} onClick={() => setTab(id)}><Icon name={t[2]} size={15}/>{t[1]}</button>;
+                  })}
+                </nav>
+              )}
               {/* 통합 검색 바 */}
               <div style={{ flex: 1, maxWidth: 900, position: "relative" }} className={"no-print global-search-wrap" + (gsMobileOpen ? " gs-open" : "")}>
                 <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text3)", display: "inline-flex", pointerEvents: "none" }}><Icon name="search" size={15}/></span>
@@ -25383,7 +25547,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
                 onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
               ><Icon name="undo" size={16}/></button>
-              <button onClick={() => setDarkMode(d => !d)} title={darkMode ? "라이트 모드" : "다크 모드"} style={{
+              <div style={{ position: "relative", flexShrink: 0 }}>
+              <button onClick={() => setThemeMenu(m => !m)} title="화면 테마 — 라이트 · 다크 · 글래스" aria-haspopup="menu" style={{
                 width: 36, height: 36, borderRadius: "50%", border: "none", cursor: "pointer",
                 background: darkMode ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.07)",
                 color: "var(--text1)",
@@ -25392,7 +25557,50 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               }}
               onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
               onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
-              ><Icon name={darkMode ? "sun" : "moon"} size={17}/></button>
+              ><Icon name={glass ? "sparkles" : darkMode ? "moon" : "sun"} size={17}/></button>
+              {themeMenu && (
+                <>
+                  <div onClick={() => setThemeMenu(false)} style={{ position: "fixed", inset: "-100vh -100vw", zIndex: 900 }}/>
+                  <div role="menu" style={{ position: "absolute", top: "100%", right: 0, marginTop: 10, zIndex: 901, width: 300, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 18, boxShadow: "var(--elev-4)", padding: 14, animation: "salesPopIn 0.14s ease-out" }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text3)", marginBottom: 8 }}>화면 테마</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                      {[["light", "라이트", "linear-gradient(135deg,#ffffff,#eef1f5)", "#191F28"], ["dark", "다크", "linear-gradient(135deg,#2a2b2f,#17181a)", "#fafafa"], ["glass", "글래스", glassWallpaper("sunset"), "#fff"]].map(([k, l, bg, fg]) => (
+                        <button key={k} type="button" onClick={() => pickTheme(k)}
+                          style={{ height: 64, borderRadius: 12, border: theme === k ? "2px solid #3182F6" : "1px solid var(--border)", background: bg, backgroundSize: "cover", backgroundPosition: "center", color: fg, fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 7, position: "relative", overflow: "hidden", textShadow: k === "glass" ? "0 1px 6px rgba(0,0,0,0.5)" : "none" }}>
+                          {k === "glass" && <span style={{ position: "absolute", left: 10, right: 10, top: 10, height: 18, borderRadius: 6, background: "rgba(255,255,255,0.22)", border: "1px solid rgba(255,255,255,0.35)" }}/>}
+                          {l}
+                        </button>
+                      ))}
+                    </div>
+                    {glass && <>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text3)", margin: "14px 0 8px" }}>배경</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+                        {Object.entries(GLASS_PRESETS).map(([k, P]) => (
+                          <button key={k} type="button" title={P.label} aria-label={P.label} onClick={() => setGlassBg(k)}
+                            style={{ height: 44, borderRadius: 10, border: glassBg === k ? "2px solid #fff" : "1px solid rgba(255,255,255,0.2)", background: glassWallpaper(k), backgroundSize: "cover", backgroundPosition: "center", cursor: "pointer", boxShadow: glassBg === k ? "0 0 0 2px #3182F6" : "none" }}/>
+                        ))}
+                        <label title="내 사진 올리기" style={{ height: 44, borderRadius: 10, border: glassBg === "photo" ? "2px solid #fff" : "1px dashed rgba(255,255,255,0.4)", background: glassPhoto ? `center / cover no-repeat url("${glassPhoto}")` : "rgba(255,255,255,0.06)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text2)", boxShadow: glassBg === "photo" ? "0 0 0 2px #3182F6" : "none" }}
+                          onClick={e => { if (glassPhoto && glassBg !== "photo") { e.preventDefault(); setGlassBg("photo"); } }}>
+                          {!glassPhoto && <Icon name="image" size={16}/>}
+                          <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { onGlassPhoto(e.target.files?.[0]); e.target.value = ""; }}/>
+                        </label>
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6, display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <span>{glassBg === "photo" ? "내 사진" : (GLASS_PRESETS[glassBg] || {}).label}</span>
+                        {glassPhoto && <span style={{ display: "inline-flex", gap: 8 }}>
+                          <label style={{ cursor: "pointer", textDecoration: "underline" }}>사진 바꾸기<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { onGlassPhoto(e.target.files?.[0]); e.target.value = ""; }}/></label>
+                          <span role="button" style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => { save("frw_glass_photo", ""); setGlassPhoto(""); if (glassBg === "photo") setGlassBg("sunset"); }}>지우기</span>
+                        </span>}
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: "var(--text3)", margin: "14px 0 6px", display: "flex", justifyContent: "space-between" }}>
+                        <span>유리 진하기</span><span style={{ fontWeight: 600 }}>{glassTint < 0.25 ? "투명하게" : glassTint > 0.7 ? "진하게 (글씨 잘 보임)" : "보통"}</span>
+                      </div>
+                      <input type="range" min="0" max="1" step="0.05" value={glassTint} onChange={e => setGlassTint(Number(e.target.value))} aria-label="유리 진하기" style={{ width: "100%", accentColor: "#3182F6" }}/>
+                    </>}
+                  </div>
+                </>
+              )}
+              </div>
             </div>
           </div>
         </div>
