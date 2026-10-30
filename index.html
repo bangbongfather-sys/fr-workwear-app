@@ -11937,7 +11937,21 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
   };
   const monthData = ledgers[selectedYM] || { clients: [] };
   const monthClients = monthData.clients || [];
-  const filtered = monthClients.filter(c => {
+  // 정렬 — 기본 청구합계 큰 순 (기기에 기억). 「입력 순」은 예전처럼 들어온 순서 그대로.
+  const [ledgerSort, setLedgerSort] = useState(() => load("frw_ledger_sort", "totalDesc"));   // totalDesc | totalAsc | unpaid | name | manual
+  const pickLedgerSort = (k) => { setLedgerSort(k); save("frw_ledger_sort", k); };
+  const sortLedger = (list) => {
+    if (ledgerSort === "manual") return list;
+    const amt = (c) => parseFloat(c.total) || 0;
+    const arr = list.slice();
+    if (ledgerSort === "totalAsc") arr.sort((a, b) => amt(a) - amt(b));
+    else if (ledgerSort === "name") arr.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ko"));
+    else if (ledgerSort === "unpaid") arr.sort((a, b) => ((a.status === "미입금" ? 0 : 1) - (b.status === "미입금" ? 0 : 1)) || amt(b) - amt(a));
+    else arr.sort((a, b) => amt(b) - amt(a));
+    return arr;
+  };
+  const sortedMonth = sortLedger(monthClients);
+  const filtered = sortedMonth.filter(c => {
     if (statusFilter && c.status !== statusFilter) return false;
     if (!searchHit(search, c.name)) return false;
     return true;
@@ -12486,14 +12500,14 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
           </select>
         )}
         <div style={{flex:1}}/>
-        <button onClick={() => exportLedgerExcel(selectedYM, monthClients)} disabled={monthClients.length===0}
+        <button onClick={() => exportLedgerExcel(selectedYM, sortedMonth)} disabled={monthClients.length===0}
           title="현재 월 장부 엑셀 다운로드"
           style={{padding:"8px 14px",height:38,borderRadius:10,border:"1.5px solid var(--divider)",background:"transparent",color:monthClients.length===0?"var(--text3)":"var(--text2)",fontSize:12,fontWeight:600,cursor:monthClients.length===0?"not-allowed":"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,opacity:monthClients.length===0?0.5:1,transition:"all 0.15s"}}
           onMouseEnter={e => { if (!e.currentTarget.disabled) { e.currentTarget.style.borderColor = "var(--text1)"; e.currentTarget.style.color = "var(--text1)"; } }}
           onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--divider)"; e.currentTarget.style.color = monthClients.length===0?"var(--text3)":"var(--text2)"; }}>
           <Icon name="fileSheet" size={14}/>엑셀
         </button>
-        <button onClick={() => exportLedgerPDF(selectedYM, monthClients)} disabled={monthClients.length===0}
+        <button onClick={() => exportLedgerPDF(selectedYM, sortedMonth)} disabled={monthClients.length===0}
           title="현재 월 장부 PDF 다운로드"
           style={{padding:"8px 14px",height:38,borderRadius:10,border:"1.5px solid var(--divider)",background:"transparent",color:monthClients.length===0?"var(--text3)":"var(--text2)",fontSize:12,fontWeight:600,cursor:monthClients.length===0?"not-allowed":"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6,opacity:monthClients.length===0?0.5:1,transition:"all 0.15s"}}
           onMouseEnter={e => { if (!e.currentTarget.disabled) { e.currentTarget.style.borderColor = "var(--text1)"; e.currentTarget.style.color = "var(--text1)"; } }}
@@ -12595,6 +12609,13 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
             <option value="입금완료">입금완료</option>
             <option value="법인 거래">법인 거래</option>
           </select>
+          <select value={ledgerSort} onChange={e=>pickLedgerSort(e.target.value)} aria-label="정렬" title="정렬 — 엑셀·PDF 도 이 순서로 나가요" style={{height:40,fontSize:13,width:150}}>
+            <option value="totalDesc">청구합계 큰 순</option>
+            <option value="totalAsc">청구합계 작은 순</option>
+            <option value="unpaid">미입금 먼저</option>
+            <option value="name">거래처명 순</option>
+            <option value="manual">입력 순</option>
+          </select>
           <div style={{flex:1}}/>
           {monthClients.length > 0 && (
             <button onClick={deleteAllInMonth} style={{padding:"8px 12px",fontSize:12,fontWeight:700,color:"#F04452",background:"transparent",border:"1.5px solid rgba(240,68,82,0.4)",borderRadius:10,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}} title={`${selectedYM} 월 전체 삭제`}><Icon name="trash" size={12} style={{marginRight:4,verticalAlign:"-2px"}}/>월 전체 삭제</button>
@@ -12694,7 +12715,9 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                 <th>거래처명</th>
                 <th style={{textAlign:"right"}}>공급가액</th>
                 <th style={{textAlign:"right"}}>부가세</th>
-                <th style={{textAlign:"right"}}>청구합계</th>
+                <th style={{textAlign:"right",cursor:"pointer",userSelect:"none",whiteSpace:"nowrap"}} title="눌러서 큰 순 ↔ 작은 순" onClick={()=>pickLedgerSort(ledgerSort === "totalDesc" ? "totalAsc" : "totalDesc")}>
+                  청구합계 <span style={{fontSize:10,color:ledgerSort === "totalDesc" || ledgerSort === "totalAsc" ? "#DB6B2E" : "var(--text3)"}}>{ledgerSort === "totalAsc" ? "▲" : "▼"}</span>
+                </th>
                 <th style={{textAlign:"center"}}>입금현황</th>
                 <th>메모</th>
                 <th style={{textAlign:"center",minWidth:120}}>관리</th>
