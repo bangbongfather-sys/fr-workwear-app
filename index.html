@@ -11917,16 +11917,23 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
       else if (Math.round(parseFloat(hit.total) || 0) !== total) updates.push({ id: hit.id, name: hit.name, before: Math.round(parseFloat(hit.total) || 0), supply, tax, total });
       else same.push(hit.name);
     });
-    if (!adds.length && !updates.length) { showToast(`장부가 이미 판매 현황과 같아요 (${same.length}곳)`); return; }
-    const lines = [`${selectedYM} 판매 현황 → 장부`, ""];
+    // 판매 현황 기준 — 판매 현황에 없는(또는 합계 0 이하인) 거래처 줄은 장부에서 뺀다 (이카운트에서 취소·삭제된 전표가 장부에 남지 않게)
+    const live = salesClients.filter(sc => Math.round(sc.total) > 0);
+    const removes = cur.filter(c => c.status !== "법인 거래" && !live.some(sc => payablesNameMatch(c.name, sc.name)));   // 「법인 거래」 줄은 판매 현황과 따로라 그대로
+    const risky = removes.filter(c => (c.status && c.status !== "미입금") || String(c.memo || "").trim() || (Array.isArray(c.ar) && c.ar.length));
+    if (!adds.length && !updates.length && !removes.length) { showToast(`장부가 이미 판매 현황과 같아요 (${same.length}곳)`); return; }
+    const lines = [`${selectedYM} 판매 현황 기준으로 장부 맞추기`, ""];
     if (adds.length) lines.push(`새로 추가 ${adds.length}곳 (미입금): ${adds.slice(0, 5).map(a => a.name).join(", ")}${adds.length > 5 ? ` 외 ${adds.length - 5}곳` : ""}`);
     if (updates.length) lines.push(`금액 갱신 ${updates.length}곳: ${updates.slice(0, 5).map(u => `${u.name} ${u.before.toLocaleString()}→${u.total.toLocaleString()}`).join(", ")}${updates.length > 5 ? ` 외 ${updates.length - 5}곳` : ""}`);
+    if (removes.length) lines.push(`판매 현황에 없어 빼기 ${removes.length}곳: ${removes.slice(0, 5).map(c => `${c.name} ${Math.round(parseFloat(c.total) || 0).toLocaleString()}원`).join(", ")}${removes.length > 5 ? ` 외 ${removes.length - 5}곳` : ""}`);
+    if (risky.length) lines.push(`  ⚠️ 이 중 ${risky.length}곳은 입금 상태·메모가 있어요: ${risky.slice(0, 3).map(c => `${c.name}(${c.status || ""}${String(c.memo || "").trim() ? " · 메모" : ""})`).join(", ")}${risky.length > 3 ? " …" : ""}`);
     if (same.length) lines.push(`그대로 ${same.length}곳`);
-    if (skipped.length) lines.push(`건너뜀(합계 0 이하) ${skipped.length}곳`);
-    lines.push("", "상태·메모·미수금 내역은 그대로 둡니다. 진행할까요?");
+    if (skipped.length) lines.push(`판매 현황 합계 0 이하(반품 등) ${skipped.length}곳 — 장부에 넣지 않아요`);
+    lines.push("", "남는 거래처의 상태·메모·미수금 내역은 그대로 둡니다. 잘못 뺐으면 위쪽 ↶ 되돌리기로 되돌릴 수 있어요. 진행할까요?");
     if (!window.confirm(lines.join("\n"))) return;
-    updateMonth(cs => cs.map(c => { const u = updates.find(x => x.id === c.id); return u ? { ...c, supply: u.supply, tax: u.tax, total: u.total } : c; }).concat(adds));
-    showToast(`✅ 판매 현황에서 ${adds.length}곳 추가 · ${updates.length}곳 갱신`, "success");
+    const removeIds = new Set(removes.map(c => c.id));
+    updateMonth(cs => cs.filter(c => !removeIds.has(c.id)).map(c => { const u = updates.find(x => x.id === c.id); return u ? { ...c, supply: u.supply, tax: u.tax, total: u.total } : c; }).concat(adds));
+    showToast(`✅ 판매 현황 기준으로 맞췄어요 — ${adds.length}곳 추가 · ${updates.length}곳 갱신${removes.length ? ` · ${removes.length}곳 뺌` : ""}`, "success");
   };
   const monthData = ledgers[selectedYM] || { clients: [] };
   const monthClients = monthData.clients || [];
@@ -12514,9 +12521,9 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                   {inSync ? <span style={{ color: "#00B493", fontWeight: 700 }}> · 장부와 같아요</span>
                   : <span style={{ color: "#B5521E", fontWeight: 700 }}> · 차이 {diff > 0 ? "+" : ""}{diff.toLocaleString()}원{missing ? ` · 장부에 없는 거래처 ${missing}곳` : ""}{changed ? ` · 금액 다른 거래처 ${changed}곳` : ""}{extra ? ` · 장부에만 있는 거래처 ${extra}곳` : ""}</span>}</>}
             </span>
-            {salesHas && (missing > 0 || changed > 0) && (
-              <button type="button" onClick={importFromSales} className="btn-primary" style={{ padding: "8px 14px", fontSize: 12.5, whiteSpace: "nowrap" }}>
-                <Icon name="download" size={13} style={{ marginRight: 5, verticalAlign: "-2px" }}/>판매 현황에서 가져오기
+            {salesHas && (missing > 0 || changed > 0 || extra > 0) && (
+              <button type="button" onClick={importFromSales} className="btn-primary" title="판매 현황에 있는 거래처는 추가·금액 갱신, 판매 현황에 없는 거래처는 장부에서 빼요" style={{ padding: "8px 14px", fontSize: 12.5, whiteSpace: "nowrap" }}>
+                <Icon name="download" size={13} style={{ marginRight: 5, verticalAlign: "-2px" }}/>판매 현황 기준으로 맞추기
               </button>
             )}
             {salesMonth && <button type="button" onClick={() => setSalesTick(t => t + 1)} title="판매 현황 다시 읽기" aria-label="판매 현황 다시 읽기" style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text3)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="refresh" size={13}/></button>}
