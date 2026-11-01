@@ -1006,6 +1006,28 @@
     body.glass .app-header { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
     body.glass-nav .global-search-wrap { display: none !important; }
     body.glass-nav .gs-mobile-btn { display: flex !important; }
+    /* ─── 폴더블 펼친 화면 (body.fold — App 이 판단) ───
+       햄버거·하단 독 대신 왼쪽 레일을 늘 보여 준다(아이콘 + 작은 이름 — 손가락 화면엔 마우스 올림 이름표가 없어서).
+       769~1024 에 걸리는 최소 폭 1024 를 풀어 가로 스크롤을 없앤다. */
+    /* 레일은 화면 왼쪽 끝에 딱 붙여 위에서 아래까지 — 둥근 모서리·카메라 쪽 안전 영역까지 레일 바탕이 채워 버려지는 띠가 없게 */
+    body.fold .app-sidebar { position: sticky !important; top: 0 !important; left: auto !important; transform: none !important;
+      width: calc(80px + env(safe-area-inset-left)) !important; height: 100vh !important; height: 100dvh !important;
+      margin: 0 !important; border-radius: 0 20px 20px 0 !important; border-left: none !important; z-index: 99 !important;
+      padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left) !important; }
+    body.fold .app-sidebar nav { overflow-y: auto; scrollbar-width: none; padding-top: 10px !important; }
+    body.fold .sb-top { display: none !important; }
+    body.fold.fold-rail-off .app-sidebar { display: none !important; }
+    body.fold .mobile-dock, body.fold .dock-unfold, body.fold .mobile-sidebar-backdrop, body.fold .sb-toggle { display: none !important; }
+    body.fold .mobile-menu-btn { display: flex !important; }
+    body.fold .app-main { padding: max(8px, env(safe-area-inset-top)) max(var(--side-pad, 8px), env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) 8px !important; gap: 8px !important; }
+    body.fold.fold-rail-off .app-main { padding-left: max(8px, env(safe-area-inset-left)) !important; }
+    body.fold .main-content { padding-left: 4px !important; padding-right: 4px !important; }
+    body.fold .main-content > * { min-width: 0 !important; }
+    body.fold .app-sidebar.collapsed .sb-nav-item { flex-direction: column !important; gap: 3px !important; width: 70px !important; height: auto !important; min-height: 54px;
+      padding: 7px 2px !important; margin: 1px auto !important; border-radius: 14px !important; justify-content: center !important; }
+    body.fold .app-sidebar.collapsed .sb-label { display: block !important; font-size: 10.5px; font-weight: 600; line-height: 1.15; max-width: 66px; text-align: center; white-space: normal !important; word-break: keep-all; }
+    body.fold .app-sidebar .sb-side-btn { display: none !important; }
+    body.fold .app-sidebar.collapsed .sb-nav-item > span:first-of-type[style*="left: -8px"] { display: none; }
     /* 서브창(분할 화면) 열린 동안 — 본 화면 최소 폭(1024px) 풀기 */
     body.frw-split .main-content > * { min-width: 0 !important; }
     body.frw-split-bottom .app-main { padding-bottom: calc(var(--side-h, 50vh) + 16px) !important; }
@@ -22601,13 +22623,30 @@ function App() {
   const [sideH, setSideH] = useState(() => load("frw_side_h", 0.5));     // 좁은 화면: 화면 높이 비율
   const [sideMenu, setSideMenu] = useState(false);                         // 헤더 「서브창」 메뉴
   const [vw, setVw] = useState(() => window.innerWidth);
-  useEffect(() => { const on = () => setVw(window.innerWidth); window.addEventListener("resize", on); return () => window.removeEventListener("resize", on); }, []);
+  const [vh, setVh] = useState(() => window.innerHeight);
+  useEffect(() => { const on = () => { setVw(window.innerWidth); setVh(window.innerHeight); }; window.addEventListener("resize", on); window.addEventListener("orientationchange", on); return () => { window.removeEventListener("resize", on); window.removeEventListener("orientationchange", on); }; }, []);
+  // ── 폴더블(아이폰 듀오 등) 펼친 화면 — 손가락 화면 + 거의 정사각형(짧은 변 560 이상 · 긴 변 1100 이하).
+  // 접은 화면(폭 ~460)은 지금 핸드폰 화면 그대로. 펼치면: 아이콘+이름 레일 상시 표시(햄버거·하단 독 대신),
+  // 최소 폭 1024 해제, 서브창은 가로면 좌우 반반 · 세로면 위아래. iPad(긴 변 1133 이상)는 해당 없음.
+  const coarse = typeof window !== "undefined" && window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  const foldMode = coarse && Math.min(vw, vh) >= 560 && Math.max(vw, vh) <= 1100;
+  const foldLandscape = foldMode && vw > vh;
+  useEffect(() => {
+    document.body.classList.toggle("fold", foldMode);
+    document.body.classList.toggle("fold-landscape", foldLandscape);
+    document.body.classList.toggle("fold-portrait", foldMode && !foldLandscape);
+  }, [foldMode, foldLandscape]);
+  const sbCollapsed = sidebarCollapsed || foldMode;   // 펼친 폴더블은 늘 레일(아이콘+작은 이름)
+  // 펼친 폴더블에서 ☰ 로 레일을 통째로 숨겨 화면을 끝까지 쓴다 (기기에 기억)
+  const [foldRailOff, setFoldRailOff] = useState(() => load("frw_fold_rail_off", false));
+  useEffect(() => { save("frw_fold_rail_off", foldRailOff); document.body.classList.toggle("fold-rail-off", foldMode && foldRailOff); }, [foldRailOff, foldMode]);
   useEffect(() => { save("frw_side_tab", sideTab); }, [sideTab]);
-  const sideNarrow = vw < 900;
+  const sideNarrow = foldLandscape ? false : vw < 900;   // 폴더블 가로 펼침은 좌우 반반
   // 넓은 화면 + 글래스: 영상처럼 위 가운데 알약 메뉴(자주 쓰는 화면), 검색은 아이콘(⌘K)으로
   const glassNav = glass && vw >= 1180;
   useEffect(() => { document.body.classList.toggle("glass-nav", glassNav); }, [glassNav]);
-  const sideWidth = Math.min(sideW, Math.max(360, vw - 620));   // 본 화면이 최소 600px 은 남게
+  const sideWidth = foldLandscape ? Math.round((vw - (foldRailOff ? 44 : 112)) / 2)   // 폴더블 가로: 레일 빼고 정확히 반반 (접히는 선 근처에서 나뉘게)
+    : Math.min(sideW, Math.max(360, vw - 620));   // 본 화면이 최소 600px 은 남게
   const sideShown = !!sideTab && !sideMin;
   useEffect(() => {
     document.body.classList.toggle("frw-split", sideShown && !sideNarrow);
@@ -25262,8 +25301,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       <div className={`mobile-sidebar-backdrop no-print${mobileSidebarOpen ? " show" : ""}`} onClick={() => setMobileSidebarOpen(false)} />
 
       {/* ── 사이드바 ── */}
-      <aside className={`app-sidebar no-print${mobileSidebarOpen ? " mobile-open" : ""}${sidebarCollapsed ? " collapsed" : ""}`} style={{
-        width: sidebarCollapsed ? 68 : 232,
+      <aside className={`app-sidebar no-print${mobileSidebarOpen ? " mobile-open" : ""}${sbCollapsed ? " collapsed" : ""}`} style={{
+        width: sbCollapsed ? 68 : 232,
         flexShrink: 0,
         background: "#17181A",
         border: "1px solid rgba(255,255,255,0.04)",
@@ -25276,8 +25315,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         overflow: "hidden",
         zIndex: 99,
       }}>
-        <div style={{ display: "flex", alignItems: "center", padding: sidebarCollapsed ? "20px 8px" : "20px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "relative", justifyContent: sidebarCollapsed ? "center" : "flex-start", minHeight: 80 }}>
-          <button onClick={() => setSidebarCollapsed(c => !c)} title={sidebarCollapsed ? "펼치기" : "접기"} style={{
+        <div className="sb-top" style={{ display: "flex", alignItems: "center", padding: sbCollapsed ? "20px 8px" : "20px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "relative", justifyContent: sbCollapsed ? "center" : "flex-start", minHeight: 80 }}>
+          <button className="sb-toggle" onClick={() => setSidebarCollapsed(c => !c)} title={sbCollapsed ? "펼치기" : "접기"} style={{
             position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
             width: 24, height: 24, border: "none", borderRadius: 6,
             background: "rgba(255,255,255,0.06)", cursor: "pointer", color: "#B4BAC4",
@@ -25286,8 +25325,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           }}
           onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.12)"}
           onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
-          >{sidebarCollapsed ? "›" : "‹"}</button>
-          {!sidebarCollapsed && (
+          >{sbCollapsed ? "›" : "‹"}</button>
+          {!sbCollapsed && (
             <button onClick={() => { try { sessionStorage.removeItem("nj_welcome_seen"); } catch {} location.reload(); }}
               title="홈 (웰컴 화면으로)" style={{
                 display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center",
@@ -25305,7 +25344,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
           {TAB_GROUPS.map((group, gi) => (
             <React.Fragment key={group.label}>
-              {!sidebarCollapsed
+              {!sbCollapsed
                 ? <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7685", letterSpacing: 0.6, textTransform: "uppercase", padding: gi === 0 ? "2px 14px 6px" : "14px 14px 6px" }}>{group.label}</div>
                 : (gi > 0 && <div style={{ height: 1, background: "rgba(255,255,255,0.07)", margin: "6px 12px" }}/>)}
               {group.ids.map(id => {
@@ -25314,9 +25353,9 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 const [, label, icon] = t;
                 const active = tab === id;
                 return (
-                  <button key={id} className="sb-nav-item" data-active={active ? "1" : "0"} onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sidebarCollapsed ? label : ""} style={{
+                  <button key={id} className="sb-nav-item" data-active={active ? "1" : "0"} onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sbCollapsed ? label : ""} style={{
                     display: "flex", alignItems: "center", gap: 12,
-                    width: "100%", padding: sidebarCollapsed ? "11px 0" : "10px 14px",
+                    width: "100%", padding: sbCollapsed ? "11px 0" : "10px 14px",
                     border: "none", borderRadius: 10,
                     background: active ? "rgba(219,107,46,0.18)" : "transparent",
                     boxShadow: active ? "inset 0 0 0 1px rgba(219,107,46,0.25)" : "none",
@@ -25324,18 +25363,18 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                     cursor: "pointer", fontFamily: "inherit", fontSize: 13,
                     fontWeight: active ? 600 : 500, letterSpacing: -0.1,
                     transition: "background 0.15s, color 0.15s",
-                    justifyContent: sidebarCollapsed ? "center" : "flex-start",
+                    justifyContent: sbCollapsed ? "center" : "flex-start",
                     position: "relative", textAlign: "left",
                   }}
                   onMouseEnter={e => { if (!active) { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#E5E8ED"; } }}
                   onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#B4BAC4"; } }}
                   >
-                    {active && !sidebarCollapsed && <span style={{ position: "absolute", left: -8, top: 8, bottom: 8, width: 3, borderRadius: 3, background: "var(--accent)" }}/>}
+                    {active && !sbCollapsed && <span style={{ position: "absolute", left: -8, top: 8, bottom: 8, width: 3, borderRadius: 3, background: "var(--accent)" }}/>}
                     <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center", color: active ? "#FFFFFF" : "#B4BAC4" }}>
                       <Icon name={icon} size={18} strokeWidth={1.7}/>
                     </span>
-                    {!sidebarCollapsed && <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>}
-                    {!sidebarCollapsed && SIDE_TAB_IDS.has(id) && (
+                    <span className="sb-label" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: sbCollapsed ? "none" : undefined }}>{label}</span>
+                    {!sbCollapsed && SIDE_TAB_IDS.has(id) && (
                       <span role="button" tabIndex={-1} className={"sb-side-btn" + (sideTab === id && !sideMin ? " on" : "")} title={sideTab === id ? "서브창에 열려 있어요" : `「${label}」 서브창에서 열기 — 지금 화면은 그대로`}
                         onClick={e => { e.stopPropagation(); openSide(id); setMobileSidebarOpen(false); }}
                         style={{ marginLeft: "auto", width: 26, height: 22, borderRadius: 6, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
@@ -25350,17 +25389,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           ))}
         </nav>
         {/* 바로가기 — 평소엔 이 한 줄만. 팝오버는 aside 바깥에 그린다(overflow:hidden 회피) */}
-        <div style={{ padding: sidebarCollapsed ? "10px 8px 12px" : "10px 12px 12px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
+        <div style={{ padding: sbCollapsed ? "10px 8px 12px" : "10px 12px 12px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
           <button ref={linksBtnRef} onClick={() => linksOpen ? setLinksOpen(false) : openLinks()}
-            title={sidebarCollapsed ? "바로가기" : "연결된 사이트 열기"}
+            title={sbCollapsed ? "바로가기" : "연결된 사이트 열기"}
             style={{
               display: "flex", alignItems: "center", gap: 12, width: "100%",
-              padding: sidebarCollapsed ? "11px 0" : "11px 13px",
+              padding: sbCollapsed ? "11px 0" : "11px 13px",
               border: "none", borderRadius: 11,
               background: linksOpen ? "rgba(219,107,46,0.14)" : "rgba(255,255,255,0.06)",
               color: linksOpen ? "#DB6B2E" : "#B4BAC4",
               cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600,
-              justifyContent: sidebarCollapsed ? "center" : "flex-start", textAlign: "left",
+              justifyContent: sbCollapsed ? "center" : "flex-start", textAlign: "left",
               transition: "background 0.15s, color 0.15s",
             }}
             onMouseEnter={e => { if (!linksOpen) { e.currentTarget.style.background = "rgba(255,255,255,0.10)"; e.currentTarget.style.color = "#E5E8ED"; } }}
@@ -25368,7 +25407,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center" }}>
               <Icon name="grip" size={18} strokeWidth={1.8}/>
             </span>
-            {!sidebarCollapsed && (
+            {!sbCollapsed && (
               <>
                 <span style={{ flex: 1, whiteSpace: "nowrap" }}>바로가기</span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: linksOpen ? "rgba(219,107,46,0.75)" : "#6B7685" }}>{EXTERNAL_LINKS.length}</span>
@@ -25377,8 +25416,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
             )}
           </button>
         </div>
-        <div style={{ padding: sidebarCollapsed ? "12px 8px" : "12px 14px", borderTop: "1px solid var(--divider)", fontSize: 10, color: "var(--text3)", textAlign: "center", fontWeight: 500, letterSpacing: 0.4 }}>
-          {sidebarCollapsed ? "v2" : "NJ SAFETY · v2"}
+        <div style={{ padding: sbCollapsed ? "12px 8px" : "12px 14px", borderTop: "1px solid var(--divider)", fontSize: 10, color: "var(--text3)", textAlign: "center", fontWeight: 500, letterSpacing: 0.4 }}>
+          {sbCollapsed ? "v2" : "NJ SAFETY · v2"}
         </div>
       </aside>
 
@@ -25424,7 +25463,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       )}
 
       {/* ── 메인 영역 ── */}
-      <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: `12px ${sideShown && !sideNarrow ? sideWidth + 24 : 12}px 12px 12px`, gap: 12 }}>
+      <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: `12px ${sideShown && !sideNarrow ? sideWidth + 24 : 12}px 12px 12px`, gap: 12, "--side-pad": sideShown && !sideNarrow ? `${sideWidth + 24}px` : undefined }}>
 
       {/* ── 헤더 (떠있는 카드) ── */}
       <div style={{ border: "1px solid var(--border)", borderRadius: 14, position: "sticky", top: 12, zIndex: 50, boxShadow: "0 1px 2px rgba(15,17,21,0.03), 0 2px 6px rgba(15,17,21,0.04)" }} className="no-print app-header">
@@ -25432,7 +25471,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           {/* 상단 타이틀 + 동기화 */}
           <div className="header-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0 12px", gap: 12 }}>
             {/* 햄버거 메뉴 (모바일 전용) */}
-            <button className="mobile-menu-btn" onClick={() => setMobileSidebarOpen(true)} title="메뉴 열기" style={{
+            <button className="mobile-menu-btn" onClick={() => { if (foldMode) setFoldRailOff(v => !v); else setMobileSidebarOpen(true); }} title={foldMode ? (foldRailOff ? "메뉴 레일 보이기" : "메뉴 레일 숨기기 — 화면 끝까지 쓰기") : "메뉴 열기"} style={{
               width: 38, height: 38, borderRadius: 10, border: "none",
               background: "var(--surface2)", cursor: "pointer", color: "var(--text1)",
               alignItems: "center", justifyContent: "center", flexShrink: 0,
