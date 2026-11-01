@@ -1100,6 +1100,9 @@
     body.fold .sb .sb-foot { padding: 8px 0 10px; display: flex; justify-content: center; }
     body.fold .sb .sb-links { width: 52px; height: 40px; padding: 0; justify-content: center; border-radius: 14px; }
     body.fold .sb .sb-links .sb-label, body.fold .sb .sb-count { display: none !important; }
+    /* 가로로 쥔 폴더블 — 상태 표시줄(시간·와이파이)이 오른쪽 세로 띠로 붙는다. 아이콘은 위쪽에만 있으니
+       위 메뉴 줄(헤더)만 비켜 가고, 카드·본문은 오른쪽 끝까지 채운다(통째로 비우면 빈 띠가 남았다). */
+    .app-header { margin-right: env(safe-area-inset-right); }
     /* 핸드폰 서랍 메뉴 — 상태 표시줄 밑까지 그리므로 위쪽은 비켜 둔다 */
     @media (max-width: 768px) { .app-sidebar { padding-top: env(safe-area-inset-top) !important; } }
     /* ─── 폴더블 펼친 화면 (body.fold — App 이 판단) ───
@@ -1114,7 +1117,7 @@
     body.fold.fold-rail-off .app-sidebar { display: none !important; }
     body.fold .mobile-dock, body.fold .dock-unfold, body.fold .mobile-sidebar-backdrop { display: none !important; }
     body.fold .mobile-menu-btn { display: flex !important; }
-    body.fold .app-main { padding: max(8px, env(safe-area-inset-top)) max(var(--side-pad, 8px), env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) 8px !important; gap: 8px !important; }
+    body.fold .app-main { padding: max(8px, env(safe-area-inset-top)) var(--side-pad, 8px) max(10px, env(safe-area-inset-bottom)) 8px !important; gap: 8px !important; }
     body.fold.fold-rail-off .app-main { padding-left: max(8px, env(safe-area-inset-left)) !important; }
     body.fold .main-content { padding-left: 4px !important; padding-right: 4px !important; }
     body.fold .main-content > * { min-width: 0 !important; }
@@ -25487,7 +25490,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       )}
 
       {/* ── 메인 영역 ── */}
-      <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: `max(12px, env(safe-area-inset-top)) max(${sideShown && !sideNarrow ? sideWidth + 24 : 12}px, calc(env(safe-area-inset-right) + 8px)) max(12px, env(safe-area-inset-bottom)) 12px`, gap: 12, "--side-pad": sideShown && !sideNarrow ? `${sideWidth + 24}px` : undefined }}>
+      <div className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", padding: `max(12px, env(safe-area-inset-top)) ${sideShown && !sideNarrow ? sideWidth + 24 : 12}px max(12px, env(safe-area-inset-bottom)) 12px`, gap: 12, "--side-pad": sideShown && !sideNarrow ? `${sideWidth + 24}px` : undefined }}>
 
       {/* ── 헤더 (떠있는 카드) ── */}
       <div style={{ border: "1px solid var(--border)", borderRadius: 14, position: "sticky", top: "max(12px, env(safe-area-inset-top))", zIndex: 50, boxShadow: "0 1px 2px rgba(15,17,21,0.03), 0 2px 6px rgba(15,17,21,0.04)" }} className="no-print app-header">
