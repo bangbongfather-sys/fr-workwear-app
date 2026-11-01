@@ -984,10 +984,6 @@
     body.glass .app-sidebar { background: transparent !important; border: 1px solid rgba(255,255,255,0.16) !important; box-shadow: 0 16px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18) !important; border-radius: 26px !important; }
     body.glass .app-sidebar::before { background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)), rgba(12,14,20,calc(0.25 + var(--glass-tint, 0.35) * 0.5)); }
     /* 접힌 사이드바 = 영상의 떠 있는 독 — 동그란 아이콘 버튼 */
-    body.glass .app-sidebar.collapsed .sb-nav-item { width: 44px !important; height: 44px; padding: 0 !important; margin: 2px auto; border-radius: 50% !important; justify-content: center !important; background: rgba(255,255,255,0.06) !important; }
-    body.glass .app-sidebar.collapsed .sb-nav-item:hover { background: rgba(255,255,255,0.16) !important; }
-    body.glass .app-sidebar .sb-nav-item[data-active="1"] { background: rgba(255,255,255,0.92) !important; color: #15161a !important; box-shadow: 0 4px 14px rgba(0,0,0,0.25) !important; }
-    body.glass .app-sidebar .sb-nav-item[data-active="1"] span { color: #15161a !important; }
 
     body.glass .app-header { background: transparent !important; border-color: rgba(255,255,255,0.14) !important; border-radius: 22px !important; box-shadow: 0 10px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.16) !important; }
     body.glass .side-pane { background: transparent !important; border-color: rgba(255,255,255,0.18) !important; }
@@ -1014,9 +1010,99 @@
     body.glass .app-header { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
     body.glass-nav .global-search-wrap { display: none !important; }
     body.glass-nav .gs-mobile-btn { display: flex !important; }
+    /* ─── 왼쪽 메뉴 (사이드바 .sb) ───
+       세 가지 모양을 한 원칙으로: 펼침(240) · 접힘(72, 아이콘) · 폴더블 레일(아이콘 알약 + 작은 이름).
+       선택된 메뉴 = 주황 아이콘 + 은은한 주황 바탕 + 안쪽 막대. 바탕은 늘 어두운 판(밝은 테마에서도 대비). */
+    .sb { --sb-bg: #15161A; --sb-line: rgba(255,255,255,0.07); --sb-text: #A9B0BA; --sb-strong: #F4F5F7; --sb-muted: #646C78;
+      --sb-hover: rgba(255,255,255,0.055); --sb-on-bg: rgba(219,107,46,0.15); --sb-on-line: rgba(240,138,75,0.28); --sb-on-ico: #FF9152;
+      background: var(--sb-bg); border: 1px solid var(--sb-line); border-radius: 20px;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 16px 40px rgba(15,17,21,0.14); color: var(--sb-text); }
+    body.dark .sb { --sb-bg: #1B1C20; box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 16px 40px rgba(0,0,0,0.35); }
+    .sb button { font-family: inherit; }
+    /* 머리 */
+    .sb .sb-top { display: flex; align-items: center; gap: 6px; padding: 14px 12px 12px 14px; min-height: 66px; flex-shrink: 0; }
+    .sb .sb-brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; padding: 6px; margin: -6px; border: none; border-radius: 12px; background: transparent; cursor: pointer; text-align: left; transition: background .15s; }
+    .sb .sb-brand:hover { background: var(--sb-hover); }
+    .sb .sb-logo { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; border-radius: 9px; }
+    .sb .sb-brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
+    .sb .sb-brand-text b { font-size: 14.5px; font-weight: 800; color: var(--sb-strong); letter-spacing: 0.2px; white-space: nowrap; }
+    .sb .sb-brand-text small { font-size: 11px; font-weight: 600; color: var(--sb-muted); margin-top: 2px; white-space: nowrap; }
+    .sb .sb-toggle { width: 28px; height: 28px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 8px;
+      background: transparent; color: var(--sb-muted); cursor: pointer; transition: background .15s, color .15s; }
+    .sb .sb-toggle:hover { background: var(--sb-hover); color: var(--sb-strong); }
+    /* 메뉴 목록 — 위아래 끝이 부드럽게 흐려져 더 있다는 게 보이게 */
+    .sb .sb-nav { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px 12px; scrollbar-width: none;
+      -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 18px), transparent 100%);
+              mask-image: linear-gradient(180deg, transparent 0, #000 10px, #000 calc(100% - 18px), transparent 100%); }
+    .sb .sb-nav::-webkit-scrollbar { display: none; }
+    .sb .sb-group + .sb-group { margin-top: 10px; }
+    .sb .sb-group-label { font-size: 11px; font-weight: 700; color: var(--sb-muted); letter-spacing: 0.4px; padding: 8px 10px 6px; }
+    .sb .sb-sep { height: 1px; background: var(--sb-line); margin: 6px 14px 8px; }
+    .sb .sb-nav-item { position: relative; display: flex; align-items: center; gap: 11px; width: 100%; height: 40px; padding: 0 8px 0 10px; margin: 1px 0;
+      border: none; border-radius: 11px; background: transparent; color: var(--sb-text); font-size: 13.5px; font-weight: 500; letter-spacing: -0.1px;
+      text-align: left; cursor: pointer; transition: background .15s, color .15s; -webkit-tap-highlight-color: transparent; }
+    .sb .sb-nav-item:hover { background: var(--sb-hover); color: var(--sb-strong); }
+    .sb .sb-nav-item:focus-visible { outline: 2px solid var(--sb-on-ico); outline-offset: -2px; }
+    .sb .sb-ico { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; transition: color .15s, background .15s; }
+    .sb .sb-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sb .sb-nav-item.on { background: var(--sb-on-bg); color: var(--sb-strong); font-weight: 650; box-shadow: inset 0 0 0 1px var(--sb-on-line); }
+    .sb .sb-nav-item.on .sb-ico { color: var(--sb-on-ico); }
+    .sb .sb-nav-item.on::before { content: ""; position: absolute; left: 3px; top: 11px; bottom: 11px; width: 3px; border-radius: 3px; background: var(--sb-on-ico); }
+    .sb .sb-side-btn { margin-left: auto; width: 26px; height: 24px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+      color: var(--sb-muted); opacity: 0; transition: opacity .15s, background .15s, color .15s; }
+    .sb .sb-nav-item:hover .sb-side-btn, .sb .sb-side-btn.on { opacity: 1; }
+    .sb .sb-side-btn.on { color: #7DB3FF; background: rgba(49,130,246,0.2); }
+    .sb .sb-side-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+    @media (hover: none) { .sb .sb-side-btn { opacity: 0.7; } }
+    /* 아래 */
+    .sb .sb-foot { flex-shrink: 0; padding: 10px; border-top: 1px solid var(--sb-line); }
+    .sb .sb-links { display: flex; align-items: center; gap: 11px; width: 100%; height: 42px; padding: 0 10px; border: none; border-radius: 12px;
+      background: rgba(255,255,255,0.045); color: var(--sb-text); font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s, color .15s; }
+    .sb .sb-links:hover { background: rgba(255,255,255,0.08); color: var(--sb-strong); }
+    .sb .sb-links.on { background: var(--sb-on-bg); color: var(--sb-on-ico); }
+    .sb .sb-count { font-size: 11px; font-weight: 700; color: var(--sb-muted); background: rgba(255,255,255,0.06); padding: 1px 7px; border-radius: 999px; }
+    .sb .sb-ver { font-size: 10.5px; color: var(--sb-muted); text-align: center; padding: 8px 0 0; letter-spacing: 0.3px; }
+    /* 접힘(아이콘만) */
+    .sb.collapsed .sb-top { flex-direction: column; justify-content: center; gap: 8px; padding: 14px 0 8px; }
+    .sb.collapsed .sb-brand { flex: none; margin: 0; padding: 4px; }
+    .sb.collapsed .sb-brand-text, .sb.collapsed .sb-label { display: none; }
+    .sb.collapsed .sb-nav { padding: 4px 0 12px; }
+    .sb.collapsed .sb-nav-item { width: 46px; height: 44px; margin: 2px auto; padding: 0; justify-content: center; border-radius: 13px; }
+    .sb.collapsed .sb-nav-item.on::before { display: none; }
+    .sb.collapsed .sb-ico { width: 24px; height: 24px; }
+    .sb.collapsed .sb-foot { padding: 10px 0; display: flex; justify-content: center; }
+    .sb.collapsed .sb-links { width: 46px; height: 44px; padding: 0; justify-content: center; border-radius: 13px; }
+    /* 글래스 테마 — 판은 유리(위 공통 ::before), 선택은 흰 알약(영상처럼) */
+    body.glass .sb { --sb-line: rgba(255,255,255,0.12); --sb-text: rgba(255,255,255,0.78); --sb-muted: rgba(255,255,255,0.5); --sb-hover: rgba(255,255,255,0.09);
+      --sb-on-bg: rgba(255,255,255,0.94); --sb-on-line: transparent; --sb-on-ico: #DB6B2E; }
+    body.glass .sb .sb-nav-item.on { color: #15161a; box-shadow: 0 6px 18px rgba(0,0,0,0.22); }
+    body.glass .sb .sb-nav-item.on::before { display: none; }
+    body.glass .sb .sb-links { background: rgba(255,255,255,0.07); }
+    body.glass .sb .sb-links.on { background: rgba(255,255,255,0.94); color: #15161a; }
+    /* 폴더블 레일 — 아이콘 알약 + 아래 작은 이름 (손가락 화면엔 마우스 올림 이름표가 없어서) */
+    body.fold .sb .sb-top { flex-direction: column; padding: 12px 0 6px; min-height: 0; }
+    body.fold .sb .sb-brand { flex: none; margin: 0; padding: 4px; }
+    body.fold .sb .sb-brand-text, body.fold .sb .sb-toggle, body.fold .sb .sb-side-btn, body.fold .sb .sb-ver { display: none !important; }
+    body.fold .sb .sb-logo { width: 30px; height: 30px; }
+    body.fold .sb .sb-nav { padding: 2px 0 12px; }
+    body.fold .sb .sb-group + .sb-group { margin-top: 2px; }
+    body.fold .sb .sb-sep { margin: 4px 22px 6px; }
+    body.fold .sb .sb-nav-item { flex-direction: column; justify-content: flex-start; gap: 3px; width: 100%; height: auto; padding: 5px 0 6px; margin: 0;
+      border-radius: 0; background: transparent !important; box-shadow: none !important; color: var(--sb-text); }
+    body.fold .sb .sb-nav-item::before { display: none; }
+    body.fold .sb .sb-ico { width: 52px; height: 30px; border-radius: 15px; }
+    body.fold .sb .sb-nav-item:hover .sb-ico { background: var(--sb-hover); }
+    body.fold .sb .sb-nav-item.on .sb-ico { background: var(--sb-on-bg); box-shadow: inset 0 0 0 1px var(--sb-on-line); }
+    body.fold .sb .sb-label { display: block !important; flex: none; width: 100%; padding: 0 4px; font-size: 10.5px; font-weight: 600; line-height: 1.2; text-align: center;
+      white-space: normal; word-break: keep-all; overflow: hidden; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    body.fold .sb .sb-nav-item.on .sb-label { color: var(--sb-strong); font-weight: 750; }
+    body.glass.fold .sb .sb-nav-item.on .sb-label { color: #fff; }
+    body.fold .sb .sb-foot { padding: 8px 0 10px; display: flex; justify-content: center; }
+    body.fold .sb .sb-links { width: 52px; height: 40px; padding: 0; justify-content: center; border-radius: 14px; }
+    body.fold .sb .sb-links .sb-label, body.fold .sb .sb-count { display: none !important; }
     /* 핸드폰 서랍 메뉴 — 상태 표시줄 밑까지 그리므로 위쪽은 비켜 둔다 */
     @media (max-width: 768px) { .app-sidebar { padding-top: env(safe-area-inset-top) !important; } }
-    /* ─── 폴더블 펼친 화면 (body.fold — App 이 판단) ─── */
+    /* ─── 폴더블 펼친 화면 (body.fold — App 이 판단) ───
        햄버거·하단 독 대신 왼쪽 레일을 늘 보여 준다(아이콘 + 작은 이름 — 손가락 화면엔 마우스 올림 이름표가 없어서).
        769~1024 에 걸리는 최소 폭 1024 를 풀어 가로 스크롤을 없앤다. */
     /* 레일은 화면 왼쪽 끝에 딱 붙여 위에서 아래까지 — 둥근 모서리·카메라 쪽 안전 영역까지 레일 바탕이 채워 버려지는 띠가 없게 */
@@ -1025,26 +1111,16 @@
       margin: 0 !important; border-radius: 0 20px 20px 0 !important; border-left: none !important; z-index: 99 !important;
       padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left) !important; }
     body.fold .app-sidebar nav { overflow-y: auto; scrollbar-width: none; padding-top: 10px !important; }
-    body.fold .sb-top { display: none !important; }
     body.fold.fold-rail-off .app-sidebar { display: none !important; }
-    body.fold .mobile-dock, body.fold .dock-unfold, body.fold .mobile-sidebar-backdrop, body.fold .sb-toggle { display: none !important; }
+    body.fold .mobile-dock, body.fold .dock-unfold, body.fold .mobile-sidebar-backdrop { display: none !important; }
     body.fold .mobile-menu-btn { display: flex !important; }
     body.fold .app-main { padding: max(8px, env(safe-area-inset-top)) max(var(--side-pad, 8px), env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) 8px !important; gap: 8px !important; }
     body.fold.fold-rail-off .app-main { padding-left: max(8px, env(safe-area-inset-left)) !important; }
     body.fold .main-content { padding-left: 4px !important; padding-right: 4px !important; }
     body.fold .main-content > * { min-width: 0 !important; }
-    body.fold .app-sidebar.collapsed .sb-nav-item { flex-direction: column !important; gap: 3px !important; width: 70px !important; height: auto !important; min-height: 54px;
-      padding: 7px 2px !important; margin: 1px auto !important; border-radius: 14px !important; justify-content: center !important; }
-    body.fold .app-sidebar.collapsed .sb-label { display: block !important; font-size: 10.5px; font-weight: 600; line-height: 1.15; max-width: 66px; text-align: center; white-space: normal !important; word-break: keep-all; }
-    body.fold .app-sidebar .sb-side-btn { display: none !important; }
-    body.fold .app-sidebar.collapsed .sb-nav-item > span:first-of-type[style*="left: -8px"] { display: none; }
     /* 서브창(분할 화면) 열린 동안 — 본 화면 최소 폭(1024px) 풀기 */
     body.frw-split .main-content > * { min-width: 0 !important; }
     body.frw-split-bottom .app-main { padding-bottom: calc(var(--side-h, 50vh) + 16px) !important; }
-    .sb-nav-item .sb-side-btn { opacity: 0; transition: opacity 0.15s, background 0.15s; }
-    .sb-nav-item:hover .sb-side-btn, .sb-nav-item .sb-side-btn.on { opacity: 1; }
-    .sb-nav-item .sb-side-btn:hover { background: rgba(255,255,255,0.12) !important; color: #fff !important; }
-    @media (hover: none) { .sb-nav-item .sb-side-btn { opacity: 0.75; } }
     @keyframes sideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
     @keyframes salesPopIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
     @keyframes salesSheetUp { from { transform: translateY(100%); } to { transform: none; } }
@@ -22646,7 +22722,7 @@ function App() {
     document.body.classList.toggle("fold-landscape", foldLandscape);
     document.body.classList.toggle("fold-portrait", foldMode && !foldLandscape);
   }, [foldMode, foldLandscape]);
-  const sbCollapsed = sidebarCollapsed || foldMode;   // 펼친 폴더블은 늘 레일(아이콘+작은 이름)
+  const sbCollapsed = (sidebarCollapsed && vw > 768) || foldMode;   // 펼친 폴더블은 늘 레일(아이콘+작은 이름), 핸드폰 서랍은 늘 펼친 모양
   // 펼친 폴더블에서 ☰ 로 레일을 통째로 숨겨 화면을 끝까지 쓴다 (기기에 기억)
   const [foldRailOff, setFoldRailOff] = useState(() => load("frw_fold_rail_off", false));
   useEffect(() => { save("frw_fold_rail_off", foldRailOff); document.body.classList.toggle("fold-rail-off", foldMode && foldRailOff); }, [foldRailOff, foldMode]);
@@ -25311,123 +25387,61 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       <div className={`mobile-sidebar-backdrop no-print${mobileSidebarOpen ? " show" : ""}`} onClick={() => setMobileSidebarOpen(false)} />
 
       {/* ── 사이드바 ── */}
-      <aside className={`app-sidebar no-print${mobileSidebarOpen ? " mobile-open" : ""}${sbCollapsed ? " collapsed" : ""}`} style={{
-        width: sbCollapsed ? 68 : 232,
+      <aside className={`app-sidebar sb no-print${mobileSidebarOpen ? " mobile-open" : ""}${sbCollapsed ? " collapsed" : ""}`} style={{
+        width: sbCollapsed ? 72 : 240,
         flexShrink: 0,
-        background: "#17181A",
-        border: "1px solid rgba(255,255,255,0.04)",
-        borderRadius: 16,
         margin: "max(12px, env(safe-area-inset-top)) 0 max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left))",
         position: "sticky", top: "max(12px, env(safe-area-inset-top))", height: "calc(100vh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)))",
         display: "flex", flexDirection: "column",
         transition: "width 0.25s cubic-bezier(0.4,0,0.2,1)",
-        boxShadow: "0 12px 32px rgba(15,17,21,0.10)",
         overflow: "hidden",
         zIndex: 99,
       }}>
-        <div className="sb-top" style={{ display: "flex", alignItems: "center", padding: sbCollapsed ? "20px 8px" : "20px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "relative", justifyContent: sbCollapsed ? "center" : "flex-start", minHeight: 80 }}>
-          <button className="sb-toggle" onClick={() => setSidebarCollapsed(c => !c)} title={sbCollapsed ? "펼치기" : "접기"} style={{
-            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-            width: 24, height: 24, border: "none", borderRadius: 6,
-            background: "rgba(255,255,255,0.06)", cursor: "pointer", color: "#B4BAC4",
-            fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-            transition: "background 0.15s", zIndex: 2,
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.12)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
-          >{sbCollapsed ? "›" : "‹"}</button>
-          {!sbCollapsed && (
-            <button onClick={() => { try { sessionStorage.removeItem("nj_welcome_seen"); } catch {} location.reload(); }}
-              title="홈 (웰컴 화면으로)" style={{
-                display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "center",
-                gap: 8, padding: "4px 8px", borderRadius: 10, border: "none",
-                background: "transparent", cursor: "pointer", fontFamily: "inherit",
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.06)"}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAVRSURBVFhHxZdrTFtlGMfPOTDMBkzqZBRY0lEkwMYuTDNHCVNuYqFjG9CWU0qhFMXScdpx3ZiyWdnC4twyIxoyNfHDjG5+WoyfNPOSaHSbt6BnH1wcjlEupbT0Bmz0b94qhh1j2ORM/8mT9n3f//s8v5ye91KKugcBYDCQuErYL5oaGxsvGAwGvqamJhw6nY5nWfYnq9VaQcYBrJg/nfZGyE79MtdF8cEOmg/sp3k/R/PeZpp3N9H8lInmnfUMP65n+NFqhndoGH54L8PfKGf4oVKGv1FE8UPa5Cu4efVhYX0CcM1kMqG+vj4cBoMBWq2WhPf48eNpxBM8WyGff1kahJ0CDtHAARpoZxCy0bi9j8ZsE43gMwwC9Qy8tQw8OgZTGgauvQyc5QxcT1O4rk1G6PrPicL6lMlkGqyrq4Nerw+HTqdDRUUFVCoV1Gr1ZQCRxHfrvEGJvjjc7qIQaKMRsDLwWmh4mmhMmWhMGhk49QzGWAYODYObFQyGyxn8VsZguJjCdU2yD78OSoX1/xFAqVSipKSEfD+94J179dFOHInEbBuFoJWG30Jh+lkK7gYKrnoKkzUUxqspcQBKS0uRn58fDr1eX73gn+1L/QD2lUBnFOY7ojHXGosZLgYBSyz8z62G2xgNh1okgIKCAuTk5CAvL8/LcVz4fXA4HNGhgccUgZfSFYH+pxSBgUpFoH+3wtNfqfD0axUuLnWfm6UxIiZAdnY2du7c+X0oFHpAOF8oZxW13acTGWDr1q3IyspCYWHhGeF8oSZ0EflesQHIE0hPT0dmZiZZHbXCHIt13wBIcZlMhtTUVB/LshnCPAsSDaCsrOxvACkpKUhISIBcLv+W7JDCXESiAFRVVd1mWdZRVFSEHTt23AEglUohkUiwceOmt4W5iEQB0Gg084cPH96jUql+yM3NvQMgMVGK6NjViIqJA6cpbhbmEwWAhNls3tzRYU0vLi66tQAgT0mBJD4RTLQEB7dRCFgfgv9U5eOL8y0boKamJnwY7dq1q4CMG41Gs0KhQGZGBtask4efwFnlCqA9Are61l3yv2tJWpxPFACNRkNWQf6CR1lW9mZKxhbkZKzDd/oI4GAUgkc2vEPGxu1PqFydG97C5YHwS3lfAAaBqPY92VcCNhp4Phb+F7P2kX7vsTwb2uPgsq3/asE7UR1RIDoAUejTosxQn+yS98SThaTt60w8iYNx8B3a0E/ajrbtKeOcPG1MF5m7bAC1Wk32gDyhl2j6fWN8sFv6OXri4e/LbSJ9zqNFFUGzJDRuWX9+TL9qi2c5hxEBYFkWHMf9dQQvlq938wtz3WucUydV20jbe+CRl9ASDb9l7UdjF8/FjFg3KQP6yH8PQJZgbW0tent7O4ReotCXr6x0f/GhZOrU7rjgAdln6I7HVPfmo2TMZS8p9zSuGZ2sXuZ9gHza7fb9Qu9iebpkX8/aYmc8p1RK0vZ2bTwSaIiBR0thZLk3orsCOJGvGH3dKHddu/ygrzPjk3ljJJykuFqEO+HdABB5Pz6TMN0m84SMFMZZGqNaJnwdGxUDoKenZ0kAXHwtxt0qOx8y/XEbFg2ArASbzbYkABEGB6Pc+2VXZwxUGIAUX/ZPcC8ARL73urb4mtfOuP+8ko9q6P8WgGjiWEntjHElJjTUvQE0NDRcMxqN4b9kJAgE2Qc4jusUepfSKJfWh/pITGspTFVScO2m4FRRmCymMKRORIi/csfJGVZra+sFq9XKWyyWcJjNZr6lpYXv6empE3qXEgB60pZ+ztuczDsakvgRQxI/rE/iHVopf8O06RsM/SgRzvlf9DvFLnsMZsJ2JwAAAABJRU5ErkJggg==" alt="NJ SAFETY" className="nj-sidebar-logo" style={{ width: 34, height: 34, objectFit: "contain", flexShrink: 0 }} />
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#E5E8ED", letterSpacing: 0.2, whiteSpace: "nowrap" }}>NJ SAFETY</div>
-            </button>
-          )}
+        {/* 머리 — 로고(누르면 웰컴 화면) + 접기 */}
+        <div className="sb-top">
+          <button type="button" className="sb-brand" onClick={() => { try { sessionStorage.removeItem("nj_welcome_seen"); } catch {} location.reload(); }} title="홈 (웰컴 화면으로)">
+            <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAVRSURBVFhHxZdrTFtlGMfPOTDMBkzqZBRY0lEkwMYuTDNHCVNuYqFjG9CWU0qhFMXScdpx3ZiyWdnC4twyIxoyNfHDjG5+WoyfNPOSaHSbt6BnH1wcjlEupbT0Bmz0b94qhh1j2ORM/8mT9n3f//s8v5ye91KKugcBYDCQuErYL5oaGxsvGAwGvqamJhw6nY5nWfYnq9VaQcYBrJg/nfZGyE79MtdF8cEOmg/sp3k/R/PeZpp3N9H8lInmnfUMP65n+NFqhndoGH54L8PfKGf4oVKGv1FE8UPa5Cu4efVhYX0CcM1kMqG+vj4cBoMBWq2WhPf48eNpxBM8WyGff1kahJ0CDtHAARpoZxCy0bi9j8ZsE43gMwwC9Qy8tQw8OgZTGgauvQyc5QxcT1O4rk1G6PrPicL6lMlkGqyrq4Nerw+HTqdDRUUFVCoV1Gr1ZQCRxHfrvEGJvjjc7qIQaKMRsDLwWmh4mmhMmWhMGhk49QzGWAYODYObFQyGyxn8VsZguJjCdU2yD78OSoX1/xFAqVSipKSEfD+94J179dFOHInEbBuFoJWG30Jh+lkK7gYKrnoKkzUUxqspcQBKS0uRn58fDr1eX73gn+1L/QD2lUBnFOY7ojHXGosZLgYBSyz8z62G2xgNh1okgIKCAuTk5CAvL8/LcVz4fXA4HNGhgccUgZfSFYH+pxSBgUpFoH+3wtNfqfD0axUuLnWfm6UxIiZAdnY2du7c+X0oFHpAOF8oZxW13acTGWDr1q3IyspCYWHhGeF8oSZ0EflesQHIE0hPT0dmZiZZHbXCHIt13wBIcZlMhtTUVB/LshnCPAsSDaCsrOxvACkpKUhISIBcLv+W7JDCXESiAFRVVd1mWdZRVFSEHTt23AEglUohkUiwceOmt4W5iEQB0Gg084cPH96jUql+yM3NvQMgMVGK6NjViIqJA6cpbhbmEwWAhNls3tzRYU0vLi66tQAgT0mBJD4RTLQEB7dRCFgfgv9U5eOL8y0boKamJnwY7dq1q4CMG41Gs0KhQGZGBtask4efwFnlCqA9Are61l3yv2tJWpxPFACNRkNWQf6CR1lW9mZKxhbkZKzDd/oI4GAUgkc2vEPGxu1PqFydG97C5YHwS3lfAAaBqPY92VcCNhp4Phb+F7P2kX7vsTwb2uPgsq3/asE7UR1RIDoAUejTosxQn+yS98SThaTt60w8iYNx8B3a0E/ajrbtKeOcPG1MF5m7bAC1Wk32gDyhl2j6fWN8sFv6OXri4e/LbSJ9zqNFFUGzJDRuWX9+TL9qi2c5hxEBYFkWHMf9dQQvlq938wtz3WucUydV20jbe+CRl9ASDb9l7UdjF8/FjFg3KQP6yH8PQJZgbW0tent7O4ReotCXr6x0f/GhZOrU7rjgAdln6I7HVPfmo2TMZS8p9zSuGZ2sXuZ9gHza7fb9Qu9iebpkX8/aYmc8p1RK0vZ2bTwSaIiBR0thZLk3orsCOJGvGH3dKHddu/ygrzPjk3ljJJykuFqEO+HdABB5Pz6TMN0m84SMFMZZGqNaJnwdGxUDoKenZ0kAXHwtxt0qOx8y/XEbFg2ArASbzbYkABEGB6Pc+2VXZwxUGIAUX/ZPcC8ARL73urb4mtfOuP+8ko9q6P8WgGjiWEntjHElJjTUvQE0NDRcMxqN4b9kJAgE2Qc4jusUepfSKJfWh/pITGspTFVScO2m4FRRmCymMKRORIi/csfJGVZra+sFq9XKWyyWcJjNZr6lpYXv6empE3qXEgB60pZ+ztuczDsakvgRQxI/rE/iHVopf8O06RsM/SgRzvlf9DvFLnsMZsJ2JwAAAABJRU5ErkJggg==" alt="NJ SAFETY" className="nj-sidebar-logo sb-logo"/>
+            <span className="sb-brand-text"><b>NJ SAFETY</b><small>업무 관리</small></span>
+          </button>
+          <button type="button" className="sb-toggle" onClick={() => setSidebarCollapsed(c => !c)} title={sbCollapsed ? "메뉴 펼치기" : "메뉴 접기"} aria-label={sbCollapsed ? "메뉴 펼치기" : "메뉴 접기"}>
+            <Icon name={sbCollapsed ? "chevronRight" : "chevronLeft"} size={14}/>
+          </button>
         </div>
-        <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+        {/* 메뉴 */}
+        <nav className="sb-nav" aria-label="화면 메뉴">
           {TAB_GROUPS.map((group, gi) => (
-            <React.Fragment key={group.label}>
-              {!sbCollapsed
-                ? <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7685", letterSpacing: 0.6, textTransform: "uppercase", padding: gi === 0 ? "2px 14px 6px" : "14px 14px 6px" }}>{group.label}</div>
-                : (gi > 0 && <div style={{ height: 1, background: "rgba(255,255,255,0.07)", margin: "6px 12px" }}/>)}
+            <div className="sb-group" key={group.label} role="group" aria-label={group.label}>
+              {sbCollapsed ? (gi > 0 && <div className="sb-sep" aria-hidden="true"/>) : <div className="sb-group-label">{group.label}</div>}
               {group.ids.map(id => {
                 const t = TABS.find(x => x[0] === id);
                 if (!t) return null;
                 const [, label, icon] = t;
                 const active = tab === id;
                 return (
-                  <button key={id} className="sb-nav-item" data-active={active ? "1" : "0"} onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sbCollapsed ? label : ""} style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    width: "100%", padding: sbCollapsed ? "11px 0" : "10px 14px",
-                    border: "none", borderRadius: 10,
-                    background: active ? "rgba(219,107,46,0.18)" : "transparent",
-                    boxShadow: active ? "inset 0 0 0 1px rgba(219,107,46,0.25)" : "none",
-                    color: active ? "#FFFFFF" : "#B4BAC4",
-                    cursor: "pointer", fontFamily: "inherit", fontSize: 13,
-                    fontWeight: active ? 600 : 500, letterSpacing: -0.1,
-                    transition: "background 0.15s, color 0.15s",
-                    justifyContent: sbCollapsed ? "center" : "flex-start",
-                    position: "relative", textAlign: "left",
-                  }}
-                  onMouseEnter={e => { if (!active) { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#E5E8ED"; } }}
-                  onMouseLeave={e => { if (!active) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#B4BAC4"; } }}
-                  >
-                    {active && !sbCollapsed && <span style={{ position: "absolute", left: -8, top: 8, bottom: 8, width: 3, borderRadius: 3, background: "var(--accent)" }}/>}
-                    <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center", color: active ? "#FFFFFF" : "#B4BAC4" }}>
-                      <Icon name={icon} size={18} strokeWidth={1.7}/>
-                    </span>
-                    <span className="sb-label" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: sbCollapsed ? "none" : undefined }}>{label}</span>
+                  <button key={id} type="button" className={"sb-nav-item" + (active ? " on" : "")} data-active={active ? "1" : "0"} aria-current={active ? "page" : undefined}
+                    onClick={() => { setTab(id); setMobileSidebarOpen(false); }} title={sbCollapsed ? label : undefined}>
+                    <span className="sb-ico"><Icon name={icon} size={18} strokeWidth={1.75}/></span>
+                    <span className="sb-label">{label}</span>
                     {!sbCollapsed && SIDE_TAB_IDS.has(id) && (
                       <span role="button" tabIndex={-1} className={"sb-side-btn" + (sideTab === id && !sideMin ? " on" : "")} title={sideTab === id ? "서브창에 열려 있어요" : `「${label}」 서브창에서 열기 — 지금 화면은 그대로`}
-                        onClick={e => { e.stopPropagation(); openSide(id); setMobileSidebarOpen(false); }}
-                        style={{ marginLeft: "auto", width: 26, height: 22, borderRadius: 6, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                          color: sideTab === id ? "#7DB3FF" : "#8B95A1", background: sideTab === id ? "rgba(49,130,246,0.22)" : "transparent" }}>
+                        onClick={e => { e.stopPropagation(); openSide(id); setMobileSidebarOpen(false); }}>
                         <Icon name="split" size={13}/>
                       </span>
                     )}
                   </button>
                 );
               })}
-            </React.Fragment>
+            </div>
           ))}
         </nav>
-        {/* 바로가기 — 평소엔 이 한 줄만. 팝오버는 aside 바깥에 그린다(overflow:hidden 회피) */}
-        <div style={{ padding: sbCollapsed ? "10px 8px 12px" : "10px 12px 12px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
-          <button ref={linksBtnRef} onClick={() => linksOpen ? setLinksOpen(false) : openLinks()}
-            title={sbCollapsed ? "바로가기" : "연결된 사이트 열기"}
-            style={{
-              display: "flex", alignItems: "center", gap: 12, width: "100%",
-              padding: sbCollapsed ? "11px 0" : "11px 13px",
-              border: "none", borderRadius: 11,
-              background: linksOpen ? "rgba(219,107,46,0.14)" : "rgba(255,255,255,0.06)",
-              color: linksOpen ? "#DB6B2E" : "#B4BAC4",
-              cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600,
-              justifyContent: sbCollapsed ? "center" : "flex-start", textAlign: "left",
-              transition: "background 0.15s, color 0.15s",
-            }}
-            onMouseEnter={e => { if (!linksOpen) { e.currentTarget.style.background = "rgba(255,255,255,0.10)"; e.currentTarget.style.color = "#E5E8ED"; } }}
-            onMouseLeave={e => { if (!linksOpen) { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "#B4BAC4"; } }}>
-            <span style={{ flexShrink: 0, width: 20, display: "inline-flex", justifyContent: "center", alignItems: "center" }}>
-              <Icon name="grip" size={18} strokeWidth={1.8}/>
-            </span>
-            {!sbCollapsed && (
-              <>
-                <span style={{ flex: 1, whiteSpace: "nowrap" }}>바로가기</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: linksOpen ? "rgba(219,107,46,0.75)" : "#6B7685" }}>{EXTERNAL_LINKS.length}</span>
-                <span style={{ fontSize: 9, color: linksOpen ? "rgba(219,107,46,0.75)" : "#6B7685" }}>{linksOpen ? "▼" : "▲"}</span>
-              </>
-            )}
+        {/* 아래 — 바로가기(팝오버는 aside 바깥에 그린다: overflow:hidden 회피) + 버전 */}
+        <div className="sb-foot">
+          <button ref={linksBtnRef} type="button" className={"sb-links" + (linksOpen ? " on" : "")} onClick={() => linksOpen ? setLinksOpen(false) : openLinks()} title={sbCollapsed ? "바로가기" : "연결된 사이트 열기"}>
+            <span className="sb-ico"><Icon name="grip" size={18} strokeWidth={1.8}/></span>
+            <span className="sb-label">바로가기</span>
+            {!sbCollapsed && <span className="sb-count">{EXTERNAL_LINKS.length}</span>}
           </button>
-        </div>
-        <div style={{ padding: sbCollapsed ? "12px 8px" : "12px 14px", borderTop: "1px solid var(--divider)", fontSize: 10, color: "var(--text3)", textAlign: "center", fontWeight: 500, letterSpacing: 0.4 }}>
-          {sbCollapsed ? "v2" : "NJ SAFETY · v2"}
+          {!sbCollapsed && <div className="sb-ver">NJ SAFETY · v2</div>}
         </div>
       </aside>
 
