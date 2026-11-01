@@ -1103,6 +1103,26 @@
     /* 가로로 쥔 폴더블 — 상태 표시줄(시간·와이파이)이 오른쪽 세로 띠로 붙는다. 아이콘은 위쪽에만 있으니
        위 메뉴 줄(헤더)만 비켜 가고, 카드·본문은 오른쪽 끝까지 채운다(통째로 비우면 빈 띠가 남았다). */
     .app-header { margin-right: env(safe-area-inset-right); }
+    /* ─── 오른쪽 상태 표시줄 띠 활용 (body.rail-r — 가로로 쥔 폴더블, 띠 폭 --inset-r) ───
+       클로드 앱처럼 시간·와이파이 아이콘 아래 빈 띠에 위 메뉴 줄 버튼(☰·검색·서브창·동기화·기록·되돌리기·테마)을 세로로 놓는다.
+       위 메뉴 줄 판은 없애 화면 위아래도 넓게. 본문은 띠 바로 앞까지. */
+    body.rail-r .app-header { position: static !important; height: 0; min-height: 0; margin: 0 !important; padding: 0 !important; border: none !important;
+      background: transparent !important; box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; overflow: visible; z-index: auto !important; }
+    body.rail-r .app-header::before { display: none !important; }
+    body.rail-r .app-header, body.rail-r .app-header .header-wrap { isolation: auto !important; }
+    body.rail-r .header-top div[style*="display: flex"], body.rail-r .header-top .sync-group { flex-direction: column !important; gap: 12px !important; align-items: center !important; }
+    body.rail-r .header-top .sync-badge.sb-safety { margin: 0 !important; }
+    body.rail-r .app-header .header-wrap { padding: 0 !important; }
+    body.rail-r .app-header .header-top { position: fixed; z-index: 120; right: 0; top: calc(env(safe-area-inset-top) + 118px); bottom: max(12px, env(safe-area-inset-bottom));
+      width: var(--inset-r); padding: 0 !important; margin: 0; flex-direction: column !important; justify-content: flex-start !important; align-items: center !important; gap: 12px !important; overflow-y: auto; scrollbar-width: none; }
+    body.rail-r .app-header .hdr-center { display: none !important; }
+    body.rail-r .hdr-actions { flex-direction: column !important; gap: 12px !important; align-items: center !important; }
+    body.rail-r .header-top button, body.rail-r .header-top .sync-badge { width: 52px !important; height: 52px !important; min-width: 52px; padding: 0 !important; border-radius: 26px !important; justify-content: center !important; flex-shrink: 0; }
+    body.rail-r .header-top .hdr-side-label, body.rail-r .header-top .sync-badge .sb-label, body.rail-r .header-top .install-label-full { display: none !important; }
+    body.rail-r .header-top .sync-badge { display: inline-flex !important; align-items: center; }
+    /* 버튼에서 여는 메뉴(서브창·테마)는 띠 왼쪽으로 펼친다 */
+    body.rail-r .hdr-actions [role="menu"] { position: fixed !important; right: calc(var(--inset-r) + 8px) !important; top: calc(env(safe-area-inset-top) + 118px) !important; left: auto !important; margin: 0 !important; max-height: calc(100vh - 140px); overflow-y: auto; }
+    body.fold.rail-r .app-main { padding-right: max(var(--side-pad, 0px), calc(var(--inset-r) + 6px)) !important; }
     /* 핸드폰 서랍 메뉴 — 상태 표시줄 밑까지 그리므로 위쪽은 비켜 둔다 */
     @media (max-width: 768px) { .app-sidebar { padding-top: env(safe-area-inset-top) !important; } }
     /* ─── 폴더블 펼친 화면 (body.fold — App 이 판단) ───
@@ -22725,6 +22745,23 @@ function App() {
     document.body.classList.toggle("fold-landscape", foldLandscape);
     document.body.classList.toggle("fold-portrait", foldMode && !foldLandscape);
   }, [foldMode, foldLandscape]);
+  // 오른쪽 상태 표시줄 띠(가로로 쥔 폴더블) 폭을 재서, 띠가 있으면 위 메뉴 줄 버튼들을 그 띠로 옮긴다(클로드 앱처럼).
+  // env() 는 JS 에서 못 읽어서 보이지 않는 막대로 잰다. 시험용: sessionStorage frw_debug_inset_r = 숫자.
+  const [insetR, setInsetR] = useState(0);
+  useEffect(() => {
+    const probe = document.createElement("div");
+    probe.style.cssText = "position:fixed;top:0;right:0;height:1px;width:env(safe-area-inset-right);visibility:hidden;pointer-events:none;";
+    document.body.appendChild(probe);
+    const read = () => { let v = probe.getBoundingClientRect().width || 0; try { const d = Number(sessionStorage.getItem("frw_debug_inset_r")); if (d) v = d; } catch {} setInsetR(Math.round(v)); };
+    read(); const t = setTimeout(read, 400);
+    window.addEventListener("resize", read); window.addEventListener("orientationchange", read);
+    return () => { clearTimeout(t); window.removeEventListener("resize", read); window.removeEventListener("orientationchange", read); probe.remove(); };
+  }, []);
+  const railR = foldLandscape && insetR >= 44;
+  useEffect(() => {
+    document.body.classList.toggle("rail-r", railR);
+    document.body.style.setProperty("--inset-r", `${insetR}px`);
+  }, [railR, insetR]);
   const sbCollapsed = (sidebarCollapsed && vw > 768) || foldMode;   // 펼친 폴더블은 늘 레일(아이콘+작은 이름), 핸드폰 서랍은 늘 펼친 모양
   // 펼친 폴더블에서 ☰ 로 레일을 통째로 숨겨 화면을 끝까지 쓴다 (기기에 기억)
   const [foldRailOff, setFoldRailOff] = useState(() => load("frw_fold_rail_off", false));
@@ -24877,7 +24914,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         <Icon name="history" size={13} />
       </button>
     );
-    const withSafety = (el) => <span style={{ display: "inline-flex", alignItems: "center" }}>{el}{safetyBtn}</span>;
+    const withSafety = (el) => <span className="sync-group" style={{ display: "inline-flex", alignItems: "center" }}>{el}{safetyBtn}</span>;
     if (syncStatus === "syncing") return withSafety(<div className="sync-badge" style={styles.wrap}><Icon name="refresh" size={13} style={{ animation: "spin 1.4s linear infinite" }}/><span className="sb-label" style={styles.text}>저장 중</span></div>);
     // "동기화됨"도 눌러서 즉시 확인할 수 있게 — 저장 대기분이 있으면 바로 밀어올리고,
     // 없으면 클라우드 최신본을 다시 받아온다. (정말 저장됐는지 불안할 때 쓰는 수단)
@@ -25504,7 +25541,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
               alignItems: "center", justifyContent: "center", flexShrink: 0,
               padding: 0,
             }}><Icon name="menu" size={20}/></button>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
+            <div className="hdr-center" style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0, flex: 1 }}>
               {glassNav && (
                 <nav className="glass-pills no-print" aria-label="자주 쓰는 화면" style={{ margin: "0 auto" }}>
                   {[...quickTabs, ...(quickTabs.includes(tab) ? [] : [tab])].map(id => {
@@ -25725,6 +25762,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
         {(() => {
           const meta = TABS.find(t => t[0] === tab);
           if (!meta) return null;
+          if (tab === "hr") return null;   // 인사 관리는 화면 안에 제목·재직 인원 줄이 따로 있어 겹쳐 보였다
           const subtitle = PAGE_SUBTITLES[tab];
           return (
             <div className="page-header no-print" style={{ display: "flex", alignItems: "flex-end", gap: 13, padding: "18px 10px 14px" }}>
