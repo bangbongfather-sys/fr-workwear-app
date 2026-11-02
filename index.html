@@ -36,6 +36,23 @@
   <meta name="apple-mobile-web-app-title" content="NJ SAFETY" />
   <meta name="mobile-web-app-capable" content="yes" />
   <script>
+    // 아이폰 듀오(펼친 화면)는 홈 화면 아이콘을 「Safari 방식」으로 연다.
+    // 홈 화면 앱 틀에선 iOS 가 오른쪽에 상태 표시줄 띠를 따로 잡아 화면이 줄었고, Safari 안에선 그 자리까지 쓸 수 있다.
+    // iOS 는 「홈 화면에 추가」를 누르는 순간의 설정을 읽으므로, 이 기기에서만 매니페스트를 browser 로 바꾸고 앱 모드 표시를 뺀다.
+    // localStorage frw_safari_mode: "1" 이면 어느 기기든 켬, "0" 이면 끔.
+    (function () { try {
+      var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      var a = Math.min(screen.width, screen.height), b = Math.max(screen.width, screen.height);
+      var pref = localStorage.getItem("frw_safari_mode");
+      if (!(pref === "1" || (pref !== "0" && ios && a >= 560 && b <= 1100))) return;
+      window.__njSafariMode = true;
+      var mf = document.querySelector('link[rel="manifest"]'); if (mf) mf.setAttribute("href", "/manifest-safari.json");
+      ["apple-mobile-web-app-capable", "mobile-web-app-capable"].forEach(function (n) {
+        var m = document.querySelector('meta[name="' + n + '"]'); if (m) m.parentNode.removeChild(m);
+      });
+    } catch (e) {} })();
+  </script>
+  <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -1008,6 +1025,12 @@
     .glass-pill.on { background: rgba(255,255,255,0.94); color: #15161a; border-color: transparent; box-shadow: 0 6px 18px rgba(0,0,0,0.25); }
     body.glass .mobile-bottomnav { background: rgba(14,16,24,0.5) !important; border: 1px solid rgba(255,255,255,0.16); }
     body.glass .app-header { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+    /* 위 메뉴 줄 위쪽 틈 가리개 — 화면을 내리면 본문 글자가 메뉴 줄 위 틈(특히 Safari 주소창 바로 아래)으로 비쳐 보였다.
+       밝은·어두운 테마는 바탕색으로 덮고, 유리 테마는 뒤를 흐리게만(가만히 있을 땐 풍경이 그대로 보이게). */
+    .app-header::after { content: ""; position: absolute; left: -2px; right: -2px; bottom: calc(100% + 1px); height: calc(max(12px, env(safe-area-inset-top)) + 2px);
+      background: var(--bg); pointer-events: none; }
+    body.glass .app-header::after { background: rgba(12,14,20,0.10); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }
+    body.rail-r .app-header::after { display: none; }
     body.glass-nav .global-search-wrap { display: none !important; }
     body.glass-nav .gs-mobile-btn { display: flex !important; }
     /* ─── 왼쪽 메뉴 (사이드바 .sb) ───
@@ -22388,7 +22411,8 @@ function App() {
   // PWA 설치 프롬프트 — head에서 미리 잡아둔 전역 이벤트(__njDeferredPrompt)로 초기화
   // (beforeinstallprompt가 React 마운트 전에 발생하면 여기 리스너로는 못 잡으므로)
   const [installPromptEvt, setInstallPromptEvt] = useState(() => window.__njDeferredPrompt || null);
-  const [installed, setInstalled] = useState(false);
+  // 아이폰 듀오(Safari 방식)에선 설치할 게 없으니 「앱 설치」 버튼을 숨긴다
+  const [installed, setInstalled] = useState(() => !!window.__njSafariMode);
   useEffect(() => {
     const onPrompt = (e) => { e.preventDefault(); setInstallPromptEvt(e); };
     const onInstalled = () => { setInstalled(true); setInstallPromptEvt(null); };
