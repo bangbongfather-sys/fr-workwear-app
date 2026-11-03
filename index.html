@@ -1011,6 +1011,22 @@
     .ar-kpi { container-type: inline-size; }
     .ar-kpi-val { font-size: 16px; }
     @supports (font-size: 1cqi) { .ar-kpi-val { font-size: max(12px, min(16px, 13cqi)); } }
+    /* 재고 현황 「품절 예보」 — 사이즈 한 줄: 체크 · 사이즈 · 상태 · 남은 양/속도/품절일 · 제안 수량 */
+    .fc-list { display: flex; flex-direction: column; gap: 10px; }
+    .fc-gname { font-size: 13px; font-weight: 800; color: var(--text1); margin: 2px 0 4px; }
+    .fc-row { display: grid; grid-template-columns: 18px 56px auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 9px; }
+    .fc-row.on { background: rgba(219,107,46,0.08); }
+    .fc-size { font-size: 13px; font-weight: 800; color: var(--text1); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fc-badge { font-size: 10.5px; font-weight: 800; padding: 2px 8px; border-radius: 100px; white-space: nowrap; }
+    .fc-meta { font-size: 12px; color: var(--text3); font-variant-numeric: tabular-nums; min-width: 0; }
+    .fc-qty { display: inline-flex; align-items: center; gap: 4px; }
+    .fc-card { container-type: inline-size; }
+    @container (max-width: 520px) {
+      .fc-row { grid-template-columns: 18px 48px minmax(0, 1fr) auto; row-gap: 2px; }
+      .fc-badge { grid-column: 3; justify-self: start; }
+      .fc-meta { grid-column: 2 / 4; grid-row: 2; }
+      .fc-qty { grid-column: 4; grid-row: 1 / 3; }
+    }
     /* 판매 현황 전표 — 고른 전표 합계 막대. 목록을 내려도 화면 아래에 붙어 따라온다(휴대폰은 아래 메뉴 위로) */
     .slip-pickbar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; align-items: center; gap: 12px;
       padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(219,107,46,0.35); background: var(--surface); box-shadow: 0 10px 28px rgba(0,0,0,0.22); }
@@ -16646,6 +16662,181 @@ function StockMovesCard({ stamp = "" }) {
   );
 }
 
+// ── 품절 예보 — 사이즈별 「지금 속도면 언제 떨어지나」 + 발주서 초안 ──
+// 판매 속도: 판매 현황(품목 줄 엑셀)의 최근 판매 수량 → 없으면 「출고 추정」(새로고침 사이 재고 감소)으로.
+// 「입고까지 걸리는 날」 안에 떨어질 사이즈가 맨 위. 제안 수량 = 입고까지 + 그 뒤 몇 주 버틸 만큼 − 지금 재고(5개 단위 올림).
+const FC_CFG_KEY = "frw_forecast_cfg";
+const FC_DEFAULT = { win: 60, lead: 21, cover: 45 };
+const fcAddDays = (ymd, k) => { const t = new Date(ymd + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + k); return t.toISOString().slice(0, 10); };
+const fcDays = (a, b) => Math.round((Date.parse(b.slice(0, 10) + "T00:00:00Z") - Date.parse(a.slice(0, 10) + "T00:00:00Z")) / 86400e3) + 1;
+const fcNorm = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
+// 판매·출고 자료 + 재고 → 사이즈별 예보 줄 (화면과 따로 시험할 수 있게 순수 함수로)
+function stockoutForecast(items, sales, moves, cfg, today, effSafe = () => 0) {
+  const { win, lead, cover } = cfg;
+  // 판매 현황(품목 줄): 코드 → 수량, 「품목 [사이즈]」 이름 → 수량 (코드가 없을 때 대비)
+  let salesDays = 0; const salesByCode = new Map(), salesByName = new Map();
+  if (sales && sales.totals && sales.totals.itemRows > 0) {
+    const from = fcAddDays(today, -(win - 1));
+    const seen = new Set();
+    for (const c of sales.covered || []) { for (let d = c.from < from ? from : c.from; d <= c.to && d <= today; d = fcAddDays(d, 1)) seen.add(d); }
+    salesDays = seen.size;
+    for (const p of sales.products || []) for (const z of p.sizes || []) {
+      if (z.code) salesByCode.set(String(z.code).trim(), (salesByCode.get(String(z.code).trim()) || 0) + (z.qty || 0));
+      const nk = fcNorm(z.size ? `${p.name} [${z.size}]` : p.name);
+      salesByName.set(nk, (salesByName.get(nk) || 0) + (z.qty || 0));
+    }
+  }
+  // 출고 추정: 코드 → 출고 수량, 기간 = 첫 새로고침 ~ 마지막 새로고침
+  let moveDays = 0; const outByCode = new Map();
+  if (moves && moves.syncs > 0) {
+    moveDays = moves.span ? Math.min(win, Math.max(1, fcDays(moves.span.from || today, moves.span.to || today) - 1)) : 0;
+    for (const p of moves.products || []) for (const z of p.sizes || []) if (z.out > 0) outByCode.set(String(z.code).trim(), z.out);
+  }
+  const rows = [];
+  for (const it of items || []) {
+    const code = String(it.code || "").trim();
+    const sq = salesDays >= 7 ? (salesByCode.get(code) ?? salesByName.get(fcNorm(it.name)) ?? 0) : 0;
+    const oq = moveDays >= 7 ? (outByCode.get(code) || 0) : 0;
+    let rate = 0, src = "";
+    if (sq > 0) { rate = sq / salesDays; src = "판매"; }
+    else if (oq > 0) { rate = oq / moveDays; src = "출고"; }
+    if (!(rate > 0)) continue;
+    const qty = Number(it.qty) || 0;
+    const daysLeft = qty > 0 ? qty / rate : 0;
+    if (daysLeft > lead + 14) continue;             // 입고까지 + 2주 넘게 버티면 아직 괜찮다
+    const safe = effSafe(it) || 0;
+    const target = Math.ceil(rate * (lead + cover));
+    const need = Math.max(target - qty, safe - qty, 1);
+    const suggest = Math.ceil(need / 5) * 5;
+    const level = qty <= 0 ? "out" : daysLeft <= 14 ? "soon" : daysLeft <= lead ? "lead" : "watch";
+    rows.push({ it, code, name: it.name, base: stockBaseName(it.name), qty, rate, src, daysLeft, outDate: qty > 0 ? fcAddDays(today, Math.floor(daysLeft)) : null, suggest, level });
+  }
+  const rank = { out: 0, soon: 1, lead: 2, watch: 3 };
+  rows.sort((a, b) => rank[a.level] - rank[b.level] || a.daysLeft - b.daysLeft || b.rate - a.rate);
+  return { rows, salesDays, moveDays, hasData: salesDays >= 7 || moveDays >= 7 };
+}
+const FC_LEVEL = {
+  out:   { label: "품절",           color: "#F04452", bg: "rgba(240,68,82,0.12)" },
+  soon:  { label: "2주 안 품절",     color: "#F04452", bg: "rgba(240,68,82,0.10)" },
+  lead:  { label: "입고 전 품절",    color: "#FE9800", bg: "rgba(254,152,0,0.12)" },
+  watch: { label: "곧 바닥",         color: "#C9A227", bg: "rgba(201,162,39,0.12)" },
+};
+function StockoutForecastCard({ items, stamp = "", effSafe, onDraftPO }) {
+  const [cfg, setCfg] = useState(() => { try { return { ...FC_DEFAULT, ...(JSON.parse(localStorage.getItem(FC_CFG_KEY) || "{}")) }; } catch { return FC_DEFAULT; } });
+  const [src, setSrc] = useState({ sales: null, moves: null, loading: true, err: "" });
+  const [pick, setPick] = useState(null);        // null = 기본(빨강·주황 자동 선택), 아니면 Set(코드)
+  const [qtyEdit, setQtyEdit] = useState({});    // { 코드: 고친 수량 }
+  const [showAll, setShowAll] = useState(false);
+  const [openCfg, setOpenCfg] = useState(false);
+  const today = kstTodayYmd();
+  useEffect(() => { try { localStorage.setItem(FC_CFG_KEY, JSON.stringify(cfg)); } catch {} }, [cfg]);
+  useEffect(() => {
+    let dead = false;
+    const from = fcAddDays(today, -(cfg.win - 1));
+    setSrc(s => ({ ...s, loading: true, err: "" }));
+    const get = (u) => fetch(u, { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => (j && !j.error ? j : null)).catch(() => null);
+    Promise.all([get(`/api/sales?from=${from}&to=${today}`), get(`/api/ecount/moves?from=${from}&to=${today}`)])
+      .then(([sales, moves]) => { if (!dead) setSrc({ sales, moves, loading: false, err: !sales && !moves ? "판매·출고 자료를 불러오지 못했어요" : "" }); });
+    return () => { dead = true; };
+  }, [cfg.win, stamp, today]);
+  const fc = React.useMemo(() => stockoutForecast(items, src.sales, src.moves, cfg, today, effSafe), [items, src, cfg, today]);
+  const keyOf = (r) => r.code || r.name;
+  const picked = pick || new Set(fc.rows.filter(r => r.level === "out" || r.level === "soon" || r.level === "lead").map(keyOf));
+  const togglePick = (r) => { const n = new Set(picked); const k = keyOf(r); n.has(k) ? n.delete(k) : n.add(k); setPick(n); };
+  const qOf = (r) => { const v = qtyEdit[keyOf(r)]; return v == null ? r.suggest : (parseInt(v, 10) || 0); };
+  const chosen = fc.rows.filter(r => picked.has(keyOf(r)) && qOf(r) > 0);
+  const chosenQty = chosen.reduce((a, r) => a + qOf(r), 0);
+  const fmt = (n) => Math.round(Number(n) || 0).toLocaleString();
+  const perWeek = (r) => { const w = r.rate * 7; return w >= 10 ? fmt(w) : (Math.round(w * 10) / 10).toString(); };
+  const md = (d) => d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8))}` : "";
+  // 품목(사이즈 묶음)별로 보여 준다 — 그룹 순서는 가장 급한 사이즈 기준
+  const groups = []; const gi = new Map();
+  for (const r of fc.rows) { if (!gi.has(r.base)) { gi.set(r.base, groups.length); groups.push({ base: r.base, rows: [] }); } groups[gi.get(r.base)].rows.push(r); }
+  const shownGroups = showAll ? groups : groups.slice(0, 6);
+  const draft = () => {
+    if (!chosen.length) return;
+    onDraftPO && onDraftPO(chosen.map(r => ({ name: r.name, code: r.code, unit: r.it.unit || "", qty: qOf(r),
+      note: `현재 ${fmt(r.qty)} · 주 ${perWeek(r)}개 ${r.src === "판매" ? "판매" : "출고"} · ${r.qty <= 0 ? "이미 품절" : `약 ${Math.floor(r.daysLeft)}일 뒤(${md(r.outDate)}) 품절 예상`}` })), cfg);
+  };
+  const numIn = (k, label, min, max) => (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text2)" }}>{label}
+      <input type="number" min={min} max={max} value={cfg[k]} onChange={e => { const v = Math.max(min, Math.min(max, parseInt(e.target.value, 10) || min)); setCfg(c => ({ ...c, [k]: v })); setPick(null); setQtyEdit({}); }}
+        style={{ width: 64, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px" }}/>일
+    </label>
+  );
+  return (
+    <div className="card no-print fc-card">
+      <div className="section-header">
+        <span className="section-header-title"><Icon name="alert" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>품절 예보
+          <span className="section-sub">— 지금 속도면 언제 떨어지나</span></span>
+        <button type="button" onClick={() => setOpenCfg(v => !v)}
+          style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+          기준 {openCfg ? "닫기" : `· 입고 ${cfg.lead}일`}
+        </button>
+      </div>
+      {openCfg && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", alignItems: "center", padding: "10px 12px", marginBottom: 12, borderRadius: 10, background: "var(--surface2)" }}>
+          {numIn("win", "판매 속도는 최근", 14, 180)}
+          {numIn("lead", "발주 → 입고까지", 1, 120)}
+          {numIn("cover", "입고 뒤 버틸 기간", 7, 180)}
+          <span style={{ fontSize: 11.5, color: "var(--text3)" }}>제안 수량 = (입고까지 + 버틸 기간) 동안 팔릴 양 − 지금 재고, 5개 단위로 올림</span>
+        </div>
+      )}
+      {src.loading ? <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "6px 0" }}>판매 속도를 계산하는 중…</div>
+      : !fc.hasData ? (
+        <div style={{ fontSize: 12.5, color: "var(--text3)", lineHeight: 1.7 }}>
+          {src.err ? src.err + ". " : ""}아직 판매 속도를 알 자료가 모자라요(최근 {cfg.win}일 중 7일 이상 필요).<br/>
+          ① 재고 「새로고침」을 며칠에 걸쳐 몇 번 하면 출고 추정이 쌓이고, ② 이카운트 <b>판매현황(품목별)</b> 엑셀을 판매 현황에 올리면 더 정확해져요.
+        </div>
+      ) : fc.rows.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: "var(--text3)" }}>지금 속도로는 {cfg.lead + 14}일 안에 떨어질 사이즈가 없어요. 👍</div>
+      ) : (
+        <>
+          <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 8 }}>
+            {fc.salesDays >= 7 ? `판매 현황 ${fc.salesDays}일치` : ""}{fc.salesDays >= 7 && fc.moveDays >= 7 ? " · " : ""}{fc.moveDays >= 7 ? `출고 추정 ${fc.moveDays}일치` : ""} 기준 · {fc.rows.length}개 사이즈 · 체크한 것으로 발주서 초안을 만들어요
+          </div>
+          <div className="fc-list">
+            {shownGroups.map(g => (
+              <div key={g.base} className="fc-group">
+                <div className="fc-gname">{g.base}</div>
+                {g.rows.map(r => {
+                  const k = keyOf(r); const on = picked.has(k); const L = FC_LEVEL[r.level];
+                  const size = (String(r.name).match(/\[([^\]]+)\]\s*$/) || [])[1] || r.code || "";
+                  return (
+                    <div key={k} className={"fc-row" + (on ? " on" : "")}>
+                      <input type="checkbox" checked={on} onChange={() => togglePick(r)} aria-label={`${r.name} 발주에 넣기`} style={{ width: 16, height: 16, margin: 0, accentColor: "#DB6B2E", cursor: "pointer" }}/>
+                      <span className="fc-size" title={r.name}>{size}</span>
+                      <span className="fc-badge" style={{ color: L.color, background: L.bg }}>{L.label}</span>
+                      <span className="fc-meta">
+                        <b style={{ color: r.qty <= 0 ? "#F04452" : "var(--text1)" }}>{fmt(r.qty)}</b> 남음 · 주 {perWeek(r)}개
+                        <span className="fc-when">{r.qty <= 0 ? " · 지금 없음" : ` · ${md(r.outDate)}쯤 (${Math.floor(r.daysLeft)}일)`}</span>
+                      </span>
+                      <label className="fc-qty" title="발주 제안 수량 — 고칠 수 있어요">
+                        <input type="number" min="0" value={qtyEdit[k] ?? r.suggest} onChange={e => setQtyEdit(m => ({ ...m, [k]: e.target.value }))}
+                          style={{ width: 66, height: 30, fontSize: 13, fontWeight: 700, textAlign: "right", padding: "0 8px" }}/>
+                        <span style={{ fontSize: 11, color: "var(--text3)" }}>{r.it.unit || "개"}</span>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          {groups.length > 6 && <button type="button" onClick={() => setShowAll(v => !v)} style={{ marginTop: 6, padding: "6px 0", border: "none", background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{showAll ? "접기" : `나머지 품목 ${groups.length - 6}개 더 보기`}</button>}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+            <span style={{ fontSize: 12.5, color: "var(--text2)" }}><b style={{ color: "var(--text1)" }}>{chosen.length}개 사이즈</b> · 합계 <b style={{ color: "var(--text1)" }}>{fmt(chosenQty)}</b>개</span>
+            {pick && <button type="button" onClick={() => { setPick(null); setQtyEdit({}); }} style={{ border: "none", background: "transparent", color: "var(--text3)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>처음 제안으로</button>}
+            <button type="button" onClick={draft} disabled={!chosen.length}
+              style={{ marginLeft: "auto", height: 38, padding: "0 16px", borderRadius: 10, border: "none", background: chosen.length ? "var(--accent)" : "var(--surface2)", color: chosen.length ? "#fff" : "var(--text3)", fontSize: 13, fontWeight: 800, cursor: chosen.length ? "pointer" : "not-allowed", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Icon name="clipboard" size={14}/>발주서 초안 만들기
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── 판매 현황 탭 ───
 // 이카운트 OpenAPI 에 판매 「조회」가 없어서, 이카운트 판매조회 엑셀을 끌어다 놓으면 서버(/api/sales)에 쌓고 기간별로 정리한다.
 //  - 「판매조회」 전표 목록(거래처·금액합계만) → 요약·달력·거래처별 매출. 품목이 한 줄씩 나오는 엑셀이면 품목·사이즈별 수량까지.
@@ -18196,7 +18387,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   );
 }
 
-function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch, onSalesFile, pane = "main" }) {
+function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = null, clearFocusSearch, onSalesFile, onDraftPO, pane = "main" }) {
   const items = stock?.items || [];
   const [search, setSearch] = useViewState("stock.search", "");
   const listRef = useRef(null); // 전체 재고 카드 — 통합검색 진입 시 스크롤 목적지
@@ -18547,6 +18738,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
       </div>
 
       <StockMovesCard stamp={stock?.updatedAt || ""}/>
+      {items.length > 0 && <StockoutForecastCard items={items} stamp={stock?.updatedAt || ""} effSafe={effSafe} onDraftPO={onDraftPO}/>}
 
       {/* 엑셀 업로드 */}
       <div className="card">
@@ -24837,6 +25029,30 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
     setPoSubTab("current");
   };
 
+  // 재고 현황 「품절 예보」 → 발주서 초안. 작성 중인 발주서가 있으면 거기에 더할지 묻는다.
+  const draftPOFromForecast = (list, cfg = {}) => {
+    if (!list || !list.length) return;
+    const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    const rows = list.map(x => ({ id: uid(), kind: "custom", name: x.name, unit: x.unit || "EA", qty: String(x.qty), unitPrice: "", note: x.note || "" }));
+    const filled = poDraft && (poDraft.items || []).some(it => (it.name || "").trim() || it.qty);
+    if (filled && window.confirm(`작성 중인 발주서가 있어요.\n거기에 ${rows.length}개 품목을 더할까요?\n\n[취소]를 누르면 새 발주서로 시작합니다(작성 중이던 건 사라져요).`)) {
+      setPoDraft(d => ({ ...d, items: [...(d.items || []).filter(it => (it.name || "").trim() || it.qty), ...rows] }));
+    } else {
+      setPoDraft({
+        title: "재고 보충 — 품절 예보",
+        supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" },
+        items: rows, photos: [], orderDate: today,
+        deliveryDate: cfg.lead ? new Date(Date.parse(today + "T00:00:00Z") + cfg.lead * 86400e3).toISOString().slice(0, 10) : "",
+        paymentTerms: "", deliveryPlace: "",
+        memo: "재고 현황 「품절 예보」로 만든 초안입니다. 공급처·단가·납기를 확인해 주세요.", body: "",
+      });
+    }
+    setViewingPO(null);
+    setPoSubTab("current");
+    setTab("purchase");
+    showToast(`발주서 초안에 ${rows.length}개 품목을 넣었어요 — 공급처와 단가를 채워 주세요`, "success");
+  };
+
   const startNewPO = () => {
     setPoDraft({
       title: "",
@@ -25298,7 +25514,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       case "stock": return (
         <StockTab stock={stock} setStock={setStock} materials={materials} darkMode={darkMode} pane={pane}
           focusSearch={pane === "main" ? stockFocusSearch : null} clearFocusSearch={() => setStockFocusSearch(null)}
-          onSalesFile={(parsed) => { setSalesPendingFile(parsed); setTab("sales"); }} />
+          onSalesFile={(parsed) => { setSalesPendingFile(parsed); setTab("sales"); }} onDraftPO={draftPOFromForecast} />
       );
       case "sales": return (
         <SalesTab pendingFile={pane === "main" ? salesPendingFile : null} clearPending={() => setSalesPendingFile(null)} darkMode={darkMode} clientsDb={clients} pane={pane} />
