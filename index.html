@@ -999,7 +999,13 @@
     .sales-kpi { container-type: inline-size; }
     .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
     .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
+    /* 경영 대시보드 KPI 값 — 카드 크기로 정한 글자 크기(--kv)를 넘지 않되, 카드 폭이 좁으면 줄인다 */
+    .dash-kpi { container-type: inline-size; }
+    .kpi-val.kpi-fit { font-size: var(--kv, 22px); }
+    .kpi-val.kpi-fit.txt { font-size: min(var(--kv, 22px), 20px); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     @supports (font-size: 1cqi) {
+      .kpi-val.kpi-fit { font-size: max(15px, min(var(--kv, 22px), 12cqi)); }
+      .kpi-val.kpi-fit.txt { font-size: max(14px, min(var(--kv, 22px), 20px, 9cqi)); }
       .sales-kpi-val { font-size: clamp(17px, 15cqi, 24px); }
       .sales-kpi-val.big { font-size: clamp(18px, 13.5cqi, 28px); }
     }
@@ -7763,6 +7769,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
     const w = layout?.width || 200;
     const valFontSize = (opt.hero || opt.big) ? (w >= 300 || !layout ? 30 : 24) : (w >= 360 ? 32 : w >= 240 ? 26 : w >= 180 ? 22 : 18);
     const ringPct = opt.ring != null ? Math.max(0, Math.min(100, opt.ring)) : null;
+    const valIsText = typeof val === "string" && /[가-힣A-Za-z]/.test(val.replace(/\s*(원|%|건|곳|개|명|일|억|만|천)+$/, "").replace(/[억만천]/g, ""));
     return (
       <div className={"card rcard kpi-card dash-kpi" + (opt.hero ? " dash-kpi-hero" : "") + (opt.hero || opt.big || opt.wideMobile ? " dash-kpi-full-m" : "")} data-card-key={key} style={{ ...cardLayoutStyle(key), position: "relative", minWidth: 140, flex: layout ? "0 0 auto" : `${opt.grow || 1} 1 200px`, overflow: "hidden" }}>
         <button onClick={() => hideKPI(key, label)} title="이 카드 숨기기" className="kpi-hide-btn no-print"
@@ -7786,7 +7793,9 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
             </svg>
           )}
           <div style={{minWidth:0,flex:1}}>
-            <div className="kpi-val" style={{fontSize:valFontSize,fontWeight:800,color:opt.hero?"#fff":(color||"var(--text1)"),lineHeight:1.1,wordBreak:"break-all",fontVariantNumeric:"tabular-nums",letterSpacing:"-0.015em"}}>{val}</div>
+            {/* 값 글자 크기는 카드 폭(cqi)에 맞춘다 — 펼친 폴더블처럼 카드가 좁으면 「103,222,50/0원」처럼 숫자 중간이 끊겼다.
+                제품 이름 같은 글자 값은 조금 작게, 두 줄까지만 */}
+            <div className={"kpi-val kpi-fit" + (valIsText ? " txt" : "")} title={valIsText ? String(val) : undefined} style={{"--kv":valFontSize+"px",fontWeight:800,color:opt.hero?"#fff":(color||"var(--text1)"),lineHeight:1.15,wordBreak:"keep-all",overflowWrap:"anywhere",fontVariantNumeric:"tabular-nums",letterSpacing:"-0.015em"}}>{val}</div>
             {sub && <div className="dash-kpi-sub" style={{fontSize:12,color:opt.hero?"rgba(255,255,255,0.9)":"var(--text3)",marginTop:5,lineHeight:1.45}}>{sub}</div>}
           </div>
         </div>
