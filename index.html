@@ -1001,6 +1001,9 @@
     .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
     .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
     /* 거래처 원장 요약 칸 — 금액 글자를 칸 폭에 맞춤 */
+    .ar-kpi-wrap { container-type: inline-size; }
+    .ar-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    @container (max-width: 600px) { .ar-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     .ar-kpi { container-type: inline-size; }
     .ar-kpi-val { font-size: 16px; }
     @supports (font-size: 1cqi) { .ar-kpi-val { font-size: max(12px, min(16px, 13cqi)); } }
@@ -14112,7 +14115,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                 </button>
               </div>
               {/* 좁으면(서브창·세로 폴더블) 4칸 → 2칸×2줄, 금액 글자도 칸 폭에 맞춰 줄인다 — 「5,7…」로 잘렸다 */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", gap: 10 }}>
+              <div className="ar-kpi-wrap"><div className="ar-kpi-grid">
                 {[
                   ["총 청구", Math.round(sel.charge).toLocaleString(), "원", null],
                   ["총 입금", Math.round(sel.paid).toLocaleString(), "원", "var(--positive-text)"],
@@ -14126,7 +14129,7 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                     </div>
                   </div>
                 ))}
-              </div>
+              </div></div>
               <div style={{ flex: 1, minHeight: 0 }}>{clientDetail(sel)}</div>
             </div>
           );
