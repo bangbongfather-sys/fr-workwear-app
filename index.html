@@ -1000,6 +1000,11 @@
     .sales-kpi { container-type: inline-size; }
     .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
     .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
+    /* 판매 현황 전표 — 고른 전표 합계 막대. 목록을 내려도 화면 아래에 붙어 따라온다(휴대폰은 아래 메뉴 위로) */
+    .slip-pickbar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(219,107,46,0.35); background: var(--surface); box-shadow: 0 10px 28px rgba(0,0,0,0.22); }
+    body.glass .slip-pickbar { background: rgba(24,26,34,0.96); }
+    @media (max-width: 768px) { .slip-pickbar { bottom: 92px; } body.dock-off .slip-pickbar { bottom: 56px; } }
     /* 입금내역 표 — 좁은 화면에선 칸 양옆 여백을 줄여 「확인」 버튼까지 한 화면에 */
     table.dep-narrow td, table.dep-narrow th { padding-left: 7px !important; padding-right: 7px !important; }
     table.dep-narrow td:first-child, table.dep-narrow th:first-child { padding-left: 10px !important; }
@@ -17316,6 +17321,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   const [selClient, setSelClient] = useViewState("sales.client", null);
   const [clientQ, setClientQ] = useViewState("sales.clientQ", "");
   const [slipQ, setSlipQ] = useViewState("sales.slipQ", "");          // 전표 탭 검색 (거래처·품목)
+  const [slipPick, setSlipPick] = useState(() => new Set());            // 전표 탭 — 골라서 합계 보기 (전표 키 모음)
   const [slipLimit, setSlipLimit] = useState(60);
   const openSlips = (q = "") => { setSlipQ(q); setSlipLimit(60); pickSub("slips"); try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {} };
   const [allClients, setAllClients] = useViewState("sales.allClients", false);
@@ -17980,6 +17986,18 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   // 전표 탭 — 기간 안 전표 전부 (최근 날짜부터, 날짜별로 묶음), 거래처·품목 검색
   const slipsSorted = React.useMemo(() => slips.slice().sort((a, b) => b.d.localeCompare(a.d) || (Number(b.no) || 0) - (Number(a.no) || 0)), [slips]);
   const slipsFiltered = React.useMemo(() => { const q = slipQ.trim().toLowerCase(); return q ? slipsSorted.filter(x => searchHit(q, x.c, x.name)) : slipsSorted; }, [slipsSorted, slipQ]);
+  // 전표를 골라 합계 보기 — 검색을 바꿔도 고른 건 유지(전체 전표 기준으로 다시 찾는다)
+  const slipKey = (x) => `${x.d}|${x.no || ""}|${x.c}|${x.total}|${x.name || ""}`;
+  const pickedSlips = React.useMemo(() => slipPick.size ? slips.filter(x => slipPick.has(slipKey(x))) : [], [slips, slipPick]);
+  const togglePick = (x) => setSlipPick(prev => { const n = new Set(prev); const k = slipKey(x); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const pickMany = (list, on) => setSlipPick(prev => { const n = new Set(prev); list.forEach(x => { const k = slipKey(x); on ? n.add(k) : n.delete(k); }); return n; });
+  const copyPicked = () => {
+    const tot = pickedSlips.reduce((a, x) => a + x.total, 0);
+    const lines = pickedSlips.slice().sort((a, b) => a.d.localeCompare(b.d) || (Number(a.no) || 0) - (Number(b.no) || 0))
+      .map(x => `${md(x.d)}${x.no ? ` No.${x.no}` : ""} ${x.c}${x.name ? ` (${x.name})` : ""} ${fmt(x.total)}원`);
+    const text = lines.join("\n") + `\n합계 ${pickedSlips.length}건 ${fmt(tot)}원 (부가세 포함)`;
+    try { navigator.clipboard.writeText(text).then(() => showToast("고른 전표와 합계를 복사했어요", "success"), () => showToast("복사하지 못했어요")); } catch { showToast("복사하지 못했어요"); }
+  };
   const slipsView = data && (() => {
     const shown = slipsFiltered.slice(0, slipLimit);
     const sum = slipsFiltered.reduce((a, x) => a + x.total, 0);
@@ -17988,13 +18006,22 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     shown.forEach((x, i) => {
       if (x.d !== lastD) {
         lastD = x.d; const rec = dayMap.get(x.d);
-        rows.push(<div key={"h" + x.d} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "12px 8px 6px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
+        const dayList = slipsFiltered.filter(y => y.d === x.d);
+        const dayAll = dayList.length > 0 && dayList.every(y => slipPick.has(slipKey(y)));
+        rows.push(<div key={"h" + x.d} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 8px 6px", borderTop: i === 0 ? "none" : "1px solid var(--border)" }}>
+          <input type="checkbox" checked={dayAll} onChange={e => pickMany(dayList, e.target.checked)} aria-label={`${md(x.d)} 전표 ${dayList.length}건 모두 고르기`} title="이날 전표 모두 고르기"
+            style={{ width: 16, height: 16, margin: 0, flexShrink: 0, accentColor: "#DB6B2E", cursor: "pointer" }}/>
           <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{Number(x.d.slice(5, 7))}월 {Number(x.d.slice(8))}일 ({dowOf(x.d)})</span>
           {rec && !slipQ.trim() ? <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{rec.count}건 · {won(rec.total)}</span> : null}
           {x.d > today ? <span style={{ fontSize: 10.5, fontWeight: 700, color: "#3182F6", padding: "1px 6px", borderRadius: 5, background: "rgba(49,130,246,0.1)" }}>선발행</span> : null}
         </div>);
       }
-      rows.push(<div key={`${x.d}-${x.c}-${x.no || i}`} style={{ display: "grid", gridTemplateColumns: "44px minmax(0, 1fr) 112px", gap: 10, alignItems: "baseline", padding: "7px 8px", borderRadius: 8 }}>
+      const on = slipPick.has(slipKey(x));
+      rows.push(<div key={`${x.d}-${x.c}-${x.no || i}`} role="checkbox" aria-checked={on} tabIndex={0} title="눌러서 고르면 아래에 합계가 나와요"
+        onClick={() => togglePick(x)} onKeyDown={e => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); togglePick(x); } }}
+        style={{ display: "grid", gridTemplateColumns: "16px 44px minmax(0, 1fr) 112px", gap: 10, alignItems: "center", padding: "7px 8px", borderRadius: 8, cursor: "pointer", userSelect: "none",
+          background: on ? "rgba(219,107,46,0.10)" : "transparent", boxShadow: on ? "inset 0 0 0 1px rgba(219,107,46,0.35)" : "none" }}>
+        <input type="checkbox" checked={on} readOnly tabIndex={-1} aria-hidden="true" style={{ width: 16, height: 16, margin: 0, accentColor: "#DB6B2E", pointerEvents: "none" }}/>
         <span style={{ fontSize: 11.5, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{x.no ? `No.${x.no}` : ""}</span>
         <span style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.c}</div>
@@ -18015,12 +18042,41 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         </div>
         {minus.length > 0 && !slipQ.trim() && <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 6 }}>마이너스 전표 {minus.length}건 ({won(minus.reduce((a, x) => a + x.total, 0))}) — 반품·취소로 보여요. 합계에 그대로 빼서 계산돼요.</div>}
         {data.slipsTruncated && <div style={{ fontSize: 11.5, color: "var(--warning-text)", marginBottom: 6 }}>전표가 너무 많아 앞 4,000건만 보여요. 기간을 좁혀 주세요.</div>}
+        {slipsFiltered.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 11.5, color: "var(--text3)", margin: "0 0 4px 8px" }}>
+            <span>전표를 눌러 고르면 합계가 나와요</span>
+            {slipsFiltered.length <= 500 && <button type="button" onClick={() => pickMany(slipsFiltered, !slipsFiltered.every(x => slipPick.has(slipKey(x))))}
+              style={{ border: "none", background: "transparent", color: "var(--accent)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>
+              {slipsFiltered.every(x => slipPick.has(slipKey(x))) ? "보이는 전표 고르기 해제" : `${slipQ.trim() ? "검색 결과" : "이 기간"} ${fmt(slipsFiltered.length)}건 모두 고르기`}
+            </button>}
+          </div>
+        )}
         {slipsFiltered.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "6px 0" }}>{slips.length === 0 ? "이 기간 전표가 없어요." : "검색 결과가 없어요."}</div> : (
           <div style={{ display: "flex", flexDirection: "column" }}>
             {rows}
             {slipsFiltered.length > slipLimit && <button type="button" onClick={() => setSlipLimit(n => n + 100)} style={{ marginTop: 8, padding: "9px 0", border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>나머지 {fmt(slipsFiltered.length - slipLimit)}건 더 보기</button>}
           </div>
         )}
+        {pickedSlips.length > 0 && (() => {
+          const tot = pickedSlips.reduce((a, x) => a + x.total, 0);
+          const supply = Math.round(tot / 1.1);
+          const clientsN = new Set(pickedSlips.map(x => x.c)).size;
+          return (
+            <div className="slip-pickbar" role="status" aria-live="polite">
+              <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)" }}>{fmt(pickedSlips.length)}건 고름{clientsN > 1 ? ` · 거래처 ${clientsN}곳` : ""}</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{fmt(tot)}<span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 3 }}>원 · 부가세 포함</span></div>
+                <div style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>공급가 약 {fmt(supply)}원 · 부가세 약 {fmt(tot - supply)}원</div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button type="button" onClick={copyPicked} title="고른 전표 목록과 합계를 글자로 복사 (카톡·메일에 붙여넣기)"
+                  style={{ height: 34, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>복사</button>
+                <button type="button" onClick={() => setSlipPick(new Set())}
+                  style={{ height: 34, padding: "0 12px", borderRadius: 9, border: "none", background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>선택 해제</button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   })();
