@@ -1000,6 +1000,9 @@
     .sales-kpi { container-type: inline-size; }
     .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
     .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
+    /* 입금내역 표 — 좁은 화면에선 칸 양옆 여백을 줄여 「확인」 버튼까지 한 화면에 */
+    table.dep-narrow td, table.dep-narrow th { padding-left: 7px !important; padding-right: 7px !important; }
+    table.dep-narrow td:first-child, table.dep-narrow th:first-child { padding-left: 10px !important; }
     /* 재고 현황 표 — 카드 폭이 좁으면(세로로 펼친 폴더블·분할 화면) 코드·규격 칸을 빼고 품목명 아래 작게 붙인다 */
     .stock-list { container-type: inline-size; }
     .stock-list .st-sub { display: none; }
@@ -1663,6 +1666,19 @@
 const { useState, useEffect, useCallback, useRef } = React;
 
 // ─── 서브탭 순서 변경 훅 (드래그 앤 드롭 + 모바일 터치) ───
+// 요소 폭 재기 — [ref 콜백, 폭]. 세로로 펼친 폴더블·분할 화면처럼 카드가 좁을 때 표 칸을 합치는 데 쓴다.
+function useBoxWidth(init = 1000) {
+  const [el, setEl] = React.useState(null);
+  const [w, setW] = React.useState(init);
+  React.useEffect(() => {
+    if (!el) return;
+    const m = () => setW(el.clientWidth || init);
+    m();
+    if (typeof ResizeObserver === "undefined") { window.addEventListener("resize", m); return () => window.removeEventListener("resize", m); }
+    const ro = new ResizeObserver(m); ro.observe(el); return () => ro.disconnect();
+  }, [el]);
+  return [setEl, w];
+}
 function useSubtabOrder(storageKey, defaultIds, dataAttr = "data-tab-id") {
   const { useState, useEffect, useRef } = React;
   const [order, setOrder] = useState(() => {
@@ -10424,6 +10440,27 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const [biz, setBiz] = useState(() => load("frw_bank_dep_biz", DEP_BIZ_DEFAULT));
   useEffect(() => { save("frw_bank_dep_biz", biz); }, [biz]);
   const items = React.useMemo(() => allItems.filter(x => depBizOf(x) === biz), [allItems, biz]);
+  // 목록 카드가 좁으면(세로 폴더블·분할 화면) 「붙일 거래처」와 「연결될 청구」를 한 칸에 위아래로 — 「확인」 버튼이 화면 밖으로 밀리지 않게
+  const [depListRef, depListW] = useBoxWidth(1000);
+  const depNarrow = depListW < 900;
+  // 「연결될 청구」 칸 내용 — 넓을 땐 따로 한 칸, 좁을 땐 거래처 버튼 아래
+  const depLinkInfo = (t, dep) => !t.client ? (
+    <span style={{ color: "var(--warning-text)" }}>거래처를 고르면 붙일 청구를 찾아드립니다</span>
+  ) : t.exact ? (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <span style={{ color: "var(--text2)" }}>{t.exact.ym} 청구 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(t.exact.total)}원</b></span>
+      <span style={{ padding: "2px 7px", borderRadius: 100, background: "var(--positive-bg)", color: "var(--positive-text)", fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>✓ 금액 일치</span>
+    </span>
+  ) : (
+    <span style={{ color: "var(--text3)" }}>
+      미수금 원장에 입금 기록
+      {t.near && (
+        <div style={{ fontSize: 10.5, marginTop: 2 }}>
+          {t.near.ym} 청구 {fmt(t.near.total)}원 · 차액 <b style={{ color: "var(--negative-text)" }}>{fmt(Math.abs(Math.round(dep.amount) - Math.round(t.near.total)))}원</b>
+        </div>
+      )}
+    </span>
+  );
   const bizCounts = React.useMemo(() => {
     const m = {};
     DEP_BIZ.forEach(o => { m[o.id] = { total: 0, pending: 0 }; });
@@ -11689,14 +11726,23 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       )}
 
       {/* 목록 — 누르기 전에 어디에 붙을지가 이미 보인다 */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card" ref={depListRef} style={{ padding: 0, overflow: "hidden" }}>
         {shown.length === 0 ? (
           <div style={{ padding: "36px 16px", textAlign: "center", fontSize: 13, color: "var(--text3)" }}>
             {items.length === 0 ? <><b>{depBizLabel(biz)}</b> 입금내역이 아직 없습니다.<br/>오른쪽 위 「거래내역 엑셀 가져오기」를 누르거나 파일을 이 화면에 끌어다 놓으면 이 사업자 앞으로 들어갑니다.</> : "조건에 맞는 내역이 없습니다."}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table className="table-plain" style={{ width: "100%", minWidth: 940, borderCollapse: "collapse", fontSize: 13 }}>
+            <table className={"table-plain" + (depNarrow ? " dep-narrow" : "")} style={{ width: "100%", minWidth: depNarrow ? 0 : 940, borderCollapse: "collapse", fontSize: 13 }}>
+              {depNarrow ? (
+                <colgroup>
+                  <col style={{ width: 34 }} />
+                  <col />
+                  <col style={{ width: 100 }} />
+                  <col style={{ width: "33%" }} />
+                  <col style={{ width: 84 }} />
+                </colgroup>
+              ) : (
               <colgroup>
                 <col style={{ width: 44 }} />
                 <col />
@@ -11705,21 +11751,23 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                 <col style={{ width: 250 }} />
                 <col style={{ width: 108 }} />
               </colgroup>
+              )}
               <thead><tr style={{ background: "var(--surface2)", color: "var(--text2)", fontSize: 12 }}>
                 <th style={{ padding: "10px 8px 10px 12px", textAlign: "center" }}>
                   <input type="checkbox" checked={allShownSelected} onChange={toggleSelectAllShown} title="표시된 항목 전체 선택/해제" style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer" }} />
                 </th>
                 <th style={{ padding: "10px 12px", textAlign: "left" }}>입금자 / 적요</th>
                 <th style={{ padding: "10px 12px", textAlign: "right", whiteSpace: "nowrap" }}>입금액</th>
+                {depNarrow ? <th style={{ padding: "10px 12px", textAlign: "left" }}>붙일 거래처 · 청구</th> : <>
                 <th style={{ padding: "10px 12px", textAlign: "left" }}>붙일 거래처</th>
-                <th style={{ padding: "10px 12px", textAlign: "left" }}>연결될 청구</th>
+                <th style={{ padding: "10px 12px", textAlign: "left" }}>연결될 청구</th></>}
                 <th style={{ padding: "10px 12px", textAlign: "center" }}></th>
               </tr></thead>
               <tbody>
                 {dayGroups.map(g => (
                   <React.Fragment key={g.date}>
                     <tr>
-                      <td colSpan={6} style={{ padding: "8px 12px", background: "var(--row-bg)", borderTop: "1px solid var(--divider)", fontSize: 11.5, fontWeight: 700, color: "var(--text3)" }}>
+                      <td colSpan={depNarrow ? 5 : 6} style={{ padding: "8px 12px", background: "var(--row-bg)", borderTop: "1px solid var(--divider)", fontSize: 11.5, fontWeight: 700, color: "var(--text3)" }}>
                         {dayLabel(g.date)} · {g.rows.length}건 · <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmt(g.sum)}원</span>
                       </td>
                     </tr>
@@ -11738,7 +11786,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                               style={{ padding: "10px 8px 10px 12px", textAlign: "center", cursor: "pointer", userSelect: "none" }}>
                               <input type="checkbox" checked={selectedIds.has(dep.id)} readOnly tabIndex={-1} style={{ width: 16, height: 16, accentColor: "#DB6B2E", cursor: "pointer", pointerEvents: "none" }} />
                             </td>
-                            <td style={{ padding: "10px 12px" }}>
+                            <td className={depNarrow ? "allow-wrap" : undefined} style={{ padding: "10px 12px" }}>
                               {(() => {
                                 const peekName = (dep.client || "").trim() || suggestClient(dep.name) || "";
                                 return (
@@ -11776,10 +11824,16 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
 
                             {isDone ? (
                               <>
+                                {depNarrow ? (
+                                  <td className="allow-wrap" style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>
+                                    <div style={{ fontWeight: 600, color: "var(--text2)" }}>{dep.client}</div>
+                                    <div style={{ fontSize: 11, marginTop: 2 }}>{(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 원장 입금 기록" : "확인 처리만"}</div>
+                                  </td>
+                                ) : <>
                                 <td style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>{dep.client}</td>
                                 <td style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>
                                   {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 원장 입금 기록" : "확인 처리만"}
-                                </td>
+                                </td></>}
                                 <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
                                   <button onClick={() => undoDeposit(dep)} title="처리 되돌리기"
                                     style={{ padding: "5px 12px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: fresh ? 800 : 600,
@@ -11790,7 +11844,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                               </>
                             ) : (
                               <>
-                                <td style={{ padding: "10px 12px" }}>
+                                <td className={depNarrow ? "allow-wrap" : undefined} style={{ padding: "10px 12px" }}>
                                   <button onClick={() => isOpen ? setOpenId(null) : openProcess(dep)} title="눌러서 바꾸기"
                                     style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: "100%", height: 27, padding: "0 9px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
                                       border: t.client ? "1px solid transparent" : "1px dashed var(--warning)",
@@ -11799,26 +11853,11 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.client || "거래처 고르기"}</span>
                                     <span style={{ opacity: 0.5, flexShrink: 0 }}>▾</span>
                                   </button>
+                                {depNarrow ? <div style={{ fontSize: 11.5, marginTop: 5, lineHeight: 1.45 }}>{depLinkInfo(t, dep)}</div> : null}
                                 </td>
-                                <td style={{ padding: "10px 12px", fontSize: 12 }}>
-                                  {!t.client ? (
-                                    <span style={{ color: "var(--warning-text)" }}>거래처를 고르면 붙일 청구를 찾아드립니다</span>
-                                  ) : t.exact ? (
-                                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                                      <span style={{ color: "var(--text2)" }}>{t.exact.ym} 청구 <b style={{ color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{fmt(t.exact.total)}원</b></span>
-                                      <span style={{ padding: "2px 7px", borderRadius: 100, background: "var(--positive-bg)", color: "var(--positive-text)", fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap" }}>✓ 금액 일치</span>
-                                    </span>
-                                  ) : (
-                                    <span style={{ color: "var(--text3)" }}>
-                                      미수금 원장에 입금 기록
-                                      {t.near && (
-                                        <div style={{ fontSize: 10.5, marginTop: 2 }}>
-                                          {t.near.ym} 청구 {fmt(t.near.total)}원 · 차액 <b style={{ color: "var(--negative-text)" }}>{fmt(Math.abs(Math.round(dep.amount) - Math.round(t.near.total)))}원</b>
-                                        </div>
-                                      )}
-                                    </span>
-                                  )}
-                                </td>
+                                {depNarrow ? null : <td style={{ padding: "10px 12px", fontSize: 12 }}>
+                                  {depLinkInfo(t, dep)}
+                                </td>}
                                 <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
                                   <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
                                     <button onClick={() => confirmOne(dep)} disabled={!t.client} title={t.exact ? "청구액과 일치 — 그 달 장부를 입금완료로" : "미수금 원장에 입금으로 기록"}
@@ -13354,6 +13393,10 @@ function CollectionPatternView({ ledgers, clientAR, bankDeposits, darkMode, onJu
 
   const daysColor = (d) => d == null ? "var(--text3)" : d <= 30 ? "#00B493" : d <= 60 ? "#FF9500" : "#F04452";
   const money = (n) => n > 0 ? Math.round(n).toLocaleString() : "—";
+  // 표가 좁으면(세로 폴더블·분할 화면) 모든 거래처가 0원인 경과 구간 칸(~30·31~60·61~90일)은 빼서 오른쪽 칸이 잘리지 않게
+  const [patBoxRef, patBoxW] = useBoxWidth(1000);
+  const patNarrow = patBoxW < 760;
+  const showBucket = (k) => !patNarrow || visible.some(r => r[k] > 0);
   const th = { padding: "9px 10px", fontSize: 11, fontWeight: 700, color: "var(--text3)", textAlign: "right", whiteSpace: "nowrap", borderBottom: "1px solid var(--divider)" };
   const td = { padding: "10px 10px", fontSize: 13, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", borderBottom: "1px solid var(--divider)" };
   const kpiCard = (label, value, sub, color) => (
@@ -13393,15 +13436,15 @@ function CollectionPatternView({ ledgers, clientAR, bankDeposits, darkMode, onJu
       {visible.length === 0 ? (
         <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13, background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 12 }}>표시할 거래처가 없습니다{showAll ? "" : " — 우측 상단 [전체 보기]로 완납 거래처까지 볼 수 있어요"}</div>
       ) : (
-        <div style={{ background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 12, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+        <div ref={patBoxRef} style={{ background: "var(--surface)", border: "1px solid var(--divider)", borderRadius: 12, overflowX: "auto" }}>
+          <table className={patNarrow ? "table-plain" : undefined} style={{ width: "100%", borderCollapse: "collapse", minWidth: patNarrow ? 0 : 760 }}>
             <thead>
               <tr>
                 <th style={{ ...th, textAlign: "left" }}>거래처</th>
                 <th style={th}>미수 잔액</th>
-                <th style={th}>~30일</th>
-                <th style={th}>31~60일</th>
-                <th style={th}>61~90일</th>
+                {showBucket("d30") && <th style={th}>~30일</th>}
+                {showBucket("d60") && <th style={th}>31~60일</th>}
+                {showBucket("d90") && <th style={th}>61~90일</th>}
                 <th style={th}>90일 초과</th>
                 <th style={th}>평균 수금일</th>
                 <th style={th}>최장 경과</th>
@@ -13414,9 +13457,9 @@ function CollectionPatternView({ ledgers, clientAR, bankDeposits, darkMode, onJu
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <td style={{ ...td, textAlign: "left", fontWeight: 700, color: "var(--text1)", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</td>
                   <td style={{ ...td, fontWeight: 800, color: r.balance > 0 ? "var(--text1)" : "var(--text3)" }}>{money(r.balance)}</td>
-                  <td style={{ ...td, color: r.d30 > 0 ? "var(--text2)" : "var(--text3)" }}>{money(r.d30)}</td>
-                  <td style={{ ...td, color: r.d60 > 0 ? "#FE9800" : "var(--text3)", fontWeight: r.d60 > 0 ? 700 : 400 }}>{money(r.d60)}</td>
-                  <td style={{ ...td, color: r.d90 > 0 ? "#FE9800" : "var(--text3)", fontWeight: r.d90 > 0 ? 700 : 400 }}>{money(r.d90)}</td>
+                  {showBucket("d30") && <td style={{ ...td, color: r.d30 > 0 ? "var(--text2)" : "var(--text3)" }}>{money(r.d30)}</td>}
+                  {showBucket("d60") && <td style={{ ...td, color: r.d60 > 0 ? "#FE9800" : "var(--text3)", fontWeight: r.d60 > 0 ? 700 : 400 }}>{money(r.d60)}</td>}
+                  {showBucket("d90") && <td style={{ ...td, color: r.d90 > 0 ? "#FE9800" : "var(--text3)", fontWeight: r.d90 > 0 ? 700 : 400 }}>{money(r.d90)}</td>}
                   <td style={{ ...td, color: r.d90p > 0 ? "#F04452" : "var(--text3)", fontWeight: r.d90p > 0 ? 800 : 400 }}>{money(r.d90p)}</td>
                   <td style={{ ...td, color: daysColor(r.avgDays), fontWeight: 700 }}>{r.avgDays != null ? `${r.avgDays}일` : "—"}{r.sampleN > 0 && <span style={{ fontSize: 10, color: "var(--text3)", fontWeight: 500 }}> ({r.sampleN}건)</span>}</td>
                   <td style={{ ...td, color: r.oldestDays > 90 ? "#F04452" : r.oldestDays > 60 ? "#FE9800" : "var(--text3)" }}>{r.balance > 0 ? `${r.oldestDays}일` : "—"}</td>
@@ -18619,7 +18662,8 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+            {/* table-plain: 카드 폭을 꽉 채운다(공통 표 규칙은 내용이 좁으면 오른쪽이 비었다). 넘치면 바깥 div 가 좌우 스크롤 */}
+            <table className="table-plain" style={{ width: "100%", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
               <thead><tr style={{ color: "var(--text3)", fontSize: 11 }}>
                 <th style={{ width: 34, textAlign: "center", padding: "7px 4px" }}>
                   <input type="checkbox" checked={allVisiblePicked} onChange={e => pickMany(visible, e.target.checked)}
@@ -21766,6 +21810,10 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
   const [newSupplier, setNewSupplier] = useState({ name: "", contact: "", phone: "", email: "", address: "", items: "", paymentTerms: "", note: "" });
   const [editId, setEditId] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+  // 목록 카드가 좁으면(세로 폴더블·분할 화면) 담당자·전화·이메일을 이름 아래로, 결제 조건·비고를 한 칸으로 — 관리 버튼이 밀려 잘리지 않게.
+  // 고치는 중인 행은 입력칸이 많아 원래 표 모양 그대로.
+  const [supListRef, supListW] = useBoxWidth(1000);
+  const supNarrow = supListW < 880 && !editId;
   const [search, setSearch] = useViewState("suppliers.search", "");
 
   const filtered = suppliers.filter(s => {
@@ -21854,10 +21902,11 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
             {suppliers.length === 0 ? "등록된 공급처가 없습니다" : "검색 결과가 없습니다"}
           </div>
         ) : (
-          <div className="card" style={{ overflowX: "auto" }}>
-            <table>
+          <div className="card" ref={supListRef} style={{ overflowX: "auto" }}>
+            <table className={supNarrow ? "table-plain" : undefined}>
               <thead><tr>
-                <th>공급처명</th><th>담당자</th><th>전화</th><th>이메일</th><th>품목</th><th>결제 조건</th><th>비고</th><th style={{ textAlign: "center", width: 100 }}>관리</th>
+                {supNarrow ? <><th>공급처명</th><th>품목</th><th>결제 조건 · 비고</th><th style={{ textAlign: "center", width: 76 }}>관리</th></>
+                  : <><th>공급처명</th><th>담당자</th><th>전화</th><th>이메일</th><th>품목</th><th>결제 조건</th><th>비고</th><th style={{ textAlign: "center", width: 100 }}>관리</th></>}
               </tr></thead>
               <tbody>
                 {filtered.map(s => editId === s.id ? (
@@ -21876,6 +21925,13 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
                   </tr>
                 ) : (
                   <tr key={s.id}>
+                    {supNarrow ? <>
+                    <td className="allow-wrap" style={{ fontWeight: 700, fontSize: 13 }}>{s.name}
+                      {(s.contact || s.phone || s.email) ? <div style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text3)", marginTop: 2, overflowWrap: "anywhere" }}>{[s.contact, s.phone, s.email].filter(Boolean).join(" · ")}</div> : null}
+                    </td>
+                    <td className="allow-wrap" style={{ fontSize: 12, color: "var(--text2)" }}>{s.items}</td>
+                    <td className="allow-wrap" style={{ fontSize: 12, color: "var(--text2)" }}>{s.paymentTerms}{s.paymentTerms && s.note ? <br/> : null}{s.note ? <span style={{ color: "var(--text3)" }}>{s.note}</span> : null}</td>
+                    </> : <>
                     <td style={{ fontWeight: 700, fontSize: 13 }}>{s.name}</td>
                     <td style={{ fontSize: 13 }}>{s.contact}</td>
                     <td style={{ fontSize: 13, color: "var(--text2)" }}>{s.phone}</td>
@@ -21883,7 +21939,8 @@ function SuppliersTab({ suppliers, setSuppliers, materials, fabricIntakes, darkM
                     <td style={{ fontSize: 12, color: "var(--text2)", maxWidth: 200 }}>{s.items}</td>
                     <td style={{ fontSize: 12, color: "var(--text2)" }}>{s.paymentTerms}</td>
                     <td style={{ fontSize: 12, color: "var(--text2)" }}>{s.note}</td>
-                    <td style={{ textAlign: "center" }}>
+                    </>}
+                    <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
                       <button onClick={() => startEdit(s)} style={{ background: "none", border: "none", cursor: "pointer", color: "#DB6B2E", fontSize: 14, marginRight: 6, fontFamily: "inherit" }}><Icon name="edit" size={14}/></button>
                       <button onClick={() => deleteSupplier(s.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#F04452", fontSize: 14, fontFamily: "inherit" }}><Icon name="close" size={14} style={{verticalAlign:"middle"}}/></button>
                     </td>
