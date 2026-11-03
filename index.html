@@ -995,6 +995,14 @@
     body.glass .sched-eventbar:hover { z-index: 60; }
     body.glass .card:hover { box-shadow: 0 18px 44px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.28); }
     body.glass .kpi-card:hover { transform: translateY(-4px); }
+    /* 판매 현황 요약 카드 금액 — 카드 폭(cqi)에 맞춰 크기 조절. 컨테이너 단위를 모르는 옛 브라우저는 화면 폭 기준 */
+    .sales-kpi { container-type: inline-size; }
+    .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
+    .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
+    @supports (font-size: 1cqi) {
+      .sales-kpi-val { font-size: clamp(17px, 15cqi, 24px); }
+      .sales-kpi-val.big { font-size: clamp(18px, 13.5cqi, 28px); }
+    }
     body.glass .card .card { box-shadow: inset 0 1px 0 rgba(255,255,255,0.14); }
     body.glass .card .card::before { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(255,255,255,0.05); }
 
@@ -17492,10 +17500,16 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
       {sub ? <span style={{ fontSize: 11, color: "var(--text3)", whiteSpace: "nowrap" }}>{sub}</span> : null}
     </div>
   );
+  // 금액 글자 크기는 화면 폭이 아니라 「카드 폭」에 맞춘다(.sales-kpi 컨테이너) — 펼친 폴더블처럼 화면은 넓은데
+  // 카드가 4칸으로 좁아지면 「34억 1,427만원」이 칸 밖으로 넘쳤다. 그래도 좁으면 「억」과 「만」 사이에서 줄을 바꾼다.
+  const kpiValue = (value, unit) => {
+    const parts = String(value).split(" ");
+    return parts.map((w, i) => <React.Fragment key={i}>{i ? " " : null}<span style={{ whiteSpace: "nowrap" }}>{w}{i === parts.length - 1 && unit ? <span style={{ fontSize: 13, fontWeight: 700, marginLeft: 2 }}>{unit}</span> : null}</span></React.Fragment>);
+  };
   const kpiCard = (label, value, unit, sub, dark) => (
-    <div className={dark ? "" : "card"} style={dark ? { padding: "18px 20px", borderRadius: 16, background: "var(--text1)", color: "var(--surface)", display: "flex", flexDirection: "column", gap: 6 } : { display: "flex", flexDirection: "column", gap: 6 }}>
+    <div className={(dark ? "" : "card ") + "sales-kpi"} style={dark ? { padding: "18px 20px", borderRadius: 16, background: "var(--text1)", color: "var(--surface)", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 } : { display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
       <div style={{ fontSize: 11.5, fontWeight: 600, color: dark ? "var(--surface)" : "var(--text3)", opacity: dark ? 0.7 : 1 }}>{label}</div>
-      <div style={{ fontSize: dark ? "clamp(20px, 6vw, 28px)" : "clamp(19px, 5.5vw, 24px)", fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.1, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", color: dark ? "var(--surface)" : "var(--text1)" }}>{value}{unit ? <span style={{ fontSize: 13, fontWeight: 700, marginLeft: 2 }}>{unit}</span> : null}</div>
+      <div className={"sales-kpi-val" + (dark ? " big" : "")} style={{ fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.15, fontVariantNumeric: "tabular-nums", color: dark ? "var(--surface)" : "var(--text1)" }}>{kpiValue(value, unit)}</div>
       {sub ? <div style={{ fontSize: 11.5, color: dark ? "var(--surface)" : "var(--text3)", opacity: dark ? 0.7 : 1 }}>{sub}</div> : null}
     </div>
   );
