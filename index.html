@@ -16755,8 +16755,7 @@ function StockoutForecastCard({ items, stamp = "", effSafe, onDraftPO }) {
   const shownGroups = showAll ? groups : groups.slice(0, 6);
   const draft = () => {
     if (!chosen.length) return;
-    onDraftPO && onDraftPO(chosen.map(r => ({ name: r.name, code: r.code, unit: r.it.unit || "", qty: qOf(r),
-      note: `현재 ${fmt(r.qty)} · 주 ${perWeek(r)}개 ${r.src === "판매" ? "판매" : "출고"} · ${r.qty <= 0 ? "이미 품절" : `약 ${Math.floor(r.daysLeft)}일 뒤(${md(r.outDate)}) 품절 예상`}` })), cfg);
+    onDraftPO && onDraftPO(chosen.map(r => ({ name: r.name, code: r.code, unit: r.it.unit || "", qty: qOf(r) })), cfg);
   };
   const numIn = (k, label, min, max) => (
     <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text2)" }}>{label}
@@ -25033,24 +25032,24 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
   const draftPOFromForecast = (list, cfg = {}) => {
     if (!list || !list.length) return;
     const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-    const rows = list.map(x => ({ id: uid(), kind: "custom", name: x.name, unit: x.unit || "EA", qty: String(x.qty), unitPrice: "", note: x.note || "" }));
+    // 품목 메모·추가 메모·건명은 공급처에 나가는 발주서에 그대로 찍힌다 → 남은 재고·품절일 같은 내부 정보는 넣지 않는다
+    const rows = list.map(x => ({ id: uid(), kind: "custom", name: x.name, unit: x.unit || "EA", qty: String(x.qty), unitPrice: "" }));
     const filled = poDraft && (poDraft.items || []).some(it => (it.name || "").trim() || it.qty);
     if (filled && window.confirm(`작성 중인 발주서가 있어요.\n거기에 ${rows.length}개 품목을 더할까요?\n\n[취소]를 누르면 새 발주서로 시작합니다(작성 중이던 건 사라져요).`)) {
       setPoDraft(d => ({ ...d, items: [...(d.items || []).filter(it => (it.name || "").trim() || it.qty), ...rows] }));
     } else {
       setPoDraft({
-        title: "재고 보충 — 품절 예보",
+        title: "재고 보충 발주",
         supplier: { name: "", contact: "", phone: "", email: "", address: "", paymentTerms: "" },
         items: rows, photos: [], orderDate: today,
         deliveryDate: cfg.lead ? new Date(Date.parse(today + "T00:00:00Z") + cfg.lead * 86400e3).toISOString().slice(0, 10) : "",
-        paymentTerms: "", deliveryPlace: "",
-        memo: "재고 현황 「품절 예보」로 만든 초안입니다. 공급처·단가·납기를 확인해 주세요.", body: "",
+        paymentTerms: "", deliveryPlace: "", memo: "", body: "",
       });
     }
     setViewingPO(null);
     setPoSubTab("current");
     setTab("purchase");
-    showToast(`발주서 초안에 ${rows.length}개 품목을 넣었어요 — 공급처와 단가를 채워 주세요`, "success");
+    showToast(`품절 예보로 발주서 초안에 ${rows.length}개 품목을 넣었어요 — 공급처·단가·납기를 확인해 주세요`, "success");
   };
 
   const startNewPO = () => {
