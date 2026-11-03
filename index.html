@@ -846,6 +846,7 @@
     /* ─── 섹션 제목 ─── */
     .section-header {
       display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+      flex-wrap: wrap; gap: 8px 12px; /* 오른쪽 버튼이 많으면 제목을 짓누르지 말고 아랫줄로 */
     }
     .section-header-title {
       font-size: 15px; font-weight: 600; color: var(--text1);
@@ -999,6 +1000,15 @@
     .sales-kpi { container-type: inline-size; }
     .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
     .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
+    /* 재고 현황 표 — 카드 폭이 좁으면(세로로 펼친 폴더블·분할 화면) 코드·규격 칸을 빼고 품목명 아래 작게 붙인다 */
+    .stock-list { container-type: inline-size; }
+    .stock-list .st-sub { display: none; }
+    @container (max-width: 860px) {
+      .stock-list .st-wide { display: none; }
+      .stock-list .st-sub { display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: var(--text3); }
+      .stock-list .st-safe { width: 58px !important; padding: 0 6px !important; }
+      .stock-list td, .stock-list th { padding-left: 6px !important; padding-right: 6px !important; }
+    }
     /* 경영 대시보드 KPI 값 — 카드 크기로 정한 글자 크기(--kv)를 넘지 않되, 카드 폭이 좁으면 줄인다 */
     .dash-kpi { container-type: inline-size; }
     .kpi-val.kpi-fit { font-size: var(--kv, 22px); }
@@ -18561,7 +18571,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
       )}
 
       {/* 전체 재고 목록 */}
-      <div className="card" ref={listRef}>
+      <div className="card stock-list" ref={listRef}>
         <div className="section-header">
           <span className="section-header-title">전체 재고 <span className="section-sub">— {visible.length}개{q ? ` / ${items.length}개` : ""}</span></span>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -18615,9 +18625,9 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                   <input type="checkbox" checked={allVisiblePicked} onChange={e => pickMany(visible, e.target.checked)}
                     title={`검색 결과 ${visible.length}개 전체 선택`} style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#DB6B2E" }}/>
                 </th>
-                <th style={{ textAlign: "left", padding: "7px 8px" }}>코드</th>
+                <th className="st-wide" style={{ textAlign: "left", padding: "7px 8px" }}>코드</th>
                 <th style={{ textAlign: "left", padding: "7px 8px" }}>품목명</th>
-                <th style={{ textAlign: "left", padding: "7px 8px" }}>규격</th>
+                <th className="st-wide" style={{ textAlign: "left", padding: "7px 8px" }}>규격</th>
                 <th style={{ textAlign: "right", padding: "7px 8px" }}>재고수량</th>
                 <th style={{ textAlign: "right", padding: "7px 8px" }} title="지난 엑셀 업로드 대비 수량 변화 (▼감소=소진, ▲증가=입고)">증감</th>
                 <th style={{ textAlign: "right", padding: "7px 8px" }} title="단가표에 같은 이름이 있으면 수량×단가로 추정">평가액</th>
@@ -18632,9 +18642,13 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                         <input type="checkbox" checked={picked.has(it.id)} onChange={() => togglePick(it.id)}
                           title="선택해서 재고 공유" style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#DB6B2E" }}/>
                       </td>
-                      <td style={{ padding: "7px 8px", color: "var(--text3)", fontSize: 12 }}>{it.code || "—"}</td>
-                      <td style={{ padding: "7px 8px", fontWeight: 600, color: "var(--text1)" }}>{it.name}</td>
-                      <td className="allow-wrap" style={{ padding: "7px 8px", color: "var(--text2)", fontSize: 12 }}>{it.spec || "—"}</td>
+                      <td className="st-wide" style={{ padding: "7px 8px", color: "var(--text3)", fontSize: 12 }}>{it.code || "—"}</td>
+                      <td style={{ padding: "7px 8px", fontWeight: 600, color: "var(--text1)" }}>{it.name}
+                        {/* 좁은 화면(세로 폴더블·분할 화면)에선 코드·규격 칸을 없애고 이름 아래 작게 */}
+                        {(it.code || (it.spec && it.spec !== it.name)) ? <span className="st-sub">{[it.code, it.spec && it.spec !== it.name ? it.spec : ""].filter(Boolean).join(" · ")}</span> : null}
+                      </td>
+                      {/* 규격이 품목명과 똑같으면(이카운트 엑셀에 흔함) 같은 글자를 두 번 쓰지 않는다 */}
+                      <td className="allow-wrap st-wide" style={{ padding: "7px 8px", color: "var(--text2)", fontSize: 12 }}>{it.spec && it.spec !== it.name ? it.spec : "—"}</td>
                       <td style={{ padding: "7px 8px", textAlign: "right", fontWeight: 700, color: it.qty < 0 ? "#F04452" : it.qty === 0 ? "var(--text3)" : "var(--text1)" }}>{fmtQty(it)}</td>
                       <td style={{ padding: "7px 8px", textAlign: "right", fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{deltaCell(deltaOf(it))}</td>
                       <td style={{ padding: "7px 8px", textAlign: "right", color: val > 0 ? "var(--text2)" : "var(--text3)", fontSize: 12 }}>{val > 0 ? Math.round(val).toLocaleString() + "원" : "—"}</td>
@@ -18643,7 +18657,7 @@ function StockTab({ stock, setStock, materials = [], darkMode, focusSearch = nul
                         <input type="number" value={it.safeQty || ""} placeholder={inh > 0 ? String(inh) : "—"}
                           title={inh > 0 && !(parseFloat(it.safeQty) > 0) ? "단가표 원단 안전재고 " + inh + " 자동 적용 중 (직접 입력하면 덮어씀)" : ""}
                           onChange={e => setSafeQty(it.id, e.target.value)}
-                          style={{ width: 74, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", borderColor: inh > 0 && !(parseFloat(it.safeQty) > 0) ? "rgba(255,149,0,0.4)" : undefined }}/>
+                          className="st-safe" style={{ width: 74, height: 30, fontSize: 12, textAlign: "right", padding: "0 8px", borderColor: inh > 0 && !(parseFloat(it.safeQty) > 0) ? "rgba(255,149,0,0.4)" : undefined }}/>
                         ); })()}
                       </td>
                     </tr>
