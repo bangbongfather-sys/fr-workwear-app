@@ -1000,6 +1000,10 @@
     .sales-kpi { container-type: inline-size; }
     .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
     .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
+    /* 거래처별 미수금 위 요약 다섯 칸 — 숫자 크기를 칸 폭에 맞춰 한 가지로 */
+    .arsum { container-type: inline-size; min-width: 0; }
+    .arsum-val { font-weight: 800; line-height: 1.15; white-space: nowrap; letter-spacing: -0.012em; font-variant-numeric: tabular-nums; font-size: 22px; }
+    @supports (font-size: 1cqi) { .arsum-val { font-size: max(15px, min(26px, 13cqi)); } }
     /* 거래처 원장 요약 칸 — 금액 글자를 칸 폭에 맞춤 */
     .ar-kpi-wrap { container-type: inline-size; }
     .ar-kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -13975,28 +13979,21 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       <div style={{fontSize:18,fontWeight:800,color:"var(--text1)"}}><span style={{display:"inline-flex",alignItems:"center",gap:6,verticalAlign:"middle"}}><Icon name="treasury" size={14}/>거래처별 미수금</span></div>
 
-      {/* KPI */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(170px, 1fr))",gap:12}}>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>미수금 거래처</div>
-          <div className="kpi-num" style={{color:overdueCount>0?"#FE9800":"#00B493"}}>{overdueCount}<span style={{fontSize:13,fontWeight:600,marginLeft:4}}>곳</span></div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>미수금 합계</div>
-          <div className="kpi-num" style={{color:totalBalance>0?"#F04452":"#00B493"}}>{Math.round(totalBalance).toLocaleString()}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>원</span></div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 청구 누적</div>
-          <div style={{fontSize:22,fontWeight:800,color:"#475569"}}>{Math.round(totalCharge).toLocaleString()}<span style={{fontSize:12,fontWeight:600,marginLeft:2}}>원</span></div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>총 입금 누적</div>
-          <div style={{fontSize:22,fontWeight:800,color:"#00B493"}}>{Math.round(totalPaid).toLocaleString()}<span style={{fontSize:12,fontWeight:600,marginLeft:2}}>원</span></div>
-        </div>
-        <div className="card">
-          <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>회수율</div>
-          <div className="kpi-num" style={{color:"var(--text1)"}}>{totalCharge>0?Math.round(totalPaid/totalCharge*100):0}<span style={{fontSize:14,fontWeight:600}}>%</span></div>
-        </div>
+      {/* KPI — 다섯 칸 숫자 크기를 하나로(칸 폭에 맞춤). 예전엔 칸마다 크기·색 규칙이 달라 들쭉날쭉했고
+          「총 청구 누적」은 진한 회색이라 어두운·유리 테마에서 안 보였다 */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(min(200px, calc(50% - 6px)), 1fr))",gap:12}}>
+        {[
+          ["미수금 거래처", String(overdueCount), "곳", overdueCount > 0 ? "#FE9800" : "#00B493"],
+          ["미수금 합계", Math.round(totalBalance).toLocaleString(), "원", totalBalance > 0 ? "#F04452" : "#00B493"],
+          ["총 청구 누적", Math.round(totalCharge).toLocaleString(), "원", "var(--text1)"],
+          ["총 입금 누적", Math.round(totalPaid).toLocaleString(), "원", "#00B493"],
+          ["회수율", String(totalCharge > 0 ? Math.round(totalPaid / totalCharge * 100) : 0), "%", "var(--text1)"],
+        ].map(([label, val, unit, color]) => (
+          <div key={label} className="card arsum">
+            <div style={{fontSize:11,fontWeight:700,color:"var(--text3)",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{label}</div>
+            <div className="arsum-val" style={{color}}>{val}<span style={{fontSize:13,fontWeight:600,marginLeft:2}}>{unit}</span></div>
+          </div>
+        ))}
       </div>
 
       {/* 필터 */}
