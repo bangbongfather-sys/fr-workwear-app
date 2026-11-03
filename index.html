@@ -1000,11 +1000,24 @@
     .sales-kpi { container-type: inline-size; }
     .sales-kpi-val { font-size: clamp(19px, 5.5vw, 24px); }
     .sales-kpi-val.big { font-size: clamp(20px, 6vw, 28px); }
+    /* 거래처 원장 요약 칸 — 금액 글자를 칸 폭에 맞춤 */
+    .ar-kpi { container-type: inline-size; }
+    .ar-kpi-val { font-size: 16px; }
+    @supports (font-size: 1cqi) { .ar-kpi-val { font-size: max(12px, min(16px, 13cqi)); } }
     /* 판매 현황 전표 — 고른 전표 합계 막대. 목록을 내려도 화면 아래에 붙어 따라온다(휴대폰은 아래 메뉴 위로) */
     .slip-pickbar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; align-items: center; gap: 12px;
       padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(219,107,46,0.35); background: var(--surface); box-shadow: 0 10px 28px rgba(0,0,0,0.22); }
     body.glass .slip-pickbar { background: rgba(24,26,34,0.96); }
-    @media (max-width: 768px) { .slip-pickbar { bottom: 92px; } body.dock-off .slip-pickbar { bottom: 56px; } }
+    /* 1100px 이하는 본문 틀(.main-content)이 좌우 스크롤 상자라 sticky 가 안 붙는다 → 화면 아래에 띄운다(서브창 안은 그대로 sticky) */
+    @media (max-width: 1100px) {
+      .slip-pickbar:not(.in-side) { position: fixed; left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 24px)); margin: 0; z-index: 60; }
+      body.fold:not(.fold-rail-off) .slip-pickbar:not(.in-side) { left: calc(50% + 44px); width: min(560px, calc(100vw - 112px)); }
+    }
+    @media (max-width: 768px) { .slip-pickbar:not(.in-side) { bottom: 92px; } body.dock-off .slip-pickbar:not(.in-side) { bottom: 56px; } }
+    body.fold .slip-pickbar:not(.in-side) { bottom: max(12px, env(safe-area-inset-bottom)) !important; } /* 폴더블은 아래 메뉴가 없다 */
+    /* 띄운 막대가 목록 맨 아래 전표를 가리지 않게 빈 자리 */
+    .slip-pickbar-space { display: none; }
+    @media (max-width: 1100px) { .slip-pickbar-space:not(.in-side) { display: block; height: 104px; } }
     /* 입금내역 표 — 좁은 화면에선 칸 양옆 여백을 줄여 「확인」 버튼까지 한 화면에 */
     table.dep-narrow td, table.dep-narrow th { padding-left: 7px !important; padding-right: 7px !important; }
     table.dep-narrow td:first-child, table.dep-narrow th:first-child { padding-left: 10px !important; }
@@ -14098,16 +14111,17 @@ function ARDetailView({ ledgers, setLedgers, clientAR, setClientAR, darkMode, fo
                   이 거래처 내역 삭제
                 </button>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+              {/* 좁으면(서브창·세로 폴더블) 4칸 → 2칸×2줄, 금액 글자도 칸 폭에 맞춰 줄인다 — 「5,7…」로 잘렸다 */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", gap: 10 }}>
                 {[
                   ["총 청구", Math.round(sel.charge).toLocaleString(), "원", null],
                   ["총 입금", Math.round(sel.paid).toLocaleString(), "원", "var(--positive-text)"],
                   ["미수금", Math.round(sel.balance).toLocaleString(), "원", col],
                   ["거래 개월", String(sel.months.length), "개월", null],
                 ].map(([label, val, unit, color], i) => (
-                  <div key={i} style={{ background: i === 2 ? "var(--accent-tonal)" : "var(--row-bg)", border: i === 2 ? "1px solid rgba(219,107,46,0.2)" : "1px solid var(--divider)", borderRadius: 12, padding: "12px 14px", minWidth: 0 }}>
+                  <div key={i} className="ar-kpi" style={{ background: i === 2 ? "var(--accent-tonal)" : "var(--row-bg)", border: i === 2 ? "1px solid rgba(219,107,46,0.2)" : "1px solid var(--divider)", borderRadius: 12, padding: "12px 14px", minWidth: 0 }}>
                     <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.6, color: i === 2 ? "var(--accent-strong)" : "var(--text3)" }}>{label}</div>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: color || "var(--text1)", marginTop: 3, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    <div className="ar-kpi-val" style={{ fontWeight: 800, color: color || "var(--text1)", marginTop: 3, letterSpacing: "-0.01em", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                       {val}<span style={{ fontSize: 11, fontWeight: 500, color: "var(--text3)" }}> {unit}</span>
                     </div>
                   </div>
@@ -18062,7 +18076,9 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
           const supply = Math.round(tot / 1.1);
           const clientsN = new Set(pickedSlips.map(x => x.c)).size;
           return (
-            <div className="slip-pickbar" role="status" aria-live="polite">
+            <>
+            <div className={"slip-pickbar-space" + (pane === "side" ? " in-side" : "")} aria-hidden="true"/>
+            <div className={"slip-pickbar" + (pane === "side" ? " in-side" : "")} role="status" aria-live="polite">
               <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)" }}>{fmt(pickedSlips.length)}건 고름{clientsN > 1 ? ` · 거래처 ${clientsN}곳` : ""}</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: "var(--text1)", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{fmt(tot)}<span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 3 }}>원 · 부가세 포함</span></div>
@@ -18075,6 +18091,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
                   style={{ height: 34, padding: "0 12px", borderRadius: 9, border: "none", background: "var(--accent)", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>선택 해제</button>
               </div>
             </div>
+            </>
           );
         })()}
       </div>
@@ -22969,12 +22986,13 @@ function App() {
   useEffect(() => { save("frw_fold_rail_off", foldRailOff); document.body.classList.toggle("fold-rail-off", foldMode && foldRailOff); }, [foldRailOff, foldMode]);
   useEffect(() => { save("frw_side_tab", sideTab); }, [sideTab]);
   const sideNarrow = foldLandscape ? false : vw < 900;   // 폴더블 가로 펼침은 좌우 반반
-  // 넓은 화면 + 글래스: 영상처럼 위 가운데 알약 메뉴(자주 쓰는 화면), 검색은 아이콘(⌘K)으로
-  const glassNav = glass && vw >= 1180;
-  useEffect(() => { document.body.classList.toggle("glass-nav", glassNav); }, [glassNav]);
   const sideWidth = foldLandscape ? Math.round((vw - (foldRailOff ? 44 : 112)) / 2)   // 폴더블 가로: 레일 빼고 정확히 반반 (접히는 선 근처에서 나뉘게)
     : Math.min(sideW, Math.max(360, vw - 620));   // 본 화면이 최소 600px 은 남게
   const sideShown = !!sideTab && !sideMin;
+  // 넓은 화면 + 글래스: 영상처럼 위 가운데 알약 메뉴(자주 쓰는 화면), 검색은 아이콘(⌘K)으로.
+  // 서브창이 옆에 열려 있으면 그만큼 좁아지니 남은 폭으로 판단(알약이 오른쪽 버튼과 겹쳤다)
+  const glassNav = glass && (vw - (sideShown && !sideNarrow ? sideWidth + 24 : 0)) >= 1180;
+  useEffect(() => { document.body.classList.toggle("glass-nav", glassNav); }, [glassNav]);
   useEffect(() => {
     document.body.classList.toggle("frw-split", sideShown && !sideNarrow);
     document.body.classList.toggle("frw-split-bottom", sideShown && sideNarrow);
