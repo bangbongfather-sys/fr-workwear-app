@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-03-slip-vat-label", note: "판매 현황 전표 제목·날짜 줄에 부가세 포함 표시" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-06-intake-redate", note: "캠퍼스 입고 기록 입고일 고치기(redate)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -895,7 +895,7 @@ function kstToday() { return new Date(Date.now() + 9 * 3600e3).toISOString().sli
 async function toolRecordIntake(args, env) {
   const mode = String(args.mode || "");
   const qty = Number(args.qty);
-  if (mode !== "batch" && (!(qty > 0) || !Number.isFinite(qty))) return errContent("qty 는 0보다 큰 숫자여야 합니다.");
+  if (mode !== "batch" && mode !== "redate" && (!(qty > 0) || !Number.isFinite(qty))) return errContent("qty 는 0보다 큰 숫자여야 합니다.");
   const date = args.date ? String(args.date) : kstToday();
   if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}"`);
   const token = String(args.token || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`).slice(0, 64);
@@ -969,6 +969,23 @@ async function toolRecordIntake(args, env) {
         note: `${cur.note || ""} · 부분입고 ${qty}/${ordered}${extra}`.trim() };
       return { patch: { [key]: rest, [nkey]: got }, apply: (dd) => withRow(withRow(dd, key, rest), nkey, got), check: hasToken,
         result: { 결과: "부분 입고", 입고행: got, 남은행: rest } };
+    }, env);
+    return plan.isError ? plan : textContent(plan.result);
+  }
+  if (mode === "redate") {
+    // 캠퍼스가 같은 요청(token)으로 넣은 줄들의 입고일만 바꾼다 (예: 명세서 연도를 잘못 읽은 경우)
+    const of = String(args.ofToken || "").trim();
+    if (of.length < 6) return errContent("redate 에는 ofToken(처음 기록한 요청 token)이 필요합니다.");
+    const mine = (r) => r && (r.campusToken === of || String(r.campusToken || "").startsWith(of + "#"));
+    const plan = await safeSectionWrite("fabricIntakes", (d) => {
+      const hits = list(d).filter(([, r]) => mine(r));
+      if (!hits.length) return errContent(`token=${of} 로 기록된 줄이 없습니다.`);
+      if (hits.every(([, r]) => r.date === date)) return { done: true, result: { 결과: "변경 없음", 줄수: hits.length, 입고일: date } };
+      const patch = {}, before = [];
+      for (const [k, r] of hits) { before.push(r.date); patch[k] = { ...r, date, ...(r.status === "입고완료" ? { receivedAt: date } : {}), redateFrom: r.date }; }
+      const apply = (dd) => { let out = dd; for (const [k, v] of Object.entries(patch)) out = withRow(out, k, v); return out; };
+      const check = (dd) => list(dd).filter(([, r]) => mine(r)).every(([, r]) => r.date === date);
+      return { patch, apply, check, result: { 결과: "입고일 변경", 줄수: hits.length, 이전: [...new Set(before)], 변경: date } };
     }, env);
     return plan.isError ? plan : textContent(plan.result);
   }
