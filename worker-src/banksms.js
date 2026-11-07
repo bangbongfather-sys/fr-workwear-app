@@ -91,6 +91,59 @@ async function pushLog(env, entry) {
 }
 const maskText = (t) => String(t || "").replace(/(\d{2,8})[*Xx]{1,8}(\d{1,8})/g, (m, a, b) => `****${(a + b).slice(-4)}`).slice(0, 300);
 
+// 문자 여러 통 한 덩어리로 올 때 나누기 — 같은 분에 입금이 두 건 오면 아이폰이 두 문자를 이어 붙여 한 번에 보낼 수 있다.
+// 「월/일 시:분」이 두 번 이상 나오면 그 줄마다 나눈다. 나눈 조각이 모두 거래로 읽힐 때만 나누고, 아니면 통째로 하나로 본다.
+export function splitBankSms(text, nowKst) {
+  const raw = String(text || "").replace(/\r/g, "");
+  const re = /\d{1,2}\s*\/\s*\d{1,2}\s+\d{1,2}:\d{2}/g;
+  const starts = [];
+  for (const m of raw.matchAll(re)) {
+    // 날짜 바로 앞의 머리말(「[Web발신]」「[KB]」 같은 대괄호 표시)까지 한 통으로 — 한 줄로 이어 붙어 와도 나뉘게
+    const head = raw.slice(0, m.index).match(/(?:\[[^\]\n]{1,12}\]\s*)*$/);
+    const st = head ? m.index - head[0].length : m.index;
+    if (!starts.includes(st)) starts.push(st);
+  }
+  if (starts.length < 2) return [raw];
+  starts[0] = 0;
+  const segs = starts.map((st, k) => raw.slice(st, k + 1 < starts.length ? starts[k + 1] : raw.length).trim()).filter(Boolean);
+  const ok = segs.every(sg => { const p = parseBankSms(sg, nowKst); return !p.error && (p.kind === "card" || p.amount > 0); });
+  return ok ? segs : [raw];
+}
+
+// 문자 한 통 처리 → 결과 (계좌 조건·카드·출금·입금)
+async function handleOneSms(env, cfg, text, now, multi) {
+  const tag = multi > 1 ? { multi } : {};
+  // 계좌 앞자리를 정해 두면 그 숫자가 들어 있는 문자만 받는다 (다른 통장·카드 문자 차단)
+  const hint = String(cfg.acctHint || "").replace(/\D/g, "");
+  if (hint && !text.replace(/[\s-]/g, "").includes(hint)) {
+    await pushLog(env, { at: now, ok: true, kind: "other", text: "", ...tag });
+    return { ok: true, kind: "other", skipped: "다른 계좌 문자는 건너뜁니다" };
+  }
+  const p = parseBankSms(text, now.slice(0, 10));
+  if (p.kind === "card") {
+    await pushLog(env, { at: now, ok: true, kind: "card", text: "", ...tag });   // 카드 내용은 남기지 않는다
+    return { ok: true, kind: "card", skipped: "카드 문자는 건너뜁니다" };
+  }
+  if (p.error) {
+    await pushLog(env, { at: now, ok: false, error: p.error, text: maskText(text), ...tag });
+    return { ok: false, error: p.error };
+  }
+  const ext = `${p.last4 || "sms"}|${p.date.replace(/-/g, "")}${p.time.replace(":", "")}|${p.amount}|${p.bal ?? ""}`;
+  const key = ext.replace(/[.#$/\[\]|]/g, "_");
+  if (p.bal != null) {
+    try { await fbPatch(env, SMS_CHAIN_PATH, { [key]: { ext, last4: p.last4 || "", date: p.date, time: p.time, kind: p.kind === "in" ? "in" : "out", amount: p.amount, bal: p.bal, name: String(p.name || "").slice(0, 40), at: now } }); } catch {}
+  }
+  if (p.kind !== "in") {
+    await pushLog(env, { at: now, ok: true, kind: "out", date: p.date, time: p.time, amount: p.amount, name: p.name, text: maskText(text), ...tag });
+    return { ok: true, kind: "out", skipped: "출금은 입금함에 넣지 않습니다", amount: p.amount };
+  }
+  const item = { ext, acct: p.last4, biz: cfg.biz || "nj", date: p.date, time: p.time, amount: p.amount,
+    ...(p.bal != null ? { bal: p.bal } : {}), name: p.name, memo: "", remarks: "문자", src: "sms", collectedAt: Date.now() };
+  await fbPatch(env, BANK_INBOX_PATH, { [key]: item });
+  await pushLog(env, { at: now, ok: true, kind: "in", date: p.date, time: p.time, amount: p.amount, name: p.name, text: maskText(text), ...tag });
+  return { ok: true, kind: "in", date: p.date, time: p.time, amount: p.amount, name: p.name };
+}
+
 // 공개 경로: POST /api/bank/sms/<토큰>   본문 = 문자 원문(text/plain) 또는 {"text": "..."}
 export async function handleBankSmsPublic(request, env, url) {
   const m = /^\/api\/bank\/sms\/([a-f0-9]{16,64})\/?$/.exec(url.pathname);
@@ -105,38 +158,13 @@ export async function handleBankSmsPublic(request, env, url) {
     else if (ct.includes("form")) { const f = await request.formData(); text = String(f.get("text") || ""); }
     else text = await request.text();
   } catch { return json({ error: "본문을 읽지 못했습니다" }, 400); }
-  text = text.slice(0, 1000);
+  text = text.slice(0, 4000);   // 여러 통이 붙어 와도 다 읽게
   const now = kstNow();
-  // 계좌 앞자리를 정해 두면 그 숫자가 들어 있는 문자만 받는다 (다른 통장·카드 문자 차단)
-  const hint = String(cfg.acctHint || "").replace(/\D/g, "");
-  if (hint && !text.replace(/[\s-]/g, "").includes(hint)) {
-    await pushLog(env, { at: now, ok: true, kind: "other", text: "" });
-    return json({ ok: true, kind: "other", skipped: "다른 계좌 문자는 건너뜁니다" });
-  }
-  const p = parseBankSms(text, now.slice(0, 10));
-  if (p.kind === "card") {
-    await pushLog(env, { at: now, ok: true, kind: "card", text: "" });   // 카드 내용은 남기지 않는다
-    return json({ ok: true, kind: "card", skipped: "카드 문자는 건너뜁니다" });
-  }
-  if (p.error) {
-    await pushLog(env, { at: now, ok: false, error: p.error, text: maskText(text) });
-    return json({ ok: false, error: p.error });
-  }
-  const ext = `${p.last4 || "sms"}|${p.date.replace(/-/g, "")}${p.time.replace(":", "")}|${p.amount}|${p.bal ?? ""}`;
-  const key = ext.replace(/[.#$/\[\]|]/g, "_");
-  if (p.bal != null) {
-    try { await fbPatch(env, SMS_CHAIN_PATH, { [key]: { ext, last4: p.last4 || "", date: p.date, time: p.time, kind: p.kind === "in" ? "in" : "out", amount: p.amount, bal: p.bal, name: String(p.name || "").slice(0, 40), at: now } }); } catch {}
-  }
-  if (p.kind !== "in") {
-    await pushLog(env, { at: now, ok: true, kind: "out", date: p.date, time: p.time, amount: p.amount, name: p.name, text: maskText(text) });
-    return json({ ok: true, kind: "out", skipped: "출금은 입금함에 넣지 않습니다", amount: p.amount });
-  }
-  const item = { ext, acct: p.last4, biz: cfg.biz || "nj", date: p.date, time: p.time, amount: p.amount,
-    ...(p.bal != null ? { bal: p.bal } : {}), name: p.name, memo: "", remarks: "문자", src: "sms", collectedAt: Date.now() };
-  await fbPatch(env, BANK_INBOX_PATH, { [key]: item });
-  await pushLog(env, { at: now, ok: true, kind: "in", date: p.date, time: p.time, amount: p.amount, name: p.name, text: maskText(text) });
-  await fbPatch(env, SMS_CFG_PATH, { lastAt: now });
-  return json({ ok: true, kind: "in", date: p.date, time: p.time, amount: p.amount, name: p.name });
+  const segs = splitBankSms(text, now.slice(0, 10)).slice(0, 10);
+  const results = [];
+  for (const sg of segs) results.push(await handleOneSms(env, cfg, sg, now, segs.length));   // 기록이 서로 덮지 않게 차례로
+  if (results.some(r => r.kind === "in")) await fbPatch(env, SMS_CFG_PATH, { lastAt: now });
+  return json(results.length === 1 ? results[0] : { ok: results.every(r => r.ok), count: results.length, items: results });
 }
 
 // 관리 경로 (로그인 필요): /api/bank/smskey/status | issue | disable
@@ -176,7 +204,10 @@ export async function handleBankSmsAdmin(request, env, url) {
   // 문자 붙여 넣고 미리 읽어 보기 (저장하지 않음)
   if (p === "/api/bank/smskey/test" && request.method === "POST") {
     let b = {}; try { b = await request.json(); } catch {}
-    return json(parseBankSms(String(b.text || ""), kstNow().slice(0, 10)));
+    const day = kstNow().slice(0, 10);
+    const segs = splitBankSms(String(b.text || ""), day);
+    const items = segs.map(sg => parseBankSms(sg, day));
+    return json(items.length > 1 ? { ...items[0], count: items.length, items } : items[0]);
   }
   return json({ error: "Not found" }, 404);
 }
