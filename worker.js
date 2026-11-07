@@ -31,6 +31,7 @@ import { handleFxApi } from "./worker-src/fx.js";
 import { newsFeed } from "./worker-src/news.js";
 import { handleBankApi } from "./worker-src/bank.js";
 import { handleBankSmsPublic, handleBankSmsAdmin } from "./worker-src/banksms.js";
+import { notionTodoCreate, notionTodoPatch, notionTodoArchive } from "./worker-src/notiontodo.js";
 
 const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
@@ -391,54 +392,24 @@ async function handleNotionApi(request, env, url) {
   }
   const pageId = m[1];
 
+  // 생성·수정·보관은 커넥터(add_todo·update_todo)와 같은 함수를 쓴다 — worker-src/notiontodo.js
+  const reply = (r, okBody) => r.ok
+    ? new Response(JSON.stringify(okBody), { status: 200, headers: corsHeaders })
+    : new Response(JSON.stringify({ error: r.error, ...(r.details ? { details: r.details } : {}) }), { status: r.status || 500, headers: corsHeaders });
   try {
     if (request.method === "POST" && !pageId) {
       const body = await request.json();
-      if (!body.text) {
-        return new Response(JSON.stringify({ error: "text 필수" }), { status: 400, headers: corsHeaders });
-      }
-      const properties = buildProperties(body);
-      const res = await fetch(`${NOTION_API}/pages`, {
-        method: "POST",
-        headers: notionHeaders,
-        body: JSON.stringify({
-          parent: { database_id: env.NOTION_TODO_DSID },
-          properties,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}`, details: data }), { status: res.status, headers: corsHeaders });
-      }
-      return new Response(JSON.stringify({ notionPageId: data.id, url: data.url }), { status: 200, headers: corsHeaders });
+      const r = await notionTodoCreate(env, body);
+      return reply(r, { notionPageId: r.notionPageId, url: r.url });
     }
 
     if (request.method === "PATCH" && pageId) {
       const body = await request.json();
-      const properties = buildProperties(body);
-      const res = await fetch(`${NOTION_API}/pages/${pageId}`, {
-        method: "PATCH",
-        headers: notionHeaders,
-        body: JSON.stringify({ properties }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}`, details: data }), { status: res.status, headers: corsHeaders });
-      }
-      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+      return reply(await notionTodoPatch(env, pageId, body), { ok: true });
     }
 
     if (request.method === "DELETE" && pageId) {
-      const res = await fetch(`${NOTION_API}/pages/${pageId}`, {
-        method: "PATCH",
-        headers: notionHeaders,
-        body: JSON.stringify({ archived: true }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return new Response(JSON.stringify({ error: data.message || `Notion HTTP ${res.status}`, details: data }), { status: res.status, headers: corsHeaders });
-      }
-      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: corsHeaders });
+      return reply(await notionTodoArchive(env, pageId), { ok: true });
     }
 
     return new Response(JSON.stringify({ error: "지원하지 않는 메서드/경로" }), { status: 405, headers: corsHeaders });
@@ -529,29 +500,6 @@ async function handleFirebaseSync(request, env, url) {
 //                          - endDate 도 있으면 기간 (date.start ~ date.end)
 //                          - date null/빈문자열이면 업무 기간 자체 제거
 //   done                → 완료 (checkbox) + 상태 구분 (status: 시작 전 / 완료)
-function buildProperties(body) {
-  const props = {};
-  if (body.text !== undefined) {
-    props["이름"] = { title: [{ text: { content: String(body.text || "").slice(0, 1900) } }] };
-  }
-  // date 또는 endDate 중 하나라도 정의되면 업무 기간 갱신
-  if (body.date !== undefined || body.endDate !== undefined) {
-    const start = body.date;
-    const end = body.endDate;
-    if (start) {
-      const dateObj = { start };
-      if (end && end !== start) dateObj.end = end;
-      props["업무 기간"] = { date: dateObj };
-    } else {
-      props["업무 기간"] = { date: null };
-    }
-  }
-  if (body.done !== undefined) {
-    props["완료"] = { checkbox: !!body.done };
-    props["상태 구분"] = { status: { name: body.done ? "완료" : "시작 전" } };
-  }
-  return props;
-}
 
 
 // ─── 노션 회의록 연동 (「회의 진행 내역」 DB) ───
