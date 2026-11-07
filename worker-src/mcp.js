@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-sales-prev-fix", note: "판매 현황 지난 달 기간 오류 수정 + 전표 검색 기간 넓혀 찾기" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-merge-deposits", note: "입금내역·미수금 원장 충돌 자동 병합 + 커넥터 입금↔원장 연결(_deposit_link)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -558,6 +558,12 @@ async function toolGetSection(args, env) {
   const compact = (o) => ({ content: [{ type: "text", text: JSON.stringify(o) }] });
   // 입금 직접 넣기 — 문자 누락 등으로 빠진 입금을 문자와 같은 수집함에 넣는다(앱이 입금내역에 합침)
   // section = "_deposit_add:" + JSON {date, time, amount, name, biz?, acct?, bal?, memo?} 또는 {items:[...]} (20건까지)
+  // 입금을 「이미 있는」 미수금 원장 입금 기록에 연결해 처리완료로 — 새 원장 기록은 만들지 않는다(두 번 들어가지 않게)
+  // section = "_deposit_link:" + JSON {id(입금 id), client(원장 거래처명), entryId(원장 입금 기록 id)} 또는 {items:[...]}
+  if (section.startsWith("_deposit_link:")) {
+    let a; try { a = JSON.parse(section.slice(14)); } catch { return errContent("_deposit_link 인자 JSON 이 잘못됐습니다."); }
+    return compact(await depositLink(env, a || {}));
+  }
   if (section.startsWith("_deposit_add:")) {
     let a; try { a = JSON.parse(section.slice(13)); } catch { return errContent("_deposit_add 인자 JSON 이 잘못됐습니다."); }
     return compact(await depositAdd(env, a || {}));
@@ -1103,6 +1109,37 @@ function depQueryMatcher(q) {
   if (/^[ㄱ-ㅎ\s]{2,}$/.test(bare)) { const cho = bare.replace(/\s+/g, ""); return (txt) => toChosung(txt).includes(cho); }
   const toks = bare.split(/\s+/).filter(Boolean), tn = toks.map(searchNorm), tb = toks.map(searchBare);
   return (txt) => { const n = searchNorm(txt), b = searchBare(txt); return tn.every((t, i) => (t && n.includes(t)) || (tb[i] && b.includes(tb[i]))); };
+}
+
+async function depositLink(env, a) {
+  const S = env.FIREBASE_DB_SECRET;
+  const list = (Array.isArray(a.items) ? a.items : [a]).slice(0, 20).map((x) => ({ id: String(x.id || ""), client: String(x.client || "").trim(), entryId: Number(x.entryId) }));
+  if (list.some((x) => !x.id || !x.client || !(x.entryId > 0))) return { 오류: "id·client·entryId 가 모두 필요합니다" };
+  // 원장 기록이 정말 있는지, 그 금액이 입금과 같은지 먼저 확인
+  const ar = (await fbGet("/frw/clientAR", S)) || {};
+  const entryOf = (c, eid) => asList(ar[c] && ar[c].entries).find((e) => Number(e && e.id) === eid);
+  for (const x of list) if (!entryOf(x.client, x.entryId)) return { 오류: `원장에 ${x.client} #${x.entryId} 기록이 없습니다` };
+  const now = Date.now();
+  const res = [];
+  const plan = await safeSectionWrite("bankDeposits", (d) => {
+    const items = Array.isArray(d && d.items) ? d.items : asList(d && d.items);
+    const patch = {}; const touched = [];
+    for (const x of list) {
+      const idx = items.findIndex((it) => it && String(it.id) === x.id);
+      if (idx < 0) { res.push({ id: x.id, ok: false, 이유: "입금내역에 없음" }); continue; }
+      const it = items[idx];
+      const e = entryOf(x.client, x.entryId);
+      if (Math.round(Number(it.amount)) !== Math.round(Number(e.amount))) { res.push({ id: x.id, ok: false, 이유: `금액이 다름(입금 ${it.amount} / 원장 ${e.amount})` }); continue; }
+      if (it.status === "done") { res.push({ id: x.id, ok: true, 이유: "이미 처리완료" }); continue; }
+      Object.assign(patch, { [`items/${idx}/status`]: "done", [`items/${idx}/client`]: x.client, [`items/${idx}/link`]: { kind: "ar", entryId: x.entryId }, [`items/${idx}/doneAt`]: now });
+      touched.push(idx);
+      res.push({ id: x.id, ok: true, 날짜: it.date, 금액: it.amount, 거래처: x.client, 원장기록: x.entryId });
+    }
+    if (!touched.length) return { done: true };
+    return { patch, apply: (dd) => { const c = JSON.parse(JSON.stringify(dd)); touched.forEach((i) => { const l = list.find((x) => String(c.items[i].id) === x.id); Object.assign(c.items[i], { status: "done", client: l.client, link: { kind: "ar", entryId: l.entryId }, doneAt: now }); }); return c; },
+      check: (after) => touched.every((i) => after && after.items && after.items[i] && after.items[i].status === "done") };
+  }, env);
+  return { 결과: res, 안내: plan && plan.done ? "바꿀 것이 없었습니다" : "앱 입금내역에서 처리완료(초록)로 보입니다(몇 초 안에 다른 기기에도 반영)" };
 }
 
 async function depositAdd(env, a) {
