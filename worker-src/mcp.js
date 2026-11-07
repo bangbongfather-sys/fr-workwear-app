@@ -1,5 +1,6 @@
 import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecountRows } from "./ecount.js";
 import { salesSummary, salesImport, salesCadence } from "./sales.js";
+import { notionTodoCreate, notionTodoPatch, notionTodoArchive, notionTodoConfigured } from "./notiontodo.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
@@ -187,6 +188,41 @@ const TOOLS = [
         },
       },
       required: ["id", "paidDate"],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "add_todo",
+    description:
+      "회사앱 「일정」에 일정 1건을 추가합니다. id·createdAt 은 지금 시각(Date.now())으로 만들고 done=false 로 넣습니다. 앱에서 일정을 추가할 때처럼 노션 「To Do List」 페이지도 만들어 notionPageId 를 붙입니다(노션 미설정·실패여도 일정은 저장). 같은 token 으로 다시 요청하면 한 번만 반영됩니다. 회사앱 동기화 안전장치(_revs 증가·_sigs 갱신)를 지킵니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "일정 날짜(시작일) YYYY-MM-DD — 필수" },
+        text: { type: "string", description: "일정 내용 — 필수" },
+        memo: { type: "string", description: "메모 (선택)" },
+        endDate: { type: "string", description: "끝나는 날 YYYY-MM-DD (선택, 여러 날 일정). 시작일보다 앞이면 서로 바꿉니다" },
+        category: { type: "string", description: "분류 (선택)" },
+        token: { type: "string", description: "중복 방지용 1회 토큰 (같은 토큰 재요청은 한 번만 반영)" },
+      },
+      required: ["date", "text"],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: "update_todo",
+    description:
+      "회사앱 「일정」의 일정 1건을 고칩니다. id 로 대상을 정하고 done·text·memo·date 중 넘긴 필드만 바꾸며 나머지는 그대로 둡니다. 노션 페이지가 연결돼 있으면 앱처럼 노션도 같이 고칩니다(완료·내용·날짜). id 는 get_business_section(section:\"_todos\") 또는 \"_cal:YYYY-MM\" 으로 확인하세요. 회사앱 동기화 안전장치(_revs 증가·_sigs 갱신)를 지킵니다.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: ["string", "number"], description: "일정 id — 필수" },
+        done: { type: "boolean", description: "완료 여부 (선택)" },
+        text: { type: "string", description: "일정 내용 (선택)" },
+        memo: { type: "string", description: "메모 (선택, 빈 문자열이면 메모를 지움)" },
+        date: { type: "string", description: "날짜 YYYY-MM-DD (선택)" },
+      },
+      required: ["id"],
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
@@ -463,7 +499,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-intake-redate-group", note: "매입 현황 매입일 묶음 날짜 한 번에 바꾸기" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-todo-tools", note: "커넥터 일정 쓰기 도구 add_todo·update_todo (노션 같은 경로)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -618,6 +654,14 @@ async function toolGetSection(args, env) {
   if (section.startsWith("_fetch:")) return compact(await webRead(section.slice(7)));
   // 깊은 리서치: Anthropic API(웹 검색 도구 포함)를 서버가 직접 부른다 — 유료, ANTHROPIC_API_KEY 필요
   if (section.startsWith("_research:")) return compact(await claudeResearch(section.slice(10), env));
+  // 일정 쓰기 — add_todo·update_todo 를 아직 못 볼 때의 우회, _todo_delete 는 정리용(앱의 일정 삭제와 같음: 노션 페이지 보관)
+  if (section.startsWith("_todo_add:") || section.startsWith("_todo_update:") || section.startsWith("_todo_delete:")) {
+    const cut = section.indexOf(":") + 1;
+    let a; try { a = JSON.parse(section.slice(cut)); } catch { return errContent("일정 인자 JSON 이 잘못됐습니다."); }
+    if (section.startsWith("_todo_add:")) return await toolAddTodo(a || {}, env);
+    if (section.startsWith("_todo_update:")) return await toolUpdateTodo(a || {}, env);
+    return await toolDeleteTodo(a || {}, env);
+  }
   if (section.startsWith("_intake:")) {
     let a; try { a = JSON.parse(section.slice(8)); } catch { return errContent("_intake 인자 JSON 이 잘못됐습니다."); }
     return await toolRecordIntake(a || {}, env);
@@ -1889,6 +1933,118 @@ async function toolPoSave(a, env) {
 }
 
 // 세무 탭의 납부일만 기록/해제한다. 유일한 쓰기 도구이므로 대상과 형식을 엄격히 검증한다.
+// ── 일정(todos) 쓰기 ──
+// 앱의 일정 한 건 모양: { id, date, endDate, text, memo?, category?, done, createdAt, notionPageId? }
+const todoList = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
+const todoWithRow = (d, key, row) => { if (Array.isArray(d) || d == null) { const a = [...(d || [])]; a[Number(key)] = row; return a; } return { ...d, [key]: row }; };
+const todoBrief = (r) => ({ id: r.id, 날짜: r.date, 끝: r.endDate || "", 내용: r.text, 메모: r.memo || "", 분류: r.category || "", 완료: !!r.done, 노션: r.notionPageId ? "연결됨" : "없음" });
+
+// 노션 페이지 id 를 일정에 붙인다 (앱: notionCreate 후 setTodos(... notionPageId))
+async function attachTodoNotion(env, id, pageId) {
+  await safeSectionWrite("todos", (d) => {
+    const f = findRecordKey(d, id);
+    if (!f || f.record.notionPageId === pageId) return { done: true };
+    const row = { ...f.record, notionPageId: pageId };
+    return { patch: { [f.key]: row }, apply: (dd) => todoWithRow(dd, f.key, row), check: (dd) => { const g = findRecordKey(dd, id); return !!g && g.record.notionPageId === pageId; } };
+  }, env);
+}
+
+async function toolAddTodo(args, env) {
+  let date = String(args.date || "").trim(), endDate = String(args.endDate || "").trim();
+  const text = String(args.text || "").trim();
+  if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}" (YYYY-MM-DD, 필수)`);
+  if (!text) return errContent("text(일정 내용)가 필요합니다.");
+  if (endDate && !isRealDate(endDate)) return errContent(`endDate 가 잘못됐습니다: "${endDate}"`);
+  if (endDate && endDate < date) { const t = date; date = endDate; endDate = t; }   // 앱과 같이: 끝이 앞이면 바꾼다
+  if (endDate === date) endDate = "";
+  const token = args.token != null && String(args.token).trim() ? String(args.token).trim().slice(0, 64) : null;
+  const memo = args.memo != null ? String(args.memo).slice(0, 4000) : "";
+  const category = args.category != null ? String(args.category).slice(0, 40) : "";
+  const hasToken = (d) => token && todoList(d).find(([, r]) => r.campusToken === token);
+  let row = null;
+  const plan = await safeSectionWrite("todos", (d) => {
+    const dup = hasToken(d);
+    if (dup) return { done: true, result: { 결과: "이미 반영됨 (같은 token)", 일정: todoBrief(dup[1]) } };
+    const ids = new Set(todoList(d).map(([, r]) => String(r.id)));
+    let id = Date.now(); while (ids.has(String(id))) id++;
+    const key = Array.isArray(d) || d == null ? String(Array.isArray(d) ? d.length : 0) : `c${id}`;
+    row = { id, date, endDate, text, ...(memo ? { memo } : {}), ...(category ? { category } : {}), done: false, createdAt: id, ...(token ? { campusToken: token } : {}) };
+    return { patch: { [key]: row }, apply: (dd) => todoWithRow(dd, key, row), check: (dd) => !!findRecordKey(dd, id), result: null };
+  }, env);
+  if (plan.isError) return plan;
+  if (plan.done) return textContent(plan.result);
+  // 앱과 같은 경로로 노션 페이지 생성 → notionPageId 붙이기 (실패해도 일정은 이미 저장됨)
+  let notion = "미설정(NOTION_TOKEN·NOTION_TODO_DSID 없음)";
+  if (notionTodoConfigured(env)) {
+    try {
+      const r = await notionTodoCreate(env, { text: row.text, date: row.date, endDate: row.endDate || null, done: false });
+      if (r.ok && r.notionPageId) { await attachTodoNotion(env, row.id, r.notionPageId); row.notionPageId = r.notionPageId; notion = "페이지 생성·연결"; }
+      else notion = `실패: ${r.error || "알 수 없음"}`;
+    } catch (e) { notion = `실패: ${e && e.message}`; }
+  }
+  return textContent({ 결과: "일정 추가", 일정: todoBrief(row), 노션: notion });
+}
+
+async function toolUpdateTodo(args, env) {
+  const id = args.id;
+  if (id === undefined || id === null || String(id).trim() === "") return errContent("id 가 필요합니다. get_business_section(section:\"_todos\")로 먼저 확인하세요.");
+  const ch = {};
+  if (args.done !== undefined) ch.done = !!args.done;
+  if (args.text !== undefined) { const t = String(args.text).trim(); if (!t) return errContent("text 를 빈 값으로 바꿀 수 없습니다."); ch.text = t; }
+  if (args.memo !== undefined) ch.memo = String(args.memo).slice(0, 4000);
+  if (args.date !== undefined) { const dt = String(args.date).trim(); if (!isRealDate(dt)) return errContent(`date 가 잘못됐습니다: "${dt}"`); ch.date = dt; }
+  if (!Object.keys(ch).length) return errContent("바꿀 필드(done·text·memo·date) 중 하나 이상을 넘겨 주세요.");
+  let before = null, after = null;
+  const plan = await safeSectionWrite("todos", (d) => {
+    const f = findRecordKey(d, id);
+    if (!f) return errContent(`일정에 id=${id} 인 건이 없습니다.`);
+    before = f.record;
+    const row = { ...f.record, ...ch };
+    // 날짜만 옮겼는데 끝나는 날이 새 날짜보다 앞이 되면 한 날 일정으로
+    if (ch.date && row.endDate && row.endDate < row.date) row.endDate = "";
+    if (Object.keys(ch).every((k) => JSON.stringify(f.record[k] ?? (k === "memo" ? "" : undefined)) === JSON.stringify(row[k]))) { after = f.record; return { done: true }; }
+    after = row;
+    return { patch: { [f.key]: row }, apply: (dd) => todoWithRow(dd, f.key, row), check: (dd) => { const g = findRecordKey(dd, id); return !!g && Object.keys(ch).every((k) => JSON.stringify(g.record[k]) === JSON.stringify(row[k])); } };
+  }, env);
+  if (plan.isError) return plan;
+  if (plan.done) return textContent({ 결과: "변경 없음 (이미 같은 값)", 일정: todoBrief(after || before) });
+  // 앱과 같이 노션도 고친다 (완료·내용·날짜 — 메모는 노션 속성이 없어 앱처럼 보내지 않음)
+  let notion = after.notionPageId ? "변경할 노션 속성 없음" : "연결된 페이지 없음";
+  if (after.notionPageId) {
+    const nb = {};
+    if (ch.done !== undefined) nb.done = after.done;
+    if (ch.text !== undefined) nb.text = after.text;
+    if (ch.date !== undefined) { nb.date = after.date; nb.endDate = after.endDate || null; }
+    if (Object.keys(nb).length) {
+      try { const r = await notionTodoPatch(env, after.notionPageId, nb); notion = r.ok ? "노션도 수정" : `노션 수정 실패: ${r.error}`; }
+      catch (e) { notion = `노션 수정 실패: ${e && e.message}`; }
+    }
+  }
+  return textContent({ 결과: "일정 수정", 바꾼_필드: Object.keys(ch), 이전: todoBrief(before), 이후: todoBrief(after), 노션: notion });
+}
+
+// 정리용 삭제 (앱의 일정 삭제와 같음: 일정 지우고 연결된 노션 페이지는 보관)
+async function toolDeleteTodo(args, env) {
+  const id = args.id;
+  if (id === undefined || id === null || String(id).trim() === "") return errContent("id 가 필요합니다.");
+  let gone = null;
+  const plan = await safeSectionWrite("todos", (d) => {
+    const f = findRecordKey(d, id);
+    if (!f) return { done: true };
+    gone = f.record;
+    const next = Array.isArray(d) ? d.filter((r) => !(r && String(r.id) === String(id))) : Object.fromEntries(Object.entries(d || {}).filter(([, r]) => !(r && String(r.id) === String(id))));
+    return { replace: true, patch: {}, apply: () => next, check: (dd) => !findRecordKey(dd, id) };
+  }, env);
+  if (plan.isError) return plan;
+  if (!gone) return textContent({ 결과: "이미 없음", id });
+  let notion = "연결된 페이지 없음";
+  if (gone.notionPageId) {
+    try { const r = await notionTodoArchive(env, gone.notionPageId); notion = r.ok ? "노션 페이지 보관" : `노션 보관 실패: ${r.error}`; }
+    catch (e) { notion = `노션 보관 실패: ${e && e.message}`; }
+  }
+  return textContent({ 결과: "일정 삭제", 일정: todoBrief(gone), 노션: notion });
+}
+
 async function toolMarkTaxPaid(args, env) {
   const id = args.id;
   if (id === undefined || id === null || String(id).trim() === "") {
@@ -1951,6 +2107,8 @@ async function callTool(params, env) {
     if (name === "get_campus_snapshot") return textContent(await buildCampusSnapshot(env));
     if (name === "record_intake") return await toolRecordIntake(args, env);
     if (name === "mark_tax_paid") return await toolMarkTaxPaid(args, env);
+    if (name === "add_todo") return await toolAddTodo(args, env);
+    if (name === "update_todo") return await toolUpdateTodo(args, env);
     if (name === "list_backups") return await toolListBackups(args, env);
     if (name === "get_backup_section") return await toolGetBackupSection(args, env);
     return errContent(`알 수 없는 도구: ${name}`);
