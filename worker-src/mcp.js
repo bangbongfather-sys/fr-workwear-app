@@ -16,7 +16,7 @@ import { notionTodoCreate, notionTodoPatch, notionTodoArchive, notionTodoConfigu
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 const SERVER_NAME = "nj-safety";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = "1.1.0";   // 도구가 늘거나 바뀌면 올린다 (claude.ai 커넥터가 새 목록을 받아 가게)
 const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 
 const ALLOWED_SECTIONS = [
@@ -499,7 +499,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-todo-tools", note: "커넥터 일정 쓰기 도구 add_todo·update_todo (노션 같은 경로)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-todo-tools-v110", note: "커넥터 일정 쓰기 도구 add_todo·update_todo — 서버 버전 1.1.0" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
