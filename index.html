@@ -2418,6 +2418,57 @@ function planPush({ sections, knownRevs, serverRevs, revsOk, mySigs, serverSigs 
   return { push, conflict, shrink, retry: false };
 }
 
+// ── 충돌 때 자동 병합 (입금내역 · 미수금 원장) ──
+// 두 기기가 같은 섹션을 거의 동시에 바꾸면 늦게 저장하는 쪽은 「충돌」로 막히고, 새로고침하면 그 기기 변경이 버려졌다.
+// 입금 처리는 입금내역(처리완료)과 미수금 원장(입금 기록)을 함께 바꾸는데, 한쪽만 버려지면 원장엔 입금이 있는데
+// 입금내역은 미처리로 남는다(2026-10-30 성목실업·선인안전산업). 그래서 이 두 섹션은 버리지 않고 합친다:
+// 기준(base) = 이 기기가 마지막으로 서버와 맞춘 값. 기준 대비 이 기기에서 바뀐 것(추가·수정·삭제)만 서버 최신본 위에 얹는다.
+const MERGE_SECTIONS = ["bankDeposits", "clientAR"];
+function mergeById3(base, mine, theirs, keyOf = (x) => x && x.id) {
+  const bm = new Map(), mm = new Map();
+  (base || []).forEach(x => { const k = keyOf(x); if (k != null) bm.set(String(k), x); });
+  (mine || []).forEach(x => { const k = keyOf(x); if (k != null) mm.set(String(k), x); });
+  const out = new Map();
+  (theirs || []).forEach(x => { const k = keyOf(x); if (k != null) out.set(String(k), x); });
+  for (const [k, x] of mm) {
+    if (!bm.has(k)) out.set(k, x);                                              // 이 기기에서 새로 생김
+    else if (JSON.stringify(x) !== JSON.stringify(bm.get(k))) out.set(k, x);    // 이 기기에서 고침 → 이 기기 것
+  }
+  for (const k of bm.keys()) if (!mm.has(k)) out.delete(k);                    // 이 기기에서 지움
+  return [...out.values()];
+}
+function mergeBankDeposits3(base, mine, theirs) {
+  const B = base || {}, M = mine || {}, T = theirs || {};
+  const gone = [...new Set([...(T.gone || []), ...(M.gone || [])])];
+  const goneSet = new Set(gone);
+  let items = mergeById3(B.items, M.items, T.items).filter(x => !(x && x.ext && goneSet.has(x.ext)));
+  // 두 기기가 같은 은행 문자를 각자 합치면 번호만 다른 같은 입금이 생긴다 → ext 가 같으면 하나만(처리완료 > 서버 것)
+  const theirIds = new Set((T.items || []).map(x => String(x && x.id)));
+  const best = new Map();
+  for (const x of items) {
+    if (!x || !x.ext) continue;
+    const cur = best.get(x.ext);
+    const score = (y) => (y.status === "done" ? 4 : 0) + (theirIds.has(String(y.id)) ? 1 : 0);
+    if (!cur || score(x) > score(cur)) best.set(x.ext, x);
+  }
+  items = items.filter(x => !x || !x.ext || best.get(x.ext) === x);
+  items.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || ((a.id || 0) - (b.id || 0)));
+  return { ...T, ...M, items, gone, nameMap: { ...(T.nameMap || {}), ...(M.nameMap || {}) },
+    ...((T.gapOk || M.gapOk) ? { gapOk: [...new Set([...(T.gapOk || []), ...(M.gapOk || [])])].slice(-300) } : {}) };
+}
+function mergeClientAR3(base, mine, theirs) {
+  const B = base || {}, M = mine || {}, T = theirs || {};
+  const out = {};
+  for (const c of new Set([...Object.keys(T), ...Object.keys(M), ...Object.keys(B)])) {
+    if (B[c] && !M[c]) continue;                                                // 이 기기에서 거래처째 지움
+    const entries = mergeById3((B[c] || {}).entries, (M[c] || {}).entries, (T[c] || {}).entries);
+    if (!T[c] && !M[c]) continue;
+    out[c] = { ...(T[c] || {}), ...(M[c] || {}), entries };
+  }
+  return out;
+}
+const mergeSection3 = (s, base, mine, theirs) => s === "bankDeposits" ? mergeBankDeposits3(base, mine, theirs) : s === "clientAR" ? mergeClientAR3(base, mine, theirs) : mine;
+
 // 미동기화 상태로 다시 열렸을 때, 어느 섹션이 "내 옛 복사본"인지 가려낸다.
 // dirty 로 표시하던 시점의 서버 rev 보다 지금 서버 rev 가 앞서 있으면 다른 기기가 먼저
 // 바꾼 것이므로, 내 것으로 덮지 말고 서버 것을 받아야 한다.
@@ -23954,6 +24005,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
   const dirtySections = useRef(new Set()); // 마지막 동기화 이후 로컬에서 바뀐 섹션 key 집합 (이것만 푸시)
   const prevSnapshot = useRef(null); // 직전 렌더의 섹션별 값(참조) — 무엇이 바뀌었는지 참조 비교로 판별
   const latestSnapshot = useRef(null); // 항상 "가장 최신"의 섹션별 값 — 저장 페이로드는 반드시 이걸로 만든다
+  const mergeBase = useRef({});        // 충돌 자동 병합 기준 — 입금내역·미수금 원장을 이 기기가 마지막으로 서버와 맞춘 값
   const savingRef = useRef(false);     // 클라우드 저장 in-flight 여부 (동시 저장 경합 방지)
   const resaveRef = useRef(false);     // 저장 중에 또 바뀜 → 저장 끝나면 한 번 더 돌린다
   // dirty 플래그와 dirty 섹션 목록을 localStorage에 함께 보존 → 오프라인 작업 후 앱을 껐다 켜도
@@ -24085,7 +24137,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.meetings !== undefined && Array.isArray(d.meetings)) setMeetings(d.meetings);
     if (d.recurringSchedules !== undefined) setRecurringSchedules(d.recurringSchedules);
     if (d.ledgers !== undefined) setLedgers(d.ledgers);
-    if (d.clientAR !== undefined) setClientAR(d.clientAR);
+    if (d.clientAR !== undefined) { setClientAR(d.clientAR); mergeBase.current.clientAR = JSON.parse(JSON.stringify(d.clientAR || {})); }
     if (d.accounts !== undefined) setAccounts(d.accounts);
     if (d.investments !== undefined) setInvestments(d.investments);
     if (d.cashFlows !== undefined) setCashFlows(d.cashFlows);
@@ -24095,7 +24147,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.purchaseOrders !== undefined) { setPurchaseOrders(d.purchaseOrders); save("frw_purchase_orders", d.purchaseOrders); }
     if (d.fabricIntakes !== undefined) setFabricIntakes(d.fabricIntakes);
     if (d.payables !== undefined && d.payables && typeof d.payables === "object") setPayables(d.payables);
-    if (d.bankDeposits !== undefined && d.bankDeposits && typeof d.bankDeposits === "object") setBankDeposits({ ...d.bankDeposits, items: d.bankDeposits.items || [], nameMap: d.bankDeposits.nameMap || {} });
+    if (d.bankDeposits !== undefined && d.bankDeposits && typeof d.bankDeposits === "object") {
+      const bd = { ...d.bankDeposits, items: d.bankDeposits.items || [], nameMap: d.bankDeposits.nameMap || {} };
+      setBankDeposits(bd); mergeBase.current.bankDeposits = JSON.parse(JSON.stringify(bd));
+    }
     if (d.prodTrash !== undefined && Array.isArray(d.prodTrash)) setProdTrash(d.prodTrash);
     if (d.companySeal !== undefined && typeof d.companySeal === "string") setCompanySeal(d.companySeal);
     if (d.monthlySales !== undefined) setMonthlySales(d.monthlySales);
@@ -24331,6 +24386,20 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     // 사고 수준으로 데이터가 줄어드는 저장 — 사람에게 묻는다. 2026-08-28 유실은 이 지점에서 막혔을 것이다.
     const pushable = [...plan.push];
     const conflicts = [...plan.conflict];
+    // 입금내역·미수금 원장 충돌은 버리지 않고 합친다 (기준값이 있을 때만 — 없으면 예전처럼 충돌 표시)
+    const mergedVals = {};
+    for (const s of MERGE_SECTIONS) {
+      if (!conflicts.includes(s) || !mergeBase.current[s] || !serverRevs || serverRevs[s] == null) continue;
+      try {
+        const r = await fetch(`${FB_URL}/section/${s}`, { cache: "no-store" });
+        if (!r.ok) continue;
+        const raw = await r.json();
+        const theirs = raw ? fbUnescapeKeys(raw) : (s === "clientAR" ? {} : { items: [] });
+        mergedVals[s] = mergeSection3(s, mergeBase.current[s], cur[s], theirs);
+        conflicts.splice(conflicts.indexOf(s), 1);
+        pushable.push(s);
+      } catch { /* 못 받으면 예전처럼 충돌로 둔다 */ }
+    }
     for (const s of plan.shrink) {
       const my = mySigs[s] || { n: 0, m: 0 }, srv = (serverSigs && serverSigs[s]) || { n: 0, m: 0 };
       const label = SECTION_LABELS[s] || s;
@@ -24356,8 +24425,9 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     // Firebase update는 슬래시 키를 중첩 경로로 처리 → 다른 섹션 rev는 건드리지 않음.
     const payload = {}, bumped = {}, pushed = {};
     for (const s of pushable) {
-      payload[s] = cur[s];
-      pushed[s] = cur[s];   // 규칙 2 판정용 — 이 값 그대로면 dirty 해제, 바뀌었으면 유지
+      const val = mergedVals[s] !== undefined ? mergedVals[s] : cur[s];
+      payload[s] = val;
+      pushed[s] = val;   // 규칙 2 판정용 — 이 값 그대로면 dirty 해제, 바뀌었으면 유지
       const base = (serverRevs && serverRevs[s] != null) ? serverRevs[s] : (knownRevs.current[s] || 0);
       bumped[s] = base + 1;
       payload[`_revs/${s}`] = base + 1;
@@ -24369,8 +24439,13 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       savingRef.current = false;
       for (const s of pushable) {
         knownRevs.current[s] = bumped[s];
+        if (MERGE_SECTIONS.includes(s)) mergeBase.current[s] = JSON.parse(JSON.stringify(pushed[s] || null));
         if ((latestSnapshot.current || {})[s] === pushed[s]) dirtySections.current.delete(s);
       }
+      // 합친 값을 화면에도 반영 (저장한 값과 같아질 때까지 한 번 더 저장될 수 있다 — rev 가 맞아 그대로 통과)
+      if (mergedVals.bankDeposits !== undefined) setBankDeposits(mergedVals.bankDeposits);
+      if (mergedVals.clientAR !== undefined) setClientAR(mergedVals.clientAR);
+      if (Object.keys(mergedVals).length) showToast(`${Object.keys(mergedVals).map(s => SECTION_LABELS[s] || s).join("·")} — 다른 기기에서 바뀐 내용과 이 기기 변경을 합쳐 저장했습니다`, "success");
       cloudBackupDaily(cur); // 백업은 항상 전체 로컬 스냅샷으로 (부분 페이로드 아님)
       // 저장하는 사이 또 입력이 들어왔으면 바로 한 번 더 (짧게 묶어서).
       if (dirtySections.current.size > 0 || resaveRef.current) {
