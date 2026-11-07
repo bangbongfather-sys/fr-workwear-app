@@ -10297,7 +10297,7 @@ function BankBalanceCheck({ biz, deposits, okKeys = [], onOk, onImport }) {
   );
   if (!missIn.length && !missOut.length) return (
     <div className="bal-check bal-quiet">
-      <Icon name="check" size={14}/><span><b>잔액 점검</b> · {res.since ? `${Number(res.since.slice(5, 7))}/${Number(res.since.slice(8))}부터 ` : ""}문자 {res.count}통 잔액이 모두 이어져요{filled.length ? ` (빠졌던 입금 ${filled.length}건은 엑셀로 채워짐)` : ""}.</span>
+      <Icon name="check" size={14}/><span><b>잔액 점검</b> · {res.since ? `${Number(res.since.slice(5, 7))}/${Number(res.since.slice(8))}부터 ` : ""}문자 {res.count}통 잔액이 {res.gaps.some(g => ok.has(g.key)) ? `직접 확인한 ${res.gaps.filter(g => ok.has(g.key)).length}군데 빼고 ` : "모두 "}이어져요{filled.length ? ` (빠졌던 입금 ${filled.length}건은 엑셀로 채워짐)` : ""}.</span>
     </div>
   );
   const shown = showAll ? missIn : missIn.slice(0, 5);
@@ -10441,7 +10441,7 @@ function BankSmsCard({ biz }) {
           <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {step(1, <>{cfg.enabled ? "위 「주소 복사」를 누릅니다." : "「켜기」를 누르고 나오는 주소를 복사합니다."} 이 주소는 비밀번호와 같습니다. 남에게 보내지 마세요.</>)}
             {step(2, <>아이폰 <b>단축어</b> 앱 → 아래 <b>자동화</b> → <b>+</b> → <b>메시지</b></>)}
-            {step(3, <><b>메시지 포함</b>에 문자에 보이는 <b>회사 통장 번호 앞자리</b>(예: <code>123456</code>)를 입력 — 문자에 앞자리가 안 보이면 <code>입금</code> → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음</>)}
+            {step(3, <><b>메시지 포함</b>에 문자에 보이는 <b>회사 통장 번호 앞자리</b>(예: <code>123456</code>)를 입력 — 문자에 앞자리가 안 보이면 <code>입금</code> → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음<br/><span style={{ fontSize: 11.5, color: "var(--text3)" }}>통장 번호 앞자리로 하면 출금 문자도 들어와 「잔액 점검」(빠진 입금 찾기)이 더 정확해져요. 출금은 입금내역에 넣지 않고 잔액 계산에만 써요.</span></>)}
             {step(4, <><b>새로운 빈 자동화</b> → 동작 검색에서 <b>URL 콘텐츠 가져오기</b> 추가 → URL 칸에 복사한 주소 붙여 넣기</>)}
             {step(5, <>그 동작의 <b>›</b>를 눌러 방법 <b>POST</b>, 본문 요청 <b>JSON</b> → 필드 추가 <b>텍스트</b>: 키 <code>text</code>, 값은 키보드 위 변수에서 <b>단축어 입력</b>(메시지 내용) 선택 → 완료</>)}
             {step(6, <>KB 입출금 알림이 <b>문자(SMS)</b>로 오는지 확인합니다. 앱 푸시·카카오톡 알림은 단축어가 읽지 못합니다. 다음 입금 문자부터 여기 입금내역에 「문자」로 들어옵니다.</>)}
