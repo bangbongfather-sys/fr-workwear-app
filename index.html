@@ -1039,6 +1039,9 @@
     .bal-btn-main { border: none; background: var(--accent); color: #fff; }
     .bal-more { align-self: flex-start; border: none; background: transparent; color: var(--text2); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; padding: 0; }
     .bal-foot { font-size: 11.5px; color: var(--text3); line-height: 1.55; }
+    .slip-widen { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--text3); }
+    .slip-widen button { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text2); font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .slip-widen button.on { border-color: transparent; background: var(--accent); color: #fff; }
     .vat-tag { margin-left: 8px; padding: 2px 8px; border-radius: 100px; font-size: 10.5px; font-weight: 700; color: var(--text2); background: var(--surface2); border: 1px solid var(--border); white-space: nowrap; }
     /* 판매 현황 전표 — 고른 전표 합계 막대. 목록을 내려도 화면 아래에 붙어 따라온다(휴대폰은 아래 메뉴 위로) */
     .slip-pickbar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; align-items: center; gap: 12px;
@@ -17029,7 +17032,8 @@ const SALES_CHIPS = [{ k: "today", label: "오늘" }, { k: "7", label: "7일" },
 const SALES_SUBTABS = { summary: { label: "요약", icon: "dashboard" }, calendar: { label: "달력", icon: "calendar" }, clients: { label: "거래처", icon: "clients" }, slips: { label: "전표", icon: "document" }, radar: { label: "재주문", icon: "radar" } };
 function salesRangeOf(mode, month, custom) {
   const today = kstTodayYmd();
-  if (mode === "month") return [`${month}-01`, ymMonthEnd(month)];
+  // 「지난 달」(prev)도 그 달 1일~말일 — 예전엔 빠져 있어서 「기간 지정」에 마지막으로 넣은 기간이 대신 쓰였다
+  if (mode === "month" || mode === "prev") return [`${month}-01`, ymMonthEnd(month)];
   if (mode === "today") return [today, today];
   if (mode === "7") return [addDaysYmd(today, -6), today];
   if (mode === "year") return [`${today.slice(0, 4)}-01-01`, `${today.slice(0, 4)}-12-31`];
@@ -18425,6 +18429,16 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
             <input type="text" value={slipQ} onChange={e => { setSlipQ(e.target.value); setSlipLimit(60); }} placeholder="거래처·품목 검색" aria-label="전표 검색" style={{ border: "none", background: "transparent", outline: "none", fontSize: 12.5, color: "var(--text1)", width: 150, fontFamily: "inherit" }}/>
             {slipQ ? <button type="button" onClick={() => setSlipQ("")} aria-label="검색 지우기" style={{ border: "none", background: "transparent", color: "var(--text3)", cursor: "pointer", padding: 0, display: "inline-flex" }}><Icon name="close" size={13}/></button> : null}
           </label>
+          {/* 검색 중에는 검색어 그대로 기간만 넓혀 보기 — 「기간 지정」을 따로 열지 않아도 된다 */}
+          {slipQ.trim() ? (
+            <span className="slip-widen">
+              <span>기간 넓혀 찾기</span>
+              {[["prev", "지난 달"], ["3m", "최근 3개월"], ["year", "올해"]].map(([k, label]) => {
+                const on = k === "3m" ? (mode === "custom" && from === addDaysYmd(today, -89) && to === today) : k === "prev" ? (isMonth && month === ymShift(today.slice(0, 7), -1)) : mode === k;
+                return <button key={k} type="button" className={on ? "on" : ""} onClick={() => { if (k === "3m") pickRangeTo(addDaysYmd(today, -89), today); else pickMode(k); setPicker(null); }}>{label}</button>;
+              })}
+            </span>
+          ) : null}
         </div>
         {minus.length > 0 && !slipQ.trim() && <div style={{ fontSize: 11.5, color: "var(--text3)", marginBottom: 6 }}>마이너스 전표 {minus.length}건 ({won(minus.reduce((a, x) => a + x.total, 0))}) — 반품·취소로 보여요. 합계에 그대로 빼서 계산돼요.</div>}
         {data.slipsTruncated && <div style={{ fontSize: 11.5, color: "var(--warning-text)", marginBottom: 6 }}>전표가 너무 많아 앞 4,000건만 보여요. 기간을 좁혀 주세요.</div>}
