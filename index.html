@@ -1044,6 +1044,43 @@
     .slip-widen button { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text2); font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
     .slip-widen button.on { border-color: transparent; background: var(--accent); color: #fff; }
     .redate-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface2); }
+    /* 판매 현황 「일별 매출」 표 */
+    .daily-card { container-type: inline-size; }
+    .daily-seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--surface2); }
+    .daily-seg button { height: 28px; padding: 0 10px; border: none; border-radius: 7px; background: transparent; color: var(--text2); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    .daily-seg button.on { background: var(--surface); color: var(--text1); box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+    body.glass .daily-seg button.on { background: rgba(255,255,255,0.92); color: #15161a; }
+    .daily-btn { height: 34px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--border); background: transparent; color: var(--text2); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; }
+    .daily-head, .daily-row { display: grid; grid-template-columns: 118px minmax(0, 1fr) 64px 118px var(--daily-cmp, 0px); gap: 10px; align-items: center; }
+    .daily-card:has(.daily-c-cmp) { --daily-cmp: 150px; }
+    .daily-head { padding: 0 10px 6px; font-size: 11px; font-weight: 700; color: var(--text3); border-bottom: 1px solid var(--border); }
+    .daily-head > span:nth-child(n+3), .daily-row > span:nth-child(n+3) { text-align: right; }
+    .daily-row { width: 100%; padding: 7px 10px; border: none; border-bottom: 1px solid var(--divider); background: transparent; color: var(--text1); font-family: inherit; font-size: 13px; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
+    .daily-row:hover { background: var(--row-bg); }
+    .daily-row.on { background: rgba(219,107,46,0.12); }
+    .daily-row.zero { color: var(--text3); }
+    .daily-date { font-weight: 800; white-space: nowrap; }
+    .daily-tag { margin-left: 6px; padding: 1px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; color: #3182F6; background: rgba(49,130,246,0.1); }
+    .daily-tag.warn { color: var(--warning-text); background: var(--warning-bg); }
+    .daily-amt { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .daily-amt b { flex: 0 0 auto; min-width: 92px; text-align: right; }
+    .daily-bar { flex: 1 1 auto; height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+    .daily-bar > span { display: block; height: 100%; border-radius: 3px; background: #3182F6; }
+    .daily-row.on .daily-bar > span { background: #DB6B2E; }
+    .daily-c-count, .daily-c-acc { color: var(--text2); font-size: 12px; }
+    .daily-c-cmp { color: var(--text2); font-size: 12px; white-space: nowrap; }
+    .daily-c-cmp em { font-style: normal; font-weight: 700; margin-left: 6px; font-size: 11px; }
+    .daily-more { margin-top: 8px; width: 100%; padding: 9px 0; border: 1px solid var(--border); border-radius: 9px; background: transparent; color: var(--text2); font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+    /* 좁으면(휴대폰·세로 폴더블·서브창) 누적·비교 칸을 줄 아래로 */
+    @container (max-width: 620px) {
+      .daily-head, .daily-row { grid-template-columns: 96px minmax(0, 1fr) 52px; }
+      .daily-head .daily-c-acc, .daily-head .daily-c-cmp { display: none; }
+      .daily-row .daily-c-acc { display: none; }
+      .daily-row .daily-c-cmp { grid-column: 2 / 4; text-align: left !important; font-size: 11px; color: var(--text3); }
+      .daily-row .daily-c-cmp::before { content: "비교 "; }
+      .daily-row .daily-c-cmp:empty { display: none; }
+      .daily-amt b { min-width: 0; }
+    }
     .vat-tag { margin-left: 8px; padding: 2px 8px; border-radius: 100px; font-size: 10.5px; font-weight: 700; color: var(--text2); background: var(--surface2); border: 1px solid var(--border); white-space: nowrap; }
     /* 판매 현황 전표 — 고른 전표 합계 막대. 목록을 내려도 화면 아래에 붙어 따라온다(휴대폰은 아래 메뉴 위로) */
     .slip-pickbar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; align-items: center; gap: 12px;
@@ -17767,6 +17804,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   const openSlips = (q = "") => { setSlipQ(q); setSlipLimit(60); pickSub("slips"); try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch {} };
   const [allClients, setAllClients] = useViewState("sales.allClients", false);
   const [allProducts, setAllProducts] = useViewState("sales.allProducts", false);
+  const [dailyAll, setDailyAll] = useViewState("sales.dailyAll", false);   // 일별 매출 표 — 판매 없는 날도 보기
+  const [dailyLimit, setDailyLimit] = useState(31);
   const [preview, setPreview] = useState(null);
   const [parseErr, setParseErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -17997,6 +18036,19 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     return out;
   }, [data, prev, isMonth, monthlyBars, month, from, to, dayMap, cmpDayMap, cov.length]);
   const barMax = Math.max(1, ...bars.map(b => Math.max(b.total, b.cmp || 0)));
+  // 일별 매출 표 — 지정한 기간 안 하루하루 (막대가 월별로 바뀌는 긴 기간에도 날짜별). 누적·비교 기간 같은 날 포함
+  const dailyRows = React.useMemo(() => {
+    if (!data) return [];
+    const out = []; let acc = 0;
+    const end = to > today && !data.days.some(x => x.date > today) ? today : to;   // 앞으로 올 날은 선발행 전표가 있을 때만
+    for (let d = from; d <= end && out.length < 800; d = addDaysYmd(d, 1)) {
+      const rec = dayMap.get(d); const c = cmpDayMap.get(alignDate(d));
+      const total = rec ? rec.total : 0; acc += total;
+      const w = new Date(d + "T00:00:00Z").getUTCDay();
+      out.push({ d, total, count: rec ? rec.count : 0, acc, cmp: c ? c.total : 0, off: w === 0 || w === 6 || !!HR_HOLIDAYS[d], covered: isCovered(d) });
+    }
+    return out;
+  }, [data, prev, from, to, today, dayMap, cmpDayMap, cov.length]);
 
   const chip = (k, label, on, onClick) => (
     <button key={k} type="button" onClick={onClick}
@@ -18203,6 +18255,52 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
           </>
         )}
       </div>
+      {dailyRows.length > 0 && (() => {
+        const rows = dailyAll ? dailyRows : dailyRows.filter(r => r.total);
+        const shown = rows.slice(0, dailyLimit);
+        const mx = Math.max(1, ...rows.map(r => r.total));
+        const sold = dailyRows.filter(r => r.total).length;
+        const copyDaily = () => {
+          const head = ["날짜", "요일", "매출(부가세 포함)", "건수", "누적", ...(prevHas ? [`${prevLabel} 같은 날`] : [])].join("\t");
+          const lines = rows.map(r => [r.d, dowOf(r.d), r.total, r.count, r.acc, ...(prevHas ? [r.cmp] : [])].join("\t"));
+          try { navigator.clipboard.writeText([head, ...lines].join("\n")).then(() => showToast(`일별 매출 ${rows.length}일을 복사했어요 — 엑셀에 붙여 넣으면 칸이 나뉘어요`, "success"), () => showToast("복사하지 못했어요")); } catch { showToast("복사하지 못했어요"); }
+        };
+        return (
+          <div className="card daily-card">
+            <div className="section-header">
+              <span className="section-header-title"><Icon name="calendar" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>일별 매출
+                <span className="section-sub">— {md(from)}~{md(dailyRows[dailyRows.length - 1].d)} · 판매 있는 날 {sold}일 · 하루 평균 {manWon(t.total / Math.max(1, sold))}원</span></span>
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span className="daily-seg">
+                  <button type="button" className={!dailyAll ? "on" : ""} onClick={() => { setDailyAll(false); setDailyLimit(31); }}>판매 있는 날만</button>
+                  <button type="button" className={dailyAll ? "on" : ""} onClick={() => { setDailyAll(true); setDailyLimit(31); }}>모든 날</button>
+                </span>
+                <button type="button" className="daily-btn" onClick={copyDaily} title="엑셀에 붙여 넣을 수 있게 표로 복사"><Icon name="copy" size={13}/>복사</button>
+              </span>
+            </div>
+            <div className="daily-head">
+              <span>날짜</span><span style={{ textAlign: "right" }}>매출 <span style={{ fontWeight: 500 }}>(부가세 포함)</span></span><span className="daily-c-count">건수</span><span className="daily-c-acc">누적</span>{prevHas ? <span className="daily-c-cmp" title={`${prevLabel}의 같은 날`}>비교 · 같은 날</span> : null}
+            </div>
+            {shown.map(r => {
+              const sel = selDay === r.d; const diff = r.total - r.cmp;
+              return (
+                <button key={r.d} type="button" className={"daily-row" + (sel ? " on" : "") + (r.total ? "" : " zero")} onClick={() => setSelDay(sel ? null : r.d)} title="눌러서 그날 전표 보기">
+                  <span className="daily-date" style={{ color: r.d === today ? "#DB6B2E" : r.off ? "#F04452" : undefined }}>{md(r.d)} <span style={{ fontWeight: 600 }}>({dowOf(r.d)})</span>{r.d > today ? <span className="daily-tag">선발행</span> : !r.covered ? <span className="daily-tag warn">엑셀 없음</span> : null}</span>
+                  <span className="daily-amt">
+                    <b>{r.total ? fmt(r.total) : "—"}</b>
+                    <span className="daily-bar"><span style={{ width: `${r.total ? Math.max(2, r.total / mx * 100) : 0}%` }}/></span>
+                  </span>
+                  <span className="daily-c-count">{r.count ? `${fmt(r.count)}건` : ""}</span>
+                  <span className="daily-c-acc">{fmt(r.acc)}</span>
+                  {prevHas ? <span className="daily-c-cmp">{r.total || r.cmp ? <>{r.cmp ? fmt(r.cmp) : "—"}<em style={{ color: diff >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{diff >= 0 ? "▲" : "▼"}{manWon(Math.abs(diff))}</em></> : null}</span> : null}
+                </button>
+              );
+            })}
+            {rows.length > shown.length && <button type="button" className="daily-more" onClick={() => setDailyLimit(n => n + 62)}>{rows.length - shown.length}일 더 보기</button>}
+            {rows.length === 0 && <div style={{ fontSize: 12.5, color: "var(--text3)", padding: "8px 0" }}>이 기간에 판매가 없어요.</div>}
+          </div>
+        );
+      })()}
       {selDay && (
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>{dayPanel("")}</div>
       )}
