@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-dep-xls-match", note: "입금 엑셀 가져오기 — 이름 짝 먼저·시각까지 보고 같은 입금 판단(같은 분 두 건 누락 채우기)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-sms-multi", note: "은행 문자 여러 통 한꺼번에 와도 나눠 읽기 + 커넥터 입금 직접 넣기(_deposit_add)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -556,6 +556,12 @@ async function toolGetSection(args, env) {
   }
   // 응답은 들여쓰기 없이(작게) — 큰 응답은 커넥터 중간에서 잘리거나 거절될 수 있다
   const compact = (o) => ({ content: [{ type: "text", text: JSON.stringify(o) }] });
+  // 입금 직접 넣기 — 문자 누락 등으로 빠진 입금을 문자와 같은 수집함에 넣는다(앱이 입금내역에 합침)
+  // section = "_deposit_add:" + JSON {date, time, amount, name, biz?, acct?, bal?, memo?} 또는 {items:[...]} (20건까지)
+  if (section.startsWith("_deposit_add:")) {
+    let a; try { a = JSON.parse(section.slice(13)); } catch { return errContent("_deposit_add 인자 JSON 이 잘못됐습니다."); }
+    return compact(await depositAdd(env, a || {}));
+  }
   if (section === "_deposit_inbox" || section.startsWith("_deposit_inbox:")) {
     let o = {}; if (section.length > 15) { try { o = JSON.parse(section.slice(15)); } catch {} }
     return compact(await depositInbox(env, o));
@@ -1097,6 +1103,36 @@ function depQueryMatcher(q) {
   if (/^[ㄱ-ㅎ\s]{2,}$/.test(bare)) { const cho = bare.replace(/\s+/g, ""); return (txt) => toChosung(txt).includes(cho); }
   const toks = bare.split(/\s+/).filter(Boolean), tn = toks.map(searchNorm), tb = toks.map(searchBare);
   return (txt) => { const n = searchNorm(txt), b = searchBare(txt); return tn.every((t, i) => (t && n.includes(t)) || (tb[i] && b.includes(tb[i]))); };
+}
+
+async function depositAdd(env, a) {
+  const S = env.FIREBASE_DB_SECRET;
+  const list = (Array.isArray(a.items) ? a.items : [a]).slice(0, 20);
+  const dep = await fbGet("/frw/bankDeposits", S).catch(() => null);
+  const have = asList(dep && dep.items);
+  const inbox = (await fbGet("/frw_bank_inbox", S).catch(() => null)) || {};
+  const norm = (x) => String(x || "").replace(/\(주\)|㈜|주식회사|\s/g, "").toLowerCase();
+  const hm = (t) => String(t || "").slice(0, 5);
+  const out = [];
+  for (const it of list) {
+    const date = String(it.date || ""), time = hm(it.time), amount = Math.round(Number(it.amount));
+    const name = String(it.name || "").trim().slice(0, 40);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !(amount > 0) || !name || (time && !/^\d{2}:\d{2}$/.test(time))) { out.push({ ok: false, 입력: it, 이유: "날짜(YYYY-MM-DD)·금액·입금자명이 필요합니다(시각은 HH:MM)" }); continue; }
+    // 이미 입금내역에 있으면(같은 날·금액·입금자, 시각이 둘 다 있으면 같은 분) 넣지 않는다
+    const dup = have.find((x) => x && x.date === date && Math.round(Number(x.amount)) === amount && norm(x.name) === norm(name) && (!time || !x.time || hm(x.time) === time));
+    if (dup) { out.push({ ok: false, date, time, amount, name, 이유: "이미 입금내역에 있습니다", 상태: dup.status || "" }); continue; }
+    const acct = String(it.acct || "").replace(/\D/g, "").slice(-4);
+    const bal = it.bal != null && it.bal !== "" ? Math.round(Number(it.bal)) : null;
+    const ext = `${acct || "add"}|${date.replace(/-/g, "")}${time.replace(":", "")}|${amount}|${bal ?? ""}`;
+    const key = ext.replace(/[.#$/\[\]|]/g, "_");
+    if (inbox[key]) { out.push({ ok: false, date, time, amount, name, 이유: "이미 수집함에 있습니다(앱을 열면 입금내역에 합쳐집니다)" }); continue; }
+    const item = { ext, acct, biz: it.biz === "corp" ? "corp" : "nj", date, time, amount, ...(bal != null ? { bal } : {}), name, memo: String(it.memo || "").slice(0, 80), remarks: "직접 추가", src: "manual", collectedAt: Date.now() };
+    await fbPatch("/frw_bank_inbox", { [key]: item }, S);
+    if (bal != null) { try { await fbPatch("/frw_bank_sms_chain", { [key]: { ext, last4: acct, date, time, kind: "in", amount, bal, name, at: new Date(Date.now() + 9 * 3600e3).toISOString() } }, S); } catch {} }
+    inbox[key] = item;
+    out.push({ ok: true, date, time, amount, name, biz: item.biz });
+  }
+  return { 넣음: out.filter((x) => x.ok).length, 결과: out, 안내: "앱 입금내역을 열면(또는 새로고침) 「직접」 표시로 들어옵니다" };
 }
 
 async function depositInbox(env, opt = {}) {
