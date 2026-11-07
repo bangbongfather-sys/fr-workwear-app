@@ -10870,13 +10870,29 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         const take = (m, k) => { const arr = m.get(k); if (!arr) return null; const hit = arr.find(x => !used.has(x.id)); if (!hit) return null; used.add(hit.id); return hit; };
         const fresh = [], apiSkipped = [], rename = new Map(); let dup = 0; let base = Date.now();
         const strip = ({ alt, ...rest }) => rest;
+        // 1차: 이름까지 같은 짝부터 모두 맞춘다 — 날짜·금액만 같은 다른 사람 입금을 먼저 가져가 버리지 않게
+        //  (예: 엑셀 「10/20 코리아테크 212,300」이 같은 날 문자로 들어온 「전설의대장간 212,300」으로 착각돼 빠지던 문제)
+        const rest = [];
         parsed.forEach(x => {
           if (take(byKey, keyOf(x))) { dup++; return; }
           if (x.alt && payablesNameNorm(x.alt) !== payablesNameNorm(x.name)) {
             const old = take(byKey, keyOf(x, x.alt));
             if (old) { dup++; if (x.name !== "(입금자명 없음)") rename.set(old.id, { name: x.name, alt: x.alt }); return; }
           }
-          if (take(byApi, `${x.date}|${Math.round(x.amount)}`)) { apiSkipped.push(x); return; }
+          rest.push(x);
+        });
+        // 2차: 문자·자동수집 건과 날짜·금액이 같으면 같은 입금 후보 — 둘 다 시각이 있으면 3분 안일 때만(가까운 것부터)
+        const mins = (t) => { const m = String(t || "").match(/(\d{1,2}):(\d{2})/); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+        const takeApi = (x) => {
+          const arr = (byApi.get(`${x.date}|${Math.round(x.amount)}`) || []).filter(y => !used.has(y.id));
+          const tx = mins(x.time);
+          const scored = arr.map(y => { const ty = mins(y.time); return { y, d: tx == null || ty == null ? 999 : Math.abs(tx - ty) }; })
+            .filter(o => o.d <= 3 || o.d === 999).sort((a, b) => a.d - b.d);
+          if (!scored.length) return null;
+          used.add(scored[0].y.id); return scored[0].y;
+        };
+        rest.forEach(x => {
+          if (takeApi(x)) { apiSkipped.push(x); return; }
           fresh.push({ id: ++base, ...strip(x), biz, status: "pending", client: "", link: null });
         });
         if (apiSkipped.length) {
