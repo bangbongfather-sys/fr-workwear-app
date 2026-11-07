@@ -1027,6 +1027,18 @@
       .fc-meta { grid-column: 2 / 4; grid-row: 2; }
       .fc-qty { grid-column: 4; grid-row: 1 / 3; }
     }
+    /* 입금내역 「잔액 점검」 — 은행 문자 잔액이 안 이어지는 곳 */
+    .bal-check { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(240,68,82,0.35); background: rgba(240,68,82,0.06); }
+    .bal-check.bal-quiet { flex-direction: row; align-items: center; gap: 8px; padding: 8px 12px; border-color: var(--border); background: transparent; font-size: 12px; color: var(--text3); }
+    .bal-check.bal-quiet b { color: var(--text2); }
+    .bal-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: 10px; background: var(--surface); }
+    .bal-when { font-size: 12px; font-weight: 800; color: var(--text1); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .bal-msg { flex: 1 1 260px; min-width: 0; font-size: 12.5px; color: var(--text2); }
+    .bal-sub { display: block; margin-top: 2px; font-size: 11px; color: var(--text3); font-variant-numeric: tabular-nums; }
+    .bal-btn { height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text2); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .bal-btn-main { border: none; background: var(--accent); color: #fff; }
+    .bal-more { align-self: flex-start; border: none; background: transparent; color: var(--text2); font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; padding: 0; }
+    .bal-foot { font-size: 11.5px; color: var(--text3); line-height: 1.55; }
     .vat-tag { margin-left: 8px; padding: 2px 8px; border-radius: 100px; font-size: 10.5px; font-weight: 700; color: var(--text2); background: var(--surface2); border: 1px solid var(--border); white-space: nowrap; }
     /* 판매 현황 전표 — 고른 전표 합계 막대. 목록을 내려도 화면 아래에 붙어 따라온다(휴대폰은 아래 메뉴 위로) */
     .slip-pickbar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; align-items: center; gap: 12px;
@@ -10183,6 +10195,147 @@ function mergeBankInbox(prev, inbox) {
   return { next: { ...p, items: next, nameMap: p.nameMap || {} }, added, merged, suspects };
 }
 
+// ── 잔액 점검 — 은행 문자 잔액이 앞뒤로 이어지는지 보고 「문자로 안 들어온 거래」를 찾는다 ──
+// 앞 문자 잔액 ± 이번 금액(입금 +, 출금 −) = 이번 잔액 이어야 한다. 안 맞으면 그 사이에 문자가 빠진 거래가 있다.
+//  · 차이가 + 면 입금이 빠졌다(출금 문자도 빠졌다면 실제 빠진 입금은 더 클 수 있다)
+//  · 차이가 − 면 출금 문자가 빠졌다(입금 누락 아님)
+//  · 엑셀로 채운 입금(문자 아닌 입금) 중 그 사이 것들의 합이 차이와 같으면 「채워짐」
+// 같은 분에 온 문자는 순서를 모르니, 잔액이 가장 잘 이어지는 순서를 고른다.
+const balSign = (x) => (x.kind === "in" ? 1 : -1) * Math.round(Number(x.amount) || 0);
+const balDt = (x) => `${x.date || ""} ${String(x.time || "").slice(0, 5)}`;
+function balOrderGroup(group, prevBal) {
+  if (group.length < 2) return group;
+  const run = (start) => {
+    const left = group.filter((_, i) => i !== start), out = [group[start]];
+    let cur = group[start].bal, miss = prevBal != null && prevBal + balSign(group[start]) !== group[start].bal ? 1 : 0;
+    while (left.length) {
+      let k = left.findIndex(x => cur + balSign(x) === x.bal);
+      if (k < 0) { k = 0; miss++; }
+      cur = left[k].bal; out.push(left.splice(k, 1)[0]);
+    }
+    return { out, miss };
+  };
+  let best = null;
+  for (let i = 0; i < Math.min(group.length, 8); i++) { const r = run(i); if (!best || r.miss < best.miss) best = r; }
+  return best.out;
+}
+// 합이 target 인 조합 찾기 (후보 20개까지, 깊이 우선)
+function balSubsetSum(cands, target) {
+  const xs = cands.slice(0, 20).sort((a, b) => b.amount - a.amount);
+  const pick = [];
+  const go = (i, rest) => {
+    if (rest === 0) return true;
+    if (i >= xs.length || rest < 0) return false;
+    pick.push(xs[i]); if (go(i + 1, rest - Math.round(xs[i].amount))) return true; pick.pop();
+    return go(i + 1, rest);
+  };
+  return go(0, target) ? pick.slice() : null;
+}
+function bankBalanceGaps(chain, deposits = []) {
+  const list = (chain || []).filter(x => x && Number.isFinite(Number(x.bal)) && x.date)
+    .map(x => ({ ...x, bal: Math.round(Number(x.bal)), amount: Math.round(Number(x.amount) || 0) }));
+  const chainExt = new Set(list.map(x => x.ext));
+  const byAcct = new Map();
+  list.forEach(x => { const k = x.last4 || ""; if (!byAcct.has(k)) byAcct.set(k, []); byAcct.get(k).push(x); });
+  const gaps = []; let links = 0, outs = 0;
+  for (const [acct, arr] of byAcct) {
+    arr.sort((a, b) => balDt(a).localeCompare(balDt(b)) || String(a.at || "").localeCompare(String(b.at || "")));
+    // 같은 분에 온 문자 묶음은 잔액이 이어지는 순서로
+    const ordered = []; let i = 0;
+    while (i < arr.length) {
+      let j = i; while (j < arr.length && balDt(arr[j]) === balDt(arr[i])) j++;
+      ordered.push(...balOrderGroup(arr.slice(i, j), ordered.length ? ordered[ordered.length - 1].bal : null));
+      i = j;
+    }
+    ordered.forEach(x => { if (x.kind !== "in") outs++; });
+    for (let k = 1; k < ordered.length; k++) {
+      const a = ordered[k - 1], b = ordered[k];
+      links++;
+      const diff = b.bal - (a.bal + balSign(b));
+      if (!diff) continue;
+      // 그 사이에 엑셀·직접 입력으로 들어온 입금(문자로 안 온 것)
+      const fromDt = balDt(a), toDt = balDt(b);
+      const between = deposits.filter(d => d && d.date && !(d.ext && chainExt.has(d.ext)) && Number(d.amount) > 0 && (() => {
+        if (d.date > a.date && d.date < b.date) return true;
+        if (d.date < a.date || d.date > b.date) return false;
+        const t = String(d.time || "").slice(0, 5);
+        if (!t) return true;                                  // 시각 없는 엑셀 줄은 그날이면 사이로 본다
+        const dt = `${d.date} ${t}`;
+        return dt >= fromDt && dt <= toDt;
+      })()).map(d => ({ ...d, amount: Math.round(Number(d.amount)) }));
+      const filled = diff > 0 ? balSubsetSum(between, diff) : null;
+      gaps.push({ key: `${acct}|${a.ext}|${b.ext}`, acct, from: a, to: b, diff, filled });
+    }
+  }
+  gaps.sort((x, y) => balDt(y.to).localeCompare(balDt(x.to)));
+  return { gaps, links, count: list.length, outs, since: list.length ? list.map(x => x.date).sort()[0] : null };
+}
+function BankBalanceCheck({ biz, deposits, okKeys = [], onOk, onImport }) {
+  const [data, setData] = useState(null);
+  const [showAll, setShowAll] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    fetch("/api/bank/smskey/chain", { cache: "no-store" }).then(r => r.ok ? r.json() : null)
+      .then(j => { if (!dead) setData(j && Array.isArray(j.list) ? j : { list: [], biz: null, enabled: false }); })
+      .catch(() => { if (!dead) setData({ list: [], biz: null, enabled: false }); });
+    return () => { dead = true; };
+  }, [deposits.length]);
+  const res = React.useMemo(() => data ? bankBalanceGaps(data.list, deposits) : null, [data, deposits]);
+  if (!data || !res || !data.enabled || (data.biz || "nj") !== biz) return null;
+  const ok = new Set(okKeys);
+  const missIn = res.gaps.filter(g => g.diff > 0 && !g.filled && !ok.has(g.key));
+  const missOut = res.gaps.filter(g => g.diff < 0 && !ok.has(g.key));
+  const filled = res.gaps.filter(g => g.diff > 0 && g.filled);
+  const fmt = (n) => Math.abs(Math.round(n)).toLocaleString();
+  const when = (x) => `${Number(x.date.slice(5, 7))}/${Number(x.date.slice(8))}${x.time ? " " + String(x.time).slice(0, 5) : ""}`;
+  const noOuts = res.count >= 5 && res.outs === 0;
+  // 문자가 아직 적으면 안내만
+  if (res.count < 2) return (
+    <div className="bal-check bal-quiet">
+      <Icon name="history" size={14}/><span><b>잔액 점검</b> 준비 중 — 지금부터 오는 은행 문자의 잔액이 앞뒤로 이어지는지 보고, 빠진 거래가 있으면 여기서 알려 드려요.</span>
+    </div>
+  );
+  if (!missIn.length && !missOut.length) return (
+    <div className="bal-check bal-quiet">
+      <Icon name="check" size={14}/><span><b>잔액 점검</b> · {res.since ? `${Number(res.since.slice(5, 7))}/${Number(res.since.slice(8))}부터 ` : ""}문자 {res.count}통 잔액이 {res.gaps.some(g => ok.has(g.key)) ? `직접 확인한 ${res.gaps.filter(g => ok.has(g.key)).length}군데 빼고 ` : "모두 "}이어져요{filled.length ? ` (빠졌던 입금 ${filled.length}건은 엑셀로 채워짐)` : ""}.</span>
+    </div>
+  );
+  const shown = showAll ? missIn : missIn.slice(0, 5);
+  return (
+    <div className="bal-check" role="status">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Icon name="alert" size={15} style={{ color: missIn.length ? "#F04452" : "var(--text3)" }}/>
+        <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>
+          {missIn.length ? `문자로 안 들어온 입금이 있어요 — ${missIn.length}군데` : "잔액 점검"}
+        </span>
+        <span style={{ fontSize: 11.5, color: "var(--text3)" }}>은행 문자 잔액이 앞뒤로 안 이어지는 곳</span>
+        {missIn.length > 0 && onImport && (
+          <button type="button" onClick={onImport} className="bal-btn bal-btn-main" style={{ marginLeft: "auto" }}>
+            <Icon name="folderOpen" size={13}/>은행 거래내역 엑셀로 채우기
+          </button>
+        )}
+      </div>
+      {shown.map(g => (
+        <div key={g.key} className="bal-row">
+          <span className="bal-when">{when(g.from)} → {when(g.to)}</span>
+          <span className="bal-msg">잔액이 <b style={{ color: "#F04452" }}>{fmt(g.diff)}원</b> 더 많아요 → 그 사이 <b>입금 {fmt(g.diff)}원</b>이 문자로 안 들어왔어요
+            <span className="bal-sub">앞 문자 잔액 {fmt(g.from.bal)}원 · 뒤 문자 {g.to.kind === "in" ? "입금" : "출금"} {fmt(g.to.amount)}원 · 뒤 문자 잔액 {fmt(g.to.bal)}원{noOuts ? " · 출금 문자도 빠졌다면 실제 금액은 더 클 수 있어요" : ""}</span>
+          </span>
+          <button type="button" className="bal-btn" onClick={() => onOk && onOk(g.key)} title="직접 확인했으면 이 알림을 숨겨요">확인했어요</button>
+        </div>
+      ))}
+      {missIn.length > 5 && <button type="button" className="bal-more" onClick={() => setShowAll(v => !v)}>{showAll ? "접기" : `${missIn.length - 5}군데 더 보기`}</button>}
+      {missIn.length > 0 && <div className="bal-foot">은행 앱에서 그 기간 거래내역 엑셀을 받아 올리면 빠진 입금만 채워져요(문자로 이미 들어온 건 겹치지 않게 건너뜀). 채워지면 이 알림은 저절로 사라져요.</div>}
+      {missOut.length > 0 && (
+        <div className="bal-foot" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span>출금 쪽 문자가 빠진 곳 {missOut.length}군데 (입금 누락 아님){noOuts ? " — 출금 문자가 하나도 안 들어와요. 아이폰 단축어의 「메시지 포함」을 「입금」 대신 통장 번호 앞자리로 바꾸면 출금 문자도 받아 점검이 더 정확해져요." : ""}</span>
+          <button type="button" className="bal-btn" onClick={() => missOut.forEach(g => onOk && onOk(g.key))}>숨기기</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── 은행 문자 자동 등록 (아이폰 단축어) ──
 // 은행 입출금 문자를 아이폰 「단축어」 자동화가 서버 주소로 보내면, 서버가 읽어 입금 수집함에 넣고
 // 앱이 그 수집함을 입금내역에 합친다(팝빌과 같은 길). 은행 로그인·인증서는 쓰지 않는다.
@@ -10288,7 +10441,7 @@ function BankSmsCard({ biz }) {
           <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {step(1, <>{cfg.enabled ? "위 「주소 복사」를 누릅니다." : "「켜기」를 누르고 나오는 주소를 복사합니다."} 이 주소는 비밀번호와 같습니다. 남에게 보내지 마세요.</>)}
             {step(2, <>아이폰 <b>단축어</b> 앱 → 아래 <b>자동화</b> → <b>+</b> → <b>메시지</b></>)}
-            {step(3, <><b>메시지 포함</b>에 문자에 보이는 <b>회사 통장 번호 앞자리</b>(예: <code>123456</code>)를 입력 — 문자에 앞자리가 안 보이면 <code>입금</code> → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음</>)}
+            {step(3, <><b>메시지 포함</b>에 문자에 보이는 <b>회사 통장 번호 앞자리</b>(예: <code>123456</code>)를 입력 — 문자에 앞자리가 안 보이면 <code>입금</code> → <b>즉시 실행</b> 선택(실행 전 확인 끄기) → 다음<br/><span style={{ fontSize: 11.5, color: "var(--text3)" }}>통장 번호 앞자리로 하면 출금 문자도 들어와 「잔액 점검」(빠진 입금 찾기)이 더 정확해져요. 출금은 입금내역에 넣지 않고 잔액 계산에만 써요.</span></>)}
             {step(4, <><b>새로운 빈 자동화</b> → 동작 검색에서 <b>URL 콘텐츠 가져오기</b> 추가 → URL 칸에 복사한 주소 붙여 넣기</>)}
             {step(5, <>그 동작의 <b>›</b>를 눌러 방법 <b>POST</b>, 본문 요청 <b>JSON</b> → 필드 추가 <b>텍스트</b>: 키 <code>text</code>, 값은 키보드 위 변수에서 <b>단축어 입력</b>(메시지 내용) 선택 → 완료</>)}
             {step(6, <>KB 입출금 알림이 <b>문자(SMS)</b>로 오는지 확인합니다. 앱 푸시·카카오톡 알림은 단축어가 읽지 못합니다. 다음 입금 문자부터 여기 입금내역에 「문자」로 들어옵니다.</>)}
@@ -11622,6 +11775,11 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
 
       {/* 은행 자동 수집 (팝빌 연동이 설정된 탭에만) */}
       <BankAutoCollectBar biz={biz} />
+
+      {/* 잔액 점검 — 은행 문자 잔액이 안 이어지는 곳 = 문자로 안 들어온 거래 (문자 연결된 탭에만) */}
+      <BankBalanceCheck biz={biz} deposits={items} okKeys={(bankDeposits && bankDeposits.gapOk) || []}
+        onOk={(k) => setBankDeposits(prev => ({ ...(prev || {}), gapOk: [...new Set([...(((prev || {}).gapOk) || []), k])].slice(-300) }))}
+        onImport={() => fileRef.current && fileRef.current.click()} />
 
       {/* 자동수집 건 중 엑셀로 이미 올린 것과 겹쳐 보이는 것 */}
       {suspects.length > 0 && (

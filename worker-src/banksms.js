@@ -12,6 +12,9 @@ import { BANK_INBOX_PATH } from "./bank.js";
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 export const SMS_CFG_PATH = "/frw_bank_sms";
 const SMS_LOG_PATH = "/frw_bank_sms_log";
+// 잔액 점검용 — 입금·출금 문자를 잔액과 함께 모은다(입금함과 따로). 앞 문자 잔액 ± 이번 금액 = 이번 잔액이 아니면
+// 그 사이에 문자로 안 들어온 거래가 있다는 뜻 → 앱이 「빠진 거래」로 알려 준다. 키 = ext(계좌|일시|금액|잔액)
+const SMS_CHAIN_PATH = "/frw_bank_sms_chain";
 
 const fbUrl = (env, path) => `https://${FB_HOST}${path}.json?auth=${encodeURIComponent(env.FIREBASE_DB_SECRET)}`;
 async function fbGet(env, path) { const r = await fetch(fbUrl(env, path)); return r.ok ? r.json() : null; }
@@ -120,11 +123,14 @@ export async function handleBankSmsPublic(request, env, url) {
     return json({ ok: false, error: p.error });
   }
   const ext = `${p.last4 || "sms"}|${p.date.replace(/-/g, "")}${p.time.replace(":", "")}|${p.amount}|${p.bal ?? ""}`;
+  const key = ext.replace(/[.#$/\[\]|]/g, "_");
+  if (p.bal != null) {
+    try { await fbPatch(env, SMS_CHAIN_PATH, { [key]: { ext, last4: p.last4 || "", date: p.date, time: p.time, kind: p.kind === "in" ? "in" : "out", amount: p.amount, bal: p.bal, name: String(p.name || "").slice(0, 40), at: now } }); } catch {}
+  }
   if (p.kind !== "in") {
     await pushLog(env, { at: now, ok: true, kind: "out", date: p.date, time: p.time, amount: p.amount, name: p.name, text: maskText(text) });
     return json({ ok: true, kind: "out", skipped: "출금은 입금함에 넣지 않습니다", amount: p.amount });
   }
-  const key = ext.replace(/[.#$/\[\]|]/g, "_");
   const item = { ext, acct: p.last4, biz: cfg.biz || "nj", date: p.date, time: p.time, amount: p.amount,
     ...(p.bal != null ? { bal: p.bal } : {}), name: p.name, memo: "", remarks: "문자", src: "sms", collectedAt: Date.now() };
   await fbPatch(env, BANK_INBOX_PATH, { [key]: item });
@@ -159,6 +165,13 @@ export async function handleBankSmsAdmin(request, env, url) {
     if (hint && hint.length < 3) return json({ error: "3자리 이상 넣어 주세요" }, 400);
     await fbPatch(env, SMS_CFG_PATH, { acctHint: hint });
     return json({ ok: true, acctHint: hint });
+  }
+  // 잔액 점검용 문자 묶음 — 최근 120일
+  if (p === "/api/bank/smskey/chain") {
+    const raw = (await fbGet(env, SMS_CHAIN_PATH)) || {};
+    const since = new Date(Date.now() + 9 * 3600e3 - 120 * 86400e3).toISOString().slice(0, 10);
+    const list = Object.values(raw).filter(x => x && x.date >= since && Number.isFinite(Number(x.bal)));
+    return json({ biz: cfg.biz || "nj", enabled: !!cfg.token, list });
   }
   // 문자 붙여 넣고 미리 읽어 보기 (저장하지 않음)
   if (p === "/api/bank/smskey/test" && request.method === "POST") {
