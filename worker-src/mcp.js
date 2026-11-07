@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-merge-deposits", note: "입금내역·미수금 원장 충돌 자동 병합 + 커넥터 입금↔원장 연결(_deposit_link)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-merge-deposits2", note: "입금내역·미수금 원장 충돌 자동 병합 + 입금↔원장 연결(없어진 연결 다시 잇기)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -1130,14 +1130,25 @@ async function depositLink(env, a) {
       const it = items[idx];
       const e = entryOf(x.client, x.entryId);
       if (Math.round(Number(it.amount)) !== Math.round(Number(e.amount))) { res.push({ id: x.id, ok: false, 이유: `금액이 다름(입금 ${it.amount} / 원장 ${e.amount})` }); continue; }
-      if (it.status === "done") { res.push({ id: x.id, ok: true, 이유: "이미 처리완료" }); continue; }
+      if (it.status === "done") {
+        const cur = it.link && it.link.kind === "ar" ? Number(it.link.entryId) : null;
+        if (cur === x.entryId) { res.push({ id: x.id, ok: true, 이유: "이미 이 원장 기록에 연결됨" }); continue; }
+        // 처리완료인데 연결된 원장 기록이 원장에 없으면(저장 충돌로 원장 쪽만 버려진 경우) 있는 기록으로 다시 잇는다
+        const linkedExists = cur != null && asList(ar).length !== 0 && Object.values(ar).some((c) => asList(c && c.entries).some((e) => Number(e && e.id) === cur));
+        if (it.link && it.link.kind !== "ar") { res.push({ id: x.id, ok: false, 이유: `이미 다른 곳(${it.link.kind})에 처리됨 — 손대지 않음` }); continue; }
+        if (linkedExists) { res.push({ id: x.id, ok: false, 이유: `이미 원장 기록 #${cur}에 연결돼 있음 — 손대지 않음` }); continue; }
+        Object.assign(patch, { [`items/${idx}/client`]: x.client, [`items/${idx}/link`]: { kind: "ar", entryId: x.entryId } });
+        touched.push(idx);
+        res.push({ id: x.id, ok: true, 날짜: it.date, 금액: it.amount, 거래처: x.client, 원장기록: x.entryId, 바뀐것: `없어진 원장 기록 #${cur} → #${x.entryId} 로 다시 연결` });
+        continue;
+      }
       Object.assign(patch, { [`items/${idx}/status`]: "done", [`items/${idx}/client`]: x.client, [`items/${idx}/link`]: { kind: "ar", entryId: x.entryId }, [`items/${idx}/doneAt`]: now });
       touched.push(idx);
       res.push({ id: x.id, ok: true, 날짜: it.date, 금액: it.amount, 거래처: x.client, 원장기록: x.entryId });
     }
     if (!touched.length) return { done: true };
-    return { patch, apply: (dd) => { const c = JSON.parse(JSON.stringify(dd)); touched.forEach((i) => { const l = list.find((x) => String(c.items[i].id) === x.id); Object.assign(c.items[i], { status: "done", client: l.client, link: { kind: "ar", entryId: l.entryId }, doneAt: now }); }); return c; },
-      check: (after) => touched.every((i) => after && after.items && after.items[i] && after.items[i].status === "done") };
+    return { patch, apply: (dd) => { const c = JSON.parse(JSON.stringify(dd)); touched.forEach((i) => { const l = list.find((x) => String(c.items[i].id) === x.id); Object.assign(c.items[i], { status: "done", client: l.client, link: { kind: "ar", entryId: l.entryId }, doneAt: c.items[i].doneAt || now }); }); return c; },
+      check: (after) => touched.every((i) => { const it = after && after.items && after.items[i]; const l = it && list.find((x) => String(it.id) === x.id); return it && it.status === "done" && l && it.link && Number(it.link.entryId) === l.entryId; }) };
   }, env);
   return { 결과: res, 안내: plan && plan.done ? "바꿀 것이 없었습니다" : "앱 입금내역에서 처리완료(초록)로 보입니다(몇 초 안에 다른 기기에도 반영)" };
 }
