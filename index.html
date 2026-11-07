@@ -1042,6 +1042,7 @@
     .slip-widen { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--text3); }
     .slip-widen button { height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text2); font-size: 11.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
     .slip-widen button.on { border-color: transparent; background: var(--accent); color: #fff; }
+    .redate-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--surface2); }
     .vat-tag { margin-left: 8px; padding: 2px 8px; border-radius: 100px; font-size: 10.5px; font-weight: 700; color: var(--text2); background: var(--surface2); border: 1px solid var(--border); white-space: nowrap; }
     /* 판매 현황 전표 — 고른 전표 합계 막대. 목록을 내려도 화면 아래에 붙어 따라온다(휴대폰은 아래 메뉴 위로) */
     .slip-pickbar { position: sticky; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 5; margin-top: 10px; display: flex; align-items: center; gap: 12px;
@@ -20586,8 +20587,30 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
   const [moveTarget, setMoveTarget] = useState(""); // 선택 항목 거래처 이동 대상
   // 날짜 그룹 메모 인라인 편집 상태
   const [editingMemoKey, setEditingMemoKey] = React.useState(null);
+  // 매입일 묶음의 날짜를 한 번에 바꾸기 — { key: "날짜|공급처", draft: "YYYY-MM-DD" }
+  const [redate, setRedate] = React.useState(null);
   const [memoDraft, setMemoDraft] = React.useState("");
   const memoKeyOf = (date, supplier) => `${date}|${(supplier || "").trim()}`;
+  // 묶음(같은 매입일·지금 보이는 줄) 전체의 날짜를 newDate 로. 그 날짜 메모도 같이 옮긴다(옮길 날에 메모가 없을 때).
+  const applyRedate = (oldDate, supplier, ids, newDate) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate || "")) { showToast("바꿀 날짜를 골라 주세요"); return; }
+    if (newDate === oldDate) { setRedate(null); return; }
+    if (!window.confirm(`${oldDate} 매입 ${ids.length}건의 날짜를 ${newDate} 로 바꿀까요?`)) return;
+    const idSet = new Set(ids);
+    setFabricIntakes(prev => prev.map(r => idSet.has(r.id)
+      ? { ...r, date: newDate, ...(r.receivedAt && r.receivedAt === oldDate ? { receivedAt: newDate } : {}) } : r));
+    if (setPurchaseDateMemos) {
+      const ok = memoKeyOf(oldDate, supplier), nk = memoKeyOf(newDate, supplier);
+      setPurchaseDateMemos(prev => {
+        const p = prev || {};
+        if (!p[ok] || p[nk]) return p;
+        const next = { ...p, [nk]: p[ok] }; delete next[ok]; return next;
+      });
+    }
+    setExpandedDates(prev => { if (!prev.has(oldDate)) return prev; const n = new Set(prev); n.delete(oldDate); n.add(newDate); return n; });
+    setRedate(null);
+    showToast(`${ids.length}건의 매입일을 ${newDate} 로 바꿨습니다`, "success");
+  };
   const saveMemo = (date, supplier) => {
     const k = memoKeyOf(date, supplier);
     const v = memoDraft.trim();
@@ -21670,6 +21693,12 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                                 <Icon name="edit" size={12}/>{currentMemo}
                               </span>
                             )}
+                            {!isEditingMemo && group.date !== "(날짜 없음)" && (!redate || redate.key !== groupMemoKey) && (
+                              <button onClick={()=>setRedate({ key: groupMemoKey, draft: group.date })} title={`이 매입일 ${group.rows.length}건의 날짜를 한 번에 바꾸기`}
+                                style={{background:"transparent", border:"1px solid var(--border)", borderRadius:6, padding:"4px 9px", fontSize:11, fontWeight:600, color:"var(--text2)", cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>
+                                <span style={{display:"inline-flex",alignItems:"center",gap:4}}><Icon name="calendar" size={11}/>날짜 변경</span>
+                              </button>
+                            )}
                             {!isEditingMemo && (
                               <button onClick={()=>startMemoEdit(group.date, groupSupplier)} title={currentMemo ? "메모 수정" : "메모 추가"}
                                 style={{background:"transparent", border:"1px solid var(--border)", borderRadius:6, padding:"4px 9px", fontSize:11, fontWeight:600, color:"var(--text2)", cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap"}}>
@@ -21678,6 +21707,20 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
                             )}
                           </span>
                         </div>
+                        {redate && redate.key === groupMemoKey && (
+                          <div className="redate-row" onClick={e=>e.stopPropagation()}>
+                            <span style={{fontSize:12.5, color:"var(--text2)"}}><b style={{color:"var(--text1)"}}>{group.date}</b> 매입 <b style={{color:"var(--text1)"}}>{group.rows.length}건</b>을</span>
+                            <input type="date" value={redate.draft} onChange={e=>setRedate(r => ({ ...r, draft: e.target.value }))} autoFocus
+                              onKeyDown={e=>{ if (e.key==="Enter") applyRedate(group.date, groupSupplier, groupIds, redate.draft); if (e.key==="Escape") setRedate(null); }}
+                              style={{width:170, flex:"0 0 auto", height:34, fontSize:13, padding:"0 10px", borderRadius:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text1)", fontFamily:"inherit"}}/>
+                            <span style={{fontSize:12.5, color:"var(--text2)"}}>로</span>
+                            <button onClick={()=>applyRedate(group.date, groupSupplier, groupIds, redate.draft)} style={{background:"#DB6B2E", border:"none", color:"#fff", fontSize:12, fontWeight:700, borderRadius:6, padding:"7px 12px", cursor:"pointer", fontFamily:"inherit"}}>한 번에 바꾸기</button>
+                            <button onClick={()=>setRedate(null)} style={{background:"transparent", border:"1px solid var(--border)", color:"var(--text2)", fontSize:12, fontWeight:600, borderRadius:6, padding:"6px 11px", cursor:"pointer", fontFamily:"inherit"}}>취소</button>
+                            {(() => { const sups = new Set(group.rows.map(r => (r.supplier || "").trim())); return group.rows.length < (fabricIntakes || []).filter(r => (r.date || "") === group.date && sups.has((r.supplier || "").trim())).length; })() && (
+                              <span style={{fontSize:11.5, color:"var(--warning-text)"}}>검색·품목 필터로 보이는 {group.rows.length}건만 바뀌어요</span>
+                            )}
+                          </div>
+                        )}
                         {isEditingMemo && (
                           <div style={{display:"flex", alignItems:"center", gap:6, marginTop:8}} onClick={e=>e.stopPropagation()}>
                             <input value={memoDraft} onChange={e=>setMemoDraft(e.target.value)} autoFocus

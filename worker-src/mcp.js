@@ -463,7 +463,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-merge-deposits2", note: "입금내역·미수금 원장 충돌 자동 병합 + 입금↔원장 연결(없어진 연결 다시 잇기)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-07-intake-redate-group", note: "매입 현황 매입일 묶음 날짜 한 번에 바꾸기" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
