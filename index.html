@@ -32524,12 +32524,14 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
       updateLog(ymd, l => { const cur = (l.blocks || {})[pid] || {}; return { ...l, blocks: { ...(l.blocks || {}), [pid]: { ...cur, stepText: { ...(cur.stepText || {}), [field]: v } } } }; });
     }
   };
+  // 새 일정 — 일정 탭 타임테이블의 「시간표에만 있는 항목」(ttOnly)으로 만든다: 타임테이블에만 보이고 달력·노션에는 안 올라감
   const addExtra = (ymd, startMin) => {
     const st = Math.max(0, Math.min(1380, Math.round(startMin / 15) * 15));
-    const xid = "x" + Date.now();
-    setExtra(ymd, xid, { start: plHM(st), end: plHM(Math.min(1439, st + 60)), label: "새 일정" });
-    setEditBlk({ date: ymd, id: xid, field: "label", value: "새 일정" });
+    const id = Date.now();
+    setTodos(prev => [...(prev || []), { id, date: ymd, endDate: "", text: "새 일정", memo: "", done: false, createdAt: id, atts: [], ttOnly: true, startMin: st, durMin: 60 }]);
+    setEditBlk({ date: ymd, id: "t" + id, field: "label", value: "새 일정" });
   };
+  const removeTtOnly = (todoId) => setTodos(prev => (prev || []).filter(t => t.id !== todoId));
   const openEdit = (ymd, b, field) => {
     const f = field || "label";
     setEditBlk({ date: ymd, id: b.id, field: f, value: f === "label" ? b.label : b.stepKey === f ? (b.doing || "") : ((b.steps || []).find(x => x.key === f) || {}).doing || "" });
@@ -32883,14 +32885,14 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
                   </>) : (
                     <div className="pl-blk-main">
                       <div className="tx">
-                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.todo ? <span className="pl-tag" style={{ background: "#DB6B2E", color: "#fff", marginRight: 5, padding: "0 5px", fontSize: 10 }}>일정</span> : null}{b.stepNo ? `${b.stepNo} ` : ""}{b.label}{b.kind === "study" && theme && (!b.stepKey || b.stepKey === (b.groupKeys || [])[0]) ? ` · ${theme.track}` : ""}{tiny && b.stepKey ? <span style={{ fontWeight: 500, opacity: 0.85 }}> · {bS}</span> : null}</div>}
+                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.todo ? <span className="pl-tag" title={b.todo.ttOnly ? "시간표에만 있는 항목 — 달력에는 안 보입니다" : "일정 탭 달력에도 있는 일정"} style={{ background: b.todo.ttOnly ? "var(--surface2)" : "#DB6B2E", color: b.todo.ttOnly ? "var(--text2)" : "#fff", marginRight: 5, padding: "0 5px", fontSize: 10 }}>{b.todo.ttOnly ? "시간표" : "일정"}</span> : null}{b.stepNo ? `${b.stepNo} ` : ""}{b.label}{b.kind === "study" && theme && (!b.stepKey || b.stepKey === (b.groupKeys || [])[0]) ? ` · ${theme.track}` : ""}{tiny && b.stepKey ? <span style={{ fontWeight: 500, opacity: 0.85 }}> · {bS}</span> : null}</div>}
                         {!tiny && <div className="tm">{bS} – {bE}{b.stepKey ? ` · ${plMin(bE) - plMin(bS)}분` : ""}</div>}
                         {!tiny && b.stepKey && h >= 46 && (ed && ed.field === b.stepKey ? editor(b.stepKey) : <div className="nt" data-step={b.stepKey}>{b.doing}</div>)}
                         {!tiny && b.stepKey && h >= 70 && b.aiRole && <div className="nt">AI · {b.aiRole}</div>}
                         {!tiny && !b.stepKey && h >= 52 && b.note && <div className="nt">{b.note}</div>}
                       </div>
-                      {ed && b.custom
-                        ? <button type="button" className="pl-btn ghost sm" style={{ minHeight: 26, height: 26, padding: "0 8px", fontSize: 12 }} onPointerDown={e => e.preventDefault()} onClick={() => { setEditBlk(null); setExtra(date, b.id, null); }}>지우기</button>
+                      {ed && (b.custom || (b.todo && b.todo.ttOnly))
+                        ? <button type="button" className="pl-btn ghost sm" style={{ minHeight: 26, height: 26, padding: "0 8px", fontSize: 12 }} onPointerDown={e => e.preventDefault()} onClick={() => { setEditBlk(null); if (b.todo) removeTtOnly(b.todo.id); else setExtra(date, b.id, null); }}>지우기</button>
                         : <button type="button" className={`pl-chk${b.done ? " on" : ""}`} aria-label={`${b.label} ${b.done ? "완료 취소" : "완료"}`} aria-pressed={b.done} onClick={() => toggleDone(date, b)}>{b.done && <PlCheckIcon size={tiny ? 10 : 13} />}</button>}
                     </div>
                   )}
@@ -32901,7 +32903,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
             {isToday && <div className="pl-nowline" style={{ top: y(nowMin) - 4 }} role="img" aria-label={`지금 ${plHM(nowMin)}`}><i /><b /></div>}
           </div>
         </div>
-        <div className="pl-muted" style={{ marginTop: 6 }}>블록을 끌면 시간이 옮겨지고(휴대폰은 꾹 누른 뒤), 두 번 누르면 이름을 고칩니다. 빈 시간을 두 번 누르면 새 일정.</div>
+        <div className="pl-muted" style={{ marginTop: 6 }}>블록을 끌면 시간이 옮겨지고(휴대폰은 꾹 누른 뒤), 두 번 누르면 이름을 고칩니다. 빈 시간을 두 번 누르면 새 일정 — 일정 탭 타임테이블에만 들어가고 달력에는 안 올라갑니다.</div>
       </div>
     );
     const dayTodos = todos.filter(t => t && plan.category && t.category === plan.category && t.date && t.date <= date && date <= (t.endDate || t.date))
