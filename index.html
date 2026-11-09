@@ -1997,9 +1997,9 @@ const SECTION_LABELS = {
   investments: "투자", cashFlows: "자금흐름", scheduledExpenses: "예정지출", purchaseSubTabs: "매입 거래처 탭",
   todos: "일정", notes: "중요 메모", recurringSchedules: "정기 일정", yearlyRevenue: "연매출",
   purchaseDateMemos: "매입일 메모", stock: "재고", payables: "미지급", bankDeposits: "입금내역",
-  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록", weeklyGoals: "주간 목표", employees: "직원", payrolls: "급여대장", leaves: "휴가", hrSettings: "인사 설정",
+  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록", weeklyGoals: "주간 목표", planner: "플래너", employees: "직원", payrolls: "급여대장", leaves: "휴가", hrSettings: "인사 설정",
 };
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes", "weeklyGoals", "employees", "payrolls", "leaves", "hrSettings"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes", "weeklyGoals", "planner", "employees", "payrolls", "leaves", "hrSettings"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -2462,7 +2462,7 @@ function planPush({ sections, knownRevs, serverRevs, revsOk, mySigs, serverSigs 
 // 입금 처리는 입금내역(처리완료)과 미수금 원장(입금 기록)을 함께 바꾸는데, 한쪽만 버려지면 원장엔 입금이 있는데
 // 입금내역은 미처리로 남는다(2026-10-30 성목실업·선인안전산업). 그래서 이 두 섹션은 버리지 않고 합친다:
 // 기준(base) = 이 기기가 마지막으로 서버와 맞춘 값. 기준 대비 이 기기에서 바뀐 것(추가·수정·삭제)만 서버 최신본 위에 얹는다.
-const MERGE_SECTIONS = ["bankDeposits", "clientAR"];
+const MERGE_SECTIONS = ["bankDeposits", "clientAR", "planner"];
 function mergeById3(base, mine, theirs, keyOf = (x) => x && x.id) {
   const bm = new Map(), mm = new Map();
   (base || []).forEach(x => { const k = keyOf(x); if (k != null) bm.set(String(k), x); });
@@ -2506,7 +2506,16 @@ function mergeClientAR3(base, mine, theirs) {
   }
   return out;
 }
-const mergeSection3 = (s, base, mine, theirs) => s === "bankDeposits" ? mergeBankDeposits3(base, mine, theirs) : s === "clientAR" ? mergeClientAR3(base, mine, theirs) : mine;
+// 플래너 — 묶음(plans·weeks·dayLogs…)마다 id 기준으로 합친다. 설정처럼 배열이 아닌 칸은 이 기기 것을 얹는다.
+function mergePlanner3(base, mine, theirs) {
+  const B = base || {}, M = mine || {}, T = theirs || {};
+  const out = { ...T, ...M };
+  for (const k of new Set([...Object.keys(T), ...Object.keys(M)])) {
+    if (Array.isArray(M[k]) || Array.isArray(T[k])) out[k] = mergeById3(Array.isArray(B[k]) ? B[k] : [], Array.isArray(M[k]) ? M[k] : [], Array.isArray(T[k]) ? T[k] : []);
+  }
+  return out;
+}
+const mergeSection3 = (s, base, mine, theirs) => s === "bankDeposits" ? mergeBankDeposits3(base, mine, theirs) : s === "clientAR" ? mergeClientAR3(base, mine, theirs) : s === "planner" ? mergePlanner3(base, mine, theirs) : mine;
 
 // 미동기화 상태로 다시 열렸을 때, 어느 섹션이 "내 옛 복사본"인지 가려낸다.
 // dirty 로 표시하던 시점의 서버 rev 보다 지금 서버 rev 가 앞서 있으면 다른 기기가 먼저
@@ -23598,6 +23607,7 @@ function App() {
   // 하루 기록(일별 메모·일기) — { "2026-08-26": { text, star, updatedAt } }
   const [dailyNotes, setDailyNotes] = useState(() => load("frw_daily_notes", {}));
   const [weeklyGoals, setWeeklyGoals] = useState(() => load("frw_weekly_goals", {})); // 일정 › 주간 목표 (주 일요일 키)
+  const [planner, setPlanner] = useState(() => load("frw_planner", {})); // 일정 › 플래너 (연·분기·주·하루 계획) — 처음 한 번 마스터플랜을 넣는다
   // 인사 관리 — 직원 · 달별 급여대장 · 휴가 · 설정(급여일)
   const [employees, setEmployees] = useState(() => load("frw_employees", []));
   const [payrolls, setPayrolls] = useState(() => load("frw_payrolls", {}));
@@ -24271,6 +24281,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.notes !== undefined) setNotes(d.notes);
     if (d.dailyNotes !== undefined && d.dailyNotes && typeof d.dailyNotes === "object") setDailyNotes(d.dailyNotes);
     if (d.weeklyGoals !== undefined && d.weeklyGoals && typeof d.weeklyGoals === "object" && !Array.isArray(d.weeklyGoals)) setWeeklyGoals(d.weeklyGoals);
+    if (d.planner !== undefined && d.planner && typeof d.planner === "object" && !Array.isArray(d.planner)) { const pl = plannerNormalize(d.planner); setPlanner(pl); mergeBase.current.planner = JSON.parse(JSON.stringify(pl)); }
     if (d.employees !== undefined && Array.isArray(d.employees)) setEmployees(d.employees.filter(Boolean));
     if (d.payrolls !== undefined && d.payrolls && typeof d.payrolls === "object" && !Array.isArray(d.payrolls)) setPayrolls(d.payrolls);
     if (d.leaves !== undefined && Array.isArray(d.leaves)) setLeaves(d.leaves.filter(Boolean));
@@ -24316,7 +24327,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       const savedDirty = load("frw_dirty_sections", []);
       dirtySections.current = new Set(Array.isArray(savedDirty) && savedDirty.length ? savedDirty : CLOUD_SECTIONS);
     }
+    let plannerLoadOk = false;
     cloudLoad().then(d => {
+      // 클라우드에 계획이 이미 있으면 절대 넣지 않는다 (이 기기에 미동기화 변경이 있어 클라우드 값을 안 받는 경우에도)
+      plannerLoadOk = !!d && !plannerHasPlans(plannerNormalize(d.planner));
       if (hasUnsynced) {
         // 충돌 감지용 서버 리비전만 기억하고 데이터는 로컬 유지
         if (d && typeof d._rev === "number") lastKnownRev.current = d._rev;
@@ -24357,6 +24371,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       .catch(() => setSyncStatus("error"))
       .finally(() => {
         initialized.current = true;
+        // 플래너 기본 계획(전문가 성장 마스터플랜) — 클라우드를 받은 뒤, 계획이 하나도 없을 때만 넣는다 (덮어쓰기 없음)
+        if (plannerLoadOk) setTimeout(() => setPlanner(p => plannerHasPlans(p) ? p : plannerSeed(p)), 1200);
         // 미동기화 변경이 있으면 저장 effect를 깨워 로컬 → 클라우드 푸시
         if (hasUnsynced) setOnlineRetryTick(t => t + 1);
       });
@@ -24536,7 +24552,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         const r = await fetch(`${FB_URL}/section/${s}`, { cache: "no-store" });
         if (!r.ok) continue;
         const raw = await r.json();
-        const theirs = raw ? fbUnescapeKeys(raw) : (s === "clientAR" ? {} : { items: [] });
+        const theirs = raw ? (s === "planner" ? plannerNormalize(fbUnescapeKeys(raw)) : fbUnescapeKeys(raw)) : (s === "bankDeposits" ? { items: [] } : {});
         mergedVals[s] = mergeSection3(s, mergeBase.current[s], cur[s], theirs);
         conflicts.splice(conflicts.indexOf(s), 1);
         pushable.push(s);
@@ -24587,6 +24603,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       // 합친 값을 화면에도 반영 (저장한 값과 같아질 때까지 한 번 더 저장될 수 있다 — rev 가 맞아 그대로 통과)
       if (mergedVals.bankDeposits !== undefined) setBankDeposits(mergedVals.bankDeposits);
       if (mergedVals.clientAR !== undefined) setClientAR(mergedVals.clientAR);
+      if (mergedVals.planner !== undefined) setPlanner(mergedVals.planner);
       if (Object.keys(mergedVals).length) showToast(`${Object.keys(mergedVals).map(s => SECTION_LABELS[s] || s).join("·")} — 다른 기기에서 바뀐 내용과 이 기기 변경을 합쳐 저장했습니다`, "success");
       cloudBackupDaily(cur); // 백업은 항상 전체 로컬 스냅샷으로 (부분 페이로드 아님)
       // 저장하는 사이 또 입력이 들어왔으면 바로 한 번 더 (짧게 묶어서).
@@ -24639,7 +24656,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR); save("frw_todos", todos);
-    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_weekly_goals", weeklyGoals); save("frw_employees", employees); save("frw_payrolls", payrolls); save("frw_leaves", leaves); save("frw_hr_settings", hrSettings); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
+    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_weekly_goals", weeklyGoals); save("frw_planner", planner); save("frw_employees", employees); save("frw_payrolls", payrolls); save("frw_leaves", leaves); save("frw_hr_settings", hrSettings); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
@@ -24649,7 +24666,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_prod_trash", prodTrash);
     save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, employees, payrolls, leaves, hrSettings };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, planner, employees, payrolls, leaves, hrSettings };
     // 저장 페이로드는 항상 이 최신 스냅샷으로 만든다 (타이머가 걸린 시점의 옛 값이 아니라).
     latestSnapshot.current = cur;
     if (!initialized.current) { prevSnapshot.current = cur; return; }
@@ -24669,7 +24686,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     markDirtyPersist();
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => { syncTimer.current = null; runSave(0); }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, employees, payrolls, leaves, hrSettings, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, planner, employees, payrolls, leaves, hrSettings, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
@@ -25979,7 +25996,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       case "schedule": return (
         <>
         <ScheduleAlertSettings/>
-        <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} taxes={taxes} />
+        <ScheduleTab todos={todos} setTodos={setTodos} notes={notes} setNotes={setNotes} dailyNotes={dailyNotes} setDailyNotes={setDailyNotes} weeklyGoals={weeklyGoals} setWeeklyGoals={setWeeklyGoals} recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} clients={clients} darkMode={darkMode} purchaseOrders={purchaseOrders} fabricIntakes={fabricIntakes} bankDeposits={bankDeposits} setTab={setTab} taxes={taxes} planner={planner} setPlanner={setPlanner} />
         </>
       );
       case "news": return (
@@ -31948,9 +31965,1083 @@ function WeeklyGoalBand({ items, weekKey, isThisWeek, isActive, onOpen }) {
   );
 }
 
-function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, weeklyGoals = {}, setWeeklyGoals, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab, taxes = [] }) {
+// ═══════════ 일정 › 플래너 (연·분기·주·하루 계획) ═══════════
+// 저장: 동기화 구역 "planner" 하나. 묶음마다 배열(id 있는 항목) — 두 기기 충돌 때 id 기준으로 합친다(mergePlanner3).
+//   plans · years · quarters · weeks · themes · routines · dayTemplates · dayLogs · checkRules · scores · actions · monthReviews
+// 일정(todos)과의 연결: 플래너 항목 → 「일정으로 보내기」 → 일정 1건(category·memo·plannerRef) + 노션 페이지.
+//   항목에는 todoIds 를 적어 두 번 만들지 않는다. 완료 여부는 연결된 일정 값을 그대로 쓴다(한 곳에만 저장).
+// 주의: Firebase 는 "0","1" 같은 숫자 키 객체를 배열로 바꾼다 → 객체 키는 항상 글자로 시작(s0, r1 …).
+const PL_COLLECTIONS = ["plans", "years", "quarters", "weeks", "themes", "routines", "dayTemplates", "dayLogs", "checkRules", "scores", "actions", "monthReviews"];
+const PL_COLOR = { 소재: "#2E5AAC", 규격: "#6D4AB8", 제품: "#2D6A4F", 권위: "#C2410C", AI: "#A16207", 진단: "#4E5968" };
+const PL_COLOR_DARK = { 소재: "#8DB0F0", 규격: "#B9A2EE", 제품: "#86C9A6", 권위: "#F2A27A", AI: "#E3BE6A", 진단: "#B0B8C1" };
+const PL_WK = ["일", "월", "화", "수", "목", "금", "토"];
+function plArr(v) {
+  if (Array.isArray(v)) return v.filter(Boolean);
+  if (v && typeof v === "object") return Object.keys(v).sort((a, b) => Number(a) - Number(b)).map(k => v[k]).filter(Boolean);
+  return [];
+}
+function plannerNormalize(p) {
+  const src = p && typeof p === "object" && !Array.isArray(p) ? p : {};
+  const out = { ...src };
+  for (const k of PL_COLLECTIONS) out[k] = plArr(src[k]);
+  return out;
+}
+function plannerHasPlans(p) { return !!(p && plArr(p.plans).length); }
+const plPad = (n) => String(n).padStart(2, "0");
+const plYmd = (d) => `${d.getFullYear()}-${plPad(d.getMonth() + 1)}-${plPad(d.getDate())}`;
+const plDate = (s) => { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1, 12); };
+const plAdd = (s, n) => { const d = plDate(s); d.setDate(d.getDate() + n); return plYmd(d); };
+const plDow = (s) => plDate(s).getDay();
+const plMonday = (s) => plAdd(s, -((plDow(s) + 6) % 7));
+const plMin = (hm) => { const m = /^(\d{1,2}):(\d{2})$/.exec(hm || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+const plHM = (m) => `${plPad(Math.floor(m / 60))}:${plPad(Math.round(m) % 60)}`;
+const plMD = (s) => `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
+const plToday = () => plYmd(new Date());
+
+// ── 기본 계획: 전문가 성장 마스터플랜 (요청서 7장 그대로) ──
+function plannerSeed(prev) {
+  const base = plannerNormalize(prev);
+  const P = "mp1", now = Date.now();
+  const plan = {
+    id: P, title: "전문가 성장 마스터플랜", short: "마스터플랜", category: "전문가성장",
+    startDate: "2026-11-09", endDate: "2029-10-31", weeklyHours: "주 10시간 이상",
+    tracks: [{ key: "소재", color: "#2E5AAC" }, { key: "규격", color: "#6D4AB8" }, { key: "제품", color: "#2D6A4F" }, { key: "권위", color: "#C2410C" }, { key: "AI", color: "#A16207" }],
+    proofs: [
+      { key: "p1", label: "내 판단에 확신", metric: "블라인드 진단 테스트 85% 이상" },
+      { key: "p2", label: "내가 만든 제품", metric: "직접 개발 신제품 2종 출시", target: 2, value: 0 },
+      { key: "p3", label: "외부의 인정", metric: "외부 문의·초청·기고·발표 수", value: 0 },
+    ],
+    targets: [{ yearIndex: 1, from: 40, to: 60 }, { yearIndex: 2, from: 60, to: 75 }, { yearIndex: 3, from: 75, to: 85 }],
+    peakMonths: [3, 4, 5, 6], peakStudyDays: [1, 3, 5], studyTarget: 4, noteTarget: 4,
+    autoMonday: false, createdAt: now,
+  };
+  const Y = (i, period, startDate, endDate, theme, items) => ({ id: `${P}-y${i}`, planId: P, yearIndex: i, period, startDate, endDate, theme, items });
+  const years = [
+    Y(1, "2026.11–2027.10", "2026-11-01", "2027-10-31", "기초를 내 언어로", { 소재: "B트랙 4주 완주 → 원단 12종 스펙 매트릭스 · 원단 공장 견학", 규격: "국내·한전·IEC·ASTM·NFPA 비교표 완성 · 시험 입회 2회", 제품: "현장 동행 3회 → 개선 과제 3개 · CLO 기초", 권위: "대리점용 「방염복 바로알기」 1장 · KISS 2027 참관", AI: "지식 서랍 구축 · 매일 퀴즈 · 규격 해설", 진단: "40%대 → 60%" }),
+    Y(2, "2027.11–2028.10", "2027-11-01", "2028-10-31", "내 제품으로 증명", { 소재: "혼방비·평량 변경 실험 2건 직접 설계", 규격: "신제품 시험 계획 직접 수립 · 시험 입회·성적서 판독 단독 수행", 제품: "신제품 1호 출시 (원단 지정→시험 통과)", 권위: "대리점 세미나 2회 · 업계지 기고 2편", AI: "시험 데이터 분석 · AI 시안→CLO 파이프라인", 진단: "60% → 75%" }),
+    Y(3, "2028.11–2029.10", "2028-11-01", "2029-10-31", "업계가 먼저 묻는 사람", { 소재: "원가-성능 최적화 기준표 (사내 표준)", 규격: "KS 개정 의견수렴·공청회 참여 · 표준 전문위원회 참여 문의", 제품: "신제품 2호 · 해외 규격(NFPA 2112 등) 대응 제품 검토", 권위: "전시회·세미나 발표 · 기고 4편 · 대학원 진학 검토(선택)", AI: "지식베이스를 대리점 상담 도구로 확장 (응대 타워 연동)", 진단: "75% → 85% 이상" }),
+  ];
+  const Q = (q, months, startDate, endDate, mode, weeklyHours, task, deliverable, anchor) => ({ id: `${P}-y1q${q}`, planId: P, yearIndex: 1, q, months, startDate, endDate, mode, weeklyHours, task, deliverable, anchor, done: false, todoIds: [] });
+  const quarters = [
+    Q(1, "11~1월", "2026-11-01", "2027-01-31", "비수기", "10~12h", "규격 지도 그리기, B트랙 완주, 첫 시험 입회", "NJ 제품별 규격 매트릭스 1장 + 지식 서랍 v1", "시험기관 방문, 신기방적 기술 미팅"),
+    Q(2, "2~4월", "2027-02-01", "2027-04-30", "셀인→성수기", "8h→5h", "1월 대리점 공지에 「방염복 바로알기」 포함, 대리점 피드백 반영 개정", "대리점 배포 자료 1종", "대리점 신년 공지, 상위 대리점 방문"),
+    Q(3, "5~7월", "2027-05-01", "2027-07-31", "성수기", "5~6h", "현장 동행으로 제품 문제 수집", "현장 문제 리스트 + 개선 과제 3개", "전력 현장 동행, KISS 2027(7/5~7/8)"),
+    Q(4, "8~10월", "2027-08-01", "2027-10-31", "비수기", "12h", "개선 과제 1개를 신제품 기획으로, CLO 학습", "신제품 1호 기획서 (원단 스펙·시험 계획 포함)", "CLO 수업, 공장 샘플 미팅"),
+  ];
+  const W = [
+    ["AI", "출발선 측정 · 판 깔기", "기준선 진단 50문항 결과 · 규격 구매 목록 · 지식 서랍 폴더", "FITI 또는 KOTITI 보호복 시험 상담 방문 문의"],
+    ["규격", "KS K ISO 11612 구조 (성능 코드 A~F)", "11612 1페이지 요약", "나서연에게 한전 방염복 구매규격 입수 요청"],
+    ["소재", "B트랙 3주차 — 원단 스펙 읽는 법", "우리 원단 5종 스펙 정리표", "신기방적에 원단 스펙시트 실물 요청"],
+    ["규격", "시험기관 방문 준비 · 시험 항목·비용 질문지", "시험기관 질문지 10문항", "FITI 또는 KOTITI 보호복 시험 상담 방문"],
+    ["규격", "아크 규격 — IEC 61482-2 · ASTM F1506 · ATPV/EBT", "아크 규격 비교표", ""],
+    ["소재", "B트랙 4주차 — 임가공 원가 구조", "품목별 원가 분해 1종", "나정훈과 원가 구조 30분 리뷰"],
+    ["규격", "우리 제품 1종 시험 의뢰 · 성적서 읽는 법", "시험 의뢰서 · 성적서 해석 노트", "시험 의뢰 접수"],
+    ["규격", "1분기 결산 ① — 규격 매트릭스 완성", "NJ 제품별 규격 매트릭스", ""],
+    ["권위", "「방염복 바로알기」 대리점용 1장 작성", "대리점 배포 자료 초안", "1월 대리점 신년 공지에 포함"],
+    ["규격", "해외 기준 — NFPA 2112 · 70E 개념", "국내 vs 미국 기준 비교 1장", ""],
+    ["제품", "AI 시안 실습 + CLO 수업 문의", "개선품 후보 3개 스케치", "씨앗패션패턴학원 CLO 반 등록 문의"],
+    ["AI", "분기 회고 · 진단 테스트 재응시", "기준선 대비 점수 · Q2 계획", "상위 대리점 1곳 방문 (자료 피드백)"],
+  ];
+  const weeks = W.map(([track, topic, deliverable, appointment], i) => {
+    const startDate = plAdd("2026-11-09", i * 7);
+    return {
+      id: `${P}-w${i + 1}`, planId: P, weekNo: i + 1, startDate, endDate: plAdd(startDate, 6), track, topic, deliverable, appointment,
+      outputs: deliverable.split(" · ").map((text, j) => ({ id: `o${j + 1}`, text, done: false })),
+      apptDone: false, weeklyGoal: "", todoIds: [], done: false,
+    };
+  });
+  const T = (weekday, track, label, description, hours) => ({ id: `${P}-t${weekday}`, planId: P, weekday, track, label, description, hours });
+  const themes = [
+    T(1, "규격", "규격", "규격 원문 1개 조항군 + AI 해설 → 비교표 갱신", "2h"),
+    T(2, "소재", "소재", "B트랙 자료 / 원단 스펙 / 원가", "2h"),
+    T(3, "권위", "권위(현장·외부)", "월 1회 외부 앵커. 나머지 주는 앱 「지식 서랍」 개발", "2~4h"),
+    T(4, "제품", "제품", "현장 문제 정리 → 개선 아이디어 → AI 시안 / CLO", "2h"),
+    T(5, "AI", "AI", "나봄과 토론 세션 60분 + 주간 1페이지 노트", "2h"),
+  ];
+  const routines = [
+    { id: `${P}-r1`, planId: P, rule: "firstMon", when: "첫 주 월요일", task: "AI 리서치 다이제스트 읽기 → 지식 서랍에 3줄 반영", duration: "30분" },
+    { id: `${P}-r2`, planId: P, rule: "wk2to3", when: "둘째~셋째 주", task: "외부 앵커 1건 (질문지 5개 준비)", duration: "반나절", anchor: true },
+    { id: `${P}-r3`, planId: P, rule: "lastFri", when: "마지막 주 금요일", task: "월간 진단 테스트 20문항 + 오답 재학습", duration: "60분" },
+    { id: `${P}-r4`, planId: P, rule: "lastDay", when: "마지막 날", task: "월간 1페이지: 배운 것 3 / 모르는 것 3 / 다음 달 앵커 확정", duration: "30분" },
+  ];
+  const study = {
+    id: "study", start: "13:20", end: "15:20", label: "학습 블록", kind: "study", steps: [
+      { key: "s0", label: "워밍업", mins: 15, doing: "어제 노트 + 퀴즈 5문항", aiRole: "퀴즈 출제·오답 해설" },
+      { key: "s1", label: "깊게 파기", mins: 75, doing: "원문 직접 읽기, 폰은 다른 방", aiRole: "막히는 개념 질문 (원문 먼저)" },
+      { key: "s2", label: "내 말로 남기기", mins: 30, doing: "1페이지 노트", aiRole: "지식 서랍 저장·다음 퀴즈 재료" },
+    ],
+  };
+  const ex = { id: "ex", start: "10:50", end: "12:20", label: "운동", kind: "exercise" };
+  const meal = { id: "meal", start: "12:20", end: "13:20", label: "점심", kind: "meal" };
+  const rest = { id: "rest", start: "15:20", end: "15:35", label: "휴식", kind: "rest" };
+  const ops = { id: "ops", start: "15:35", end: "16:00", label: "운영 블록", kind: "ops", note: "출고 마감(16:00) 전 직원 확인 · 전화 회신 · 숫자 1회 확인" };
+  const wrap = { id: "wrap", start: "16:45", end: "17:00", label: "마무리", kind: "wrap", note: "일정 완료 체크 + 3줄 기록 + 내일 첫 작업" };
+  const dayTemplates = [
+    { id: `${P}-normal`, planId: P, mode: "normal", blocks: [ex, meal, study, rest, ops, wrap] },
+    // 성수기(3~6월) 화·목 — 학습 블록 없이 운영 블록을 늘린다
+    { id: `${P}-peak`, planId: P, mode: "peak", blocks: [ex, meal, { ...ops, start: "13:20", end: "16:00", label: "운영 블록 (확대)" }, wrap] },
+  ];
+  const checkRules = [
+    { id: `${P}-c1`, planId: P, cycle: "매주 금", metric: "학습 블록 실행 횟수 / 1페이지 노트 수", standard: "주 4회 이상 · 노트 4장 이상" },
+    { id: `${P}-c2`, planId: P, cycle: "매월 말", metric: "외부 앵커 실행 / 월간 테스트 점수", standard: "앵커 1건 · 점수 전월 대비 상승" },
+    { id: `${P}-c3`, planId: P, cycle: "매 분기", metric: "분기 산출물 / 진단 테스트 재응시", standard: "산출물 1개 · 연간 목표 경로 위" },
+    { id: `${P}-c4`, planId: P, cycle: "매년 10월", metric: "3대 증명 진척", standard: "다음 해 계획 재설계" },
+  ];
+  const actions = [
+    { id: `${P}-a1`, planId: P, text: "기준선 진단 테스트 50문항 응시", date: "2026-11-09", endDate: "2026-11-15", done: false, todoIds: [] },
+    { id: `${P}-a2`, planId: P, text: "FITI 또는 KOTITI 보호복 시험 상담 방문 예약(11/20) · 방문(12/4)", date: "2026-11-09", endDate: "2026-11-20", done: false, todoIds: [] },
+    { id: `${P}-a3`, planId: P, text: "fr-workwear-app 「지식 서랍」 탭 최소 기능(노트 저장·검색)", date: "2026-11-09", endDate: "2026-12-06", done: false, todoIds: [] },
+  ];
+  const add = (k, list) => [...base[k], ...list.filter(x => !base[k].some(y => y.id === x.id))];
+  return {
+    ...base, plans: add("plans", [plan]), years: add("years", years), quarters: add("quarters", quarters), weeks: add("weeks", weeks),
+    themes: add("themes", themes), routines: add("routines", routines), dayTemplates: add("dayTemplates", dayTemplates),
+    checkRules: add("checkRules", checkRules), actions: add("actions", actions), seededAt: now,
+  };
+}
+
+// ── 계산 ──
+const plIsPeak = (plan, ymd) => !!(plan && (plan.peakMonths || []).includes(Number(ymd.slice(5, 7))));
+function plThemeOf(P, plan, ymd) { const dw = plDow(ymd); return P.themes.find(t => t.planId === plan.id && Number(t.weekday) === dw) || null; }
+function plLogOf(P, plan, ymd) { return P.dayLogs.find(l => l.id === `${plan.id}|${ymd}`) || null; }
+function plWeekOf(P, plan, ymd) { return P.weeks.find(w => w.planId === plan.id && w.startDate <= ymd && ymd <= w.endDate) || null; }
+function plRangeOf(list, plan, ymd) { return list.find(x => x.planId === plan.id && x.startDate <= ymd && ymd <= x.endDate) || null; }
+function plWeekNo(plan, ymd) { return Math.round((plDate(plMonday(ymd)) - plDate(plMonday(plan.startDate))) / (7 * 864e5)) + 1; }
+// 그날 블록 — 주말은 비우고, 성수기에는 학습 요일(월·수·금)이 아니면 유지 모드 틀
+function plDayBlocks(P, plan, ymd, log) {
+  const dw = plDow(ymd);
+  if (dw === 0 || dw === 6) return { blocks: [], mode: "weekend" };
+  const peak = plIsPeak(plan, ymd);
+  const studyDay = !peak || (plan.peakStudyDays || []).includes(dw);
+  const mode = peak && !studyDay ? "peak" : "normal";
+  const tpl = P.dayTemplates.find(t => t.planId === plan.id && t.mode === mode) || P.dayTemplates.find(t => t.planId === plan.id);
+  const over = (log && log.blocks) || {};
+  const blocks = plArr(tpl && tpl.blocks).map(b => {
+    const o = over[b.id] || {};
+    return { ...b, steps: plArr(b.steps), start: o.start || b.start, end: o.end || b.end, done: !!o.done };
+  }).sort((a, b) => plMin(a.start) - plMin(b.start));
+  return { blocks, mode: peak ? (studyDay ? "peak-study" : "peak") : "normal" };
+}
+// 한 주(월~일) 실행 개수 — 학습 블록 완료, 1페이지 노트(학습 ③ 완료), 운동, 3줄 기록
+function plWeekStats(P, plan, monday) {
+  const days = [];
+  let study = 0, note = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = plAdd(monday, i), log = plLogOf(P, plan, d);
+    const b = (log && log.blocks) || {}, st = (log && log.steps) || {}, n3 = (log && log.note3) || {};
+    const r = { date: d, study: !!(b.study && b.study.done), note: !!st.s2, ex: !!(b.ex && b.ex.done), log: !!(n3.did || n3.learned || n3.next) };
+    if (r.study) study++; if (r.note) note++;
+    days.push(r);
+  }
+  return { days, study, note };
+}
+// 월간 루틴 날짜
+function plRoutineDate(rule, ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const last = new Date(y, m, 0, 12).getDate();
+  if (rule === "firstMon") { for (let d = 1; d <= 7; d++) { const s = `${ym}-${plPad(d)}`; if (plDow(s) === 1) return { from: s, to: s }; } }
+  if (rule === "wk2to3") return { from: `${ym}-08`, to: `${ym}-21` };
+  if (rule === "lastFri") { for (let d = last; d > last - 7; d--) { const s = `${ym}-${plPad(d)}`; if (plDow(s) === 5) return { from: s, to: s }; } }
+  if (rule === "lastDay") { const s = `${ym}-${plPad(last)}`; return { from: s, to: s }; }
+  return null;
+}
+
+const PL_CSS = `
+.pl { display: flex; flex-direction: column; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: clip; font-variant-numeric: tabular-nums; color: var(--text1); }
+.pl * { box-sizing: border-box; }
+.pl-head { padding: 14px 16px 0; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--divider); }
+.pl-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); padding: 0 10px 0 12px; font: inherit; font-size: 13px; font-weight: 700; color: var(--text1); max-width: 100%; }
+.pl-chip select { border: 0; background: transparent; font: inherit; color: inherit; padding: 0; min-height: 0; height: auto; appearance: none; -webkit-appearance: none; cursor: pointer; max-width: 220px; text-overflow: ellipsis; }
+.pl-kicker { font-size: 12px; font-weight: 700; color: var(--text3); }
+.pl-title { margin: 2px 0 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.25; white-space: nowrap; position: relative; }
+.pl-title input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.pl.narrow .pl-title { font-size: 21px; }
+.pl.narrow .pl-title small { font-size: 13px; margin-left: 4px; }
+.pl.narrow .pl-tool { min-width: 34px; height: 34px; padding: 0 8px; }
+.pl-title small { font-size: 15px; color: var(--text2); font-weight: 600; margin-left: 6px; }
+.pl .pl-tool { min-height: 0; }
+.pl-tool { min-width: 36px; height: 36px; border: 0; border-radius: 9px; background: var(--surface2); color: var(--text1); font: inherit; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; cursor: pointer; position: relative; }
+.pl-tool input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.pl-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.pl-day { border: 0; background: transparent; padding: 2px 0 6px; font: inherit; display: flex; flex-direction: column; align-items: center; gap: 4px; min-height: 62px; color: var(--text1); cursor: pointer; border-radius: 10px; }
+.pl-day .wk { font-size: 12px; font-weight: 600; color: var(--text2); }
+.pl-day .num { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; }
+.pl-day .bar { width: 18px; height: 3px; border-radius: 2px; }
+.pl-day.sel .num { background: #DB6B2E; color: #fff; }
+.pl-day.today:not(.sel) .num { box-shadow: inset 0 0 0 2px #DB6B2E; color: #DB6B2E; }
+.pl-day.off .wk, .pl-day.off .num { color: var(--text3); }
+.pl-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface2); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+.pl-tabs button { border: 0; min-height: 34px; height: 34px; border-radius: 8px; background: transparent; font: inherit; font-size: 14px; color: var(--text2); cursor: pointer; }
+.pl-tabs button[aria-selected=true] { background: var(--surface); color: var(--text1); font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.pl-sec { padding: 16px; border-bottom: 8px solid var(--surface2); }
+.pl-sec:last-child { border-bottom: 0; }
+.pl-sec h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.pl-sec-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.pl-muted { font-size: 12px; color: var(--text3); }
+.pl-tag { display: inline-flex; align-items: center; font-size: 11px; font-weight: 800; border-radius: 5px; padding: 2px 7px; white-space: nowrap; }
+.pl-warn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #A8380A; background: #FFF1E6; border-radius: 6px; padding: 3px 8px; }
+body.dark .pl-warn, .pl.dark .pl-warn { color: #F6B38A; background: rgba(219,107,46,0.16); }
+.pl-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--divider); }
+.pl-kpis > div { padding: 10px 16px; border-right: 1px solid var(--divider); min-width: 0; }
+.pl-kpis > div:last-child { border-right: 0; }
+.pl-kpis .v { font-size: 18px; font-weight: 800; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-kpis .v span { color: var(--text3); font-weight: 600; }
+.pl-now { margin: 12px 16px 0; border-radius: 12px; background: #241A3D; color: #fff; overflow: hidden; }
+.pl-now-row { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; min-height: 52px; }
+.pl-now-row .t { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: transparent; border: 0; color: inherit; font-family: inherit; text-align: left; cursor: pointer; padding: 0; }
+.pl-now-row .t small { font-weight: 500; color: #D9CFF2; margin-right: 6px; }
+.pl-now-row .done { min-height: 36px; border: 0; border-radius: 9px; background: #fff; color: #241A3D; font: inherit; font-size: 14px; font-weight: 800; padding: 0 14px; cursor: pointer; flex: none; }
+.pl-now-more { padding: 0 14px 12px; font-size: 13px; color: #EDE7FA; display: flex; flex-direction: column; gap: 6px; }
+.pl-now-prog { display: flex; gap: 3px; padding: 0 14px 10px; }
+.pl-now-prog span { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.2); overflow: hidden; }
+.pl-now-prog span i { display: block; height: 100%; background: #B9A5EC; }
+.pl-tl { position: relative; }
+.pl-hr { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.pl-hr span:first-child { width: 38px; font-size: 11px; color: var(--text3); text-align: right; flex: none; }
+.pl-hr span:last-child { flex: 1; height: 1px; background: var(--divider); }
+.pl-blk { position: absolute; left: 48px; right: 0; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.pl-blk-main { flex: 1; display: flex; align-items: flex-start; gap: 8px; padding: 6px 6px 6px 10px; min-height: 0; }
+.pl-blk-main .tx { flex: 1; min-width: 0; }
+.pl-blk-main .ttl { font-size: 13px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-blk-main .tm { font-size: 11px; opacity: 0.85; }
+.pl-blk-main .nt { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+.pl-blk.tiny .pl-blk-main { align-items: center; padding: 0 6px 0 10px; }
+.pl-blk.tiny .ttl { font-size: 11px; font-weight: 700; }
+.pl-blk.done .ttl { text-decoration: line-through; opacity: 0.7; }
+.pl .pl-chk { min-height: 0; min-width: 0; }
+.pl-chk { flex: none; width: 26px; height: 26px; border-radius: 13px; border: 2px solid currentColor; background: transparent; color: inherit; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; opacity: 0.85; }
+.pl-chk.on { background: currentColor; opacity: 1; }
+.pl-chk.on svg { stroke: #fff; }
+.pl-blk.tiny .pl-chk { width: 18px; height: 18px; border-width: 1.5px; }
+.pl-step { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 10px; border-top: 1px dashed currentColor; border-top-color: rgba(127,127,127,0.35); font-size: 11px; min-height: 0; overflow: hidden; }
+.pl-step .tx { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-step .ai { opacity: 0.8; }
+.pl-step.on .tx { text-decoration: line-through; opacity: 0.7; }
+.pl-step .pl-chk { width: 18px; height: 18px; border-width: 1.5px; }
+.pl-nowline { position: absolute; left: 40px; right: 0; display: flex; align-items: center; pointer-events: none; z-index: 2; }
+.pl-nowline i { width: 9px; height: 9px; border-radius: 5px; background: #DB6B2E; flex: none; }
+.pl-nowline b { flex: 1; height: 2px; background: #DB6B2E; }
+.pl-box { border: 1px solid var(--divider); border-radius: 14px; overflow: hidden; background: var(--surface); }
+.pl-box-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 14px; background: var(--row-bg); border-bottom: 1px solid var(--divider); }
+.pl-box-hd h4 { margin: 0; font-size: 14px; font-weight: 800; }
+.pl-li { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; border-bottom: 1px solid var(--divider); }
+.pl-li:last-child { border-bottom: 0; }
+.pl-li label { flex: 1; min-width: 0; font-size: 14px; cursor: pointer; }
+.pl-li input[type=checkbox] { width: 20px; height: 20px; accent-color: #DB6B2E; margin: 0; flex: none; }
+.pl-field { display: grid; grid-template-columns: 84px 1fr; align-items: center; border-bottom: 1px solid var(--divider); }
+.pl-field:last-child { border-bottom: 0; }
+.pl-field label { padding-left: 14px; font-size: 13px; color: var(--text2); }
+.pl-field input, .pl-field textarea { min-height: 46px; border: 0; padding: 0 14px 0 0; font: inherit; font-size: 14px; color: var(--text1); background: transparent; min-width: 0; width: 100%; box-shadow: none; border-radius: 0; }
+.pl-field textarea { padding: 12px 14px 12px 0; resize: vertical; }
+.pl-btn { min-height: 44px; border: 0; border-radius: 12px; background: #B85422; color: #fff; font: inherit; font-size: 15px; font-weight: 700; padding: 0 18px; cursor: pointer; }
+.pl-btn:disabled { opacity: 0.5; cursor: default; }
+.pl-btn.ghost { background: var(--surface2); color: var(--text1); }
+.pl-btn.sm { min-height: 34px; font-size: 13px; border-radius: 9px; padding: 0 12px; }
+.pl-send { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--divider); background: var(--surface); }
+.pl-send .tx { flex: 1; min-width: 0; }
+.pl-send .tx b { display: block; font-size: 13px; }
+.pl-send .tx span { font-size: 11px; color: var(--text3); }
+.pl-mx { display: grid; grid-template-columns: 72px repeat(7, minmax(0, 1fr)); row-gap: 2px; }
+.pl-mx .hd { text-align: center; padding: 6px 0; border-radius: 8px 8px 0 0; }
+.pl-mx .hd b { display: block; font-size: 12px; line-height: 1.3; }
+.pl-mx .hd em { display: block; font-style: normal; font-size: 11px; color: var(--text3); }
+.pl-mx .hd span { display: block; font-size: 10px; font-weight: 800; margin-top: 2px; }
+.pl-mx .lb { display: flex; flex-direction: column; justify-content: center; min-height: 44px; }
+.pl-mx .lb b { font-size: 13px; }
+.pl-mx .lb span { font-size: 11px; color: var(--text3); }
+.pl-mx .cell { display: flex; align-items: center; justify-content: center; min-height: 44px; border: 0; background: transparent; padding: 0; cursor: pointer; }
+.pl-mx .cell i { width: 22px; height: 22px; border-radius: 11px; display: block; }
+.pl-mx .col-today { background: var(--surface2); }
+.pl-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center; row-gap: 2px; }
+.pl-cal .w { font-size: 11px; color: var(--text3); padding-bottom: 4px; }
+.pl-cal .c { min-height: 38px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; color: var(--text1); }
+.pl-cal .c b { width: 26px; height: 26px; line-height: 26px; border-radius: 13px; font-size: 13px; font-weight: 500; }
+.pl-cal .c i { width: 5px; height: 5px; border-radius: 3px; display: block; }
+.pl-cal .c.out b { color: var(--text3); opacity: 0.6; }
+.pl-cal .c.band { background: rgba(219,107,46,0.07); }
+.pl-cal .c.sel b { background: #DB6B2E; color: #fff; font-weight: 800; }
+.pl-cal .c.today:not(.sel) b { box-shadow: inset 0 0 0 2px #DB6B2E; color: #DB6B2E; font-weight: 800; }
+.pl-row-link { display: grid; grid-template-columns: 38px 1fr auto; column-gap: 8px; align-items: center; min-height: 48px; border: 0; border-bottom: 1px solid var(--divider); background: transparent; width: 100%; text-align: left; font: inherit; color: var(--text1); cursor: pointer; padding: 0; }
+.pl-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--divider); font-size: 12px; }
+.pl .pl-crumb button { min-height: 28px; }
+.pl-crumb button { border: 0; font: inherit; color: var(--text2); background: var(--surface2); border-radius: 6px; padding: 4px 8px; cursor: pointer; min-height: 28px; }
+.pl-crumb button.on { color: #fff; background: #DB6B2E; font-weight: 700; }
+.pl-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pl-tiles > div { border: 1px solid var(--divider); border-radius: 12px; padding: 10px; min-width: 0; }
+.pl-tiles .k { font-size: 11px; color: var(--text3); }
+.pl-tiles .v { font-size: 17px; font-weight: 800; margin-top: 4px; }
+.pl-tiles .v span { font-size: 12px; color: var(--text3); font-weight: 600; }
+.pl-lane { display: grid; grid-template-columns: 52px 1fr; column-gap: 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--divider); font-size: 13px; line-height: 1.5; }
+.pl-lane .pl-tag { justify-content: center; }
+.pl-q { display: grid; grid-template-columns: 20px 1fr; column-gap: 12px; }
+.pl-q .rail { display: flex; flex-direction: column; align-items: center; }
+.pl-q .rail i { width: 14px; height: 14px; border-radius: 7px; margin-top: 16px; display: block; }
+.pl-q .rail b { flex: 1; width: 2px; background: var(--divider); }
+.pl-q .card { margin-bottom: 12px; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--divider); background: var(--row-bg); min-width: 0; }
+.pl-q.now .card { border: 1.5px solid #DB6B2E; background: rgba(219,107,46,0.05); }
+.pl-seg { display: flex; gap: 4px; }
+.pl .pl-seg button { min-height: 32px; height: 32px; }
+.pl-seg button { min-height: 32px; border: 0; border-radius: 8px; background: var(--surface2); color: var(--text2); font: inherit; font-size: 12px; padding: 0 10px; cursor: pointer; }
+.pl-seg button[aria-selected=true] { background: #DB6B2E; color: #fff; font-weight: 700; }
+.pl-rings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
+.pl-rings > div { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.pl-rings b { font-size: 12px; }
+.pl-rule { display: grid; grid-template-columns: 64px 1fr auto; column-gap: 10px; align-items: center; min-height: 52px; border-bottom: 1px solid var(--divider); font-size: 13px; }
+.pl-rule:last-child { border-bottom: 0; }
+.pl-totals { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--divider); border-radius: 12px; }
+.pl-totals > div { padding: 12px 4px; text-align: center; border-right: 1px solid var(--divider); }
+.pl-totals > div:last-child { border-right: 0; }
+.pl-totals b { display: block; font-size: 20px; font-weight: 800; }
+.pl-totals span { font-size: 11px; color: var(--text2); }
+.pl-wide { display: grid; grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+.pl-wide > .side { border-left: 1px solid var(--divider); padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.pl-in { min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--text1); min-width: 0; }
+`;
+
+function PlRing({ v, total, color = "#DB6B2E", size = 60, label }) {
+  const r = size / 2 - 5, c = 2 * Math.PI * r, f = total > 0 ? Math.min(1, v / total) : 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={label || `${v} / ${total}`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--divider)" strokeWidth="6" />
+      {f > 0 && <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="6" strokeLinecap="round" strokeDasharray={`${c * f} ${c}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} />}
+      <text x={size / 2} y={size / 2 + 5} textAnchor="middle" fontSize="14" fontWeight="800" fill="var(--text1)">{v}/{total}</text>
+    </svg>
+  );
+}
+const PlCheckIcon = ({ size = 14 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true"><path d="M5 12l5 5 9-10" /></svg>;
+
+function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, notionCreate, darkMode, onOpenSchedule }) {
+  const P = React.useMemo(() => plannerNormalize(planner), [planner]);
+  const [planId, setPlanId] = React.useState(() => load("frw_planner_plan", ""));
+  const [view, setView] = React.useState(() => load("frw_planner_view", "day"));
+  const [date, setDate] = React.useState(() => plToday());
+  const [clock, setClock] = React.useState(() => Date.now());
+  const [nowOpen, setNowOpen] = React.useState(false);
+  const [editTimes, setEditTimes] = React.useState(false);
+  const [mxMore, setMxMore] = React.useState(false);
+  const [roadYear, setRoadYear] = React.useState(0);
+  const [monthOpen, setMonthOpen] = React.useState(false);
+  const [scoreDraft, setScoreDraft] = React.useState({ date: plToday(), score: "", note: "" });
+  const [boxRef, boxW] = useBoxWidth(800);
+  const sentRef = React.useRef(new Set());
+  React.useEffect(() => { const iv = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(iv); }, []);
+  React.useEffect(() => { save("frw_planner_view", view); }, [view]);
+  React.useEffect(() => { if (planId) save("frw_planner_plan", planId); }, [planId]);
+
+  const plan = P.plans.find(p => p.id === planId) || P.plans[0] || null;
+  const C = darkMode ? PL_COLOR_DARK : PL_COLOR;
+  const tint = (k) => (PL_COLOR[k] || "#4E5968") + (darkMode ? "33" : "18");
+  const wide = boxW >= 900;
+  const narrow = boxW < 520;
+  const today = plToday();
+  const nowD = new Date(clock);
+  const nowMin = nowD.getHours() * 60 + nowD.getMinutes();
+
+  // ── 쓰기 ──
+  const upsert = (coll, id, fn, init) => setPlanner(prev => {
+    const p = plannerNormalize(prev);
+    const list = p[coll];
+    const idx = list.findIndex(x => x.id === id);
+    const cur = idx >= 0 ? list[idx] : (init ? init() : null);
+    if (!cur) return prev;
+    const next = { ...fn(cur), updatedAt: Date.now() };
+    return { ...p, [coll]: idx >= 0 ? list.map((x, i) => i === idx ? next : x) : [...list, next] };
+  });
+  const updateLog = (ymd, fn) => { if (!plan) return; const id = `${plan.id}|${ymd}`; upsert("dayLogs", id, fn, () => ({ id, planId: plan.id, date: ymd, blocks: {}, steps: {}, note3: {} })); };
+  const setBlock = (ymd, bid, patch) => updateLog(ymd, l => ({ ...l, blocks: { ...(l.blocks || {}), [bid]: { ...((l.blocks || {})[bid] || {}), ...patch } } }));
+  // 단계 체크 — 블록의 단계가 모두 끝나면 블록도 완료, 하나라도 풀면 블록 완료도 푼다
+  const setStep = (ymd, key, on, blk) => updateLog(ymd, l => {
+    const steps = { ...(l.steps || {}), [key]: on };
+    if (!blk || !plArr(blk.steps).length) return { ...l, steps };
+    const all = plArr(blk.steps).every(s => steps[s.key]);
+    return { ...l, steps, blocks: { ...(l.blocks || {}), [blk.id]: { ...((l.blocks || {})[blk.id] || {}), done: all } } };
+  });
+  const setNote = (ymd, key, val) => updateLog(ymd, l => ({ ...l, note3: { ...(l.note3 || {}), [key]: val } }));
+  const monthId = (ym) => `${plan.id}|${ym}`;
+  const updateMonth = (ym, fn) => upsert("monthReviews", monthId(ym), fn, () => ({ id: monthId(ym), planId: plan.id, month: ym, routines: {}, learned: "", unknown: "", nextAnchor: "" }));
+
+  // ── 일정으로 보내기 (일정 탭 「추가」와 같은 길: id·createdAt=지금, 노션 페이지 → notionPageId) ──
+  const linkedTodo = (item, type) => {
+    const ids = plArr(item && item.todoIds);
+    return todos.find(t => ids.includes(t.id)) || todos.find(t => t.plannerRef && t.plannerRef.type === type && t.plannerRef.id === item.id) || null;
+  };
+  const sendToTodos = (type, item, { date: d, endDate, text, memo }) => {
+    if (!plan || !item) return;
+    const key = `${type}:${item.id}`;
+    if (sentRef.current.has(key) || linkedTodo(item, type)) { showToast("이미 일정에 있어요"); return; }
+    sentRef.current.add(key);
+    const id = Date.now();
+    const t = { id, date: d, endDate: endDate && endDate !== d ? endDate : "", text, done: false, createdAt: id, category: plan.category || "", memo: memo || "", plannerRef: { planId: plan.id, type, id: item.id } };
+    setTodos(prev => [...(prev || []), t]);
+    const coll = type === "week" ? "weeks" : type === "quarter" ? "quarters" : "actions";
+    upsert(coll, item.id, x => ({ ...x, todoIds: [...plArr(x.todoIds), id] }));
+    showToast("일정에 넣었어요", "success");
+    Promise.resolve(notionCreate ? notionCreate(t) : null).then(pageId => {
+      if (pageId) setTodos(prev => (prev || []).map(x => x.id === id ? { ...x, notionPageId: pageId } : x));
+    }).finally(() => setTimeout(() => sentRef.current.delete(key), 3000));
+  };
+  // 완료: 연결된 일정이 있으면 그 일정을 토글(노션도 같이), 없으면 플래너 칸에만
+  const itemDone = (item, type) => { const t = linkedTodo(item, type); return t ? !!t.done : !!(item && item.done); };
+  const toggleItemDone = (item, type, coll) => {
+    const t = linkedTodo(item, type);
+    if (t && toggleTodo) toggleTodo(t.id);
+    else upsert(coll, item.id, x => ({ ...x, done: !x.done }));
+  };
+
+  if (!plan) {
+    return (
+      <div className={`pl${darkMode ? " dark" : ""}`} ref={boxRef}>
+        <style>{PL_CSS}</style>
+        <div className="pl-sec" style={{ textAlign: "center", padding: "40px 16px" }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>계획을 불러오는 중이에요</div>
+          <div className="pl-muted" style={{ marginTop: 6 }}>클라우드를 받은 뒤 「전문가 성장 마스터플랜」이 자동으로 들어갑니다.</div>
+          <button type="button" className="pl-btn ghost sm" style={{ marginTop: 14 }} onClick={() => setPlanner(p => plannerHasPlans(p) ? p : plannerSeed(p))}>지금 기본 계획 넣기</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 그날·그주 값 ──
+  const monday = plMonday(date);
+  const week = plWeekOf(P, plan, date);
+  const weekNo = week ? week.weekNo : plWeekNo(plan, date);
+  const yearRec = plRangeOf(P.years, plan, date);
+  const quarter = plRangeOf(P.quarters, plan, date);
+  const log = plLogOf(P, plan, date);
+  const day = plDayBlocks(P, plan, date, log);
+  const theme = plThemeOf(P, plan, date);
+  const stats = plWeekStats(P, plan, monday);
+  const studyTarget = plan.studyTarget || 4, noteTarget = plan.noteTarget || 4;
+  const modeLabel = day.mode === "weekend" ? "쉬는 날" : day.mode === "normal" ? "평소 모드" : day.mode === "peak-study" ? "성수기 · 학습일" : "성수기 유지 모드";
+  const inPlan = date >= plan.startDate && date <= plan.endDate;
+  const kicker = [yearRec ? `${yearRec.yearIndex}년차` : null, quarter ? `Q${quarter.q}` : null, inPlan ? `W${weekNo}` : "계획 기간 밖", view === "day" ? modeLabel : null].filter(Boolean).join(" · ");
+  const ym = date.slice(0, 7);
+  const monthRec = P.monthReviews.find(m => m.id === monthId(ym)) || { routines: {} };
+  const routines = P.routines.filter(r => r.planId === plan.id);
+  const anchorDone = routines.some(r => r.anchor && (monthRec.routines || {})["r_" + r.id]);
+  const shift = (n) => setDate(d => plAdd(d, n));
+
+  const titleOf = () => {
+    if (view === "day") { const d = plDate(date); return <>{d.getMonth() + 1}월 {d.getDate()}일 {PL_WK[d.getDay()]}요일</>; }
+    if (view === "week") return <>W{weekNo}<small>{plMD(monday).replace("/", ".")} – {plMD(plAdd(monday, 6)).replace("/", ".")}</small></>;
+    if (view === "road") return <>{plan.title}</>;
+    return <>W{weekNo} 리뷰</>;
+  };
+
+  // ── 머리 ──
+  const head = (
+    <div className="pl-head">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <label className="pl-chip">
+          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: "#DB6B2E", flex: "none" }} />
+          <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden" }}>계획 고르기</span>
+          <select value={plan.id} onChange={e => setPlanId(e.target.value)}>
+            {P.plans.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+        </label>
+        {plan.category && <span className="pl-muted">분류 · {plan.category}</span>}
+      </div>
+      <div>
+        <div className="pl-kicker">{view === "road" ? `${plan.startDate.replace(/-/g, ".")} – ${plan.endDate.replace(/-/g, ".")} · ${plan.weeklyHours || ""}` : kicker}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <h2 className="pl-title" style={{ minWidth: 0 }}>{titleOf()}{view !== "road" && <input type="date" aria-label="날짜 고르기" value={date} onChange={e => e.target.value && setDate(e.target.value)} />}</h2>
+        {(view === "day" || view === "week" || view === "review") && (
+          <div style={{ display: "flex", gap: 4, flex: "none" }}>
+            <button type="button" className="pl-tool" aria-label={view === "day" ? "전날" : "이전 주"} onClick={() => shift(view === "day" ? -1 : -7)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg></button>
+            <button type="button" className="pl-tool" onClick={() => setDate(plToday())}>오늘</button>
+            <button type="button" className="pl-tool" aria-label={view === "day" ? "다음 날" : "다음 주"} onClick={() => shift(view === "day" ? 1 : 7)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg></button>
+            {!narrow && <label className="pl-tool" aria-label="날짜 고르기"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>
+              <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} /></label>}
+          </div>
+        )}
+      </div>
+      </div>
+      {(view === "day" || view === "week") && (
+        <div className="pl-strip" role="group" aria-label="이번 주 날짜">
+          {[0, 1, 2, 3, 4, 5, 6].map(i => {
+            const d = plAdd(monday, i), dw = plDow(d), th = plThemeOf(P, plan, d);
+            return (
+              <button key={d} type="button" className={`pl-day${d === date ? " sel" : ""}${d === today ? " today" : ""}${dw === 0 || dw === 6 ? " off" : ""}`}
+                aria-label={`${plMD(d)} ${PL_WK[dw]}요일${th ? " " + th.track : ""}`} aria-pressed={d === date} onClick={() => { setDate(d); if (view === "week") setView("day"); }}>
+                <span className="wk">{PL_WK[dw]}</span>
+                <span className="num">{Number(d.slice(8))}</span>
+                <span className="bar" style={{ background: th ? C[th.track] : "transparent" }} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="pl-tabs" role="tablist" aria-label="플래너 보기">
+        {[["day", "하루"], ["week", "주간"], ["road", "로드맵"], ["review", "리뷰"]].map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}>{l}</button>
+        ))}
+      </div>
+    </div>
+  );
+
+  // ── 하루 ──
+  const renderDay = () => {
+    const blocks = day.blocks;
+    const doneN = blocks.filter(b => b.done).length;
+    const isToday = date === today;
+    // 지금 블록 (오늘만)
+    let now = null;
+    if (isToday) {
+      const b = blocks.find(x => plMin(x.start) <= nowMin && nowMin < plMin(x.end));
+      if (b) {
+        let stepIdx = -1, stepEnd = plMin(b.end);
+        if (b.steps.length) {
+          let acc = plMin(b.start);
+          for (let i = 0; i < b.steps.length; i++) { const e = acc + Number(b.steps[i].mins || 0); if (nowMin < e) { stepIdx = i; stepEnd = e; break; } acc = e; }
+          if (stepIdx < 0) stepIdx = b.steps.length - 1;
+          // 앞 단계를 이미 끝냈다면 다음 미완료 단계를 보여준다
+          const st = (log && log.steps) || {};
+          while (stepIdx < b.steps.length - 1 && st[b.steps[stepIdx].key]) stepIdx++;
+          stepEnd = plMin(b.start) + b.steps.slice(0, stepIdx + 1).reduce((a, x) => a + Number(x.mins || 0), 0);
+        }
+        now = { b, stepIdx, left: Math.max(0, stepEnd - nowMin) };
+      }
+    }
+    const finishNow = () => {
+      if (!now) return;
+      const { b, stepIdx } = now;
+      if (b.steps.length && stepIdx >= 0) {
+        setStep(date, b.steps[stepIdx].key, true, b);
+      } else setBlock(date, b.id, { done: true });
+    };
+    const steps = (log && log.steps) || {};
+    const nowCard = now && (now.b.done ? null : (
+      <div className="pl-now" style={wide ? { margin: 0 } : undefined}>
+        <div className="pl-now-row">
+          <button type="button" className="t" aria-expanded={nowOpen} onClick={() => setNowOpen(o => !o)}>
+            <small>지금</small>{now.b.steps.length ? `${["①", "②", "③", "④"][now.stepIdx] || ""} ${now.b.steps[now.stepIdx].label}` : now.b.label}
+            <small style={{ marginLeft: 6 }}>· {now.left}분 남음</small>
+          </button>
+          <button type="button" className="done" onClick={finishNow}>끝</button>
+        </div>
+        {now.b.steps.length > 0 && (
+          <div className="pl-now-prog" aria-hidden="true">
+            {now.b.steps.map((s, i) => <span key={s.key} style={{ flex: Number(s.mins) || 1 }}><i style={{ width: steps[s.key] ? "100%" : i === now.stepIdx ? `${Math.round(100 * (1 - now.left / (Number(s.mins) || 1)))}%` : 0 }} /></span>)}
+          </div>
+        )}
+        {nowOpen && (
+          <div className="pl-now-more">
+            {now.b.steps.length ? (<>
+              <div>{now.b.steps[now.stepIdx].doing}</div>
+              <div style={{ color: "#C9BBF2" }}>AI 역할 · {now.b.steps[now.stepIdx].aiRole}</div>
+            </>) : <div>{now.b.note || `${now.b.start}–${now.b.end}`}</div>}
+          </div>
+        )}
+      </div>
+    ));
+    const kpis = (
+      <div className="pl-kpis">
+        <div><div className="pl-muted">오늘 블록</div><div className="v">{doneN}<span> / {blocks.length}</span></div></div>
+        <div><div className="pl-muted">주간 학습</div><div className="v">{stats.study}<span> / {studyTarget}</span></div></div>
+        <div><div className="pl-muted">오늘 주제</div><div className="v" style={{ fontSize: 15, marginTop: 4, color: theme && day.mode !== "weekend" ? C[theme.track] : "var(--text3)" }}>{theme && day.mode !== "weekend" ? `${theme.track} · ${theme.hours}` : "쉬는 날"}</div></div>
+      </div>
+    );
+    // 시간 비율 시간표
+    const PPM = wide ? 1.3 : 1.2;
+    const s0 = blocks.length ? Math.floor(Math.min(...blocks.map(b => plMin(b.start))) / 60) * 60 : 600;
+    const e0 = blocks.length ? Math.ceil(Math.max(...blocks.map(b => plMin(b.end))) / 60) * 60 : 1020;
+    const y = (m) => (m - s0) * PPM + 8;
+    const hours = []; for (let m = s0; m <= e0; m += 60) hours.push(m);
+    const toneOf = (b) => {
+      if (b.kind === "study" && theme) return { bg: tint(theme.track), fg: C[theme.track], ring: `inset 0 0 0 1.5px ${C[theme.track]}` };
+      if (b.kind === "ops" || b.kind === "wrap") return { bg: darkMode ? "rgba(219,107,46,0.16)" : "#FDF1E8", fg: darkMode ? "#F6B38A" : "#8A3F18" };
+      if (b.kind === "exercise") return { bg: darkMode ? "rgba(45,106,79,0.25)" : "#EAF2EE", fg: darkMode ? "#86C9A6" : "#2D6A4F" };
+      return { bg: "var(--surface2)", fg: "var(--text2)" };
+    };
+    const timeline = (
+      <div style={{ padding: "12px 16px 8px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ minWidth: 0 }}>
+            {theme && day.mode !== "weekend" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                <span className="pl-tag" style={{ background: C[theme.track], color: darkMode ? "#191F28" : "#fff" }}>{theme.track}</span>
+                <span style={{ fontSize: 13, color: "var(--text2)", minWidth: 0 }}>{day.mode === "peak" ? "성수기 유지 — 오늘은 학습 없이 운영 블록을 늘립니다" : theme.description}</span>
+              </div>
+            ) : <span className="pl-muted">주말은 블록을 비워 둡니다</span>}
+          </div>
+          {blocks.length > 0 && <button type="button" className="pl-btn ghost sm" style={{ flex: "none" }} onClick={() => setEditTimes(v => !v)}>{editTimes ? "닫기" : "시간 바꾸기"}</button>}
+        </div>
+        {day.mode === "peak-study" && <div className="pl-muted" style={{ marginBottom: 6 }}>성수기(3~6월) — 월·수·금만 학습 블록</div>}
+        {editTimes && (
+          <div className="pl-box" style={{ marginBottom: 10 }}>
+            {blocks.map(b => (
+              <div key={b.id} className="pl-li" style={{ gap: 6 }}>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700 }}>{b.label}</span>
+                <input type="time" aria-label={`${b.label} 시작`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 96 }} value={b.start} onChange={e => e.target.value && setBlock(date, b.id, { start: e.target.value })} />
+                <span aria-hidden="true">–</span>
+                <input type="time" aria-label={`${b.label} 끝`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 96 }} value={b.end} onChange={e => e.target.value && setBlock(date, b.id, { end: e.target.value })} />
+              </div>
+            ))}
+            <div className="pl-li" style={{ justifyContent: "flex-end" }}>
+              <span className="pl-muted" style={{ flex: 1 }}>이 날만 바뀝니다</span>
+              <button type="button" className="pl-btn ghost sm" onClick={() => updateLog(date, l => ({ ...l, blocks: Object.fromEntries(Object.entries(l.blocks || {}).map(([k, v]) => { const { start, end, ...rest } = v || {}; return [k, rest]; })) }))}>기본 시간으로</button>
+            </div>
+          </div>
+        )}
+        {blocks.length > 0 && (
+          <div className="pl-tl" style={{ height: (e0 - s0) * PPM + 18 }}>
+            {hours.map(m => <div key={m} className="pl-hr" style={{ top: y(m) - 7 }}><span>{plHM(m)}</span><span /></div>)}
+            {blocks.map(b => {
+              const bs = plMin(b.start), be = plMin(b.end), h = Math.max(20, (be - bs) * PPM - 3);
+              const tone = toneOf(b), tiny = h < 34;
+              const stepH = b.steps.length && h >= 90;
+              return (
+                <div key={b.id} className={`pl-blk${tiny ? " tiny" : ""}${b.done ? " done" : ""}`} style={{ top: y(bs), height: h, background: tone.bg, color: tone.fg, boxShadow: tone.ring && !b.done ? tone.ring : "none" }}>
+                  {stepH ? (<>
+                    {b.steps.map((s, i) => (
+                      <div key={s.key} className={`pl-step${steps[s.key] ? " on" : ""}`} style={{ flex: `${Number(s.mins) || 1} 1 0`, borderTop: i === 0 ? 0 : undefined, background: i === 0 ? "rgba(127,127,127,0.10)" : undefined }}>
+                        <span className="tx"><b>{["①", "②", "③", "④"][i]} {s.label} {s.mins}분</b>{i === 1 && h >= 120 ? <span className="ai"> — {s.doing}</span> : null}{i !== 1 ? <span className="ai"> · {s.doing}</span> : null}</span>
+                        <button type="button" className={`pl-chk${steps[s.key] ? " on" : ""}`} aria-label={`${s.label} ${steps[s.key] ? "완료 취소" : "완료"}`} aria-pressed={!!steps[s.key]} onClick={() => setStep(date, s.key, !steps[s.key], b)}>{steps[s.key] && <PlCheckIcon size={11} />}</button>
+                      </div>
+                    ))}
+                  </>) : (
+                    <div className="pl-blk-main">
+                      <div className="tx">
+                        <div className="ttl">{b.label}{b.kind === "study" && theme ? ` · ${theme.track}` : ""}</div>
+                        {!tiny && <div className="tm">{b.start} – {b.end}</div>}
+                        {!tiny && h >= 52 && b.note && <div className="nt">{b.note}</div>}
+                      </div>
+                      <button type="button" className={`pl-chk${b.done ? " on" : ""}`} aria-label={`${b.label} ${b.done ? "완료 취소" : "완료"}`} aria-pressed={b.done} onClick={() => setBlock(date, b.id, { done: !b.done })}>{b.done && <PlCheckIcon size={tiny ? 10 : 13} />}</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {isToday && nowMin >= s0 && nowMin <= e0 && <div className="pl-nowline" style={{ top: y(nowMin) - 4 }} role="img" aria-label={`지금 ${plHM(nowMin)}`}><i /><b /></div>}
+          </div>
+        )}
+      </div>
+    );
+    const dayTodos = todos.filter(t => t && plan.category && t.category === plan.category && t.date && t.date <= date && date <= (t.endDate || t.date))
+      .sort((a, b) => Number(!!a.done) - Number(!!b.done) || String(a.endDate || a.date).localeCompare(String(b.endDate || b.date)));
+    const drawer = (
+      <div className="pl-box">
+        <div className="pl-box-hd"><h4>할 일 <span className="pl-muted" style={{ fontWeight: 600 }}>· {plan.category} {dayTodos.filter(t => !t.done).length}</span></h4>
+          {onOpenSchedule && <button type="button" className="pl-btn ghost sm" onClick={() => onOpenSchedule(date)}>일정에서 보기</button>}</div>
+        {dayTodos.length === 0 && <div className="pl-li"><span className="pl-muted">이 날 걸린 {plan.category} 일정이 없어요. 주간에서 「일정으로 보내기」를 누르면 여기에 보입니다.</span></div>}
+        {dayTodos.map(t => (
+          <div key={t.id} className="pl-li">
+            <input type="checkbox" id={`pltd-${t.id}`} checked={!!t.done} onChange={() => toggleTodo && toggleTodo(t.id)} />
+            <label htmlFor={`pltd-${t.id}`} style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--text3)" : undefined }}>{t.text}</label>
+            {t.endDate && t.endDate !== t.date && <span className="pl-tag" style={{ background: "var(--accent-tonal)", color: "var(--accent-strong)" }}>~{plMD(t.endDate)}</span>}
+          </div>
+        ))}
+      </div>
+    );
+    const n3 = (log && log.note3) || {};
+    const note3 = (
+      <div className="pl-box">
+        <div className="pl-box-hd"><h4>3줄 기록</h4><span className="pl-muted">{n3.did || n3.learned || n3.next ? "저장됨" : "16:45 마무리 때"}</span></div>
+        {[["did", "한 것", "오늘 실제로 한 것"], ["learned", "배운 것", "새로 알게 된 것 한 줄"], ["next", "내일 첫 작업", "내일 앉자마자 할 것"]].map(([k, l, ph]) => (
+          <div key={k} className="pl-field"><label htmlFor={`pl3-${k}`}>{l}</label>
+            <input id={`pl3-${k}`} type="text" placeholder={ph} value={n3[k] || ""} onChange={e => setNote(date, k, e.target.value)} /></div>
+        ))}
+      </div>
+    );
+    if (wide) {
+      return (<>{kpis}
+        <div className="pl-wide">
+          <div>{timeline}{!blocks.length && <div className="pl-sec pl-muted">주말이에요. 할 일과 기록만 남겨 두세요.</div>}</div>
+          <div className="side">{nowCard}{drawer}{note3}</div>
+        </div>
+      </>);
+    }
+    return (<>
+      {nowCard}
+      {kpis}
+      {timeline}
+      <div style={{ padding: "4px 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>{drawer}{note3}</div>
+    </>);
+  };
+
+  // ── 주간 ──
+  const renderWeek = () => {
+    const outs = week ? plArr(week.outputs) : [];
+    const doneOuts = outs.filter(o => o.done).length + (week && week.appointment && week.apptDone ? 1 : 0);
+    const totalOuts = outs.length + (week && week.appointment ? 1 : 0);
+    const wTodo = week ? linkedTodo(week, "week") : null;
+    const wDone = week ? itemDone(week, "week") : false;
+    const setOut = (oid, on) => upsert("weeks", week.id, w => ({ ...w, outputs: plArr(w.outputs).map(o => o.id === oid ? { ...o, done: on } : o) }));
+    const objective = week ? (
+      <div className="pl-sec" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          <PlRing v={doneOuts} total={totalOuts} color={C[week.track] || "#DB6B2E"} size={64} label={`이번 주 산출물 ${totalOuts}개 중 ${doneOuts}개 완료`} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span className="pl-tag" style={{ background: tint(week.track), color: C[week.track] }}>{week.track}</span>
+              <span className="pl-muted">이번 주 주제</span>
+              {wDone && <span className="pl-tag" style={{ background: darkMode ? "rgba(45,106,79,0.3)" : "#E5F1EA", color: darkMode ? "#86C9A6" : "#1F5C40" }}>완료</span>}
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, lineHeight: 1.35 }}>{week.topic}</div>
+          </div>
+        </div>
+        <div className="pl-box"><div className="pl-field"><label htmlFor="pl-goal" style={{ fontWeight: 700 }}>주간 목표</label>
+          <input id="pl-goal" type="text" placeholder="이번 주에 꼭 끝낼 한 가지" value={week.weeklyGoal || ""} onChange={e => { const v = e.target.value; upsert("weeks", week.id, w => ({ ...w, weeklyGoal: v })); }} /></div></div>
+        <div className="pl-box">
+          {outs.map(o => (
+            <div key={o.id} className="pl-li">
+              <input type="checkbox" id={`plo-${o.id}`} checked={!!o.done} onChange={e => setOut(o.id, e.target.checked)} />
+              <label htmlFor={`plo-${o.id}`} style={{ textDecoration: o.done ? "line-through" : "none" }}>{o.text}</label>
+              <span className="pl-tag" style={{ background: "var(--surface2)", color: "var(--text2)" }}>산출물</span>
+            </div>
+          ))}
+          {week.appointment && (
+            <div className="pl-li">
+              <input type="checkbox" id="plo-appt" checked={!!week.apptDone} onChange={e => { const v = e.target.checked; upsert("weeks", week.id, w => ({ ...w, apptDone: v })); }} />
+              <label htmlFor="plo-appt" style={{ textDecoration: week.apptDone ? "line-through" : "none" }}>{week.appointment}</label>
+              <span className="pl-tag" style={{ background: darkMode ? "rgba(219,107,46,0.16)" : "#FFF1E6", color: darkMode ? "#F6B38A" : "#A8380A" }}>외부 약속</span>
+            </div>
+          )}
+          <div className="pl-li">
+            <input type="checkbox" id="plo-week" checked={wDone} onChange={() => toggleItemDone(week, "week", "weeks")} />
+            <label htmlFor="plo-week" style={{ fontWeight: 700 }}>이 주 마무리</label>
+            <span className="pl-muted">{wTodo ? "일정과 같이 바뀌어요" : "보내면 일정과 연결"}</span>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div className="pl-sec">
+        <div style={{ fontSize: 15, fontWeight: 700 }}>W{weekNo}는 아직 세부 계획이 없어요</div>
+        <div className="pl-muted" style={{ marginTop: 4 }}>지금은 1년차 첫 12주(11/9 ~ 1/31)만 들어 있습니다.</div>
+      </div>
+    );
+    const rows = [
+      { k: "study", label: "학습 블록", count: `${stats.study} / ${studyTarget}`, on: (d) => d.study, tap: (d) => { const l = plLogOf(P, plan, d.date); const cur = !!(l && l.blocks && l.blocks.study && l.blocks.study.done); setBlock(d.date, "study", { done: !cur }); } },
+      { k: "note", label: "노트", count: `${stats.note} / ${noteTarget}`, on: (d) => d.note, tap: (d) => setStep(d.date, "s2", !d.note) },
+      ...(mxMore ? [
+        { k: "ex", label: "운동", count: `${stats.days.filter(d => d.ex).length} / 5`, on: (d) => d.ex, tap: (d) => setBlock(d.date, "ex", { done: !d.ex }) },
+        { k: "log", label: "3줄 기록", count: `${stats.days.filter(d => d.log).length} / 5`, on: (d) => d.log, tap: (d) => { setDate(d.date); setView("day"); } },
+      ] : []),
+    ];
+    const matrix = (
+      <div className="pl-sec">
+        <div className="pl-sec-hd"><h3>이번 주 실행표</h3><span className="pl-muted">기준 · 학습 {studyTarget}회 · 노트 {noteTarget}장</span></div>
+        <div className="pl-mx">
+          <span />
+          {stats.days.map(d => { const dw = plDow(d.date), th = plThemeOf(P, plan, d.date); return (
+            <div key={d.date} className={`hd${d.date === today ? " col-today" : ""}`}>
+              <b style={{ color: dw === 0 || dw === 6 ? "var(--text3)" : "var(--text1)" }}>{PL_WK[dw]}</b><em>{Number(d.date.slice(8))}</em>
+              <span style={{ color: th ? C[th.track] : "var(--text3)" }}>{th ? th.track : "·"}</span>
+            </div>); })}
+          {rows.map(r => (
+            <React.Fragment key={r.k}>
+              <div className="lb"><b>{r.label}</b><span>{r.count}</span></div>
+              {stats.days.map(d => { const dw = plDow(d.date), off = dw === 0 || dw === 6, on = r.on(d); return (
+                <button key={d.date} type="button" className={`cell${d.date === today ? " col-today" : ""}`} aria-label={`${PL_WK[dw]} ${r.label} ${on ? "완료" : off ? "쉬는 날" : "예정"}`} aria-pressed={on} onClick={() => r.tap(d)}>
+                  <i style={{ background: on ? (darkMode ? "#86C9A6" : "#2D6A4F") : off ? "var(--surface2)" : "transparent", boxShadow: on || off ? "none" : "inset 0 0 0 2px var(--border)" }} />
+                </button>); })}
+            </React.Fragment>
+          ))}
+        </div>
+        <button type="button" className="pl-btn ghost sm" style={{ marginTop: 10 }} aria-expanded={mxMore} onClick={() => setMxMore(v => !v)}>{mxMore ? "접기" : "운동·3줄 기록도 보기"}</button>
+      </div>
+    );
+    // 30일 실행 (이번 주에 걸린 것)
+    const acts = P.actions.filter(a => a.planId === plan.id && a.date <= plAdd(monday, 6) && monday <= (a.endDate || a.date));
+    const actions = acts.length > 0 && (
+      <div className="pl-sec">
+        <div className="pl-sec-hd"><h3>30일 실행</h3><span className="pl-muted">보내면 일정·노션에 1건</span></div>
+        <div className="pl-box">
+          {acts.map(a => { const t = linkedTodo(a, "action"), done = itemDone(a, "action"); return (
+            <div key={a.id} className="pl-li">
+              <input type="checkbox" id={`pla-${a.id}`} checked={done} onChange={() => toggleItemDone(a, "action", "actions")} />
+              <label htmlFor={`pla-${a.id}`} style={{ textDecoration: done ? "line-through" : "none" }}>{a.text} <span className="pl-muted">~{plMD(a.endDate || a.date)}</span></label>
+              {t ? <span className="pl-tag" style={{ background: "var(--surface2)", color: "var(--text2)" }}>일정 ✓</span>
+                : <button type="button" className="pl-btn ghost sm" onClick={() => sendToTodos("action", a, { date: a.date, endDate: a.endDate, text: a.text, memo: `[${plan.short || plan.title} 30일 실행]` })}>보내기</button>}
+            </div>); })}
+        </div>
+      </div>
+    );
+    // 이번 달
+    const [yy, mm] = ym.split("-").map(Number);
+    const first = `${ym}-01`, gridStart = plMonday(first);
+    const lastDay = new Date(yy, mm, 0, 12).getDate();
+    const routineDates = routines.map(r => ({ r, d: plRoutineDate(r.rule, ym) }));
+    const cells = []; for (let i = 0; i < 42; i++) { const d = plAdd(gridStart, i); if (i >= 35 && d.slice(0, 7) !== ym) break; cells.push(d); }
+    const month = (
+      <div className="pl-sec">
+        <div className="pl-sec-hd"><h3>{mm}월</h3>
+          {!anchorDone && date.slice(0, 7) >= plan.startDate.slice(0, 7) && <span className="pl-warn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5h.01" /></svg>외부 앵커 미정</span>}</div>
+        <div className="pl-cal">
+          {["월", "화", "수", "목", "금", "토", "일"].map(w => <span key={w} className="w">{w}</span>)}
+          {cells.map(d => {
+            const out = d.slice(0, 7) !== ym;
+            const due = !out && routineDates.find(x => x.d && x.d.from === x.d.to && x.d.from === d);
+            const band = !out && routineDates.some(x => x.d && x.d.from !== x.d.to && x.d.from <= d && d <= x.d.to);
+            return (
+              <button key={d} type="button" className={`c${out ? " out" : ""}${band ? " band" : ""}${d === date ? " sel" : ""}${d === today ? " today" : ""}`} aria-label={`${plMD(d)}${due ? " " + due.r.task : ""}`} onClick={() => { setDate(d); setView("day"); }}>
+                <b>{Number(d.slice(8))}</b><i style={{ background: due ? "#DB6B2E" : "transparent" }} />
+              </button>
+            );
+          })}
+        </div>
+        <div className="pl-box" style={{ marginTop: 10 }}>
+          {routineDates.map(({ r, d }) => { const k = "r_" + r.id, on = !!(monthRec.routines || {})[k]; return (
+            <div key={r.id} className="pl-li">
+              <input type="checkbox" id={`plr-${r.id}`} checked={on} onChange={e => { const v = e.target.checked; updateMonth(ym, m => ({ ...m, routines: { ...(m.routines || {}), [k]: v } })); }} />
+              <label htmlFor={`plr-${r.id}`} style={{ textDecoration: on ? "line-through" : "none" }}>{r.task}</label>
+              <span className="pl-muted" style={{ flex: "none" }}>{d ? (d.from === d.to ? plMD(d.from) : `${plMD(d.from)}~${plMD(d.to)}`) : r.when} · {r.duration}</span>
+            </div>); })}
+        </div>
+        <button type="button" className="pl-btn ghost sm" style={{ marginTop: 10 }} aria-expanded={monthOpen} onClick={() => setMonthOpen(v => !v)}>{monthOpen ? "1페이지 접기" : `${mm}월 1페이지 쓰기`}</button>
+        {monthOpen && (
+          <div className="pl-box" style={{ marginTop: 10 }}>
+            {[["learned", "배운 것 3"], ["unknown", "모르는 것 3"], ["nextAnchor", "다음 달 앵커"]].map(([k, l]) => (
+              <div key={k} className="pl-field"><label htmlFor={`plm-${k}`}>{l}</label>
+                <textarea id={`plm-${k}`} rows={k === "nextAnchor" ? 1 : 3} value={(monthRec[k]) || ""} onChange={e => { const v = e.target.value; updateMonth(ym, m => ({ ...m, [k]: v })); }} /></div>
+            ))}
+          </div>
+        )}
+        <span className="pl-muted" style={{ display: "block", marginTop: 6 }}>{mm}월은 {lastDay}일까지 · 점이 찍힌 날은 루틴 날짜</span>
+      </div>
+    );
+    const nexts = P.weeks.filter(w => w.planId === plan.id && w.startDate > monday).sort((a, b) => a.weekNo - b.weekNo).slice(0, 3);
+    const nextList = nexts.length > 0 && (
+      <div className="pl-sec">
+        <h3 style={{ marginBottom: 4 }}>다음 주차</h3>
+        {nexts.map(w => (
+          <button key={w.id} type="button" className="pl-row-link" onClick={() => setDate(w.startDate)}>
+            <b style={{ fontSize: 14 }}>W{w.weekNo}</b>
+            <span style={{ fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.topic} <span className="pl-muted">{plMD(w.startDate)}~</span></span>
+            <span className="pl-tag" style={{ background: tint(w.track), color: C[w.track] }}>{w.track}</span>
+          </button>
+        ))}
+      </div>
+    );
+    const send = week && (
+      <div className="pl-send">
+        <div className="tx">
+          <b>{wTodo ? `W${week.weekNo} 일정에 있음${wTodo.done ? " · 완료" : ""}` : `W${week.weekNo}을 일정으로`}</b>
+          <span>{wTodo ? `${plMD(week.startDate)}~${plMD(week.endDate)} · 완료는 일정과 같이 바뀌어요` : `${plMD(week.startDate)}~${plMD(week.endDate)} 일정 1건 · 노션 페이지 1개`}</span>
+        </div>
+        {wTodo
+          ? <button type="button" className="pl-btn ghost" onClick={() => onOpenSchedule && onOpenSchedule(week.startDate)}>일정에서 보기</button>
+          : <button type="button" className="pl-btn" onClick={() => sendToTodos("week", week, {
+              date: week.startDate, endDate: week.endDate, text: `W${week.weekNo} ${week.topic}${week.weeklyGoal ? ` — ${week.weeklyGoal}` : ""}`,
+              memo: `[${plan.short || plan.title} W${week.weekNo}] 산출물: ${plArr(week.outputs).map(o => o.text).join(" · ")}${week.appointment ? ` / 외부 약속: ${week.appointment}` : ""}`,
+            })}>보내기</button>}
+      </div>
+    );
+    if (wide) {
+      return (<>
+        <div className="pl-wide">
+          <div>{objective}{matrix}{actions}</div>
+          <div className="side" style={{ padding: 0, gap: 0 }}>{month}{nextList}</div>
+        </div>
+        {send}
+      </>);
+    }
+    return (<>{objective}{matrix}{actions}{month}{nextList}{send}</>);
+  };
+
+  // ── 로드맵 ──
+  const renderRoad = () => {
+    const years = P.years.filter(y => y.planId === plan.id).sort((a, b) => a.yearIndex - b.yearIndex);
+    const yIdx = roadYear || (yearRec ? yearRec.yearIndex : 1);
+    const yr = years.find(y => y.yearIndex === yIdx) || years[0];
+    const span = plDate(plan.endDate) - plDate(plan.startDate);
+    const pos = Math.max(0, Math.min(1, (plDate(today) - plDate(plan.startDate)) / span));
+    const qs = P.quarters.filter(q => q.planId === plan.id && q.yearIndex === (yr ? yr.yearIndex : 1)).sort((a, b) => a.q - b.q);
+    const scores = P.scores.filter(s => s.planId === plan.id).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const lastScore = scores.length ? scores[scores.length - 1].score : null;
+    const proofs = plArr(plan.proofs);
+    const tracks = [...plArr(plan.tracks).map(t => t.key), "진단"];
+    return (<>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--divider)" }}>
+        <div style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${Math.max(1, years.length)}, minmax(0, 1fr))`, gap: 3 }} role="img" aria-label={`3년 중 ${Math.round(pos * 100)}% 지점`}>
+          {years.map((y, i) => <div key={y.id} style={{ height: 8, borderRadius: i === 0 ? "4px 0 0 4px" : i === years.length - 1 ? "0 4px 4px 0" : 0, background: yearRec && yearRec.id === y.id ? "rgba(219,107,46,0.25)" : "var(--surface2)" }} />)}
+          <span style={{ position: "absolute", left: `calc(${pos * 100}% - 7px)`, top: -3, width: 14, height: 14, borderRadius: 7, background: "#DB6B2E", boxShadow: "0 0 0 3px var(--surface)" }} />
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, years.length)}, minmax(0, 1fr))`, fontSize: 11, color: "var(--text3)", marginTop: 6, gap: 4 }}>
+          {years.map((y, i) => <span key={y.id} style={{ textAlign: i === 0 ? "left" : i === years.length - 1 ? "right" : "center" }}>{y.yearIndex}년차 · {y.theme}</span>)}
+        </div>
+      </div>
+      <nav className="pl-crumb" aria-label="목표 계층">
+        <button type="button" onClick={() => setRoadYear(0)}>3년</button><span aria-hidden="true" style={{ color: "var(--text3)" }}>›</span>
+        {yearRec && <><button type="button" onClick={() => setRoadYear(yearRec.yearIndex)}>{yearRec.yearIndex}년차</button><span aria-hidden="true" style={{ color: "var(--text3)" }}>›</span></>}
+        {quarter && <><button type="button" onClick={() => setRoadYear(quarter.yearIndex)}>Q{quarter.q} {quarter.mode}</button><span aria-hidden="true" style={{ color: "var(--text3)" }}>›</span></>}
+        <button type="button" className="on" onClick={() => { setDate(today); setView("week"); }}>W{plWeekNo(plan, today)} 지금</button>
+      </nav>
+      <div className="pl-sec">
+        <h3 style={{ marginBottom: 10 }}>3대 증명</h3>
+        <div className="pl-tiles">
+          {proofs.map((p, i) => (
+            <div key={p.key}>
+              <div className="k">{["①", "②", "③"][i]} {p.label}</div>
+              <div className="v">{i === 0 ? (lastScore != null ? `${lastScore}%` : "—") : (p.value || 0)}<span>{i === 0 ? " / 85%" : p.target ? ` / ${p.target}종` : " 건"}</span></div>
+              <div className="k" style={{ marginTop: 2 }}>{p.metric}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="pl-sec">
+        <div className="pl-sec-hd"><h3>{yr ? `${yr.yearIndex}년차 · ${yr.theme}` : "연차"}</h3>
+          <div className="pl-seg" role="tablist" aria-label="연차">
+            {years.map(y => <button key={y.id} type="button" role="tab" aria-selected={yr && yr.id === y.id} onClick={() => setRoadYear(y.yearIndex)}>{y.yearIndex}년</button>)}
+          </div></div>
+        {yr && <div className="pl-muted" style={{ marginBottom: 6 }}>{yr.period}</div>}
+        {yr && tracks.map(k => (yr.items || {})[k] ? (
+          <div key={k} className="pl-lane"><span className="pl-tag" style={{ background: tint(k), color: C[k] }}>{k}</span><span>{yr.items[k]}</span></div>
+        ) : null)}
+      </div>
+      <div className="pl-sec">
+        <h3 style={{ marginBottom: 12 }}>{yr ? `${yr.yearIndex}년차 분기` : "분기"}</h3>
+        {qs.length === 0 && <div className="pl-muted">이 연차의 분기 계획은 아직 없어요.</div>}
+        {qs.map(q => {
+          const isNow = quarter && quarter.id === q.id, done = itemDone(q, "quarter"), qt = linkedTodo(q, "quarter");
+          return (
+            <div key={q.id} className={`pl-q${isNow ? " now" : ""}`}>
+              <div className="rail"><i style={{ background: isNow ? "#DB6B2E" : done ? (darkMode ? "#86C9A6" : "#2D6A4F") : "var(--surface)", boxShadow: isNow || done ? "none" : "inset 0 0 0 2px var(--border)" }} /><b /></div>
+              <div className="card">
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <b style={{ fontSize: 16 }}>Q{q.q}</b><span className="pl-muted">{q.months}</span>
+                  <span className="pl-tag" style={{ background: /성수기|셀인/.test(q.mode) ? (darkMode ? "rgba(219,107,46,0.16)" : "#FBEBE2") : tint("소재"), color: /성수기|셀인/.test(q.mode) ? (darkMode ? "#F6B38A" : "#A8380A") : C["소재"] }}>{q.mode}</span>
+                  {isNow && <span className="pl-tag" style={{ background: "#DB6B2E", color: "#fff" }}>지금</span>}
+                  <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "var(--text2)" }}>주 {q.weeklyHours}</span>
+                </div>
+                <div style={{ fontSize: 13, lineHeight: 1.5 }}>{q.task}</div>
+                <div className="pl-box"><div className="pl-li" style={{ minHeight: 44 }}>
+                  <input type="checkbox" id={`plq-${q.id}`} checked={done} onChange={() => toggleItemDone(q, "quarter", "quarters")} />
+                  <label htmlFor={`plq-${q.id}`} style={{ fontWeight: 700, fontSize: 13, textDecoration: done ? "line-through" : "none" }}>{q.deliverable}</label>
+                  {qt ? <span className="pl-tag" style={{ background: "var(--surface2)", color: "var(--text2)" }}>일정 ✓</span>
+                    : <button type="button" className="pl-btn ghost sm" onClick={() => sendToTodos("quarter", q, { date: q.startDate, endDate: q.endDate, text: `Q${q.q} 산출물 — ${q.deliverable}`, memo: `[${plan.short || plan.title} ${q.yearIndex}년차 Q${q.q}] 외부 앵커: ${q.anchor}` })}>보내기</button>}
+                </div></div>
+                <div className="pl-muted">외부 앵커 · {q.anchor}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>);
+  };
+
+  // ── 리뷰 ──
+  const renderReview = () => {
+    const wk = week;
+    const outs = wk ? plArr(wk.outputs) : [];
+    const outDone = outs.filter(o => o.done).length;
+    const dw = plDow(today);
+    const weekOver = monday <= today && today <= plAdd(monday, 6) && (dw === 5 || dw === 6 || dw === 0) || plAdd(monday, 6) < today;
+    const S = (state) => state === "충족" ? [darkMode ? "#86C9A6" : "#1F5C40", darkMode ? "rgba(45,106,79,0.3)" : "#E5F1EA"] : state === "주의" ? [darkMode ? "#F6B38A" : "#A8380A", darkMode ? "rgba(219,107,46,0.16)" : "#FFF1E6"] : ["var(--text2)", "var(--surface2)"];
+    const qDone = quarter ? itemDone(quarter, "quarter") : false;
+    const qLate = quarter && plAdd(quarter.endDate, -21) <= today;
+    const rules = P.checkRules.filter(r => r.planId === plan.id).map(r => {
+      let state = "예정";
+      if (r.cycle === "매주 금") state = stats.study >= studyTarget && stats.note >= noteTarget ? "충족" : weekOver ? "주의" : "예정";
+      else if (r.cycle === "매월 말") state = anchorDone ? "충족" : Number(date.slice(8)) >= 22 ? "주의" : "예정";
+      else if (r.cycle === "매 분기") state = qDone ? "충족" : qLate ? "주의" : "예정";
+      else if (r.cycle.includes("10월")) state = Number(today.slice(5, 7)) === 10 ? "주의" : "예정";
+      return { ...r, state };
+    });
+    const logs = P.dayLogs.filter(l => l.planId === plan.id);
+    const totals = [
+      [logs.filter(l => l.blocks && l.blocks.study && l.blocks.study.done).length, "학습 블록"],
+      [logs.filter(l => l.steps && l.steps.s2).length, "1페이지 노트"],
+      [P.monthReviews.filter(m => m.planId === plan.id && routines.some(r => r.anchor && (m.routines || {})["r_" + r.id])).length, "외부 앵커"],
+      [P.scores.filter(s => s.planId === plan.id).length, "진단 기록"],
+    ];
+    // 점수 그래프 — 계획 기간 전체, 연차별 목표 경로(40→60→75→85)
+    const scores = P.scores.filter(s => s.planId === plan.id).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const W = 360, H = 180, L = 28, R = 8, T = 12, B = 26;
+    const t0 = plDate(plan.startDate).getTime(), t1 = plDate(plan.endDate).getTime();
+    const X = (d) => L + (W - L - R) * Math.max(0, Math.min(1, (plDate(d).getTime() - t0) / (t1 - t0)));
+    const Yv = (v) => T + (H - T - B) * (1 - Math.max(0, Math.min(100, v)) / 100);
+    const yrs = P.years.filter(y => y.planId === plan.id).sort((a, b) => a.yearIndex - b.yearIndex);
+    const tg = plArr(plan.targets).sort((a, b) => a.yearIndex - b.yearIndex);
+    const tPts = tg.length ? [[plan.startDate, tg[0].from], ...tg.map(t => { const y = yrs.find(v => v.yearIndex === t.yearIndex); return [y ? (y.endDate > plan.endDate ? plan.endDate : y.endDate) : plan.endDate, t.to]; })] : [];
+    const addScore = () => {
+      const v = Number(String(scoreDraft.score).replace(/[^\d.]/g, ""));
+      if (!scoreDraft.date || !isFinite(v) || v < 0 || v > 100 || String(scoreDraft.score).trim() === "") { showToast("점수는 0~100 사이 숫자로 넣어 주세요"); return; }
+      const id = `${plan.id}-sc${Date.now()}`;
+      upsert("scores", id, x => x, () => ({ id, planId: plan.id, date: scoreDraft.date, score: Math.round(v * 10) / 10, note: scoreDraft.note || "", createdAt: Date.now() }));
+      setScoreDraft(d => ({ ...d, score: "", note: "" }));
+    };
+    const delScore = (id) => { if (!window.confirm("이 점수 기록을 지울까요?")) return; setPlanner(prev => { const p = plannerNormalize(prev); return { ...p, scores: p.scores.filter(s => s.id !== id) }; }); };
+    const below = scores.length && tPts.length ? (() => { const s = scores[scores.length - 1]; let exp = tPts[0][1]; for (let i = 1; i < tPts.length; i++) { if (s.date <= tPts[i][0]) { const a = tPts[i - 1], b = tPts[i]; const f = (plDate(s.date) - plDate(a[0])) / Math.max(1, plDate(b[0]) - plDate(a[0])); exp = a[1] + (b[1] - a[1]) * Math.max(0, Math.min(1, f)); break; } exp = tPts[i][1]; } return s.score < exp ? Math.round(exp) : null; })() : null;
+    return (<>
+      <div className="pl-sec">
+        <div className="pl-sec-hd"><h3>이번 주 숫자</h3><span className="pl-muted">{plMD(monday)}~{plMD(plAdd(monday, 6))} · 금요일에 점검</span></div>
+        <div className="pl-rings">
+          <div><PlRing v={stats.study} total={studyTarget} color={stats.study >= studyTarget ? "#2D6A4F" : "#DB6B2E"} label={`학습 블록 ${stats.study}/${studyTarget}`} /><b>학습 블록</b><span className="pl-muted">기준 {studyTarget}회</span></div>
+          <div><PlRing v={stats.note} total={noteTarget} color={stats.note >= noteTarget ? "#2D6A4F" : "#DB6B2E"} label={`노트 ${stats.note}/${noteTarget}`} /><b>노트</b><span className="pl-muted">기준 {noteTarget}장</span></div>
+          <div><PlRing v={anchorDone ? 1 : 0} total={1} color="#2D6A4F" label={`외부 앵커 ${anchorDone ? 1 : 0}/1`} /><b>외부 앵커</b><span className="pl-muted">월 1건</span></div>
+          <div><PlRing v={outDone} total={outs.length || 0} color="#2D6A4F" label={`산출물 ${outDone}/${outs.length}`} /><b>산출물</b><span className="pl-muted">W{weekNo}</span></div>
+        </div>
+      </div>
+      <div className="pl-sec">
+        <h3 style={{ marginBottom: 4 }}>점검 기준</h3>
+        {rules.map(r => { const [fg, bg] = S(r.state); return (
+          <div key={r.id} className="pl-rule">
+            <span className="pl-muted">{r.cycle}</span>
+            <span>{r.standard}<span className="pl-muted" style={{ display: "block" }}>{r.metric}</span></span>
+            <span className="pl-tag" style={{ color: fg, background: bg }}>{r.state}</span>
+          </div>); })}
+      </div>
+      <div className="pl-sec">
+        <div className="pl-sec-hd"><h3>진단 점수 추이</h3>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }} className="pl-muted"><span style={{ width: 16, borderTop: "2px dashed #DB6B2E" }} />목표 경로</span></div>
+        {below != null && <div className="pl-warn" style={{ marginBottom: 8 }}>최근 점수가 목표 경로({below}%)보다 낮아요</div>}
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: 560, display: "block" }} role="img" aria-label={`목표 경로 40에서 85까지${scores.length ? `, 기록 ${scores.length}개, 최근 ${scores[scores.length - 1].score}%` : ", 아직 기록 없음"}`}>
+          {[100, 75, 50, 25, 0].map(v => <g key={v}><line x1={L} x2={W - R} y1={Yv(v)} y2={Yv(v)} stroke="var(--divider)" /><text x={L - 4} y={Yv(v) + 3} fontSize="9" fill="var(--text3)" textAnchor="end">{v}</text></g>)}
+          {yrs.map(y => <text key={y.id} x={(X(y.startDate < plan.startDate ? plan.startDate : y.startDate) + X(y.endDate > plan.endDate ? plan.endDate : y.endDate)) / 2} y={H - 8} fontSize="10" fill="var(--text3)" textAnchor="middle">{y.yearIndex}년차</text>)}
+          {tPts.length > 1 && <polyline points={tPts.map(([d, v]) => `${X(d)},${Yv(v)}`).join(" ")} fill="none" stroke="#DB6B2E" strokeWidth="1.6" strokeDasharray="5 4" />}
+          {tPts.slice(1).map(([d, v]) => <text key={d} x={Math.min(W - R - 8, X(d))} y={Yv(v) - 5} fontSize="9" fill="#C55E27" textAnchor="middle">{v}</text>)}
+          {scores.length > 1 && <polyline points={scores.map(s => `${X(s.date)},${Yv(s.score)}`).join(" ")} fill="none" stroke="var(--text1)" strokeWidth="2" />}
+          {scores.map(s => <circle key={s.id} cx={X(s.date)} cy={Yv(s.score)} r="3.5" fill="var(--text1)" />)}
+          <line x1={X(today)} x2={X(today)} y1={T} y2={H - B} stroke="var(--border)" strokeDasharray="2 3" />
+        </svg>
+        {scores.length === 0 && <div className="pl-muted" style={{ marginTop: 6 }}>아직 점수가 없어요. 기준선 진단을 보고 아래에 넣어 주세요.</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px auto", gap: 8, marginTop: 10 }}>
+          <input type="date" aria-label="날짜" className="pl-in" value={scoreDraft.date} onChange={e => setScoreDraft(d => ({ ...d, date: e.target.value }))} />
+          <input type="text" inputMode="decimal" aria-label="점수 (%)" placeholder="점수 %" className="pl-in" value={scoreDraft.score} onChange={e => setScoreDraft(d => ({ ...d, score: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") addScore(); }} />
+          <button type="button" className="pl-btn" style={{ minHeight: 44 }} onClick={addScore}>기록</button>
+        </div>
+        <input type="text" aria-label="메모" placeholder="메모 (선택) — 예: 기준선 50문항" className="pl-in" style={{ width: "100%", marginTop: 8 }} value={scoreDraft.note} onChange={e => setScoreDraft(d => ({ ...d, note: e.target.value }))} />
+        {scores.length > 0 && (
+          <div className="pl-box" style={{ marginTop: 10 }}>
+            {scores.slice().reverse().slice(0, 6).map(s => (
+              <div key={s.id} className="pl-li">
+                <b style={{ fontSize: 15, width: 52 }}>{s.score}%</b>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 13 }}>{s.date.replace(/-/g, ".")}{s.note ? <span className="pl-muted"> · {s.note}</span> : null}</span>
+                <button type="button" className="pl-btn ghost sm" aria-label={`${s.date} 점수 지우기`} onClick={() => delScore(s.id)}>지우기</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="pl-sec">
+        <h3 style={{ marginBottom: 4 }}>시작부터 쌓인 것</h3>
+        <div className="pl-muted" style={{ marginBottom: 10 }}>하루 빠져도 줄지 않는 누적 개수만 셉니다.</div>
+        <div className="pl-totals">{totals.map(([v, l]) => <div key={l}><b>{v}</b><span>{l}</span></div>)}</div>
+      </div>
+    </>);
+  };
+
+  return (
+    <div className={`pl${darkMode ? " dark" : ""}${narrow ? " narrow" : ""}`} ref={boxRef}>
+      <style>{PL_CSS}</style>
+      {head}
+      {view === "day" && renderDay()}
+      {view === "week" && renderWeek()}
+      {view === "road" && renderRoad()}
+      {view === "review" && renderReview()}
+    </div>
+  );
+}
+
+
+function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, setDailyNotes, weeklyGoals = {}, setWeeklyGoals, recurringSchedules = [], setRecurringSchedules, clients = [], darkMode, purchaseOrders = [], fabricIntakes = [], bankDeposits = {}, setTab, taxes = [], planner = {}, setPlanner }) {
   const scheduleSubOrder = useSubtabOrder("frw_schedule_subtab_order", ["calendar","timetable","daily","notes","recurring"], "data-schedule-sub");
   const [scheduleSub, setScheduleSub] = React.useState(() => load("frw_schedule_subtab", "calendar")); // 탭 이탈 후 복귀 시 유지
+  // 「일정 | 플래너」 전환 — 플래너는 기존 일정 화면과 따로 그린다 (기존 하위 탭은 그대로)
+  const [schedMode, setSchedMode] = React.useState(() => load("frw_schedule_mode", "schedule"));
+  React.useEffect(() => { save("frw_schedule_mode", schedMode); }, [schedMode]);
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
   const today = new Date();
   const ymd = (d) => {
@@ -33314,7 +34405,18 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* 서브탭 네비게이션 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div className="no-print" role="group" aria-label="일정 화면 전환" style={{ display: "flex", gap: 4, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12 }}>
+        {[["schedule", "일정"], ["planner", "플래너"]].map(([k, l]) => (
+          <button key={k} type="button" aria-pressed={schedMode === k} onClick={() => setSchedMode(k)}
+            style={{ padding: "9px 16px", border: "none", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+              background: schedMode === k ? (darkMode ? "rgba(219,107,46,0.18)" : "#fff") : "transparent",
+              color: schedMode === k ? (darkMode ? "#FBF0E8" : "#AB4F1F") : "var(--text2)",
+              boxShadow: schedMode === k ? "0 1px 2px rgba(0,0,0,0.04)" : "none" }}>{l}</button>
+        ))}
+      </div>
+      {schedMode !== "planner" && (
+      /* 서브탭 네비게이션 */
       <div className="no-print subtab-strip" style={{ display: "flex", gap: 4, padding: 4, background: darkMode ? "rgba(255,255,255,0.04)" : "#F2F4F7", borderRadius: 12, width: "fit-content" }}>
         {scheduleSubOrder.order.map(id => {
           const cfg = SCHEDULE_SUBTABS[id]; if (!cfg) return null;
@@ -33338,7 +34440,13 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           );
         })}
       </div>
+      )}
+      </div>
 
+      {schedMode === "planner" ? (
+        <PlannerView planner={planner} setPlanner={setPlanner} todos={todos} setTodos={setTodos} toggleTodo={toggleTodo} notionCreate={notionCreate} darkMode={darkMode}
+          onOpenSchedule={(d) => { setSchedMode("schedule"); setScheduleSub("calendar"); jumpToDate(d); }} />
+      ) : (<>
       {scheduleSub === "calendar" && (<>
       <div className="card" style={{ padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <div>
@@ -34344,6 +35452,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
       {scheduleSub === "recurring" && (
         <RecurringPanel recurringSchedules={recurringSchedules} setRecurringSchedules={setRecurringSchedules} darkMode={darkMode} />
       )}
+      </>)}
     </div>
   );
 }

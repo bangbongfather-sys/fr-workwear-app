@@ -451,8 +451,8 @@ async function handleFirebaseSync(request, env, url) {
   } else if (url.pathname === "/api/sync/sigs") {
     // 섹션별 내용 지문 {n,m} — 저장 전에 "사고 수준으로 줄어드는 저장"인지 판정하는 데 쓴다.
     fbPath = "/frw/_sigs.json";
-  } else if (/^\/api\/sync\/section\/(bankDeposits|clientAR)$/.test(url.pathname)) {
-    // 충돌 자동 병합용 — 그 섹션만 읽는다(GET 전용, 입금내역·미수금 원장만)
+  } else if (/^\/api\/sync\/section\/(bankDeposits|clientAR|planner)$/.test(url.pathname)) {
+    // 충돌 자동 병합용 — 그 섹션만 읽는다(GET 전용, 입금내역·미수금 원장·플래너만)
     if (request.method !== "GET") return new Response(JSON.stringify({ error: "GET 만 됩니다" }), { status: 405, headers: corsHeaders });
     fbPath = `/frw/${url.pathname.split("/").pop()}.json`;
   } else if (url.pathname === "/api/sync/revs") {
