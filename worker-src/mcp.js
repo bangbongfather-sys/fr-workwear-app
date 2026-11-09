@@ -241,7 +241,7 @@ const TOOLS = [
   {
     name: "update_planner_item",
     description:
-      "플래너 항목을 고칩니다. 넘긴 fields 만 바꿉니다. type: week(id 는 mp1-w3 또는 W3 · topic·track·weeklyGoal·appointment·apptDone·deliverable·outputs[{id|text,done}]·done) · quarter(task·deliverable·anchor·mode·weeklyHours·done) · action(text·date·endDate·done) · year(theme·items{축:내용}) · theme(요일 주제 id mp1-t1~t5 · track·description·hours) · rule · routine(id 루틴 · done+month YYYY-MM 로 그 달 체크, 또는 task·when·duration) · month(id YYYY-MM · learned·unknown·nextAnchor 월간 1페이지) · block(date 필수, id 는 get_planner day 의 블록 id · start·end HH:MM·label·done·doing·hidden — 그 날만) · template(하루 틀 자체, fields.mode normal|peak, id 블록 · start·end·label, 새 블록은 start·end·label 모두, delete:true 로 빼기 — 앞으로의 모든 날) · plan(title·weeklyHours·studyTarget·noteTarget·proofs{p2:숫자,p3:숫자}). week·quarter·action·score 는 fields.delete:true 로 지웁니다. done 을 바꾸면 연결된 일정(노션 포함)도 같이 바뀝니다.",
+      "플래너 항목을 고칩니다. 넘긴 fields 만 바꿉니다. type: week(id 는 mp1-w3 또는 W3 · topic·track·weeklyGoal·appointment·apptDone·deliverable·outputs[{id|text,done}]·done) · quarter(task·deliverable·anchor·mode·weeklyHours·done) · action(text·date·endDate·done) · year(theme·items{축:내용}) · theme(요일 주제 id mp1-t1~t5 · track·description·hours) · rule · routine(id 루틴 · done+month YYYY-MM 로 그 달 체크, 또는 task·when·duration) · month(id YYYY-MM · learned·unknown·nextAnchor 월간 1페이지) · block(date 필수, id 는 get_planner day 의 블록 id · start·end HH:MM·label·done·note(메모)·doing(학습 단계 할 일)·aiRole(학습 단계 AI 역할)·hidden — 그 날만) · template(하루 틀 자체, fields.mode normal|peak, id 블록 · start·end·label, 새 블록은 start·end·label 모두, delete:true 로 빼기 — 앞으로의 모든 날) · plan(title·weeklyHours·studyTarget·noteTarget·proofs{p2:숫자,p3:숫자}). week·quarter·action·score 는 fields.delete:true 로 지웁니다. done 을 바꾸면 연결된 일정(노션 포함)도 같이 바뀝니다.",
     inputSchema: { type: "object", properties: {
       type: { type: "string", enum: ["week", "quarter", "action", "year", "theme", "rule", "routine", "month", "block", "template", "plan", "score"] },
       id: { type: "string", description: "대상 id" },
@@ -596,7 +596,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-mcp2", note: "플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-memo", note: "블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -2589,7 +2589,7 @@ const plWeekBrief = (w, todo) => w && ({ id: w.id, 주차: `W${w.weekNo}`, 기�
   주간목표: w.weeklyGoal || "", 산출물: plArr(w.outputs).map((o) => ({ id: o.id, 내용: o.text, 완료: !!o.done })), 외부약속: w.appointment || "", 약속완료: !!w.apptDone,
   마무리: todo ? !!todo.done : !!w.done, 일정연결: todo ? { id: todo.id, 완료: !!todo.done } : null });
 const plLinked = (todos, item, type) => { const ids = plArr(item && item.todoIds).map(String); return todos.find((t) => ids.includes(String(t.id))) || todos.find((t) => t.plannerRef && t.plannerRef.type === type && t.plannerRef.id === item.id) || null; };
-const plBlockBrief = (b) => ({ id: b.todo ? `todo:${b.todo.id}` : b.id, 이름: b.label, 시작: b.start, 끝: b.end, 완료: !!b.done,
+const plBlockBrief = (b) => ({ id: b.todo ? `todo:${b.todo.id}` : b.id, 이름: b.label, 시작: b.start, 끝: b.end, 완료: !!b.done, ...((b.todo ? b.todo.memo : b.note) ? { 메모: b.todo ? b.todo.memo : b.note } : {}),
   종류: b.todo ? (b.todo.ttOnly ? "시간표 전용 일정" : "일정") : b.stepKey ? `학습 ${b.stepNo}` : b.kind, ...(b.doing ? { 할일: b.doing } : {}), ...(b.aiRole ? { AI역할: b.aiRole } : {}) });
 
 async function toolGetPlanner(args, env) {
@@ -2614,7 +2614,7 @@ async function toolGetPlanner(args, env) {
     const all = [...day.blocks, ...plTodoBlocks(todos, date)].sort((a, b) => plMin(a.start) - plMin(b.start));
     return textContent({ ...base, 요일: PL_WK[plDow(date)], 모드: { normal: "평소", peak: "성수기 유지(학습 없음)", "peak-study": "성수기 학습일", weekend: "주말" }[day.mode], 주제: th ? { 축: th.track, 내용: th.description, 시간: th.hours } : null,
       블록: all.map(plBlockBrief), 학습완료: !!(log && log.blocks && log.blocks.study && log.blocks.study.done), 세줄기록: (log && log.note3) || {},
-      도움말: "블록 수정은 update_planner_item(type:\"block\", date, id, fields:{start,end,label,done,doing,hidden}). id 가 todo:… 인 것은 일정 — update_todo 로." });
+      도움말: "블록 수정은 update_planner_item(type:\"block\", date, id, fields:{start,end,label,done,note,doing,aiRole,hidden}). id 가 todo:… 인 것은 일정 — update_todo 로." });
   }
   if (view === "week") {
     const wt = week ? plLinked(todos, week, "week") : null;
@@ -2715,10 +2715,11 @@ async function toolUpdatePlannerItem(args, env) {
     const lid = `${plan.id}|${date}`;
     const r = await plannerUpsert(env, "dayLogs", lid, (l) => {
       const n = { ...l, blocks: { ...(l.blocks || {}) }, steps: { ...(l.steps || {}) }, extra: { ...(l.extra || {}) } };
-      if (b.custom) { n.extra[b.id] = { ...(n.extra[b.id] || {}), ...pick(f, ["start", "end", "label", "done"]) }; if (f.hidden) delete n.extra[b.id]; return n; }
+      if (b.custom) { n.extra[b.id] = { ...(n.extra[b.id] || {}), ...pick(f, ["start", "end", "label", "done", "note"]) }; if (f.hidden) delete n.extra[b.id]; return n; }
       const o = { ...(n.blocks[b.id] || {}) };
-      ["start", "end", "label", "hidden"].forEach((k) => { if (f[k] !== undefined) o[k] = f[k]; });
+      ["start", "end", "label", "hidden", "note"].forEach((k) => { if (f[k] !== undefined) o[k] = k === "note" ? String(f[k]).slice(0, 500) : f[k]; });
       if (f.doing !== undefined && b.parentId) { const po = { ...(n.blocks[b.parentId] || {}) }; po.stepText = { ...(po.stepText || {}), [b.stepKey]: String(f.doing) }; n.blocks[b.parentId] = po; }
+      if (f.aiRole !== undefined && b.parentId) { const po = { ...(n.blocks[b.parentId] || {}) }; po.aiText = { ...(po.aiText || {}), [b.stepKey]: String(f.aiRole) }; n.blocks[b.parentId] = po; }
       if (f.done !== undefined) {
         if (b.stepKey) { n.steps[b.stepKey] = !!f.done; const all = plArr(b.groupKeys).every((k) => n.steps[k]); n.blocks[b.parentId] = { ...(n.blocks[b.parentId] || {}), done: all }; }
         else o.done = !!f.done;

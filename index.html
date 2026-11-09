@@ -32127,8 +32127,10 @@ function plDayBlocks(P, plan, ymd, log) {
     const o = over[b.id] || {};
     if (o.hidden) return;
     const start = o.start || b.start, end = o.end || b.end;
-    let steps = plArr(b.steps).map(st => ({ ...st, doing: (o.stepText && o.stepText[st.key]) || st.doing }));
-    if (!steps.length) { blocks.push({ ...b, baseLabel: b.label, label: o.label || b.label, steps: [], start, end, done: !!o.done }); return; }
+    let steps = plArr(b.steps).map(st => ({ ...st,
+      doing: o.stepText && o.stepText[st.key] !== undefined && o.stepText[st.key] !== "" ? o.stepText[st.key] : st.doing,
+      aiRole: o.aiText && o.aiText[st.key] !== undefined ? o.aiText[st.key] : st.aiRole }));
+    if (!steps.length) { blocks.push({ ...b, baseLabel: b.label, label: o.label || b.label, note: o.note !== undefined ? o.note : (b.note || ""), steps: [], start, end, done: !!o.done }); return; }
     // 옛 기록에서 학습 블록 전체 길이를 바꿨다면 단계 길이도 같은 비율로
     const sum = steps.reduce((a, st) => a + Number(st.mins || 0), 0), dur = plMin(end) - plMin(start);
     if (o.start || o.end) {
@@ -32422,6 +32424,10 @@ body.glass .pl-kpi4 .warn b, body.glass .pl-kpi4 .warn span, .pl.dark .pl-kpi4 .
 .pl-blk-in { width: 100%; height: 26px; border: 1.5px solid currentColor; border-radius: 6px; background: var(--surface); color: var(--text1); font: inherit; font-size: 13px; font-weight: 700; padding: 0 6px; cursor: text; user-select: text; -webkit-user-select: text; }
 body.glass .pl-blk-in { background: #1d1f27; }
 .pl-step .pl-blk-in { height: 22px; font-size: 12px; }
+.pl-blk.editing { overflow: visible; z-index: 6; }
+.pl-blk.editing .pl-blk-main { overflow: visible; }
+.pl .pl-blk-ta { height: auto; min-height: 52px; padding: 4px 6px; font-weight: 500; line-height: 1.4; resize: vertical; margin-top: 3px; box-shadow: 0 6px 18px rgba(0,0,0,0.25); position: relative; z-index: 7; }
+.pl-blk-main .nt { white-space: pre-line; cursor: text; }
 .pl-dragtip { position: absolute; right: 40px; top: 3px; font-size: 11px; font-weight: 800; background: #191F28; color: #fff; border-radius: 5px; padding: 1px 6px; pointer-events: none; z-index: 3; }
 .pl-wc-scroll { max-height: min(70vh, 680px); overflow-y: auto; overscroll-behavior: contain; }
 .pl-in { min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--text1); min-width: 0; }
@@ -32515,7 +32521,17 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   const toggleDone = (ymd, b) => b.todo ? (toggleTodo && toggleTodo(b.todo.id)) : b.stepKey ? setStep(ymd, b.stepKey, !b.done, grpOf(b)) : patchBlock(ymd, b, { done: !b.done });
   const renameBlock = (ymd, b, field, val) => {
     const v = String(val == null ? "" : val).trim();
-    if (b.todo) { if (v && v !== b.todo.text) { if (onRenameTodo) onRenameTodo(b.todo.id, v); else setTodos(prev => (prev || []).map(t => t.id === b.todo.id ? { ...t, text: v } : t)); } return; }
+    if (b.todo) {
+      if (field === "note") { if (v !== (b.todo.memo || "")) setTodos(prev => (prev || []).map(t => t.id === b.todo.id ? { ...t, memo: v } : t)); return; }
+      if (v && v !== b.todo.text) { if (onRenameTodo) onRenameTodo(b.todo.id, v); else setTodos(prev => (prev || []).map(t => t.id === b.todo.id ? { ...t, text: v } : t)); }
+      return;
+    }
+    if (field === "note") { if (b.custom) setExtra(ymd, b.id, { note: v }); else setBlock(ymd, b.id, { note: v }); return; }
+    if (field.startsWith("ai:")) {
+      const pid = b.parentId || b.id, key = field.slice(3);
+      updateLog(ymd, l => { const cur = (l.blocks || {})[pid] || {}; return { ...l, blocks: { ...(l.blocks || {}), [pid]: { ...cur, aiText: { ...(cur.aiText || {}), [key]: v } } } }; });
+      return;
+    }
     if (field === "label") {
       if (b.custom) setExtra(ymd, b.id, { label: v || "새 일정" });
       else setBlock(ymd, b.id, { label: v && v !== b.baseLabel ? v : "" });
@@ -32534,7 +32550,8 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   const removeTtOnly = (todoId) => setTodos(prev => (prev || []).filter(t => t.id !== todoId));
   const openEdit = (ymd, b, field) => {
     const f = field || "label";
-    setEditBlk({ date: ymd, id: b.id, field: f, value: f === "label" ? b.label : b.stepKey === f ? (b.doing || "") : ((b.steps || []).find(x => x.key === f) || {}).doing || "" });
+    const val = f === "label" ? b.label : f === "note" ? (b.todo ? (b.todo.memo || "") : (b.note || "")) : f.startsWith("ai:") ? (b.aiRole || "") : b.stepKey === f ? (b.doing || "") : (((b.steps || []).find(x => x.key === f) || {}).doing || "");
+    setEditBlk({ date: ymd, id: b.id, field: f, value: val });
   };
   // 블록을 한 번 누름 — 두 번 연달아 누르면 이름 고치기, 한 번이면 single(있을 때) 실행
   const blockTap = (ymd, b, field, single) => {
@@ -32554,7 +32571,8 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     if (e.button > 0) return;
     if (e.target && e.target.closest && e.target.closest("button, input, textarea, select")) return;
     if (editBlk && editBlk.id === b.id) return;
-    const field = (e.target && e.target.closest && e.target.closest("[data-step]") || {}).dataset?.step || "label";
+    const fEl = e.target && e.target.closest && e.target.closest("[data-field]");
+    const field = fEl ? fEl.dataset.field : (b.stepKey || "note");
     const y0 = e.clientY, s0 = plMin(b.start), e0 = plMin(b.end), dur = e0 - s0, touch = e.pointerType === "touch";
     const st = { active: !touch, moved: false, r: null, timer: null, done: false };
     const calc = (yy) => {
@@ -32602,14 +32620,14 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
           if (plArr(tb.steps).length) {
             const subs = list.filter(x => x.parentId === tb.id);
             if (!subs.length) return;
-            const steps = subs.map(x => { const ts = plArr(tb.steps).find(q => q.key === x.stepKey) || {}; return { ...ts, label: x.label, doing: x.doing, mins: plMin(x.end) - plMin(x.start), start: x.start, end: x.end }; });
+            const steps = subs.map(x => { const ts = plArr(tb.steps).find(q => q.key === x.stepKey) || {}; return { ...ts, label: x.label, doing: x.doing, aiRole: x.aiRole || "", mins: plMin(x.end) - plMin(x.start), start: x.start, end: x.end }; });
             out.push({ ...tb, start: subs.reduce((a, x) => x.start < a ? x.start : a, subs[0].start), end: subs.reduce((a, x) => x.end > a ? x.end : a, subs[0].end), steps });
           } else {
             const x = list.find(q => q.id === tb.id && !q.custom);
-            if (x) out.push({ ...tb, start: x.start, end: x.end, label: x.label });
+            if (x) out.push({ ...tb, start: x.start, end: x.end, label: x.label, note: x.note || "" });
           }
         });
-        list.filter(x => x.custom).forEach(x => out.push({ id: "c" + String(x.id).slice(1), start: x.start, end: x.end, label: x.label, kind: "custom" }));
+        list.filter(x => x.custom).forEach(x => out.push({ id: "c" + String(x.id).slice(1), start: x.start, end: x.end, label: x.label, note: x.note || "", kind: "custom" }));
         return { ...t, blocks: out.sort((a, b) => plMin(a.start) - plMin(b.start)), updatedAt: Date.now() };
       });
       const dayLogs = p.dayLogs.map(l => {
@@ -32837,8 +32855,10 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
                 <span aria-hidden="true">–</span>
                 <input type="time" aria-label={`${b.label} 끝`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 100 }} value={b.end} onChange={e => e.target.value && patchBlock(date, b, { end: e.target.value })} />
                 <button type="button" className="pl-btn ghost sm" onClick={() => b.custom ? setExtra(date, b.id, null) : setBlock(date, b.id, { hidden: true })}>{b.custom ? "지우기" : "이 날 빼기"}</button>
-                {b.stepKey && <input type="text" aria-label={`${b.label} 설명`} className="pl-in" style={{ flex: "1 1 100%", minHeight: 36, padding: "0 8px", fontSize: 13 }} placeholder="할 일 설명" defaultValue={b.doing || ""} key={b.id + "-d-" + (b.doing || "")}
-                  onBlur={e => { if (e.target.value.trim() !== (b.doing || "")) renameBlock(date, b, b.stepKey, e.target.value); }} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />}
+                {(b.stepKey ? [[b.stepKey, "할 일 설명", b.doing], ["ai:" + b.stepKey, "AI 역할", b.aiRole]] : [["note", "메모", b.todo ? b.todo.memo : b.note]]).map(([fk, ph, val]) => (
+                  <input key={b.id + fk + (val || "")} type="text" aria-label={`${b.label} ${ph}`} className="pl-in" style={{ flex: "1 1 100%", minHeight: 36, padding: "0 8px", fontSize: 13 }} placeholder={ph} defaultValue={val || ""}
+                    onBlur={e => { if (e.target.value.trim() !== (val || "")) renameBlock(date, b, fk, e.target.value); }} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+                ))}
               </div>
             ))}
             <div className="pl-li" style={{ justifyContent: "flex-end", flexWrap: "wrap", gap: 6, paddingTop: 6, paddingBottom: 6 }}>
@@ -32859,14 +32879,19 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
               const tone = toneOf(b), tiny = h < 34;
               const stepH = b.steps.length && h >= 90;
               const ed = editBlk && editBlk.date === date && editBlk.id === b.id ? editBlk : null;
-              const editor = (field) => (
+              const editor = (field) => field !== "label" ? (
+                <textarea className="pl-blk-in pl-blk-ta" autoFocus value={ed.value} rows={2} aria-label="설명 고치기" placeholder="설명·메모 (Enter 저장, Shift+Enter 줄바꿈)" onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}
+                  onChange={e => setEditBlk({ ...ed, value: e.target.value })}
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); e.currentTarget.blur(); } else if (e.key === "Escape") { e.currentTarget.dataset.cancel = "1"; setEditBlk(null); } }}
+                  onBlur={e => { if (!e.currentTarget.dataset.cancel) renameBlock(date, b, field, ed.value); setEditBlk(null); }} />
+              ) : (
                 <input className="pl-blk-in" autoFocus value={ed.value} aria-label="이름 바꾸기" onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}
                   onChange={e => setEditBlk({ ...ed, value: e.target.value })}
                   onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { e.currentTarget.dataset.cancel = "1"; setEditBlk(null); } }}
                   onBlur={e => { if (!e.currentTarget.dataset.cancel) renameBlock(date, b, field, ed.value); setEditBlk(null); }} />
               );
               return (
-                <div key={b.id} className={`pl-blk${tiny ? " tiny" : ""}${b.done ? " done" : ""}${dg ? " dragging" : ""}`}
+                <div key={b.id} className={`pl-blk${tiny ? " tiny" : ""}${b.done ? " done" : ""}${dg ? " dragging" : ""}${ed && ed.field !== "label" ? " editing" : ""}`}
                   style={{ top: y(bs), height: h, background: tone.bg, color: tone.fg, boxShadow: tone.ring && !b.done ? tone.ring : "none",
                     ...(ln.lanes > 1 && !dg ? { left: `calc(48px + (100% - 48px) * ${ln.lane} / ${ln.lanes})`, right: `calc((100% - 48px) * ${ln.lanes - ln.lane - 1} / ${ln.lanes} + 2px)` } : null) }}
                   title="끌면 시간 이동 · 위아래 끝을 끌면 길이 · 두 번 누르면 이름 바꾸기"
@@ -32885,11 +32910,14 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
                   </>) : (
                     <div className="pl-blk-main">
                       <div className="tx">
-                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.todo ? <span className="pl-tag" title={b.todo.ttOnly ? "시간표에만 있는 항목 — 달력에는 안 보입니다" : "일정 탭 달력에도 있는 일정"} style={{ background: b.todo.ttOnly ? "var(--surface2)" : "#DB6B2E", color: b.todo.ttOnly ? "var(--text2)" : "#fff", marginRight: 5, padding: "0 5px", fontSize: 10 }}>{b.todo.ttOnly ? "시간표" : "일정"}</span> : null}{b.stepNo ? `${b.stepNo} ` : ""}{b.label}{b.kind === "study" && theme && (!b.stepKey || b.stepKey === (b.groupKeys || [])[0]) ? ` · ${theme.track}` : ""}{tiny && b.stepKey ? <span style={{ fontWeight: 500, opacity: 0.85 }}> · {bS}</span> : null}</div>}
-                        {!tiny && <div className="tm">{bS} – {bE}{b.stepKey ? ` · ${plMin(bE) - plMin(bS)}분` : ""}</div>}
-                        {!tiny && b.stepKey && h >= 46 && (ed && ed.field === b.stepKey ? editor(b.stepKey) : <div className="nt" data-step={b.stepKey}>{b.doing}</div>)}
-                        {!tiny && b.stepKey && h >= 70 && b.aiRole && <div className="nt">AI · {b.aiRole}</div>}
-                        {!tiny && !b.stepKey && h >= 52 && b.note && <div className="nt">{b.note}</div>}
+                        {ed && ed.field === "label" ? editor("label") : <div className="ttl" data-field="label">{b.todo ? <span className="pl-tag" title={b.todo.ttOnly ? "시간표에만 있는 항목 — 달력에는 안 보입니다" : "일정 탭 달력에도 있는 일정"} style={{ background: b.todo.ttOnly ? "var(--surface2)" : "#DB6B2E", color: b.todo.ttOnly ? "var(--text2)" : "#fff", marginRight: 5, padding: "0 5px", fontSize: 10 }}>{b.todo.ttOnly ? "시간표" : "일정"}</span> : null}{b.stepNo ? `${b.stepNo} ` : ""}{b.label}{b.kind === "study" && theme && (!b.stepKey || b.stepKey === (b.groupKeys || [])[0]) ? ` · ${theme.track}` : ""}{tiny && b.stepKey ? <span style={{ fontWeight: 500, opacity: 0.85 }}> · {bS}</span> : null}</div>}
+                        {!tiny && <div className="tm" data-field="label">{bS} – {bE}{b.stepKey ? ` · ${plMin(bE) - plMin(bS)}분` : ""}</div>}
+                        {!tiny && (b.stepKey
+                          ? [[b.stepKey, b.doing, ""], ["ai:" + b.stepKey, b.aiRole, "AI · "]]
+                          : [["note", b.todo ? b.todo.memo : b.note, ""]]
+                        ).map(([fk, val, pre]) => ed && ed.field === fk
+                          ? <React.Fragment key={fk}>{editor(fk)}</React.Fragment>
+                          : (val ? <div key={fk} className="nt" data-field={fk} title="두 번 누르면 고치기">{pre}{val}</div> : null))}
                       </div>
                       {ed && (b.custom || (b.todo && b.todo.ttOnly))
                         ? <button type="button" className="pl-btn ghost sm" style={{ minHeight: 26, height: 26, padding: "0 8px", fontSize: 12 }} onPointerDown={e => e.preventDefault()} onClick={() => { setEditBlk(null); if (b.todo) removeTtOnly(b.todo.id); else setExtra(date, b.id, null); }}>지우기</button>

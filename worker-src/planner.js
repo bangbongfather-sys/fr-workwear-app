@@ -49,8 +49,10 @@ export function plDayBlocks(P, plan, ymd, log) {
     const o = over[b.id] || {};
     if (o.hidden) return;
     const start = o.start || b.start, end = o.end || b.end;
-    let steps = plArr(b.steps).map(st => ({ ...st, doing: (o.stepText && o.stepText[st.key]) || st.doing }));
-    if (!steps.length) { blocks.push({ ...b, baseLabel: b.label, label: o.label || b.label, steps: [], start, end, done: !!o.done }); return; }
+    let steps = plArr(b.steps).map(st => ({ ...st,
+      doing: o.stepText && o.stepText[st.key] !== undefined && o.stepText[st.key] !== "" ? o.stepText[st.key] : st.doing,
+      aiRole: o.aiText && o.aiText[st.key] !== undefined ? o.aiText[st.key] : st.aiRole }));
+    if (!steps.length) { blocks.push({ ...b, baseLabel: b.label, label: o.label || b.label, note: o.note !== undefined ? o.note : (b.note || ""), steps: [], start, end, done: !!o.done }); return; }
     // 옛 기록에서 학습 블록 전체 길이를 바꿨다면 단계 길이도 같은 비율로
     const sum = steps.reduce((a, st) => a + Number(st.mins || 0), 0), dur = plMin(end) - plMin(start);
     if (o.start || o.end) {
