@@ -32110,7 +32110,11 @@ function plWeekNo(plan, ymd) { return Math.round((plDate(plMonday(ymd)) - plDate
 // 그날 블록 — 주말은 비우고, 성수기에는 학습 요일(월·수·금)이 아니면 유지 모드 틀
 function plDayBlocks(P, plan, ymd, log) {
   const dw = plDow(ymd);
-  if (dw === 0 || dw === 6) return { blocks: [], mode: "weekend" };
+  // 이 날만 넣은 일정 (빈 시간 두 번 누르기·「+ 일정」)
+  const extras = Object.entries((log && log.extra) || {}).filter(([, x]) => x && x.start && x.end)
+    .map(([id, x]) => ({ id, custom: true, kind: "custom", label: x.label || "새 일정", baseLabel: "", start: x.start, end: x.end, done: !!x.done, steps: [], note: x.note || "" }));
+  const byStart = (a, b) => plMin(a.start) - plMin(b.start);
+  if (dw === 0 || dw === 6) return { blocks: extras.sort(byStart), mode: "weekend" };
   const peak = plIsPeak(plan, ymd);
   const studyDay = !peak || (plan.peakStudyDays || []).includes(dw);
   const mode = peak && !studyDay ? "peak" : "normal";
@@ -32118,9 +32122,33 @@ function plDayBlocks(P, plan, ymd, log) {
   const over = (log && log.blocks) || {};
   const blocks = plArr(tpl && tpl.blocks).map(b => {
     const o = over[b.id] || {};
-    return { ...b, steps: plArr(b.steps), start: o.start || b.start, end: o.end || b.end, done: !!o.done };
-  }).sort((a, b) => plMin(a.start) - plMin(b.start));
-  return { blocks, mode: peak ? (studyDay ? "peak-study" : "peak") : "normal" };
+    const start = o.start || b.start, end = o.end || b.end;
+    let steps = plArr(b.steps).map(st => ({ ...st, doing: (o.stepText && o.stepText[st.key]) || st.doing }));
+    // 블록 길이를 바꾸면 단계 길이도 같은 비율로
+    const sum = steps.reduce((a, st) => a + Number(st.mins || 0), 0), dur = plMin(end) - plMin(start);
+    if (steps.length && sum > 0 && dur > 0 && dur !== sum) {
+      let acc = 0;
+      steps = steps.map((st, i) => { const m = i === steps.length - 1 ? Math.max(5, dur - acc) : Math.max(5, Math.round(Number(st.mins || 0) * dur / sum / 5) * 5); acc += m; return { ...st, mins: m }; });
+    }
+    return { ...b, baseLabel: b.label, label: o.label || b.label, steps, start, end, done: !!o.done, hidden: !!o.hidden };
+  }).filter(b => !b.hidden);
+  return { blocks: [...blocks, ...extras].sort(byStart), mode: peak ? (studyDay ? "peak-study" : "peak") : "normal" };
+}
+// 겹치는 블록은 나란히 — 블록마다 몇 번째 줄(lane)인지와 그 묶음의 줄 수(lanes)
+function plLanes(blocks) {
+  const res = {}; let group = [], groupEnd = -1;
+  const flush = () => {
+    const ends = [];
+    group.forEach(b => { let li = ends.findIndex(e => e <= plMin(b.start)); if (li < 0) { li = ends.length; ends.push(0); } ends[li] = plMin(b.end); res[b.id] = { lane: li, lanes: 1 }; });
+    group.forEach(b => { res[b.id].lanes = ends.length; });
+    group = []; groupEnd = -1;
+  };
+  [...blocks].sort((a, b) => plMin(a.start) - plMin(b.start)).forEach(b => {
+    if (group.length && plMin(b.start) >= groupEnd) flush();
+    group.push(b); groupEnd = Math.max(groupEnd, plMin(b.end));
+  });
+  flush();
+  return res;
 }
 // 한 주(월~일) 실행 개수 — 학습 블록 완료, 1페이지 노트(학습 ③ 완료), 운동, 3줄 기록
 function plWeekStats(P, plan, monday) {
@@ -32346,11 +32374,24 @@ body.glass .pl-kpi4 .warn b, body.glass .pl-kpi4 .warn span, .pl.dark .pl-kpi4 .
 .pl-wc-body .dc.today { background: rgba(219,107,46,0.04); }
 .pl-wc-body .dc.off { background: var(--row-bg); }
 .pl-wc-body .dc > i { position: absolute; left: 0; right: 0; height: 1px; background: var(--divider); }
-.pl .pl-wc-body .blk { min-height: 0; }
-.pl-wc-body .blk { position: absolute; left: 4px; right: 4px; border: 0; border-radius: 7px; padding: 3px 7px; font: inherit; text-align: left; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; justify-content: flex-start; }
+.pl .pl-wc-body .blk { min-height: 0; user-select: none; -webkit-user-select: none; touch-action: pan-y; }
+.pl-wc-body .blk { position: absolute; left: 4px; right: 4px; border: 0; border-radius: 7px; padding: 3px 7px; font: inherit; text-align: left; overflow: hidden; cursor: grab; display: flex; flex-direction: column; justify-content: flex-start; }
+.pl-wc-body .blk.dragging { z-index: 4; box-shadow: 0 10px 24px rgba(0,0,0,0.28) !important; cursor: grabbing; overflow: visible; }
+.pl-wc-body .blk .pl-blk-in { height: 22px; font-size: 12px; }
 .pl-wc-body .blk b { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-wc-body .blk span { font-size: 11px; opacity: 0.85; }
 .pl-wc-body .blk.done b { text-decoration: line-through; opacity: 0.75; }
+.pl-tlbox { max-height: min(68vh, 760px); overflow-y: auto; overscroll-behavior: contain; position: relative; border-radius: 10px; }
+.pl-blk { user-select: none; -webkit-user-select: none; cursor: grab; touch-action: pan-y; -webkit-touch-callout: none; }
+.pl-blk.dragging { z-index: 4; box-shadow: 0 10px 24px rgba(0,0,0,0.28) !important; cursor: grabbing; }
+.pl-grip { position: absolute; left: 0; right: 0; height: 9px; cursor: ns-resize; z-index: 2; }
+.pl-grip.top { top: -3px; } .pl-grip.bot { bottom: -3px; }
+.pl .pl-blk-in { min-height: 0; }
+.pl-blk-in { width: 100%; height: 26px; border: 1.5px solid currentColor; border-radius: 6px; background: var(--surface); color: var(--text1); font: inherit; font-size: 13px; font-weight: 700; padding: 0 6px; cursor: text; user-select: text; -webkit-user-select: text; }
+body.glass .pl-blk-in { background: #1d1f27; }
+.pl-step .pl-blk-in { height: 22px; font-size: 12px; }
+.pl-dragtip { position: absolute; right: 40px; top: 3px; font-size: 11px; font-weight: 800; background: #191F28; color: #fff; border-radius: 5px; padding: 1px 6px; pointer-events: none; z-index: 3; }
+.pl-wc-scroll { max-height: min(70vh, 680px); overflow-y: auto; overscroll-behavior: contain; }
 .pl-in { min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--text1); min-width: 0; }
 `;
 
@@ -32380,6 +32421,14 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   const [scoreDraft, setScoreDraft] = React.useState({ date: plToday(), score: "", note: "" });
   const [boxRef, boxW] = useBoxWidth(800);
   const sentRef = React.useRef(new Set());
+  const [drag, setDrag] = React.useState(null);       // 끄는 중인 블록 {date, id, start, end}
+  const [editBlk, setEditBlk] = React.useState(null); // 이름 고치는 블록 {date, id, field, value}
+  const tlRef = React.useRef(null), wcRef = React.useRef(null);
+  const tapRef = React.useRef({ last: null, timer: null, empty: null });
+  // 24시간 시간표 — 처음 열 때·날짜·보기를 바꿀 때 지금 시각(또는 첫 블록) 근처로
+  React.useEffect(() => {
+    [tlRef.current, wcRef.current].forEach(el => { if (el && el.dataset.st) el.scrollTop = Math.max(0, Number(el.dataset.st)); });
+  }, [view, date, boxW >= 1080, planner && plArr(planner.plans).length]);
   React.useEffect(() => { const iv = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(iv); }, []);
   React.useEffect(() => { save("frw_planner_view", view); }, [view]);
   React.useEffect(() => { if (planId) save("frw_planner_plan", planId); }, [planId]);
@@ -32414,6 +32463,104 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     return { ...l, steps, blocks: { ...(l.blocks || {}), [blk.id]: { ...((l.blocks || {})[blk.id] || {}), done: all } } };
   });
   const setNote = (ymd, key, val) => updateLog(ymd, l => ({ ...l, note3: { ...(l.note3 || {}), [key]: val } }));
+  // ── 블록 끌기 · 이름 바꾸기 · 새 일정 ──
+  const setExtra = (ymd, xid, patch) => updateLog(ymd, l => { const ex = { ...(l.extra || {}) }; if (patch === null) delete ex[xid]; else ex[xid] = { ...(ex[xid] || {}), ...patch }; return { ...l, extra: ex }; });
+  const patchBlock = (ymd, b, patch) => b.custom ? setExtra(ymd, b.id, patch) : setBlock(ymd, b.id, patch);
+  const toggleDone = (ymd, b) => patchBlock(ymd, b, { done: !b.done });
+  const renameBlock = (ymd, b, field, val) => {
+    const v = String(val == null ? "" : val).trim();
+    if (field === "label") {
+      if (b.custom) setExtra(ymd, b.id, { label: v || "새 일정" });
+      else setBlock(ymd, b.id, { label: v && v !== b.baseLabel ? v : "" });
+    } else {
+      updateLog(ymd, l => { const cur = (l.blocks || {})[b.id] || {}; return { ...l, blocks: { ...(l.blocks || {}), [b.id]: { ...cur, stepText: { ...(cur.stepText || {}), [field]: v } } } }; });
+    }
+  };
+  const addExtra = (ymd, startMin) => {
+    const st = Math.max(0, Math.min(1380, Math.round(startMin / 15) * 15));
+    const xid = "x" + Date.now();
+    setExtra(ymd, xid, { start: plHM(st), end: plHM(Math.min(1439, st + 60)), label: "새 일정" });
+    setEditBlk({ date: ymd, id: xid, field: "label", value: "새 일정" });
+  };
+  const openEdit = (ymd, b, field) => {
+    const f = field || "label";
+    setEditBlk({ date: ymd, id: b.id, field: f, value: f === "label" ? b.label : ((b.steps || []).find(x => x.key === f) || {}).doing || "" });
+  };
+  // 블록을 한 번 누름 — 두 번 연달아 누르면 이름 고치기, 한 번이면 single(있을 때) 실행
+  const blockTap = (ymd, b, field, single) => {
+    const T = tapRef.current, now = Date.now();
+    if (T.last && T.last.key === ymd + b.id && now - T.last.t < 350) { clearTimeout(T.timer); T.last = null; openEdit(ymd, b, field); return; }
+    T.last = { key: ymd + b.id, t: now };
+    if (single) { clearTimeout(T.timer); T.timer = setTimeout(single, 350); }
+  };
+  // 빈 시간을 두 번 누르면 그 시각에 새 일정
+  const emptyTap = (ymd, min) => {
+    const T = tapRef.current, now = Date.now();
+    if (T.empty && T.empty.d === ymd && now - T.empty.t < 400 && Math.abs(T.empty.m - min) < 30) { T.empty = null; addExtra(ymd, min); return; }
+    T.empty = { d: ymd, t: now, m: min };
+  };
+  // 끌기 — 가운데: 통째로 이동, 위·아래 끝: 길이. 5분 단위. 손가락은 꾹(0.38초) 누른 뒤 끌기(그 전엔 화면 스크롤)
+  const startDrag = (e, ymd, b, mode, ppm, onTap) => {
+    if (e.button > 0) return;
+    if (e.target && e.target.closest && e.target.closest("button, input, textarea, select")) return;
+    if (editBlk && editBlk.id === b.id) return;
+    const field = (e.target && e.target.closest && e.target.closest("[data-step]") || {}).dataset?.step || "label";
+    const y0 = e.clientY, s0 = plMin(b.start), e0 = plMin(b.end), dur = e0 - s0, touch = e.pointerType === "touch";
+    const st = { active: !touch, moved: false, r: null, timer: null, done: false };
+    const calc = (yy) => {
+      const dm = Math.round((yy - y0) / ppm / 5) * 5;
+      let a = s0, z = e0;
+      if (mode === "move") { a = Math.max(0, Math.min(1439 - dur, s0 + dm)); z = a + dur; }
+      else if (mode === "top") a = Math.max(0, Math.min(e0 - 10, s0 + dm));
+      else z = Math.min(1439, Math.max(s0 + 10, e0 + dm));
+      return { a, z };
+    };
+    const move = (yy, ev) => {
+      if (!st.active) { if (Math.abs(yy - y0) > 8) { st.moved = true; finish(false); } return; }
+      if (ev && ev.cancelable) ev.preventDefault();
+      if (Math.abs(yy - y0) > 3) st.moved = true;
+      if (st.moved) { st.r = calc(yy); setDrag({ date: ymd, id: b.id, start: plHM(st.r.a), end: plHM(st.r.z) }); }
+    };
+    const onPM = (ev) => { if (ev.pointerType !== "touch") move(ev.clientY, ev); };
+    const onTM = (ev) => { const t = ev.touches && ev.touches[0]; if (t) move(t.clientY, ev); };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    function finish(commit) {
+      if (st.done) return; st.done = true;
+      clearTimeout(st.timer);
+      window.removeEventListener("pointermove", onPM); window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("touchmove", onTM); window.removeEventListener("touchend", onUp);
+      if (commit && st.active && st.moved && st.r) patchBlock(ymd, b, { start: plHM(st.r.a), end: plHM(st.r.z) });
+      else if (commit && !st.moved && !(touch && st.active) && onTap) onTap(field);
+      setDrag(null);
+    }
+    if (touch) st.timer = setTimeout(() => { if (st.done) return; st.active = true; try { navigator.vibrate && navigator.vibrate(12); } catch {} setDrag({ date: ymd, id: b.id, start: b.start, end: b.end }); }, 380);
+    window.addEventListener("pointermove", onPM); window.addEventListener("pointerup", onUp); window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("touchmove", onTM, { passive: false }); window.addEventListener("touchend", onUp);
+  };
+  // 이 날의 시간·이름(새 일정 포함)을 앞으로의 기본 틀로
+  const saveTemplate = (ymd, mode) => {
+    if (!window.confirm("이 날의 시간·이름을 앞으로의 기본 틀로 저장할까요?\n(이 날 새로 넣은 일정도 매일 나오는 블록이 됩니다. 성수기 유지 틀은 따로입니다)")) return;
+    const tplMode = mode === "peak" ? "peak" : "normal";
+    setPlanner(prev => {
+      const p = plannerNormalize(prev), lid = `${plan.id}|${ymd}`, lg = p.dayLogs.find(l => l.id === lid) || {};
+      const ov = lg.blocks || {}, ex = lg.extra || {};
+      const dayTemplates = p.dayTemplates.map(t => {
+        if (t.planId !== plan.id || t.mode !== tplMode) return t;
+        const bl = plArr(t.blocks).filter(b => !(ov[b.id] && ov[b.id].hidden)).map(b => { const o = ov[b.id] || {}; return { ...b, start: o.start || b.start, end: o.end || b.end, label: o.label || b.label, steps: plArr(b.steps).map(x => ({ ...x, doing: (o.stepText && o.stepText[x.key]) || x.doing })) }; });
+        const add = Object.entries(ex).map(([id, x]) => ({ id: "c" + id.slice(1), start: x.start, end: x.end, label: x.label || "새 일정", kind: "custom" }));
+        return { ...t, blocks: [...bl, ...add].sort((a, b) => plMin(a.start) - plMin(b.start)), updatedAt: Date.now() };
+      });
+      const dayLogs = p.dayLogs.map(l => {
+        if (l.id !== lid) return l;
+        const blocks = Object.fromEntries(Object.entries(l.blocks || {}).filter(([, v]) => v && !v.hidden).map(([k, v]) => [k, { done: !!v.done }]));
+        Object.entries(l.extra || {}).forEach(([id, x]) => { if (x && x.done) blocks["c" + id.slice(1)] = { done: true }; });
+        return { ...l, blocks, extra: {}, updatedAt: Date.now() };
+      });
+      return { ...p, dayTemplates, dayLogs };
+    });
+    showToast("앞으로의 기본 틀로 저장했어요", "success");
+  };
   const monthId = (ym) => `${plan.id}|${ym}`;
   const updateMonth = (ym, fn) => upsert("monthReviews", monthId(ym), fn, () => ({ id: monthId(ym), planId: plan.id, month: ym, routines: {}, learned: "", unknown: "", nextAnchor: "" }));
 
@@ -32566,7 +32713,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
       const { b, stepIdx } = now;
       if (b.steps.length && stepIdx >= 0) {
         setStep(date, b.steps[stepIdx].key, true, b);
-      } else setBlock(date, b.id, { done: true });
+      } else patchBlock(date, b, { done: true });
     };
     const steps = (log && log.steps) || {};
     const nowCard = now && (now.b.done ? null : (
@@ -32600,80 +32747,111 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
         <div><div className="pl-muted">오늘 주제</div><div className="v" style={{ fontSize: 15, marginTop: 4, color: theme && day.mode !== "weekend" ? C[theme.track] : "var(--text3)" }}>{theme && day.mode !== "weekend" ? `${theme.track} · ${theme.hours}` : "쉬는 날"}</div></div>
       </div>
     );
-    // 시간 비율 시간표
-    const PPM = desk ? 1.4 : wide ? 1.3 : 1.2;
-    const s0 = blocks.length ? Math.floor(Math.min(...blocks.map(b => plMin(b.start))) / 60) * 60 : 600;
-    const e0 = blocks.length ? Math.ceil(Math.max(...blocks.map(b => plMin(b.end))) / 60) * 60 : 1020;
+    // 시간 비율 시간표 — 0시~24시, 상자 안에서 스크롤 (처음엔 지금·첫 블록 근처로)
+    const PPM = desk ? 1.25 : wide ? 1.2 : 1.0;
+    const s0 = 0, e0 = 1440;
     const y = (m) => (m - s0) * PPM + 8;
     const hours = []; for (let m = s0; m <= e0; m += 60) hours.push(m);
+    const firstStart = blocks.length ? plMin(blocks[0].start) : 540;
+    const scrollTo = Math.max(0, ((isToday ? Math.min(nowMin, firstStart + 120) : firstStart) - 50) * PPM);
     const toneOf = (b) => {
       if (b.kind === "study" && theme) return { bg: tint(theme.track), fg: C[theme.track], ring: `inset 0 0 0 1.5px ${C[theme.track]}` };
       if (b.kind === "ops" || b.kind === "wrap") return { bg: darkMode ? "rgba(219,107,46,0.16)" : "#FDF1E8", fg: darkMode ? "#F6B38A" : "#8A3F18" };
       if (b.kind === "exercise") return { bg: darkMode ? "rgba(45,106,79,0.25)" : "#EAF2EE", fg: darkMode ? "#86C9A6" : "#2D6A4F" };
+      if (b.kind === "custom") return { bg: darkMode ? "rgba(46,90,172,0.28)" : "#E8EEF8", fg: darkMode ? "#8DB0F0" : "#2E5AAC" };
       return { bg: "var(--surface2)", fg: "var(--text2)" };
     };
+    const nextSlot = () => isToday ? Math.min(1380, Math.ceil((nowMin + 1) / 60) * 60) : 1080;
     const timeline = (
       <div style={{ padding: "12px 16px 8px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
           <div style={{ minWidth: 0 }}>
             {theme && day.mode !== "weekend" ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                 <span className="pl-tag" style={{ background: C[theme.track], color: darkMode ? "#191F28" : "#fff" }}>{theme.track}</span>
                 <span style={{ fontSize: 13, color: "var(--text2)", minWidth: 0 }}>{day.mode === "peak" ? "성수기 유지 — 오늘은 학습 없이 운영 블록을 늘립니다" : theme.description}</span>
               </div>
-            ) : <span className="pl-muted">주말은 블록을 비워 둡니다</span>}
+            ) : <span className="pl-muted">주말 — 필요한 일정만 넣어 두세요</span>}
           </div>
-          {blocks.length > 0 && <button type="button" className="pl-btn ghost sm" style={{ flex: "none" }} onClick={() => setEditTimes(v => !v)}>{editTimes ? "닫기" : "시간 바꾸기"}</button>}
+          <div style={{ display: "flex", gap: 6, flex: "none" }}>
+            <button type="button" className="pl-btn ghost sm" onClick={() => addExtra(date, nextSlot())}>+ 일정</button>
+            <button type="button" className="pl-btn ghost sm" onClick={() => setEditTimes(v => !v)}>{editTimes ? "닫기" : "시간 바꾸기"}</button>
+          </div>
         </div>
         {day.mode === "peak-study" && <div className="pl-muted" style={{ marginBottom: 6 }}>성수기(3~6월) — 월·수·금만 학습 블록</div>}
         {editTimes && (
           <div className="pl-box" style={{ marginBottom: 10 }}>
             {blocks.map(b => (
-              <div key={b.id} className="pl-li" style={{ gap: 6 }}>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 700 }}>{b.label}</span>
-                <input type="time" aria-label={`${b.label} 시작`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 96 }} value={b.start} onChange={e => e.target.value && setBlock(date, b.id, { start: e.target.value })} />
+              <div key={b.id} className="pl-li" style={{ gap: 6, flexWrap: "wrap", paddingTop: 6, paddingBottom: 6 }}>
+                <input type="text" aria-label={`${b.label} 이름`} className="pl-in" style={{ flex: "1 1 120px", minHeight: 38, padding: "0 8px" }} defaultValue={b.label} key={b.id + b.label}
+                  onBlur={e => { if (e.target.value.trim() !== b.label) renameBlock(date, b, "label", e.target.value); }} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+                <input type="time" aria-label={`${b.label} 시작`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 100 }} value={b.start} onChange={e => e.target.value && patchBlock(date, b, { start: e.target.value })} />
                 <span aria-hidden="true">–</span>
-                <input type="time" aria-label={`${b.label} 끝`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 96 }} value={b.end} onChange={e => e.target.value && setBlock(date, b.id, { end: e.target.value })} />
+                <input type="time" aria-label={`${b.label} 끝`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 100 }} value={b.end} onChange={e => e.target.value && patchBlock(date, b, { end: e.target.value })} />
+                <button type="button" className="pl-btn ghost sm" onClick={() => b.custom ? setExtra(date, b.id, null) : setBlock(date, b.id, { hidden: true })}>{b.custom ? "지우기" : "이 날 빼기"}</button>
               </div>
             ))}
-            <div className="pl-li" style={{ justifyContent: "flex-end" }}>
-              <span className="pl-muted" style={{ flex: 1 }}>이 날만 바뀝니다</span>
-              <button type="button" className="pl-btn ghost sm" onClick={() => updateLog(date, l => ({ ...l, blocks: Object.fromEntries(Object.entries(l.blocks || {}).map(([k, v]) => { const { start, end, ...rest } = v || {}; return [k, rest]; })) }))}>기본 시간으로</button>
+            <div className="pl-li" style={{ justifyContent: "flex-end", flexWrap: "wrap", gap: 6, paddingTop: 6, paddingBottom: 6 }}>
+              <span className="pl-muted" style={{ flex: "1 1 160px" }}>여기서 바꾼 것은 이 날만 바뀝니다</span>
+              <button type="button" className="pl-btn ghost sm" onClick={() => updateLog(date, l => ({ ...l, blocks: Object.fromEntries(Object.entries(l.blocks || {}).map(([k, v]) => [k, { done: !!(v && v.done) }])) }))}>기본으로 되돌리기</button>
+              <button type="button" className="pl-btn sm" onClick={() => saveTemplate(date, day.mode)}>앞으로의 기본 틀로 저장</button>
             </div>
           </div>
         )}
-        {blocks.length > 0 && (
-          <div className="pl-tl" style={{ height: (e0 - s0) * PPM + 18 }}>
+        <div className="pl-tlbox" ref={tlRef} data-st={Math.round(scrollTo)}>
+          <div className="pl-tl" style={{ height: (e0 - s0) * PPM + 18 }} onClick={e => { if (e.target.closest(".pl-blk")) return; const r = e.currentTarget.getBoundingClientRect(); emptyTap(date, (e.clientY - r.top - 8) / PPM); }}>
             {hours.map(m => <div key={m} className="pl-hr" style={{ top: y(m) - 7 }}><span>{plHM(m)}</span><span /></div>)}
-            {blocks.map(b => {
-              const bs = plMin(b.start), be = plMin(b.end), h = Math.max(20, (be - bs) * PPM - 3);
+            {(() => { const LN = plLanes(blocks); return blocks.map(b => {
+              const dg = drag && drag.date === date && drag.id === b.id ? drag : null;
+              const ln = LN[b.id] || { lane: 0, lanes: 1 };
+              const bS = dg ? dg.start : b.start, bE = dg ? dg.end : b.end;
+              const bs = plMin(bS), be = plMin(bE), h = Math.max(20, (be - bs) * PPM - 3);
               const tone = toneOf(b), tiny = h < 34;
               const stepH = b.steps.length && h >= 90;
+              const ed = editBlk && editBlk.date === date && editBlk.id === b.id ? editBlk : null;
+              const editor = (field) => (
+                <input className="pl-blk-in" autoFocus value={ed.value} aria-label="이름 바꾸기" onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}
+                  onChange={e => setEditBlk({ ...ed, value: e.target.value })}
+                  onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { e.currentTarget.dataset.cancel = "1"; setEditBlk(null); } }}
+                  onBlur={e => { if (!e.currentTarget.dataset.cancel) renameBlock(date, b, field, ed.value); setEditBlk(null); }} />
+              );
               return (
-                <div key={b.id} className={`pl-blk${tiny ? " tiny" : ""}${b.done ? " done" : ""}`} style={{ top: y(bs), height: h, background: tone.bg, color: tone.fg, boxShadow: tone.ring && !b.done ? tone.ring : "none" }}>
+                <div key={b.id} className={`pl-blk${tiny ? " tiny" : ""}${b.done ? " done" : ""}${dg ? " dragging" : ""}`}
+                  style={{ top: y(bs), height: h, background: tone.bg, color: tone.fg, boxShadow: tone.ring && !b.done ? tone.ring : "none",
+                    ...(ln.lanes > 1 && !dg ? { left: `calc(48px + (100% - 48px) * ${ln.lane} / ${ln.lanes})`, right: `calc((100% - 48px) * ${ln.lanes - ln.lane - 1} / ${ln.lanes} + 2px)` } : null) }}
+                  title="끌면 시간 이동 · 위아래 끝을 끌면 길이 · 두 번 누르면 이름 바꾸기"
+                  onPointerDown={e => startDrag(e, date, b, "move", PPM, (f) => blockTap(date, b, f))}>
+                  <span className="pl-grip top" aria-hidden="true" onPointerDown={e => { e.stopPropagation(); startDrag(e, date, b, "top", PPM); }} />
+                  {dg && <span className="pl-dragtip">{bS} – {bE}</span>}
                   {stepH ? (<>
                     {b.steps.map((s, i) => (
-                      <div key={s.key} className={`pl-step${steps[s.key] ? " on" : ""}`} style={{ flex: `${Number(s.mins) || 1} 1 0`, borderTop: i === 0 ? 0 : undefined, background: i === 0 ? "rgba(127,127,127,0.10)" : undefined }}>
-                        <span className="tx"><b>{["①", "②", "③", "④"][i]} {s.label} {s.mins}분</b>{i === 1 && h >= 120 ? <span className="ai"> — {s.doing}</span> : null}{i !== 1 ? <span className="ai"> · {s.doing}</span> : null}</span>
+                      <div key={s.key} data-step={s.key} className={`pl-step${steps[s.key] ? " on" : ""}`} style={{ flex: `${Number(s.mins) || 1} 1 0`, borderTop: i === 0 ? 0 : undefined, background: i === 0 ? "rgba(127,127,127,0.10)" : undefined }}>
+                        {ed && ed.field === s.key ? editor(s.key) : (
+                          <span className="tx"><b>{["①", "②", "③", "④"][i]} {s.label} {s.mins}분</b>{i === 1 && h >= 100 ? <span className="ai"> — {s.doing}</span> : null}{i !== 1 ? <span className="ai"> · {s.doing}</span> : null}</span>
+                        )}
                         <button type="button" className={`pl-chk${steps[s.key] ? " on" : ""}`} aria-label={`${s.label} ${steps[s.key] ? "완료 취소" : "완료"}`} aria-pressed={!!steps[s.key]} onClick={() => setStep(date, s.key, !steps[s.key], b)}>{steps[s.key] && <PlCheckIcon size={11} />}</button>
                       </div>
                     ))}
                   </>) : (
                     <div className="pl-blk-main">
                       <div className="tx">
-                        <div className="ttl">{b.label}{b.kind === "study" && theme ? ` · ${theme.track}` : ""}</div>
-                        {!tiny && <div className="tm">{b.start} – {b.end}</div>}
+                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.label}{b.kind === "study" && theme ? ` · ${theme.track}` : ""}</div>}
+                        {!tiny && <div className="tm">{bS} – {bE}</div>}
                         {!tiny && h >= 52 && b.note && <div className="nt">{b.note}</div>}
                       </div>
-                      <button type="button" className={`pl-chk${b.done ? " on" : ""}`} aria-label={`${b.label} ${b.done ? "완료 취소" : "완료"}`} aria-pressed={b.done} onClick={() => setBlock(date, b.id, { done: !b.done })}>{b.done && <PlCheckIcon size={tiny ? 10 : 13} />}</button>
+                      {ed && b.custom
+                        ? <button type="button" className="pl-btn ghost sm" style={{ minHeight: 26, height: 26, padding: "0 8px", fontSize: 12 }} onPointerDown={e => e.preventDefault()} onClick={() => { setEditBlk(null); setExtra(date, b.id, null); }}>지우기</button>
+                        : <button type="button" className={`pl-chk${b.done ? " on" : ""}`} aria-label={`${b.label} ${b.done ? "완료 취소" : "완료"}`} aria-pressed={b.done} onClick={() => toggleDone(date, b)}>{b.done && <PlCheckIcon size={tiny ? 10 : 13} />}</button>}
                     </div>
                   )}
+                  <span className="pl-grip bot" aria-hidden="true" onPointerDown={e => { e.stopPropagation(); startDrag(e, date, b, "bottom", PPM); }} />
                 </div>
               );
-            })}
-            {isToday && nowMin >= s0 && nowMin <= e0 && <div className="pl-nowline" style={{ top: y(nowMin) - 4 }} role="img" aria-label={`지금 ${plHM(nowMin)}`}><i /><b /></div>}
+            }); })()}
+            {isToday && <div className="pl-nowline" style={{ top: y(nowMin) - 4 }} role="img" aria-label={`지금 ${plHM(nowMin)}`}><i /><b /></div>}
           </div>
-        )}
+        </div>
+        <div className="pl-muted" style={{ marginTop: 6 }}>블록을 끌면 시간이 옮겨지고(휴대폰은 꾹 누른 뒤), 두 번 누르면 이름을 고칩니다. 빈 시간을 두 번 누르면 새 일정.</div>
       </div>
     );
     const dayTodos = todos.filter(t => t && plan.category && t.category === plan.category && t.date && t.date <= date && date <= (t.endDate || t.date))
@@ -32819,7 +32997,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     );
     // 이번 달
     const [yy, mm] = ym.split("-").map(Number);
-    const first = `${ym}-01`, gridStart = plMonday(first);
+    const first = `${ym}-01`, gridStart = plAdd(first, -plDow(first)); // 일요일부터 (일반 달력처럼)
     const lastDay = new Date(yy, mm, 0, 12).getDate();
     const routineDates = routines.map(r => ({ r, d: plRoutineDate(r.rule, ym) }));
     const cells = []; for (let i = 0; i < 42; i++) { const d = plAdd(gridStart, i); if (i >= 35 && d.slice(0, 7) !== ym) break; cells.push(d); }
@@ -32828,14 +33006,14 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
         <div className="pl-sec-hd"><h3>{mm}월</h3>
           {!anchorDone && date.slice(0, 7) >= plan.startDate.slice(0, 7) && <span className="pl-warn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16.5h.01" /></svg>외부 앵커 미정</span>}</div>
         <div className="pl-cal">
-          {["월", "화", "수", "목", "금", "토", "일"].map(w => <span key={w} className="w">{w}</span>)}
+          {["일", "월", "화", "수", "목", "금", "토"].map((w, i) => <span key={w} className="w" style={{ color: i === 0 ? "#E5484D" : i === 6 ? "#3B82F6" : undefined }}>{w}</span>)}
           {cells.map(d => {
             const out = d.slice(0, 7) !== ym;
             const due = !out && routineDates.find(x => x.d && x.d.from === x.d.to && x.d.from === d);
             const band = !out && routineDates.some(x => x.d && x.d.from !== x.d.to && x.d.from <= d && d <= x.d.to);
             return (
               <button key={d} type="button" className={`c${out ? " out" : ""}${band ? " band" : ""}${d === date ? " sel" : ""}${d === today ? " today" : ""}`} aria-label={`${plMD(d)}${due ? " " + due.r.task : ""}`} onClick={() => { setDate(d); setView("day"); }}>
-                <b>{Number(d.slice(8))}</b><i style={{ background: due ? "#DB6B2E" : "transparent" }} />
+                <b style={!out && d !== date && d !== today ? { color: plDow(d) === 0 ? "#E5484D" : plDow(d) === 6 ? "#3B82F6" : undefined } : undefined}>{Number(d.slice(8))}</b><i style={{ background: due ? "#DB6B2E" : "transparent" }} />
               </button>
             );
           })}
@@ -33089,9 +33267,10 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     const days7 = [0, 1, 2, 3, 4, 5, 6].map(i => plAdd(monday, i));
     const dd = days7.map(d => { const lg = plLogOf(P, plan, d); return { d, dw: plDow(d), th: plThemeOf(P, plan, d), ...plDayBlocks(P, plan, d, lg) }; });
     const all = dd.flatMap(x => x.blocks);
-    const s0 = all.length ? Math.floor(Math.min(...all.map(b => plMin(b.start))) / 60) * 60 : 600;
-    const e0 = all.length ? Math.ceil(Math.max(...all.map(b => plMin(b.end))) / 60) * 60 : 1020;
-    const PPM = 1.15, Y = (m) => (m - s0) * PPM + 8;
+    const s0 = 0, e0 = 1440;
+    const PPM = 0.95, Y = (m) => (m - s0) * PPM + 8;
+    const firstStart = all.length ? Math.min(...all.map(b => plMin(b.start))) : 540;
+    const wcScroll = Math.max(0, ((days7.includes(today) ? Math.min(nowMin, firstStart + 180) : firstStart) - 50) * PPM);
     const hours = []; for (let m = s0; m <= e0; m += 60) hours.push(m);
     const sun = days7[6];
     const wkTodos = todos.filter(t => t && plan.category && t.category === plan.category && t.date && t.date <= sun && monday <= (t.endDate || t.date)).slice(0, 4);
@@ -33099,6 +33278,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
       if (b.kind === "study" && th) return [tint(th.track), C[th.track]];
       if (b.kind === "ops" || b.kind === "wrap") return [darkMode ? "rgba(219,107,46,0.16)" : "#FDF1E8", darkMode ? "#F6B38A" : "#8A3F18"];
       if (b.kind === "exercise") return [darkMode ? "rgba(45,106,79,0.25)" : "#EAF2EE", darkMode ? "#86C9A6" : "#2D6A4F"];
+      if (b.kind === "custom") return [darkMode ? "rgba(46,90,172,0.28)" : "#E8EEF8", darkMode ? "#8DB0F0" : "#2E5AAC"];
       return ["var(--surface2)", "var(--text2)"];
     };
     return (
@@ -33122,24 +33302,41 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
             })}
           </div>
         )}
+        <div className="pl-wc-scroll" ref={wcRef} data-st={Math.round(wcScroll)}>
         <div className="pl-wc-body" style={{ height: (e0 - s0) * PPM + 18 }}>
           <div className="tc">{hours.map(m => <span key={m} style={{ top: Y(m) - 7 }}>{plHM(m)}</span>)}</div>
           {dd.map(x => (
-            <div key={x.d} className={`dc${x.d === today ? " today" : ""}${x.blocks.length ? "" : " off"}`}>
+            <div key={x.d} className={`dc${x.d === today ? " today" : ""}${x.blocks.length ? "" : " off"}`} onClick={e => { if (e.target.closest(".blk")) return; const r = e.currentTarget.getBoundingClientRect(); emptyTap(x.d, (e.clientY - r.top - 8) / PPM); }}>
               {hours.map(m => <i key={m} style={{ top: Y(m) }} />)}
-              {x.blocks.map(b => {
-                const bs = plMin(b.start), be = plMin(b.end), h = Math.max(18, (be - bs) * PPM - 2), [bg, fg] = toneOf(b, x.th);
+              {(() => { const LN = plLanes(x.blocks); return x.blocks.map(b => {
+                const dg = drag && drag.date === x.d && drag.id === b.id ? drag : null;
+                const ln = LN[b.id] || { lane: 0, lanes: 1 };
+                const bS = dg ? dg.start : b.start, bE = dg ? dg.end : b.end;
+                const bs = plMin(bS), be = plMin(bE), h = Math.max(16, (be - bs) * PPM - 2), [bg, fg] = toneOf(b, x.th);
+                const ed = editBlk && editBlk.date === x.d && editBlk.id === b.id ? editBlk : null;
+                const name = b.kind === "study" && x.th && b.label === b.baseLabel ? `${x.th.track} 학습` : b.label.replace(" 블록", "").replace(" (확대)", "");
                 return (
-                  <button key={b.id} type="button" className={`blk${b.done ? " done" : ""}`} aria-pressed={b.done} aria-label={`${PL_WK[x.dw]} ${b.label} ${b.start}–${b.end} ${b.done ? "완료" : ""}`}
-                    style={{ top: Y(bs), height: h, background: bg, color: fg, boxShadow: b.kind === "study" && x.d === today && !b.done ? `inset 0 0 0 1.5px ${fg}` : "none" }}
-                    onClick={() => setBlock(x.d, b.id, { done: !b.done })}>
-                    <b>{b.done ? "✓ " : ""}{b.kind === "study" && x.th ? `${x.th.track} 학습` : b.label.replace(" 블록", "").replace(" (확대)", "")}</b>{h >= 34 && <span>{b.start}–{b.end}</span>}
-                  </button>
+                  <div key={b.id} role="button" tabIndex={0} className={`blk${b.done ? " done" : ""}${dg ? " dragging" : ""}`} aria-pressed={b.done} aria-label={`${PL_WK[x.dw]} ${b.label} ${b.start}–${b.end}${b.done ? " 완료" : ""} — 누르면 완료, 두 번 누르면 이름 바꾸기, 끌면 시간 이동`}
+                    style={{ top: Y(bs), height: h, background: bg, color: fg, boxShadow: b.kind === "study" && x.d === today && !b.done ? `inset 0 0 0 1.5px ${fg}` : "none",
+                      ...(ln.lanes > 1 && !dg ? { left: `calc(4px + (100% - 8px) * ${ln.lane} / ${ln.lanes})`, right: `calc(4px + (100% - 8px) * ${ln.lanes - ln.lane - 1} / ${ln.lanes} + 1px)`, padding: "3px 4px" } : null) }}
+                    onPointerDown={e => startDrag(e, x.d, b, "move", PPM, (f) => blockTap(x.d, b, "label", () => toggleDone(x.d, b)))}
+                    onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleDone(x.d, b); } else if (e.key === "F2") openEdit(x.d, b, "label"); }}>
+                    <span className="pl-grip top" aria-hidden="true" onPointerDown={e => { e.stopPropagation(); startDrag(e, x.d, b, "top", PPM); }} />
+                    {ed ? (
+                      <input className="pl-blk-in" autoFocus value={ed.value} aria-label="이름 바꾸기" onPointerDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}
+                        onChange={e => setEditBlk({ ...ed, value: e.target.value })}
+                        onKeyDown={e => { e.stopPropagation(); if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { e.currentTarget.dataset.cancel = "1"; setEditBlk(null); } }}
+                        onBlur={e => { if (!e.currentTarget.dataset.cancel) renameBlock(x.d, b, "label", ed.value); setEditBlk(null); }} />
+                    ) : <b>{b.done ? "✓ " : ""}{name}</b>}
+                    {h >= 34 && <span>{bS}–{bE}</span>}
+                    <span className="pl-grip bot" aria-hidden="true" onPointerDown={e => { e.stopPropagation(); startDrag(e, x.d, b, "bottom", PPM); }} />
+                  </div>
                 );
-              })}
-              {x.d === today && nowMin >= s0 && nowMin <= e0 && <div className="pl-nowline" style={{ top: Y(nowMin) - 4, left: -4 }} aria-hidden="true"><i /><b /></div>}
+              }); })()}
+              {x.d === today && <div className="pl-nowline" style={{ top: Y(nowMin) - 4, left: -4 }} aria-hidden="true"><i /><b /></div>}
             </div>
           ))}
+        </div>
         </div>
       </div>
     );
