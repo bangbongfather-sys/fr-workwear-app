@@ -499,7 +499,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-1", note: "일정 탭 플래너 1단계 — 저장 구역·마스터플랜·하루·주간·로드맵·리뷰" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-1b", note: "플래너 PC 3단(계획·보기·목표 / 7일 시간표 / 지금·지표·기록) · 유리 테마 단단한 바탕" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
