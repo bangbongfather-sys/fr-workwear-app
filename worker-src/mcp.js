@@ -17,7 +17,7 @@ import { PL_WK, plArr, plannerNormalize, plMonday, plAdd, plDow, plMin, plWeekOf
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 const SERVER_NAME = "nj-safety";
-const SERVER_VERSION = "1.2.0";   // 도구가 늘거나 바뀌면 올린다 (claude.ai 커넥터가 새 목록을 받아 가게)
+const SERVER_VERSION = "1.3.0";   // 도구가 늘거나 바뀌면 올린다 (claude.ai 커넥터가 새 목록을 받아 가게)
 const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 
 const ALLOWED_SECTIONS = [
@@ -292,6 +292,38 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
+    name: "set_day_timetable",
+    description:
+      "플래너 하루 시간표를 한 번에 짭니다. items 의 각 줄: 플래너 블록을 옮기려면 { blockId(get_planner day 의 id: ex·meal·study_s0·study_s1·study_s2·rest·ops·wrap 등), start, end, label? }, 새 일정을 넣으려면 { start, end, label } (앱처럼 일정 탭 타임테이블에만 보이고 달력·노션엔 안 올라감). hideBlocks 로 그 날 뺄 플래너 블록 id 목록, clearPrevious:true 면 이 도구로 그 날 전에 넣었던 일정을 지우고 새로 넣습니다. 모두 그 날만 바뀝니다(매일 틀은 update_planner_item type:template).",
+    inputSchema: { type: "object", properties: {
+      date: { type: "string", description: "YYYY-MM-DD — 필수" },
+      items: { type: "array", items: { type: "object", properties: { blockId: { type: "string" }, start: { type: "string" }, end: { type: "string" }, label: { type: "string" } } } },
+      hideBlocks: { type: "array", items: { type: "string" } },
+      clearPrevious: { type: "boolean" },
+      token: { type: "string" }, planId: { type: "string" },
+    }, required: ["date"] },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: "delete_planner_item",
+    description:
+      "플래너 항목을 지웁니다. type: week(주차, id 는 mp1-w13 또는 W13) · quarter · action(30일 실행) · score(진단 점수) · block(date 필수 — 그 날 시간표에서 빼기: 플래너 블록은 그 날만 숨김, todo:… 인 일정은 일정 자체를 삭제·노션 보관) · template(하루 틀에서 블록을 아예 빼기, mode normal|peak — 앞으로의 모든 날). 연결된 일정은 그대로 둡니다(필요하면 delete_todo).",
+    inputSchema: { type: "object", properties: {
+      type: { type: "string", enum: ["week", "quarter", "action", "score", "block", "template"] },
+      id: { type: "string", description: "지울 항목 id — 필수" },
+      date: { type: "string", description: "block 일 때 YYYY-MM-DD" },
+      mode: { type: "string", enum: ["normal", "peak"], description: "template 일 때 (기본 normal)" },
+      planId: { type: "string" },
+    }, required: ["type", "id"] },
+    annotations: { readOnlyHint: false, destructiveHint: true },
+  },
+  {
+    name: "delete_todo",
+    description: "회사앱 「일정」의 일정 1건을 지웁니다 (앱의 일정 삭제와 같음 — 연결된 노션 페이지는 보관 처리). 잘못 넣은 일정 정리용. id 는 get_business_section(\"_todos\") 또는 get_planner day 의 todo:… 숫자.",
+    inputSchema: { type: "object", properties: { id: { type: ["string", "number"], description: "일정 id — 필수" } }, required: ["id"] },
+    annotations: { readOnlyHint: false, destructiveHint: true },
+  },
+  {
     name: "list_backups",
     description: "앱이 4시간 슬롯마다 남기는 백업 스냅샷(frw_backup_YYYY-MM-DD_HH) 목록을 최신순으로 반환합니다. 데이터 유실 진단·복구용.",
     inputSchema: { type: "object", properties: { limit: { type: "number", description: "최대 개수 (기본 40)" } } },
@@ -564,7 +596,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-mcp", note: "플래너 커넥터 도구 6개 (get_planner·update_planner_item·add_planner_item·log_day·add_score·push_to_todos)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-mcp2", note: "플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -730,8 +762,8 @@ async function toolGetSection(args, env) {
   // 플래너 도구 — 커넥터가 새 도구 목록을 아직 못 받았을 때의 우회: _planner:{"tool":"get_planner","args":{…}}
   if (section.startsWith("_planner:")) {
     let a; try { a = JSON.parse(section.slice(9)); } catch { return errContent("_planner 인자 JSON 이 잘못됐습니다."); }
-    const fn = { get_planner: toolGetPlanner, update_planner_item: toolUpdatePlannerItem, add_planner_item: toolAddPlannerItem, log_day: toolLogDay, add_score: toolAddScore, push_to_todos: toolPushToTodos }[a && a.tool];
-    if (!fn) return errContent("tool 은 get_planner·update_planner_item·add_planner_item·log_day·add_score·push_to_todos 중 하나입니다.");
+    const fn = { get_planner: toolGetPlanner, update_planner_item: toolUpdatePlannerItem, add_planner_item: toolAddPlannerItem, log_day: toolLogDay, add_score: toolAddScore, push_to_todos: toolPushToTodos, set_day_timetable: toolSetDayTimetable, delete_planner_item: toolDeletePlannerItem, delete_todo: (x, e) => toolDeleteTodo({ id: String((x && x.id) || "").replace(/^todo:/, "") }, e) }[a && a.tool];
+    if (!fn) return errContent("tool 은 get_planner·update_planner_item·add_planner_item·log_day·add_score·push_to_todos·set_day_timetable·delete_planner_item·delete_todo 중 하나입니다.");
     return await fn((a && a.args) || {}, env);
   }
   if (section.startsWith("_intake:")) {
@@ -2187,6 +2219,9 @@ async function callTool(params, env) {
     if (name === "log_day") return await toolLogDay(args, env);
     if (name === "add_score") return await toolAddScore(args, env);
     if (name === "push_to_todos") return await toolPushToTodos(args, env);
+    if (name === "set_day_timetable") return await toolSetDayTimetable(args, env);
+    if (name === "delete_planner_item") return await toolDeletePlannerItem(args, env);
+    if (name === "delete_todo") return await toolDeleteTodo({ id: String(args.id || "").replace(/^todo:/, "") }, env);
     if (name === "list_backups") return await toolListBackups(args, env);
     if (name === "get_backup_section") return await toolGetBackupSection(args, env);
     return errContent(`알 수 없는 도구: ${name}`);
@@ -2852,4 +2887,80 @@ async function toolPushToTodos(args, env) {
   }
   let obj = {}; try { obj = JSON.parse(added.content[0].text); } catch {}
   return textContent({ ...obj, 결과: "플래너 → 일정으로 보냄", 연결: made ? `${type} ${item.id} ↔ 일정 ${made.id}` : "연결 실패" });
+}
+
+// 하루 시간표 한 번에 — 플래너 블록 옮기기·빼기 + 새 일정(타임테이블 전용) 넣기
+async function toolSetDayTimetable(args, env) {
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 없습니다.");
+  const date = String(args.date || "");
+  if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}" (YYYY-MM-DD, 필수)`);
+  const items = Array.isArray(args.items) ? args.items.slice(0, 40) : [];
+  const hide = Array.isArray(args.hideBlocks) ? args.hideBlocks.map(String) : [];
+  const token = args.token != null && String(args.token).trim() ? String(args.token).trim().slice(0, 64) : null;
+  const tm = (v) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(v || ""));
+  for (const it of items) if (!tm(it.start) || !tm(it.end) || plMin(it.end) <= plMin(it.start)) return errContent(`시각이 잘못된 줄이 있습니다: ${JSON.stringify(it)} (HH:MM, 끝이 시작보다 뒤)`);
+  const blocks = plDayBlocks(P, plan, date, plLogOf(P, plan, date)).blocks;
+  const moves = items.filter((it) => it.blockId), adds = items.filter((it) => !it.blockId);
+  const bad = [...moves.map((m) => String(m.blockId)), ...hide].filter((id) => !blocks.some((b) => b.id === id && !b.custom));
+  if (bad.length) return errContent(`${date} 에 없는 플래너 블록 id: ${bad.join(", ")} — get_planner(view:"day") 로 확인하세요.`);
+  if (adds.some((it) => !String(it.label || "").trim())) return errContent("새 일정 줄에는 label(이름)이 필요합니다.");
+  // 1) 플래너 블록 (그 날만)
+  if (moves.length || hide.length) {
+    const lid = `${plan.id}|${date}`;
+    const r = await plannerUpsert(env, "dayLogs", lid, (l) => {
+      const n = { ...l, blocks: { ...(l.blocks || {}) } };
+      moves.forEach((m) => { n.blocks[m.blockId] = { ...(n.blocks[m.blockId] || {}), start: m.start, end: m.end, ...(m.label ? { label: String(m.label) } : {}), hidden: false }; });
+      hide.forEach((id) => { n.blocks[id] = { ...(n.blocks[id] || {}), hidden: true }; });
+      return n;
+    }, () => ({ id: lid, planId: plan.id, date, blocks: {}, steps: {}, note3: {} }));
+    if (r.isError) return r;
+  }
+  // 2) 새 일정 — 타임테이블 전용(ttOnly). clearPrevious 면 이 도구로 그 날 넣었던 것부터 지운다
+  let added = 0, removed = 0;
+  if (adds.length || args.clearPrevious) {
+    const plan2 = await safeSectionWrite("todos", (d) => {
+      if (token && todoList(d).some(([, r]) => r.campusToken === token)) return { done: true };
+      let rows = todoList(d).map(([, r]) => r);
+      const before = rows.length;
+      if (args.clearPrevious) rows = rows.filter((r) => !(r.ttOnly && r.dayTimetable && r.date === date));
+      removed = before - rows.length;
+      const ids = new Set(rows.map((r) => String(r.id))); let id = Date.now();
+      adds.forEach((it, i) => {
+        while (ids.has(String(id))) id++; ids.add(String(id));
+        rows.push({ id, date, endDate: "", text: String(it.label).trim().slice(0, 200), memo: "", done: false, createdAt: id, atts: [], ttOnly: true, dayTimetable: true,
+          startMin: plMin(it.start), durMin: plMin(it.end) - plMin(it.start), ...(token && i === 0 ? { campusToken: token } : {}) });
+        id++;
+      });
+      added = adds.length;
+      const want = rows.length;
+      return { replace: true, patch: {}, apply: () => rows, check: (dd) => todoList(dd).length === want };
+    }, env);
+    if (plan2.isError) return plan2;
+    if (plan2.done) return textContent({ 결과: "이미 반영됨 (같은 token)" });
+  }
+  const view = await toolGetPlanner({ view: "day", date, planId: plan.id }, env);
+  let day = {}; try { day = JSON.parse(view.content[0].text); } catch {}
+  return textContent({ 결과: "하루 시간표 반영", 날짜: date, 옮긴블록: moves.map((m) => m.blockId), 뺀블록: hide, 새일정: added, 지운일정: removed, 지금시간표: day.블록 || [] });
+}
+
+async function toolDeletePlannerItem(args, env) {
+  const type = String(args.type || ""), id0 = String(args.id || "");
+  if (!id0) return errContent("id 가 필요합니다.");
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 없습니다.");
+  if (id0.startsWith("todo:")) return await toolDeleteTodo({ id: id0.slice(5) }, env);
+  if (["week", "quarter", "action", "score"].includes(type)) {
+    let id = id0;
+    if (type === "week" && /^w?\d+$/i.test(id)) { const n = Number(id.replace(/\D/g, "")); const w = P.weeks.find((x) => x.planId === plan.id && x.weekNo === n); if (w) id = w.id; }
+    const coll = PL_ITEM_COLL[type], it = P[coll].find((x) => x.id === id);
+    if (!it) return textContent({ 결과: "이미 없음", 종류: type, id });
+    const r = await plannerDelete(env, coll, id); if (r.isError) return r;
+    return textContent({ 결과: "삭제", 종류: type, id, 내용: it.topic || it.text || it.deliverable || (it.score != null ? `${it.date} ${it.score}%` : ""), 참고: plArr(it.todoIds).length ? "연결된 일정은 그대로 있습니다 — 지우려면 delete_todo" : undefined });
+  }
+  if (type === "block") return await toolUpdatePlannerItem({ type: "block", id: id0, date: args.date, planId: plan.id, fields: { hidden: true } }, env);
+  if (type === "template") return await toolUpdatePlannerItem({ type: "template", id: id0, planId: plan.id, fields: { mode: args.mode === "peak" ? "peak" : "normal", delete: true } }, env);
+  return errContent("type 은 week·quarter·action·score·block·template 중 하나입니다.");
 }
