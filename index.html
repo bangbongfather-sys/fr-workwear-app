@@ -32120,18 +32120,35 @@ function plDayBlocks(P, plan, ymd, log) {
   const mode = peak && !studyDay ? "peak" : "normal";
   const tpl = P.dayTemplates.find(t => t.planId === plan.id && t.mode === mode) || P.dayTemplates.find(t => t.planId === plan.id);
   const over = (log && log.blocks) || {};
-  const blocks = plArr(tpl && tpl.blocks).map(b => {
+  const stepsDone = (log && log.steps) || {};
+  const NUM = ["①", "②", "③", "④", "⑤", "⑥"];
+  const blocks = [];
+  plArr(tpl && tpl.blocks).forEach(b => {
     const o = over[b.id] || {};
+    if (o.hidden) return;
     const start = o.start || b.start, end = o.end || b.end;
     let steps = plArr(b.steps).map(st => ({ ...st, doing: (o.stepText && o.stepText[st.key]) || st.doing }));
-    // 블록 길이를 바꾸면 단계 길이도 같은 비율로
+    if (!steps.length) { blocks.push({ ...b, baseLabel: b.label, label: o.label || b.label, steps: [], start, end, done: !!o.done }); return; }
+    // 옛 기록에서 학습 블록 전체 길이를 바꿨다면 단계 길이도 같은 비율로
     const sum = steps.reduce((a, st) => a + Number(st.mins || 0), 0), dur = plMin(end) - plMin(start);
-    if (steps.length && sum > 0 && dur > 0 && dur !== sum) {
-      let acc = 0;
-      steps = steps.map((st, i) => { const m = i === steps.length - 1 ? Math.max(5, dur - acc) : Math.max(5, Math.round(Number(st.mins || 0) * dur / sum / 5) * 5); acc += m; return { ...st, mins: m }; });
+    if (o.start || o.end) {
+      if (sum > 0 && dur > 0 && dur !== sum) { let acc = 0; steps = steps.map((st, i) => { const m = i === steps.length - 1 ? Math.max(5, dur - acc) : Math.max(5, Math.round(Number(st.mins || 0) * dur / sum / 5) * 5); acc += m; return { ...st, mins: m }; }); }
     }
-    return { ...b, baseLabel: b.label, label: o.label || b.label, steps, start, end, done: !!o.done, hidden: !!o.hidden };
-  }).filter(b => !b.hidden);
+    // 학습 3단계는 각각 따로인 블록 (끌기·길이·이름 따로). 완료는 단계 체크(steps)에, 셋 다 끝나면 학습 블록 1회
+    let acc = plMin(start);
+    const mine = [];
+    steps.forEach((st, i) => {
+      const id = `${b.id}_${st.key}`, so = over[id] || {};
+      const useOwn = st.start && st.end && !o.start && !o.end;
+      const dS = useOwn ? st.start : plHM(acc), dE = useOwn ? st.end : plHM(Math.min(1439, acc + Number(st.mins || 0)));
+      acc += Number(st.mins || 0);
+      if (so.hidden) return;
+      mine.push({ id, kind: b.kind, parentId: b.id, stepKey: st.key, stepNo: NUM[i] || "", baseLabel: st.label, label: so.label || st.label,
+        doing: st.doing, aiRole: st.aiRole, start: so.start || dS, end: so.end || dE, done: !!stepsDone[st.key], steps: [] });
+    });
+    const keys = mine.map(x => x.stepKey);
+    mine.forEach(x => { x.groupKeys = keys; blocks.push(x); });
+  });
   return { blocks: [...blocks, ...extras].sort(byStart), mode: peak ? (studyDay ? "peak-study" : "peak") : "normal" };
 }
 // 겹치는 블록은 나란히 — 블록마다 몇 번째 줄(lane)인지와 그 묶음의 줄 수(lanes)
@@ -32466,14 +32483,16 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   // ── 블록 끌기 · 이름 바꾸기 · 새 일정 ──
   const setExtra = (ymd, xid, patch) => updateLog(ymd, l => { const ex = { ...(l.extra || {}) }; if (patch === null) delete ex[xid]; else ex[xid] = { ...(ex[xid] || {}), ...patch }; return { ...l, extra: ex }; });
   const patchBlock = (ymd, b, patch) => b.custom ? setExtra(ymd, b.id, patch) : setBlock(ymd, b.id, patch);
-  const toggleDone = (ymd, b) => patchBlock(ymd, b, { done: !b.done });
+  const grpOf = (b) => ({ id: b.parentId, steps: plArr(b.groupKeys).map(k => ({ key: k })) });
+  const toggleDone = (ymd, b) => b.stepKey ? setStep(ymd, b.stepKey, !b.done, grpOf(b)) : patchBlock(ymd, b, { done: !b.done });
   const renameBlock = (ymd, b, field, val) => {
     const v = String(val == null ? "" : val).trim();
     if (field === "label") {
       if (b.custom) setExtra(ymd, b.id, { label: v || "새 일정" });
       else setBlock(ymd, b.id, { label: v && v !== b.baseLabel ? v : "" });
     } else {
-      updateLog(ymd, l => { const cur = (l.blocks || {})[b.id] || {}; return { ...l, blocks: { ...(l.blocks || {}), [b.id]: { ...cur, stepText: { ...(cur.stepText || {}), [field]: v } } } }; });
+      const pid = b.parentId || b.id;
+      updateLog(ymd, l => { const cur = (l.blocks || {})[pid] || {}; return { ...l, blocks: { ...(l.blocks || {}), [pid]: { ...cur, stepText: { ...(cur.stepText || {}), [field]: v } } } }; });
     }
   };
   const addExtra = (ymd, startMin) => {
@@ -32484,7 +32503,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   };
   const openEdit = (ymd, b, field) => {
     const f = field || "label";
-    setEditBlk({ date: ymd, id: b.id, field: f, value: f === "label" ? b.label : ((b.steps || []).find(x => x.key === f) || {}).doing || "" });
+    setEditBlk({ date: ymd, id: b.id, field: f, value: f === "label" ? b.label : b.stepKey === f ? (b.doing || "") : ((b.steps || []).find(x => x.key === f) || {}).doing || "" });
   };
   // 블록을 한 번 누름 — 두 번 연달아 누르면 이름 고치기, 한 번이면 single(있을 때) 실행
   const blockTap = (ymd, b, field, single) => {
@@ -32539,21 +32558,32 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     window.addEventListener("touchmove", onTM, { passive: false }); window.addEventListener("touchend", onUp);
   };
   // 이 날의 시간·이름(새 일정 포함)을 앞으로의 기본 틀로
-  const saveTemplate = (ymd, mode) => {
+  const saveTemplate = (ymd, mode, dayBlocks) => {
     if (!window.confirm("이 날의 시간·이름을 앞으로의 기본 틀로 저장할까요?\n(이 날 새로 넣은 일정도 매일 나오는 블록이 됩니다. 성수기 유지 틀은 따로입니다)")) return;
     const tplMode = mode === "peak" ? "peak" : "normal";
+    const list = plArr(dayBlocks);
     setPlanner(prev => {
-      const p = plannerNormalize(prev), lid = `${plan.id}|${ymd}`, lg = p.dayLogs.find(l => l.id === lid) || {};
-      const ov = lg.blocks || {}, ex = lg.extra || {};
+      const p = plannerNormalize(prev), lid = `${plan.id}|${ymd}`;
       const dayTemplates = p.dayTemplates.map(t => {
         if (t.planId !== plan.id || t.mode !== tplMode) return t;
-        const bl = plArr(t.blocks).filter(b => !(ov[b.id] && ov[b.id].hidden)).map(b => { const o = ov[b.id] || {}; return { ...b, start: o.start || b.start, end: o.end || b.end, label: o.label || b.label, steps: plArr(b.steps).map(x => ({ ...x, doing: (o.stepText && o.stepText[x.key]) || x.doing })) }; });
-        const add = Object.entries(ex).map(([id, x]) => ({ id: "c" + id.slice(1), start: x.start, end: x.end, label: x.label || "새 일정", kind: "custom" }));
-        return { ...t, blocks: [...bl, ...add].sort((a, b) => plMin(a.start) - plMin(b.start)), updatedAt: Date.now() };
+        const out = [];
+        plArr(t.blocks).forEach(tb => {
+          if (plArr(tb.steps).length) {
+            const subs = list.filter(x => x.parentId === tb.id);
+            if (!subs.length) return;
+            const steps = subs.map(x => { const ts = plArr(tb.steps).find(q => q.key === x.stepKey) || {}; return { ...ts, label: x.label, doing: x.doing, mins: plMin(x.end) - plMin(x.start), start: x.start, end: x.end }; });
+            out.push({ ...tb, start: subs.reduce((a, x) => x.start < a ? x.start : a, subs[0].start), end: subs.reduce((a, x) => x.end > a ? x.end : a, subs[0].end), steps });
+          } else {
+            const x = list.find(q => q.id === tb.id && !q.custom);
+            if (x) out.push({ ...tb, start: x.start, end: x.end, label: x.label });
+          }
+        });
+        list.filter(x => x.custom).forEach(x => out.push({ id: "c" + String(x.id).slice(1), start: x.start, end: x.end, label: x.label, kind: "custom" }));
+        return { ...t, blocks: out.sort((a, b) => plMin(a.start) - plMin(b.start)), updatedAt: Date.now() };
       });
       const dayLogs = p.dayLogs.map(l => {
         if (l.id !== lid) return l;
-        const blocks = Object.fromEntries(Object.entries(l.blocks || {}).filter(([, v]) => v && !v.hidden).map(([k, v]) => [k, { done: !!v.done }]));
+        const blocks = Object.fromEntries(Object.entries(l.blocks || {}).filter(([k, v]) => v && !v.hidden && !k.includes("_")).map(([k, v]) => [k, { done: !!v.done }]));
         Object.entries(l.extra || {}).forEach(([id, x]) => { if (x && x.done) blocks["c" + id.slice(1)] = { done: true }; });
         return { ...l, blocks, extra: {}, updatedAt: Date.now() };
       });
@@ -32690,51 +32720,35 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     const blocks = day.blocks;
     const doneN = blocks.filter(b => b.done).length;
     const isToday = date === today;
-    // 지금 블록 (오늘만)
+    // 지금 블록 (오늘만) — 학습 단계도 각각 블록
     let now = null;
     if (isToday) {
-      const b = blocks.find(x => plMin(x.start) <= nowMin && nowMin < plMin(x.end));
-      if (b) {
-        let stepIdx = -1, stepEnd = plMin(b.end);
-        if (b.steps.length) {
-          let acc = plMin(b.start);
-          for (let i = 0; i < b.steps.length; i++) { const e = acc + Number(b.steps[i].mins || 0); if (nowMin < e) { stepIdx = i; stepEnd = e; break; } acc = e; }
-          if (stepIdx < 0) stepIdx = b.steps.length - 1;
-          // 앞 단계를 이미 끝냈다면 다음 미완료 단계를 보여준다
-          const st = (log && log.steps) || {};
-          while (stepIdx < b.steps.length - 1 && st[b.steps[stepIdx].key]) stepIdx++;
-          stepEnd = plMin(b.start) + b.steps.slice(0, stepIdx + 1).reduce((a, x) => a + Number(x.mins || 0), 0);
-        }
-        now = { b, stepIdx, left: Math.max(0, stepEnd - nowMin) };
-      }
+      const cur = blocks.filter(x => plMin(x.start) <= nowMin && nowMin < plMin(x.end));
+      const b = cur.find(x => !x.done) || cur[0];
+      if (b) now = { b, left: Math.max(0, plMin(b.end) - nowMin) };
     }
-    const finishNow = () => {
-      if (!now) return;
-      const { b, stepIdx } = now;
-      if (b.steps.length && stepIdx >= 0) {
-        setStep(date, b.steps[stepIdx].key, true, b);
-      } else patchBlock(date, b, { done: true });
-    };
+    const finishNow = () => { if (now) toggleDone(date, { ...now.b, done: false }); };
     const steps = (log && log.steps) || {};
+    const sibs = now && now.b.parentId ? blocks.filter(x => x.parentId === now.b.parentId) : [];
     const nowCard = now && (now.b.done ? null : (
       <div className="pl-now" style={wide ? { margin: 0 } : undefined}>
         <div className="pl-now-row">
           <button type="button" className="t" aria-expanded={nowOpen} onClick={() => setNowOpen(o => !o)}>
-            <small>지금</small>{now.b.steps.length ? `${["①", "②", "③", "④"][now.stepIdx] || ""} ${now.b.steps[now.stepIdx].label}` : now.b.label}
+            <small>지금</small>{now.b.stepNo ? `${now.b.stepNo} ` : ""}{now.b.label}
             <small style={{ marginLeft: 6 }}>· {now.left}분 남음</small>
           </button>
           <button type="button" className="done" onClick={finishNow}>끝</button>
         </div>
-        {now.b.steps.length > 0 && (
+        {sibs.length > 1 && (
           <div className="pl-now-prog" aria-hidden="true">
-            {now.b.steps.map((s, i) => <span key={s.key} style={{ flex: Number(s.mins) || 1 }}><i style={{ width: steps[s.key] ? "100%" : i === now.stepIdx ? `${Math.round(100 * (1 - now.left / (Number(s.mins) || 1)))}%` : 0 }} /></span>)}
+            {sibs.map(x => { const d = Math.max(1, plMin(x.end) - plMin(x.start)); return <span key={x.id} style={{ flex: d }}><i style={{ width: x.done ? "100%" : x.id === now.b.id ? `${Math.round(100 * (1 - now.left / d))}%` : 0 }} /></span>; })}
           </div>
         )}
         {nowOpen && (
           <div className="pl-now-more">
-            {now.b.steps.length ? (<>
-              <div>{now.b.steps[now.stepIdx].doing}</div>
-              <div style={{ color: "#C9BBF2" }}>AI 역할 · {now.b.steps[now.stepIdx].aiRole}</div>
+            {now.b.stepKey ? (<>
+              <div>{now.b.doing}</div>
+              {now.b.aiRole && <div style={{ color: "#C9BBF2" }}>AI 역할 · {now.b.aiRole}</div>}
             </>) : <div>{now.b.note || `${now.b.start}–${now.b.end}`}</div>}
           </div>
         )}
@@ -32789,12 +32803,14 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
                 <span aria-hidden="true">–</span>
                 <input type="time" aria-label={`${b.label} 끝`} className="pl-in" style={{ minHeight: 38, padding: "0 6px", width: 100 }} value={b.end} onChange={e => e.target.value && patchBlock(date, b, { end: e.target.value })} />
                 <button type="button" className="pl-btn ghost sm" onClick={() => b.custom ? setExtra(date, b.id, null) : setBlock(date, b.id, { hidden: true })}>{b.custom ? "지우기" : "이 날 빼기"}</button>
+                {b.stepKey && <input type="text" aria-label={`${b.label} 설명`} className="pl-in" style={{ flex: "1 1 100%", minHeight: 36, padding: "0 8px", fontSize: 13 }} placeholder="할 일 설명" defaultValue={b.doing || ""} key={b.id + "-d-" + (b.doing || "")}
+                  onBlur={e => { if (e.target.value.trim() !== (b.doing || "")) renameBlock(date, b, b.stepKey, e.target.value); }} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />}
               </div>
             ))}
             <div className="pl-li" style={{ justifyContent: "flex-end", flexWrap: "wrap", gap: 6, paddingTop: 6, paddingBottom: 6 }}>
               <span className="pl-muted" style={{ flex: "1 1 160px" }}>여기서 바꾼 것은 이 날만 바뀝니다</span>
               <button type="button" className="pl-btn ghost sm" onClick={() => updateLog(date, l => ({ ...l, blocks: Object.fromEntries(Object.entries(l.blocks || {}).map(([k, v]) => [k, { done: !!(v && v.done) }])) }))}>기본으로 되돌리기</button>
-              <button type="button" className="pl-btn sm" onClick={() => saveTemplate(date, day.mode)}>앞으로의 기본 틀로 저장</button>
+              <button type="button" className="pl-btn sm" onClick={() => saveTemplate(date, day.mode, blocks)}>앞으로의 기본 틀로 저장</button>
             </div>
           </div>
         )}
@@ -32835,9 +32851,11 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
                   </>) : (
                     <div className="pl-blk-main">
                       <div className="tx">
-                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.label}{b.kind === "study" && theme ? ` · ${theme.track}` : ""}</div>}
-                        {!tiny && <div className="tm">{bS} – {bE}</div>}
-                        {!tiny && h >= 52 && b.note && <div className="nt">{b.note}</div>}
+                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.stepNo ? `${b.stepNo} ` : ""}{b.label}{b.kind === "study" && theme && (!b.stepKey || b.stepKey === (b.groupKeys || [])[0]) ? ` · ${theme.track}` : ""}{tiny && b.stepKey ? <span style={{ fontWeight: 500, opacity: 0.85 }}> · {bS}</span> : null}</div>}
+                        {!tiny && <div className="tm">{bS} – {bE}{b.stepKey ? ` · ${plMin(bE) - plMin(bS)}분` : ""}</div>}
+                        {!tiny && b.stepKey && h >= 46 && (ed && ed.field === b.stepKey ? editor(b.stepKey) : <div className="nt" data-step={b.stepKey}>{b.doing}</div>)}
+                        {!tiny && b.stepKey && h >= 70 && b.aiRole && <div className="nt">AI · {b.aiRole}</div>}
+                        {!tiny && !b.stepKey && h >= 52 && b.note && <div className="nt">{b.note}</div>}
                       </div>
                       {ed && b.custom
                         ? <button type="button" className="pl-btn ghost sm" style={{ minHeight: 26, height: 26, padding: "0 8px", fontSize: 12 }} onPointerDown={e => e.preventDefault()} onClick={() => { setEditBlk(null); setExtra(date, b.id, null); }}>지우기</button>
@@ -32949,7 +32967,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
       </div>
     );
     const rows = [
-      { k: "study", label: "학습 블록", count: `${stats.study} / ${studyTarget}`, on: (d) => d.study, tap: (d) => { const l = plLogOf(P, plan, d.date); const cur = !!(l && l.blocks && l.blocks.study && l.blocks.study.done); setBlock(d.date, "study", { done: !cur }); } },
+      { k: "study", label: "학습 블록", count: `${stats.study} / ${studyTarget}`, on: (d) => d.study, tap: (d) => { const l = plLogOf(P, plan, d.date); const cur = !!(l && l.blocks && l.blocks.study && l.blocks.study.done); updateLog(d.date, x => ({ ...x, steps: { ...(x.steps || {}), s0: !cur, s1: !cur, s2: !cur }, blocks: { ...(x.blocks || {}), study: { ...((x.blocks || {}).study || {}), done: !cur } } })); } },
       { k: "note", label: "노트", count: `${stats.note} / ${noteTarget}`, on: (d) => d.note, tap: (d) => setStep(d.date, "s2", !d.note) },
       ...(mxMore ? [
         { k: "ex", label: "운동", count: `${stats.days.filter(d => d.ex).length} / 5`, on: (d) => d.ex, tap: (d) => setBlock(d.date, "ex", { done: !d.ex }) },
@@ -33314,7 +33332,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
                 const bS = dg ? dg.start : b.start, bE = dg ? dg.end : b.end;
                 const bs = plMin(bS), be = plMin(bE), h = Math.max(16, (be - bs) * PPM - 2), [bg, fg] = toneOf(b, x.th);
                 const ed = editBlk && editBlk.date === x.d && editBlk.id === b.id ? editBlk : null;
-                const name = b.kind === "study" && x.th && b.label === b.baseLabel ? `${x.th.track} 학습` : b.label.replace(" 블록", "").replace(" (확대)", "");
+                const name = b.stepKey ? `${b.stepNo}${b.stepKey === (b.groupKeys || [])[0] && x.th ? " " + x.th.track : ""} ${b.label}` : b.kind === "study" && x.th && b.label === b.baseLabel ? `${x.th.track} 학습` : b.label.replace(" 블록", "").replace(" (확대)", "");
                 return (
                   <div key={b.id} role="button" tabIndex={0} className={`blk${b.done ? " done" : ""}${dg ? " dragging" : ""}`} aria-pressed={b.done} aria-label={`${PL_WK[x.dw]} ${b.label} ${b.start}–${b.end}${b.done ? " 완료" : ""} — 누르면 완료, 두 번 누르면 이름 바꾸기, 끌면 시간 이동`}
                     style={{ top: Y(bs), height: h, background: bg, color: fg, boxShadow: b.kind === "study" && x.d === today && !b.done ? `inset 0 0 0 1.5px ${fg}` : "none",
