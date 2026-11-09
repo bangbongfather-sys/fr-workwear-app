@@ -32100,6 +32100,128 @@ function plannerSeed(prev) {
   };
 }
 
+// ── 계획 템플릿: 「+ 새 계획」에서 고른다. 같은 id 가 이미 있으면 다시 넣지 않는다 ──
+// 투자 전문가 1년 플랜 — 「1년 투자 실력 성장 계획 (2026.11~2027.10)」 문서 그대로
+function plannerSeedInvest(prev) {
+  const base = plannerNormalize(prev);
+  const P = "inv1", now = Date.now();
+  const tracks = [
+    { key: "기업", color: "#2E5AAC", dark: "#8DB0F0" }, { key: "매크로", color: "#2D6A4F", dark: "#86C9A6" },
+    { key: "매매", color: "#C2410C", dark: "#F2A27A" }, { key: "통합", color: "#6D4AB8", dark: "#B9A2EE" },
+    { key: "공부", color: "#0F766E", dark: "#7DD3C8" }, { key: "실습", color: "#A16207", dark: "#E3BE6A" }, { key: "복기", color: "#4E5968", dark: "#B0B8C1" },
+  ];
+  const plan = {
+    id: P, title: "투자 전문가 1년 플랜", short: "투자", category: "투자", color: "#0F766E",
+    startDate: "2026-11-09", endDate: "2027-10-31", weeklyHours: "주 5시간 (평일 1시간)",
+    tracks,
+    proofs: [
+      { key: "p1", label: "프로세스를 지켰다", metric: "투자 일지 평일 80% 이상" },
+      { key: "p2", label: "벤치마크와 비교", metric: "S&P 500 대비 월간 성과 리포트", target: 12, value: 0 },
+      { key: "p3", label: "운용 준비 완료", metric: "투자 프로세스 문서 + 모의 운용 제안서", target: 2, value: 0 },
+    ],
+    targets: [{ yearIndex: 1, from: 40, to: 70 }],
+    peakMonths: [], peakStudyDays: [], studyTarget: 4, noteTarget: 4,
+    autoMonday: false, createdAt: now, template: "invest",
+  };
+  const years = [{
+    id: `${P}-y1`, planId: P, yearIndex: 1, period: "2026.11–2027.10", startDate: "2026-11-01", endDate: "2027-10-31", theme: "재현 가능한 내 투자 프로세스",
+    items: { 기업: "재무제표·밸류에이션·사업 분석 → 종목 리포트 5개, DCF 템플릿", 매크로: "금리·물가·환율·경기 사이클 → 매크로 대시보드, 투자 정책서(IPS)", 매매: "차트·수급·포지션 사이징·옵션 기초 → 매매 체크리스트, 리스크 규칙", 통합: "세후 수익·성과 측정 → 연간 성과 리포트, 모의 운용 제안서", 진단: "투자 지식 진단 40% → 70%" },
+  }];
+  const Q = (q, months, startDate, endDate, mode, task, deliverable, anchor) => ({ id: `${P}-y1q${q}`, planId: P, yearIndex: 1, q, months, startDate, endDate, mode, weeklyHours: "5h", task, deliverable, anchor, done: false, todoIds: [] });
+  const quarters = [
+    Q(1, "11~1월", "2026-11-01", "2027-01-31", "기업분석", "재무제표·밸류에이션·사업 분석", "종목 리포트 5개 + DCF 템플릿", "교재 1권 선정, 투자 스터디·세미나 1건"),
+    Q(2, "2~4월", "2027-02-01", "2027-04-30", "매크로·자산배분", "금리·물가·환율, 자산배분, 리밸런싱", "투자 정책서(IPS) + 리밸런싱 1회 실행", "교재 1권 선정, 투자 스터디·세미나 1건"),
+    Q(3, "5~7월", "2027-05-01", "2027-07-31", "매매·리스크", "차트·수급, 포지션 사이징, 옵션 기초", "매매 체크리스트 + 리스크 규칙 문서", "교재 1권 선정, 투자 스터디·세미나 1건"),
+    Q(4, "8~10월", "2027-08-01", "2027-10-31", "통합·운용", "세후 수익, 성과 측정, 운용 프로세스 정리", "연간 성과 리포트 + 모의 운용 제안서", "모의 운용 제안서를 아는 투자자 1명에게 검토받기"),
+  ];
+  // 월별: [년-월, 트랙, 배울 것, 직접 해볼 것, 산출물]
+  const M = [
+    ["2026-11", "기업", "재무제표 3종 읽기, 회계 기본", "보유 종목 2개 재무제표 직접 정리", "투자 일지 양식 · 현재 포트폴리오 진단서"],
+    ["2026-12", "기업", "밸류에이션(PER·PBR·EV/EBITDA·DCF)", "테슬라 DCF 모델 직접 만들기", "DCF 템플릿 1개"],
+    ["2027-01", "기업", "사업 분석(해자, 경쟁, 산업 구조)", "관심 종목 5개 1페이지 리포트", "종목 리포트 5개"],
+    ["2027-02", "매크로", "금리·물가·환율·경기 사이클", "매주 경제지표 발표 해석 노트", "매크로 대시보드(지표 10개)"],
+    ["2027-03", "매크로", "자산배분(주식·채권·현금·대체)", "내 자산 전체 배분표 작성", "투자 정책서(IPS) 초안"],
+    ["2027-04", "매크로", "리밸런싱, 섹터 로테이션", "분기 리밸런싱 1회 실행", "리밸런싱 규칙 문서"],
+    ["2027-05", "매매", "차트 기본, 추세·거래량·수급", "매매 전 진입·손절 근거 기록", "매매 체크리스트"],
+    ["2027-06", "매매", "포지션 사이징, 손절, MDD 관리", "종목당 최대 비중·손실 한도 적용", "리스크 관리 규칙"],
+    ["2027-07", "매매", "옵션 기초(콜·풋·그릭스)", "보유 ELS 구조를 옵션으로 분해", "ELS 해부 노트"],
+    ["2027-08", "통합", "채권·구조화 상품 심화, 세금", "세후 수익률 시뮬레이션", "상품별 세후 비교표"],
+    ["2027-09", "통합", "성과 측정(샤프, 알파, MDD)", "11개월 성과를 S&P 500과 비교", "성과 리포트 초안"],
+    ["2027-10", "통합", "운용 프로세스 정리", "내 프로세스로 모의 운용 제안서 작성", "투자 프로세스 문서 · 연간 성과 리포트"],
+  ];
+  const starts = [];
+  for (let s = "2026-11-09"; s <= "2027-10-25"; s = plAdd(s, 7)) starts.push(s);
+  const monthOf = (s) => plAdd(s, 3).slice(0, 7); // 그 주 목요일이 속한 달
+  const weeks = starts.map((startDate, i) => {
+    const ym = monthOf(startDate);
+    const m = M.find(x => x[0] === ym) || M[M.length - 1];
+    const same = starts.filter(s => monthOf(s) === ym), pos = same.indexOf(startDate), last = pos === same.length - 1;
+    const [topic, deliverable] = pos === 0 ? [`${m[2]} — 이달 주제 공부`, "공부 노트 1장"]
+      : last ? [`산출물 마무리 — ${m[4]}`, m[4]] : [`${m[3]} — 실습`, "실습 기록 1건"];
+    return {
+      id: `${P}-w${i + 1}`, planId: P, weekNo: i + 1, startDate, endDate: plAdd(startDate, 6), track: m[1], topic, deliverable, appointment: "",
+      outputs: deliverable.split(" · ").map((text, j) => ({ id: `o${j + 1}`, text, done: false })),
+      apptDone: false, weeklyGoal: "", todoIds: [], done: false,
+    };
+  });
+  const T = (weekday, track, label, description, hours) => ({ id: `${P}-t${weekday}`, planId: P, weekday, track, label, description, hours });
+  const themes = [
+    T(1, "공부", "이달 주제", "이달 '배울 것' 공부 (주간 카드 주제)", "1h"),
+    T(2, "공부", "이달 주제", "이달 '배울 것' 공부 이어서", "1h"),
+    T(3, "매크로", "매크로", "이번 주 경제지표 해석", "1h"),
+    T(4, "실습", "실습", "이달 '직접 해볼 것' 진행", "1h"),
+    T(5, "복기", "주간 복기", "일지 5건 다시 읽기: 틀린 판단·다음 주 일정·비중 규칙 점검", "1h"),
+  ];
+  const routines = [
+    { id: `${P}-r1`, planId: P, rule: "firstMon", when: "첫 주 월요일", task: "이달 계획 확인 — 배울 것·해볼 것·산출물 정하기", duration: "15분" },
+    { id: `${P}-r2`, planId: P, rule: "wk2to3", when: "둘째~셋째 주", task: "외부 앵커 1건 — 투자 스터디·세미나·기업 IR", duration: "반나절", anchor: true },
+    { id: `${P}-r3`, planId: P, rule: "lastFri", when: "마지막 주 금요일", task: "월말 리뷰 — 수익률·S&P 500 대비·MDD·규칙 위반 기록", duration: "30분" },
+    { id: `${P}-r4`, planId: P, rule: "lastDay", when: "마지막 날", task: "월간 1페이지 — 잘한 판단 1 / 못한 판단 1 / 다음 달 실습 확정", duration: "30분" },
+  ];
+  const study = {
+    id: "study", start: "09:30", end: "10:30", label: "투자 블록", kind: "study", steps: [
+      { key: "s0", label: "시장 확인", mins: 15, doing: "아침 브리핑 읽기, 어제 예상과 실제 비교", aiRole: "브리핑 요약·질문" },
+      { key: "s1", label: "이달 주제", mins: 30, doing: "오늘 요일 주제 공부 또는 실습", aiRole: "막히는 개념 질문" },
+      { key: "s2", label: "투자 일지", mins: 15, doing: "오늘 판단, 근거, 매매 여부", aiRole: "일지 검토" },
+    ],
+  };
+  const dayTemplates = [{ id: `${P}-normal`, planId: P, mode: "normal", blocks: [study] }];
+  const checkRules = [
+    { id: `${P}-c1`, planId: P, cycle: "매주 금", metric: "투자 블록 실행 / 투자 일지 수", standard: "주 4회 이상 · 일지 4건 이상" },
+    { id: `${P}-c2`, planId: P, cycle: "매월 말", metric: "월 산출물 / 수익률·S&P 500 대비·MDD / 규칙 위반", standard: "산출물 1개 · MDD -30% 이내 · 위반 월 1건 이하" },
+    { id: `${P}-c3`, planId: P, cycle: "매 분기", metric: "분기 완료 기준 / 투자 정책서·리스크 규칙", standard: "완료 못 하면 2주 더 · 규칙 수정 · 다음 교재 선정" },
+    { id: `${P}-c4`, planId: P, cycle: "2027년 10월", metric: "연간 성과 리포트 · 모의 운용 제안서", standard: "2년 차 계획 재설계" },
+  ];
+  const actions = [
+    { id: `${P}-a1`, planId: P, text: "투자 일지 양식 만들기", date: "2026-11-10", endDate: "2026-11-16", done: false, todoIds: [] },
+    { id: `${P}-a2`, planId: P, text: "1분기 교재 1권 정하기 (밸류에이션 입문서)", date: "2026-11-10", endDate: "2026-11-20", done: false, todoIds: [] },
+    { id: `${P}-a3`, planId: P, text: "현재 포트폴리오 진단서 작성", date: "2026-11-10", endDate: "2026-11-30", done: false, todoIds: [] },
+  ];
+  const add = (k, list) => [...base[k], ...list.filter(x => !base[k].some(y => y.id === x.id))];
+  return {
+    ...base, plans: add("plans", [plan]), years: add("years", years), quarters: add("quarters", quarters), weeks: add("weeks", weeks),
+    themes: add("themes", themes), routines: add("routines", routines), dayTemplates: add("dayTemplates", dayTemplates),
+    checkRules: add("checkRules", checkRules), actions: add("actions", actions),
+  };
+}
+// 빈 계획 — 이름만 정하고 1년짜리. 하루 틀은 비어 있고, 하루 보기에서 일정을 넣은 뒤 「기본 틀로 저장」으로 채운다
+function plannerAddBlank(prev, title) {
+  const base = plannerNormalize(prev);
+  const P = "pl" + Date.now(), start = plMonday(plToday());
+  const plan = { id: P, title, short: title.slice(0, 6), category: title, color: "#4E5968", startDate: start, endDate: plAdd(start, 364), weeklyHours: "",
+    tracks: [{ key: "기본", color: "#4E5968", dark: "#B0B8C1" }], proofs: [], targets: [], peakMonths: [], peakStudyDays: [], studyTarget: 4, noteTarget: 4, autoMonday: false, createdAt: Date.now() };
+  return { ...base, plans: [...base.plans, plan], dayTemplates: [...base.dayTemplates, { id: `${P}-normal`, planId: P, mode: "normal", blocks: [] }] };
+}
+// 계획 지우기 — 그 계획에 딸린 항목(주차·하루 기록 등)까지 같이
+function plannerRemovePlan(prev, planId) {
+  const base = plannerNormalize(prev), out = { ...base };
+  for (const k of PL_COLLECTIONS) out[k] = k === "plans" ? base.plans.filter(p => p.id !== planId) : base[k].filter(x => x.planId !== planId);
+  return out;
+}
+const PL_TEMPLATES = [{ id: "inv1", title: "투자 전문가 1년 플랜", desc: "기업분석·매크로·매매·통합 4분기, 평일 09:30 투자 블록 1시간", seed: plannerSeedInvest }];
+// 계획별 색 — 기본 표(마스터플랜)에 계획의 트랙 색을 덧씌운다
+const plColorsOf = (plan, dark) => ({ ...(dark ? PL_COLOR_DARK : PL_COLOR), ...Object.fromEntries(plArr(plan && plan.tracks).filter(t => t && t.key && t.color).map(t => [t.key, dark ? (t.dark || t.color) : t.color])) });
+
 // ── 계산 ──
 const plIsPeak = (plan, ymd) => !!(plan && (plan.peakMonths || []).includes(Number(ymd.slice(5, 7))));
 function plThemeOf(P, plan, ymd) { const dw = plDow(ymd); return P.themes.find(t => t.planId === plan.id && Number(t.weekday) === dw) || null; }
@@ -32471,11 +32593,36 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   React.useEffect(() => { save("frw_planner_view", view); }, [view]);
   React.useEffect(() => { if (planId) save("frw_planner_plan", planId); }, [planId]);
   // 타임테이블에서 플래너 블록을 누르면 그 날 하루 보기로
-  React.useEffect(() => { if (jump && jump.date) { setDate(jump.date); setView("day"); } }, [jump && jump.n]);
+  React.useEffect(() => { if (jump && jump.date) { if (jump.planId) setPlanId(jump.planId); setDate(jump.date); setView("day"); } }, [jump && jump.n]);
+  // 새 계획 — 템플릿 또는 빈 계획
+  const [newOpen, setNewOpen] = React.useState(false);
+  const [newTitle, setNewTitle] = React.useState("");
+  const addTemplate = (tp) => {
+    setPlanner(prev => plannerNormalize(prev).plans.some(p => p.id === tp.id) ? prev : tp.seed(prev));
+    setPlanId(tp.id); setNewOpen(false); setView("day");
+    showToast(`「${tp.title}」을 넣었어요`, "success");
+  };
+  const addBlank = () => {
+    const t = newTitle.trim();
+    if (!t) { showToast("계획 이름을 적어 주세요"); return; }
+    let nid = "";
+    setPlanner(prev => { const next = plannerAddBlank(prev, t); nid = next.plans[next.plans.length - 1].id; return next; });
+    setTimeout(() => nid && setPlanId(nid), 0);
+    setNewTitle(""); setNewOpen(false); setView("day");
+    showToast(`「${t}」 계획을 만들었어요`, "success");
+  };
+  const removePlan = (p) => {
+    if (!p || P.plans.length <= 1) { showToast("계획이 하나뿐이라 지울 수 없어요"); return; }
+    if (!window.confirm(`「${p.title}」 계획을 지울까요?\n주차·하루 기록·점수 등 이 계획에 딸린 기록도 모두 지워집니다.`)) return;
+    setPlanner(prev => plannerRemovePlan(prev, p.id));
+    setPlanId(P.plans.find(x => x.id !== p.id).id);
+    showToast("계획을 지웠어요", "success");
+  };
 
   const plan = P.plans.find(p => p.id === planId) || P.plans[0] || null;
-  const C = darkMode ? PL_COLOR_DARK : PL_COLOR;
-  const tint = (k) => (PL_COLOR[k] || "#4E5968") + (darkMode ? "33" : "18");
+  const C = plColorsOf(plan, darkMode);
+  const CL = plColorsOf(plan, false);
+  const tint = (k) => (CL[k] || "#4E5968") + (darkMode ? "33" : "18");
   const wide = boxW >= 900;
   const narrow = boxW < 520;
   const desk = boxW >= 1080; // PC 3단 (왼쪽 계획·보기·목표 / 가운데 / 오른쪽 지금·지표·기록)
@@ -32711,20 +32858,46 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     return <>W{weekNo} 리뷰</>;
   };
 
+  // ── 새 계획 패널 (모바일 머리·PC 사이드바 같이 씀) ──
+  const newPlanPanel = (
+    <div className="pl-sec" style={{ margin: "8px 0", padding: 12, display: "grid", gap: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>새 계획</div>
+      {PL_TEMPLATES.map(tp => {
+        const has = P.plans.some(p => p.id === tp.id);
+        return (
+          <button key={tp.id} type="button" className="pl-btn ghost sm" disabled={has} style={{ textAlign: "left", height: "auto", padding: "8px 10px", whiteSpace: "normal", opacity: has ? 0.55 : 1 }} onClick={() => addTemplate(tp)}>
+            <div style={{ fontWeight: 700 }}>{tp.title}{has ? " · 이미 있음" : ""}</div>
+            <div className="pl-muted" style={{ marginTop: 2 }}>{tp.desc}</div>
+          </button>
+        );
+      })}
+      <div style={{ display: "flex", gap: 6 }}>
+        <input type="text" value={newTitle} placeholder="빈 계획 이름" aria-label="빈 계획 이름" onChange={e => setNewTitle(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addBlank(); }}
+          style={{ flex: 1, minWidth: 0, height: 32, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", fontFamily: "inherit", fontSize: 13 }} />
+        <button type="button" className="pl-btn sm" onClick={addBlank}>만들기</button>
+      </div>
+      {P.plans.length > 1 && <button type="button" className="pl-btn ghost sm" style={{ color: "#E5484D" }} onClick={() => removePlan(plan)}>지금 보는 계획 지우기 · {plan.title}</button>}
+    </div>
+  );
+
   // ── 머리 ──
   const head = (
     <div className="pl-head">
       {!desk && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
         <label className="pl-chip">
-          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: "#DB6B2E", flex: "none" }} />
+          <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: plan.color || "#DB6B2E", flex: "none" }} />
           <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden" }}>계획 고르기</span>
           <select value={plan.id} onChange={e => setPlanId(e.target.value)}>
             {P.plans.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
           </select>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
         </label>
-        {plan.category && <span className="pl-muted">분류 · {plan.category}</span>}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {plan.category && <span className="pl-muted">분류 · {plan.category}</span>}
+          <button type="button" className="pl-btn ghost sm" aria-expanded={newOpen} onClick={() => setNewOpen(v => !v)}>+ 새 계획</button>
+        </div>
       </div>}
+      {!desk && newOpen && newPlanPanel}
       <div>
         <div className="pl-kicker">{view === "road" ? `${plan.startDate.replace(/-/g, ".")} – ${plan.endDate.replace(/-/g, ".")} · ${plan.weeklyHours || ""}` : kicker}</div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -33445,9 +33618,11 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
             <div className="pl-side-lb">계획</div>
             {P.plans.map(p => (
               <button key={p.id} type="button" className={`pl-side-it${p.id === plan.id ? " on" : ""}`} aria-pressed={p.id === plan.id} onClick={() => setPlanId(p.id)}>
-                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: "#DB6B2E", flex: "none" }} /><span className="tx">{p.title}</span>
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: p.color || "#DB6B2E", flex: "none" }} /><span className="tx">{p.title}</span>
               </button>
             ))}
+            <button type="button" className="pl-side-it" aria-expanded={newOpen} onClick={() => setNewOpen(v => !v)}><span aria-hidden="true" style={{ width: 8, textAlign: "center", flex: "none" }}>+</span><span className="tx">새 계획</span></button>
+            {newOpen && newPlanPanel}
             {plan.category && <div className="pl-muted" style={{ padding: "4px 8px 0" }}>분류 · {plan.category}</div>}
           </div>
           <nav aria-label="플래너 보기">
@@ -33540,8 +33715,12 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   const [plannerJump, setPlannerJump] = React.useState(null);
   const plN = React.useMemo(() => plannerNormalize(planner), [planner]);
   const plPlan = plN.plans.find(p => p.id === load("frw_planner_plan", "")) || plN.plans[0] || null;
-  const plBlocksOn = (ds) => (!ttPlanner || !plPlan) ? [] : plDayBlocks(plN, plPlan, ds, plLogOf(plN, plPlan, ds)).blocks;
-  const openPlannerDay = (ds) => { setPlannerJump({ date: ds, n: Date.now() }); setSchedMode("planner"); };
+  // 모든 계획의 블록을 함께 (계획마다 id 가 겹칠 수 있어 key 는 계획 id 를 붙인다). 계획 기간 밖이면 그 계획은 빼고
+  const plBlocksOn = (ds) => (!ttPlanner || !plPlan) ? [] : plN.plans
+    .filter(pl => pl.id === plPlan.id || (!pl.startDate || pl.startDate <= ds) && (!pl.endDate || ds <= pl.endDate))
+    .flatMap(pl => plDayBlocks(plN, pl, ds, plLogOf(plN, pl, ds)).blocks.map(b => ({ ...b, key: pl.id + ":" + b.id, planId: pl.id, planColor: pl.color && pl.id !== "mp1" ? pl.color : "" })))
+    .sort((a, b) => plMin(a.start) - plMin(b.start));
+  const openPlannerDay = (ds, planId) => { if (planId) save("frw_planner_plan", planId); setPlannerJump({ date: ds, planId, n: Date.now() }); setSchedMode("planner"); };
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
   const today = new Date();
   const ymd = (d) => {
@@ -34437,7 +34616,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   const renderTimetable = (opts) => {
     const compact = !!(opts && opts.compact);
     const plDark = darkMode || (typeof document !== "undefined" && document.body.classList.contains("glass"));
-    const plColor = (b) => { const k = b.kind === "study" ? "규격" : b.kind === "exercise" ? "제품" : b.kind === "custom" ? "소재" : (b.kind === "ops" || b.kind === "wrap") ? "권위" : "진단"; return (plDark ? PL_COLOR_DARK : PL_COLOR)[k]; };
+    const plColor = (b) => { if (b.planColor) return b.planColor; const k = b.kind === "study" ? "규격" : b.kind === "exercise" ? "제품" : b.kind === "custom" ? "소재" : (b.kind === "ops" || b.kind === "wrap") ? "권위" : "진단"; return (plDark ? PL_COLOR_DARK : PL_COLOR)[k]; };
     const plToggle = plPlan ? (
       <button onClick={() => setTtPlanner(v => !v)} title={ttPlanner ? "플래너 블록 숨기기" : "플래너 블록(운동·학습 등) 함께 보기"}
         style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
@@ -34625,8 +34804,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                             {(plWeek[day.date] || []).map(b => {
                               const c = plColor(b), top = wY(plMin(b.start)) + 2, hh = Math.max(12, wY(plMin(b.end)) - wY(plMin(b.start)) - 2);
                               return (
-                                <div key={"pl-" + b.id} data-tt-block="1" role="button" tabIndex={0} title={`플래너 · ${b.label} ${b.start}–${b.end} — 누르면 플래너 하루 보기`}
-                                  onClick={(e) => { e.stopPropagation(); openPlannerDay(day.date); }} onKeyDown={(e) => { if (e.key === "Enter") openPlannerDay(day.date); }}
+                                <div key={"pl-" + (b.key || b.id)} data-tt-block="1" role="button" tabIndex={0} title={`플래너 · ${b.label} ${b.start}–${b.end} — 누르면 플래너 하루 보기`}
+                                  onClick={(e) => { e.stopPropagation(); openPlannerDay(day.date, b.planId); }} onKeyDown={(e) => { if (e.key === "Enter") openPlannerDay(day.date, b.planId); }}
                                   style={{ position: "absolute", left: 2, right: 2, top, height: hh, borderRadius: 6, boxSizing: "border-box", overflow: "hidden", padding: "1px 5px", cursor: "pointer",
                                     background: c + "1A", border: `1px dashed ${c}88`, color: c, opacity: b.done ? 0.5 : 0.95, zIndex: 0, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                                   <span style={{ textDecoration: b.done ? "line-through" : "none" }}>{b.stepNo ? b.stepNo + " " : ""}{b.label}</span>
@@ -34719,8 +34898,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 {plDay.map(b => {
                   const c = plColor(b), top = yOf(plMin(b.start)) + 6, hh = Math.max(14, yOf(plMin(b.end)) - yOf(plMin(b.start)) - 2);
                   return (
-                    <div key={"pl-" + b.id} data-tt-block="1" role="button" tabIndex={0} title={`플래너 · ${b.label} ${b.start}–${b.end} — 누르면 플래너 하루 보기`}
-                      onClick={(e) => { e.stopPropagation(); openPlannerDay(selectedDate); }} onKeyDown={(e) => { if (e.key === "Enter") openPlannerDay(selectedDate); }}
+                    <div key={"pl-" + (b.key || b.id)} data-tt-block="1" role="button" tabIndex={0} title={`플래너 · ${b.label} ${b.start}–${b.end} — 누르면 플래너 하루 보기`}
+                      onClick={(e) => { e.stopPropagation(); openPlannerDay(selectedDate, b.planId); }} onKeyDown={(e) => { if (e.key === "Enter") openPlannerDay(selectedDate, b.planId); }}
                       style={{ position: "absolute", left: 46, width: plW, top, height: hh, borderRadius: 7, boxSizing: "border-box", overflow: "hidden", padding: "2px 6px", cursor: "pointer",
                         background: c + "1A", border: `1px dashed ${c}88`, color: c, opacity: b.done ? 0.55 : 1, zIndex: 0 }}>
                       <div style={{ fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: b.done ? "line-through" : "none" }}>{b.done ? "✓ " : ""}{b.stepNo ? b.stepNo + " " : ""}{b.label}</div>
