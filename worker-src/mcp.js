@@ -1,6 +1,7 @@
 import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecountRows } from "./ecount.js";
 import { salesSummary, salesImport, salesCadence } from "./sales.js";
 import { notionTodoCreate, notionTodoPatch, notionTodoArchive, notionTodoConfigured } from "./notiontodo.js";
+import { PL_WK, plArr, plannerNormalize, plMonday, plAdd, plDow, plMin, plWeekOf, plRangeOf, plWeekNo, plLogOf, plThemeOf, plDayBlocks, plWeekStats, plRoutineDate, plTodoBlocks } from "./planner.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
 // claude.ai → 설정 → 커넥터 → 커스텀 커넥터 추가 → URL: https://<worker>/mcp
@@ -16,7 +17,7 @@ import { notionTodoCreate, notionTodoPatch, notionTodoArchive, notionTodoConfigu
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 const SERVER_NAME = "nj-safety";
-const SERVER_VERSION = "1.1.0";   // 도구가 늘거나 바뀌면 올린다 (claude.ai 커넥터가 새 목록을 받아 가게)
+const SERVER_VERSION = "1.2.0";   // 도구가 늘거나 바뀌면 올린다 (claude.ai 커넥터가 새 목록을 받아 가게)
 const DEFAULT_PROTOCOL_VERSION = "2025-06-18";
 
 const ALLOWED_SECTIONS = [
@@ -224,6 +225,70 @@ const TOOLS = [
       },
       required: ["id"],
     },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "get_planner",
+    description:
+      "회사앱 「일정 › 플래너」(전문가 성장 마스터플랜 등)를 읽습니다. view: day(그 날 시간표 블록·학습 단계·3줄 기록·시각 있는 일정) · week(주차 카드·산출물·외부 약속·실행표·월간 루틴·30일 실행) · quarter · year(연차·축별 목표·분기) · dashboard(이번 주 숫자·점수·누적·점검 기준) · plan(요일 주제·하루 틀·설정). 블록·주차의 id 는 다른 플래너 도구에 그대로 씁니다.",
+    inputSchema: { type: "object", properties: {
+      view: { type: "string", enum: ["day", "week", "quarter", "year", "dashboard", "plan"], description: "보기 (기본 week)" },
+      date: { type: "string", description: "기준 날짜 YYYY-MM-DD (기본 오늘)" },
+      planId: { type: "string", description: "계획 id 또는 이름 (기본 첫 계획)" },
+    } },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "update_planner_item",
+    description:
+      "플래너 항목을 고칩니다. 넘긴 fields 만 바꿉니다. type: week(id 는 mp1-w3 또는 W3 · topic·track·weeklyGoal·appointment·apptDone·deliverable·outputs[{id|text,done}]·done) · quarter(task·deliverable·anchor·mode·weeklyHours·done) · action(text·date·endDate·done) · year(theme·items{축:내용}) · theme(요일 주제 id mp1-t1~t5 · track·description·hours) · rule · routine(id 루틴 · done+month YYYY-MM 로 그 달 체크, 또는 task·when·duration) · month(id YYYY-MM · learned·unknown·nextAnchor 월간 1페이지) · block(date 필수, id 는 get_planner day 의 블록 id · start·end HH:MM·label·done·doing·hidden — 그 날만) · template(하루 틀 자체, fields.mode normal|peak, id 블록 · start·end·label, 새 블록은 start·end·label 모두, delete:true 로 빼기 — 앞으로의 모든 날) · plan(title·weeklyHours·studyTarget·noteTarget·proofs{p2:숫자,p3:숫자}). week·quarter·action·score 는 fields.delete:true 로 지웁니다. done 을 바꾸면 연결된 일정(노션 포함)도 같이 바뀝니다.",
+    inputSchema: { type: "object", properties: {
+      type: { type: "string", enum: ["week", "quarter", "action", "year", "theme", "rule", "routine", "month", "block", "template", "plan", "score"] },
+      id: { type: "string", description: "대상 id" },
+      date: { type: "string", description: "block 일 때 날짜 YYYY-MM-DD" },
+      fields: { type: "object", description: "바꿀 칸만" },
+      planId: { type: "string" },
+    }, required: ["type", "fields"] },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: "add_planner_item",
+    description:
+      "플래너에 새 항목을 넣습니다. type: week(fields.startDate 그 주 월요일·track·topic·deliverable(「 · 」로 여러 개)·appointment·weeklyGoal — W13 이후 주차 계획) · action(text·date·endDate — 30일 실행) · quarter(yearIndex·q·startDate·endDate·months·mode·weeklyHours·task·deliverable·anchor) · block(date·start·end·label — 그 날 시간표에 넣는 일정. 앱과 같이 일정 탭 타임테이블에만 보이고 달력·노션에는 안 올라감). 같은 token 재요청은 한 번만 반영.",
+    inputSchema: { type: "object", properties: {
+      type: { type: "string", enum: ["week", "action", "quarter", "block"] },
+      fields: { type: "object" },
+      planId: { type: "string" },
+      token: { type: "string", description: "중복 방지용 1회 토큰" },
+    }, required: ["type", "fields"] },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: "log_day",
+    description: "플래너 하루 기록 — 3줄 기록(note3: did 한 것·learned 배운 것·next 내일 첫 작업)과 블록 완료(blocksDone·blocksUndone: get_planner day 의 블록 id, 예 ex·study_s0·study_s1·study_s2·ops)를 저장합니다. 학습 3단계가 모두 완료면 학습 블록 1회로 셉니다.",
+    inputSchema: { type: "object", properties: {
+      date: { type: "string", description: "YYYY-MM-DD (기본 오늘)" },
+      note3: { type: "object", properties: { did: { type: "string" }, learned: { type: "string" }, next: { type: "string" } } },
+      blocksDone: { type: "array", items: { type: "string" } },
+      blocksUndone: { type: "array", items: { type: "string" } },
+      planId: { type: "string" },
+    } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+  },
+  {
+    name: "add_score",
+    description: "플래너 진단 테스트 점수(0~100%)를 기록합니다. 점검 대시보드의 점수 그래프(목표선 40→60→75→85%)에 찍힙니다. 같은 token 재요청은 한 번만.",
+    inputSchema: { type: "object", properties: {
+      date: { type: "string", description: "YYYY-MM-DD (기본 오늘)" }, score: { type: "number" }, note: { type: "string" }, token: { type: "string" }, planId: { type: "string" },
+    }, required: ["score"] },
+    annotations: { readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: "push_to_todos",
+    description: "플래너 항목(week·quarter·action)을 앱의 「일정으로 보내기」와 똑같이 일정 1건으로 보냅니다 — 분류=계획 분류, 메모에 출처([마스터플랜 W1] …), 노션 페이지 생성, 항목에 일정 id 를 적어 두 번 만들지 않습니다. 이미 보냈으면 그 일정을 알려 줍니다.",
+    inputSchema: { type: "object", properties: {
+      type: { type: "string", enum: ["week", "quarter", "action"] }, id: { type: "string", description: "항목 id (주차는 W1 처럼도 가능)" }, planId: { type: "string" },
+    }, required: ["type", "id"] },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
   },
   {
@@ -499,7 +564,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-1f", note: "플래너 ↔ 타임테이블 연동 · 플래너에서 넣은 새 일정은 타임테이블 전용(달력·노션 안 올림)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-planner-mcp", note: "플래너 커넥터 도구 6개 (get_planner·update_planner_item·add_planner_item·log_day·add_score·push_to_todos)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -661,6 +726,13 @@ async function toolGetSection(args, env) {
     if (section.startsWith("_todo_add:")) return await toolAddTodo(a || {}, env);
     if (section.startsWith("_todo_update:")) return await toolUpdateTodo(a || {}, env);
     return await toolDeleteTodo(a || {}, env);
+  }
+  // 플래너 도구 — 커넥터가 새 도구 목록을 아직 못 받았을 때의 우회: _planner:{"tool":"get_planner","args":{…}}
+  if (section.startsWith("_planner:")) {
+    let a; try { a = JSON.parse(section.slice(9)); } catch { return errContent("_planner 인자 JSON 이 잘못됐습니다."); }
+    const fn = { get_planner: toolGetPlanner, update_planner_item: toolUpdatePlannerItem, add_planner_item: toolAddPlannerItem, log_day: toolLogDay, add_score: toolAddScore, push_to_todos: toolPushToTodos }[a && a.tool];
+    if (!fn) return errContent("tool 은 get_planner·update_planner_item·add_planner_item·log_day·add_score·push_to_todos 중 하나입니다.");
+    return await fn((a && a.args) || {}, env);
   }
   if (section.startsWith("_intake:")) {
     let a; try { a = JSON.parse(section.slice(8)); } catch { return errContent("_intake 인자 JSON 이 잘못됐습니다."); }
@@ -2109,6 +2181,12 @@ async function callTool(params, env) {
     if (name === "mark_tax_paid") return await toolMarkTaxPaid(args, env);
     if (name === "add_todo") return await toolAddTodo(args, env);
     if (name === "update_todo") return await toolUpdateTodo(args, env);
+    if (name === "get_planner") return await toolGetPlanner(args, env);
+    if (name === "update_planner_item") return await toolUpdatePlannerItem(args, env);
+    if (name === "add_planner_item") return await toolAddPlannerItem(args, env);
+    if (name === "log_day") return await toolLogDay(args, env);
+    if (name === "add_score") return await toolAddScore(args, env);
+    if (name === "push_to_todos") return await toolPushToTodos(args, env);
     if (name === "list_backups") return await toolListBackups(args, env);
     if (name === "get_backup_section") return await toolGetBackupSection(args, env);
     return errContent(`알 수 없는 도구: ${name}`);
@@ -2432,4 +2510,346 @@ export async function ecountRelayPush(env, body, dev = "") {
   const inv = ecountRows((body && body.inv) || {}), prod = ecountRows((body && body.prod) || {});
   const got = { ...buildStockItems(inv, prod), test: false };
   return ecountSyncStock(env, label, { got });
+}
+
+// ═══════════ 일정 › 플래너 (planner 구역) — 읽기·고치기·넣기·하루 기록·점수·일정으로 보내기 ═══════════
+// 앱과 같은 저장(safeSectionWrite: _revs 증가·_sigs 갱신). 앱은 플래너 충돌을 id 기준으로 합치므로 서버에서 고친 칸이 살아남는다.
+const PL_ITEM_COLL = { week: "weeks", quarter: "quarters", action: "actions", year: "years", theme: "themes", routine: "routines", score: "scores", plan: "plans", month: "monthReviews", rule: "checkRules" };
+const plList = (v) => todoList(v);   // 배열·객체 모두 [key, row]
+async function plannerRead(env) { return plannerNormalize(await fbGet("/frw/planner", env.FIREBASE_DB_SECRET)); }
+function plPickPlan(P, planId) { return (planId && P.plans.find((p) => p.id === planId || p.title === planId)) || P.plans[0] || null; }
+// 묶음 안 한 항목을 고치거나 새로 넣는다 (fn 이 errContent 를 돌려주면 그대로 실패)
+async function plannerUpsert(env, coll, id, fn, init) {
+  let out = null;
+  const plan = await safeSectionWrite("planner", (d) => {
+    const list = d && d[coll];
+    const hit = plList(list).find(([, r]) => String(r.id) === String(id));
+    const cur = hit ? hit[1] : (init ? init() : null);
+    if (!cur) return errContent(`${coll} 에 id=${id} 인 항목이 없습니다. get_planner 로 먼저 확인하세요.`);
+    const next = fn(JSON.parse(JSON.stringify(cur)));
+    if (next && next.isError) return next;
+    if (hit && JSON.stringify(next) === JSON.stringify(cur)) { out = cur; return { done: true }; }
+    const key = hit ? hit[0] : (Array.isArray(list) || list == null ? String(Array.isArray(list) ? list.length : 0) : `c${Date.now()}`);
+    const row = { ...next, updatedAt: Date.now() };
+    out = row;
+    return {
+      patch: { [`${coll}/${key}`]: row },
+      apply: (dd) => ({ ...(dd || {}), [coll]: todoWithRow(dd && dd[coll], key, row) }),
+      check: (dd) => { const e = plList(dd && dd[coll]).find(([, r]) => String(r.id) === String(id)); return !!e && e[1].updatedAt === row.updatedAt; },
+    };
+  }, env);
+  if (plan.isError) return plan;
+  return { row: out, unchanged: !!plan.done };
+}
+async function plannerDelete(env, coll, id) {
+  const plan = await safeSectionWrite("planner", (d) => {
+    const list = d && d[coll];
+    if (!plList(list).some(([, r]) => String(r.id) === String(id))) return { done: true };
+    const nextList = plList(list).map(([, r]) => r).filter((r) => String(r.id) !== String(id));
+    return { patch: { [coll]: nextList }, apply: (dd) => ({ ...(dd || {}), [coll]: nextList }), check: (dd) => !plList(dd && dd[coll]).some(([, r]) => String(r.id) === String(id)) };
+  }, env);
+  return plan;
+}
+const plWeekBrief = (w, todo) => w && ({ id: w.id, 주차: `W${w.weekNo}`, 기간: `${w.startDate}~${w.endDate}`, 축: w.track, 주제: w.topic,
+  주간목표: w.weeklyGoal || "", 산출물: plArr(w.outputs).map((o) => ({ id: o.id, 내용: o.text, 완료: !!o.done })), 외부약속: w.appointment || "", 약속완료: !!w.apptDone,
+  마무리: todo ? !!todo.done : !!w.done, 일정연결: todo ? { id: todo.id, 완료: !!todo.done } : null });
+const plLinked = (todos, item, type) => { const ids = plArr(item && item.todoIds).map(String); return todos.find((t) => ids.includes(String(t.id))) || todos.find((t) => t.plannerRef && t.plannerRef.type === type && t.plannerRef.id === item.id) || null; };
+const plBlockBrief = (b) => ({ id: b.todo ? `todo:${b.todo.id}` : b.id, 이름: b.label, 시작: b.start, 끝: b.end, 완료: !!b.done,
+  종류: b.todo ? (b.todo.ttOnly ? "시간표 전용 일정" : "일정") : b.stepKey ? `학습 ${b.stepNo}` : b.kind, ...(b.doing ? { 할일: b.doing } : {}), ...(b.aiRole ? { AI역할: b.aiRole } : {}) });
+
+async function toolGetPlanner(args, env) {
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 아직 없습니다. 앱의 일정 › 플래너를 한 번 열면 기본 계획이 들어갑니다.");
+  const view = String(args.view || "week");
+  const date = args.date ? String(args.date) : kstToday();
+  if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}"`);
+  const todos = plList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)).map(([, r]) => r);
+  const monday = plMonday(date);
+  const stats = plWeekStats(P, plan, monday);
+  const week = plWeekOf(P, plan, date);
+  const yearRec = plRangeOf(P.years, plan, date), quarter = plRangeOf(P.quarters, plan, date);
+  const base = { 계획: { id: plan.id, 이름: plan.title, 분류: plan.category, 기간: `${plan.startDate}~${plan.endDate}` }, 날짜: date, 위치: `${yearRec ? yearRec.yearIndex + "년차 · " : ""}${quarter ? "Q" + quarter.q + " · " : ""}W${week ? week.weekNo : plWeekNo(plan, date)}` };
+  const ym = date.slice(0, 7), mrec = P.monthReviews.find((m) => m.id === `${plan.id}|${ym}`) || { routines: {} };
+  const routines = P.routines.filter((r) => r.planId === plan.id).map((r) => { const d = plRoutineDate(r.rule, ym); return { id: r.id, 할일: r.task, 언제: d ? (d.from === d.to ? d.from : `${d.from}~${d.to}`) : r.when, 소요: r.duration, 완료: !!(mrec.routines || {})["r_" + r.id], 외부앵커: !!r.anchor }; });
+  if (view === "day") {
+    const log = plLogOf(P, plan, date);
+    const day = plDayBlocks(P, plan, date, log);
+    const th = plThemeOf(P, plan, date);
+    const all = [...day.blocks, ...plTodoBlocks(todos, date)].sort((a, b) => plMin(a.start) - plMin(b.start));
+    return textContent({ ...base, 요일: PL_WK[plDow(date)], 모드: { normal: "평소", peak: "성수기 유지(학습 없음)", "peak-study": "성수기 학습일", weekend: "주말" }[day.mode], 주제: th ? { 축: th.track, 내용: th.description, 시간: th.hours } : null,
+      블록: all.map(plBlockBrief), 학습완료: !!(log && log.blocks && log.blocks.study && log.blocks.study.done), 세줄기록: (log && log.note3) || {},
+      도움말: "블록 수정은 update_planner_item(type:\"block\", date, id, fields:{start,end,label,done,doing,hidden}). id 가 todo:… 인 것은 일정 — update_todo 로." });
+  }
+  if (view === "week") {
+    const wt = week ? plLinked(todos, week, "week") : null;
+    return textContent({ ...base, 주: plWeekBrief(week, wt) || `W${plWeekNo(plan, date)} 세부 계획 없음 — add_planner_item(type:\"week\") 로 넣을 수 있음`,
+      실행: { 학습블록: `${stats.study}/${plan.studyTarget || 4}`, 노트: `${stats.note}/${plan.noteTarget || 4}`, 날마다: stats.days.map((d) => ({ 날짜: d.date, 요일: PL_WK[plDow(d.date)], 주제: (plThemeOf(P, plan, d.date) || {}).track || "", 학습: d.study, 노트: d.note, 운동: d.ex, 세줄: d.log })) },
+      월간루틴: routines, 다음주차: P.weeks.filter((w) => w.planId === plan.id && w.startDate > monday).sort((a, b) => a.weekNo - b.weekNo).slice(0, 4).map((w) => ({ id: w.id, 주차: `W${w.weekNo}`, 시작: w.startDate, 축: w.track, 주제: w.topic })),
+      실행30일: P.actions.filter((a) => a.planId === plan.id).map((a) => { const t = plLinked(todos, a, "action"); return { id: a.id, 내용: a.text, 기간: `${a.date}~${a.endDate || a.date}`, 완료: t ? !!t.done : !!a.done, 일정연결: !!t }; }) });
+  }
+  if (view === "year" || view === "quarter") {
+    const ys = P.years.filter((y) => y.planId === plan.id).sort((a, b) => a.yearIndex - b.yearIndex);
+    const qs = P.quarters.filter((q) => q.planId === plan.id).sort((a, b) => a.yearIndex - b.yearIndex || a.q - b.q).map((q) => { const t = plLinked(todos, q, "quarter"); return { id: q.id, 연차: q.yearIndex, 분기: `Q${q.q}`, 월: q.months, 기간: `${q.startDate}~${q.endDate}`, 모드: q.mode, 주당: q.weeklyHours, 과제: q.task, 산출물: q.deliverable, 완료: t ? !!t.done : !!q.done, 외부앵커: q.anchor, 지금: !!(quarter && quarter.id === q.id) }; });
+    if (view === "quarter") return textContent({ ...base, 분기: qs, 이번분기주차: quarter ? P.weeks.filter((w) => w.planId === plan.id && w.startDate >= quarter.startDate && w.startDate <= quarter.endDate).sort((a, b) => a.weekNo - b.weekNo).map((w) => ({ id: w.id, 주차: `W${w.weekNo}`, 시작: w.startDate, 축: w.track, 주제: w.topic })) : [] });
+    return textContent({ ...base, 증명: plArr(plan.proofs), 목표선: plArr(plan.targets), 연차: ys.map((y) => ({ id: y.id, 연차: y.yearIndex, 기간: y.period, 테마: y.theme, 축별: y.items })), 분기: qs });
+  }
+  if (view === "dashboard") {
+    const scores = P.scores.filter((x) => x.planId === plan.id).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const logs = P.dayLogs.filter((l) => l.planId === plan.id);
+    return textContent({ ...base, 이번주: { 학습블록: `${stats.study}/${plan.studyTarget || 4}`, 노트: `${stats.note}/${plan.noteTarget || 4}` },
+      이번달외부앵커: routines.some((r) => r.외부앵커 && r.완료) ? "완료" : "미정", 이번분기산출물: quarter ? { 내용: quarter.deliverable, 완료: !!(plLinked(todos, quarter, "quarter") || quarter).done } : null,
+      점수: scores.map((x) => ({ id: x.id, 날짜: x.date, 점수: x.score, 메모: x.note || "" })), 목표선: plArr(plan.targets),
+      누적: { 학습블록: logs.filter((l) => l.blocks && l.blocks.study && l.blocks.study.done).length, 노트: logs.filter((l) => l.steps && l.steps.s2).length, 진단기록: scores.length },
+      점검기준: P.checkRules.filter((r) => r.planId === plan.id).map((r) => ({ 주기: r.cycle, 지표: r.metric, 기준: r.standard })) });
+  }
+  if (view === "plan") {
+    return textContent({ ...base, 계획들: P.plans.map((p) => ({ id: p.id, 이름: p.title, 분류: p.category, 기간: `${p.startDate}~${p.endDate}` })), 요일주제: P.themes.filter((t) => t.planId === plan.id).map((t) => ({ id: t.id, 요일: PL_WK[t.weekday], 축: t.track, 내용: t.description, 시간: t.hours })),
+      하루틀: P.dayTemplates.filter((t) => t.planId === plan.id).map((t) => ({ id: t.id, 모드: t.mode, 블록: plArr(t.blocks).map((b) => ({ id: b.id, 이름: b.label, 시작: b.start, 끝: b.end, 종류: b.kind, 단계: plArr(b.steps).map((x) => ({ key: x.key, 이름: x.label, 분: x.mins, 할일: x.doing })) })) })), 설정: { 학습목표: plan.studyTarget, 노트목표: plan.noteTarget, 성수기월: plan.peakMonths, 성수기학습요일: plan.peakStudyDays } });
+  }
+  return errContent(`view 는 day·week·year·quarter·dashboard·plan 중 하나입니다 (받은 값: ${view})`);
+}
+
+// 연결된 일정 완료도 같이 (앱과 같이 노션까지)
+async function plSyncTodoDone(env, item, type, done) {
+  const todos = plList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)).map(([, r]) => r);
+  const t = plLinked(todos, item, type);
+  if (!t || !!t.done === !!done) return null;
+  await toolUpdateTodo({ id: t.id, done: !!done }, env);
+  return t.id;
+}
+
+async function toolUpdatePlannerItem(args, env) {
+  const type = String(args.type || ""), f = args.fields && typeof args.fields === "object" ? args.fields : {};
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 없습니다.");
+  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => f[k] !== undefined).map((k) => [k, f[k]]));
+  const timeOk = (v) => v === undefined || /^([01]?\d|2[0-3]):[0-5]\d$/.test(String(v));
+  // 주차 id 는 "W3" 처럼 써도 된다
+  let id = args.id != null ? String(args.id) : "";
+  if (type === "week" && /^w?\d+$/i.test(id)) { const n = Number(id.replace(/\D/g, "")); const w = P.weeks.find((x) => x.planId === plan.id && x.weekNo === n); if (w) id = w.id; }
+  if (f.delete === true && ["week", "action", "score", "quarter"].includes(type)) {
+    const r = await plannerDelete(env, PL_ITEM_COLL[type], id); if (r.isError) return r;
+    return textContent({ 결과: "삭제", 종류: type, id });
+  }
+  if (type === "week" || type === "quarter" || type === "action" || type === "year" || type === "theme" || type === "rule") {
+    const allow = { week: ["topic", "track", "weeklyGoal", "appointment", "apptDone", "deliverable", "startDate", "endDate"], quarter: ["task", "deliverable", "anchor", "mode", "weeklyHours", "months", "startDate", "endDate"],
+      action: ["text", "date", "endDate"], year: ["theme", "period"], theme: ["track", "label", "description", "hours"], rule: ["cycle", "metric", "standard"] }[type];
+    const ch = pick(f, allow);
+    const r = await plannerUpsert(env, PL_ITEM_COLL[type], id, (cur) => {
+      const n = { ...cur, ...ch };
+      if (type === "week" && f.deliverable !== undefined) { const old = plArr(cur.outputs); n.outputs = String(f.deliverable).split(" · ").filter(Boolean).map((text, j) => ({ id: `o${j + 1}`, text, done: !!(old.find((o) => o.text === text) || {}).done })); }
+      if (type === "week" && Array.isArray(f.outputs)) n.outputs = plArr(n.outputs).map((o) => { const u = f.outputs.find((x) => x && (x.id === o.id || x.text === o.text)); return u && u.done !== undefined ? { ...o, done: !!u.done } : o; });
+      if (type === "year" && f.items && typeof f.items === "object") n.items = { ...(cur.items || {}), ...f.items };
+      if (f.done !== undefined && ["week", "quarter", "action"].includes(type)) n.done = !!f.done;
+      return n;
+    });
+    if (r.isError) return r;
+    let todoSync = null;
+    if (f.done !== undefined && ["week", "quarter", "action"].includes(type)) todoSync = await plSyncTodoDone(env, r.row, type, f.done);
+    return textContent({ 결과: r.unchanged ? "변경 없음" : "수정", 종류: type, 항목: type === "week" ? plWeekBrief(r.row) : r.row, ...(todoSync ? { 연결된일정도완료변경: todoSync } : {}) });
+  }
+  if (type === "routine") {
+    const ym = String(f.month || kstToday().slice(0, 7));
+    const rt = P.routines.find((x) => x.id === id || x.rule === id);
+    if (!rt) return errContent(`월간 루틴 id 가 없습니다: ${id}`);
+    if (f.done === undefined) {
+      const r = await plannerUpsert(env, "routines", rt.id, (cur) => ({ ...cur, ...pick(f, ["task", "when", "duration"]) })); if (r.isError) return r;
+      return textContent({ 결과: "루틴 수정", 루틴: r.row });
+    }
+    const mid = `${plan.id}|${ym}`;
+    const r = await plannerUpsert(env, "monthReviews", mid, (cur) => ({ ...cur, routines: { ...(cur.routines || {}), ["r_" + rt.id]: !!f.done } }), () => ({ id: mid, planId: plan.id, month: ym, routines: {}, learned: "", unknown: "", nextAnchor: "" }));
+    if (r.isError) return r;
+    return textContent({ 결과: `${ym} 루틴 ${f.done ? "완료" : "완료 취소"}`, 루틴: rt.task });
+  }
+  if (type === "month") {
+    const ym = /^\d{4}-\d{2}$/.test(id) ? id : kstToday().slice(0, 7), mid = `${plan.id}|${ym}`;
+    const r = await plannerUpsert(env, "monthReviews", mid, (cur) => ({ ...cur, ...pick(f, ["learned", "unknown", "nextAnchor"]) }), () => ({ id: mid, planId: plan.id, month: ym, routines: {}, learned: "", unknown: "", nextAnchor: "" }));
+    if (r.isError) return r;
+    return textContent({ 결과: `${ym} 월간 1페이지 저장`, 내용: pick(r.row, ["learned", "unknown", "nextAnchor"]) });
+  }
+  if (type === "block") {
+    const date = String(args.date || "");
+    if (!isRealDate(date)) return errContent("block 은 date(YYYY-MM-DD)가 필요합니다.");
+    if (!timeOk(f.start) || !timeOk(f.end)) return errContent("start·end 는 HH:MM 형식입니다.");
+    const log = plLogOf(P, plan, date);
+    const blocks = plDayBlocks(P, plan, date, log).blocks;
+    const b = blocks.find((x) => x.id === id);
+    if (!b) return errContent(`${date} 에 id=${id} 블록이 없습니다. get_planner(view:"day", date) 로 id 를 확인하세요. (일정 블록은 update_todo)`);
+    const lid = `${plan.id}|${date}`;
+    const r = await plannerUpsert(env, "dayLogs", lid, (l) => {
+      const n = { ...l, blocks: { ...(l.blocks || {}) }, steps: { ...(l.steps || {}) }, extra: { ...(l.extra || {}) } };
+      if (b.custom) { n.extra[b.id] = { ...(n.extra[b.id] || {}), ...pick(f, ["start", "end", "label", "done"]) }; if (f.hidden) delete n.extra[b.id]; return n; }
+      const o = { ...(n.blocks[b.id] || {}) };
+      ["start", "end", "label", "hidden"].forEach((k) => { if (f[k] !== undefined) o[k] = f[k]; });
+      if (f.doing !== undefined && b.parentId) { const po = { ...(n.blocks[b.parentId] || {}) }; po.stepText = { ...(po.stepText || {}), [b.stepKey]: String(f.doing) }; n.blocks[b.parentId] = po; }
+      if (f.done !== undefined) {
+        if (b.stepKey) { n.steps[b.stepKey] = !!f.done; const all = plArr(b.groupKeys).every((k) => n.steps[k]); n.blocks[b.parentId] = { ...(n.blocks[b.parentId] || {}), done: all }; }
+        else o.done = !!f.done;
+      }
+      n.blocks[b.id] = { ...(n.blocks[b.id] || {}), ...o };
+      return n;
+    }, () => ({ id: lid, planId: plan.id, date, blocks: {}, steps: {}, note3: {} }));
+    if (r.isError) return r;
+    const after = plDayBlocks(plannerNormalize({ ...P, dayLogs: [...P.dayLogs.filter((x) => x.id !== lid), r.row] }), plan, date, r.row).blocks.find((x) => x.id === id);
+    return textContent({ 결과: "블록 수정 (이 날만)", 날짜: date, 블록: after ? plBlockBrief(after) : "숨김" });
+  }
+  if (type === "template") {
+    const mode = f.mode === "peak" ? "peak" : "normal";
+    if (!timeOk(f.start) || !timeOk(f.end)) return errContent("start·end 는 HH:MM 형식입니다.");
+    const tpl = P.dayTemplates.find((t) => t.planId === plan.id && t.mode === mode);
+    if (!tpl) return errContent("하루 틀이 없습니다.");
+    const r = await plannerUpsert(env, "dayTemplates", tpl.id, (t) => {
+      let blocks = plArr(t.blocks);
+      const [bid, sk] = id.split("_");
+      if (f.delete === true) blocks = blocks.filter((b) => b.id !== id);
+      else if (sk) blocks = blocks.map((b) => b.id !== bid ? b : { ...b, steps: plArr(b.steps).map((x) => x.key !== sk ? x : { ...x, ...pick(f, ["start", "end", "doing", "aiRole"]), ...(f.label ? { label: f.label } : {}), ...(f.start && f.end ? { mins: plMin(f.end) - plMin(f.start) } : {}) }) });
+      else if (blocks.some((b) => b.id === id)) blocks = blocks.map((b) => b.id !== id ? b : { ...b, ...pick(f, ["start", "end", "label", "note"]) });
+      else if (f.start && f.end && f.label) blocks = [...blocks, { id: id || `c${Date.now()}`, start: f.start, end: f.end, label: f.label, kind: "custom" }];
+      else return errContent(`틀에 id=${id} 블록이 없습니다 (새로 넣으려면 start·end·label 을 모두).`);
+      return { ...t, blocks: blocks.sort((a, b) => plMin(a.start) - plMin(b.start)) };
+    });
+    if (r.isError) return r;
+    return textContent({ 결과: `하루 틀(${mode === "peak" ? "성수기 유지" : "평소"}) 수정 — 앞으로의 모든 날에 적용`, 블록: plArr(r.row.blocks).map((b) => ({ id: b.id, 이름: b.label, 시작: b.start, 끝: b.end })) });
+  }
+  if (type === "plan") {
+    const r = await plannerUpsert(env, "plans", plan.id, (p) => {
+      const n = { ...p, ...pick(f, ["title", "weeklyHours", "studyTarget", "noteTarget", "autoMonday", "endDate"]) };
+      if (f.proofs && typeof f.proofs === "object") n.proofs = plArr(p.proofs).map((x) => f.proofs[x.key] !== undefined ? { ...x, value: Number(f.proofs[x.key]) || 0 } : x);
+      return n;
+    });
+    if (r.isError) return r;
+    return textContent({ 결과: "계획 설정 수정", 계획: pick(r.row, ["title", "weeklyHours", "studyTarget", "noteTarget", "autoMonday"]), 증명: plArr(r.row.proofs) });
+  }
+  return errContent("type 은 week·quarter·action·year·theme·rule·routine·month·block·template·plan 중 하나입니다.");
+}
+
+async function toolAddPlannerItem(args, env) {
+  const type = String(args.type || ""), f = args.fields && typeof args.fields === "object" ? args.fields : {};
+  const token = args.token != null && String(args.token).trim() ? String(args.token).trim().slice(0, 64) : null;
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 없습니다.");
+  const coll = PL_ITEM_COLL[type];
+  if (token && coll && P[coll].some((x) => x.campusToken === token)) return textContent({ 결과: "이미 반영됨 (같은 token)" });
+  const now = Date.now();
+  if (type === "block") {
+    // 그 날만의 일정 — 앱처럼 「시간표에만 있는 항목」(달력·노션에는 안 올림)
+    const date = String(f.date || args.date || ""), start = String(f.start || ""), end = String(f.end || "");
+    if (!isRealDate(date) || plMin(start) == null || plMin(end) == null || plMin(end) <= plMin(start)) return errContent("block 은 fields.date(YYYY-MM-DD)·start·end(HH:MM, 끝이 뒤)·label 이 필요합니다.");
+    const label = String(f.label || "").trim(); if (!label) return errContent("label(이름)이 필요합니다.");
+    let row = null;
+    const plan2 = await safeSectionWrite("todos", (d) => {
+      if (token && todoList(d).some(([, r]) => r.campusToken === token)) return { done: true };
+      const ids = new Set(todoList(d).map(([, r]) => String(r.id))); let id = now; while (ids.has(String(id))) id++;
+      const key = Array.isArray(d) || d == null ? String(Array.isArray(d) ? d.length : 0) : `c${id}`;
+      row = { id, date, endDate: "", text: label, memo: "", done: false, createdAt: id, atts: [], ttOnly: true, startMin: plMin(start), durMin: plMin(end) - plMin(start), ...(token ? { campusToken: token } : {}) };
+      return { patch: { [key]: row }, apply: (dd) => todoWithRow(dd, key, row), check: (dd) => !!findRecordKey(dd, id) };
+    }, env);
+    if (plan2.isError) return plan2;
+    if (plan2.done) return textContent({ 결과: "이미 반영됨 (같은 token)" });
+    return textContent({ 결과: "하루 시간표에 추가 (일정 탭 타임테이블에만, 달력·노션 안 올림)", 일정: { id: row.id, 날짜: date, 시작: start, 끝: end, 이름: label } });
+  }
+  let item = null;
+  if (type === "week") {
+    const startDate = String(f.startDate || ""); if (!isRealDate(startDate)) return errContent("week 는 fields.startDate(그 주 월요일 YYYY-MM-DD)가 필요합니다.");
+    const mon = plMonday(startDate), weekNo = Number(f.weekNo) || plWeekNo(plan, mon);
+    if (P.weeks.some((w) => w.planId === plan.id && w.startDate === mon)) return errContent(`${mon} 주(W${weekNo})는 이미 있습니다 — update_planner_item(type:"week") 로 고치세요.`);
+    const deliverable = String(f.deliverable || "");
+    item = { id: `${plan.id}-w${weekNo}`, planId: plan.id, weekNo, startDate: mon, endDate: plAdd(mon, 6), track: String(f.track || ""), topic: String(f.topic || ""), deliverable, appointment: String(f.appointment || ""),
+      outputs: deliverable.split(" · ").filter(Boolean).map((text, j) => ({ id: `o${j + 1}`, text, done: false })), apptDone: false, weeklyGoal: String(f.weeklyGoal || ""), todoIds: [], done: false };
+    if (P.weeks.some((w) => w.id === item.id)) item.id = `${plan.id}-w${weekNo}-${now}`;
+  } else if (type === "action") {
+    if (!isRealDate(String(f.date || "")) || !String(f.text || "").trim()) return errContent("action 은 fields.text·date(YYYY-MM-DD)가 필요합니다 (endDate 선택).");
+    item = { id: `${plan.id}-a${now}`, planId: plan.id, text: String(f.text).trim(), date: String(f.date), endDate: isRealDate(String(f.endDate || "")) ? String(f.endDate) : "", done: false, todoIds: [] };
+  } else if (type === "quarter") {
+    const yi = Number(f.yearIndex), q = Number(f.q);
+    if (!(yi >= 1) || !(q >= 1 && q <= 4) || !isRealDate(String(f.startDate || "")) || !isRealDate(String(f.endDate || ""))) return errContent("quarter 는 fields.yearIndex·q(1~4)·startDate·endDate 가 필요합니다.");
+    item = { id: `${plan.id}-y${yi}q${q}`, planId: plan.id, yearIndex: yi, q, months: String(f.months || ""), startDate: f.startDate, endDate: f.endDate, mode: String(f.mode || ""), weeklyHours: String(f.weeklyHours || ""), task: String(f.task || ""), deliverable: String(f.deliverable || ""), anchor: String(f.anchor || ""), done: false, todoIds: [] };
+    if (P.quarters.some((x) => x.id === item.id)) return errContent(`${yi}년차 Q${q} 는 이미 있습니다 — update_planner_item(type:"quarter") 로 고치세요.`);
+  } else return errContent("type 은 week·action·quarter·block 중 하나입니다.");
+  if (token) item.campusToken = token;
+  const r = await plannerUpsert(env, coll, item.id, (x) => x, () => item);
+  if (r.isError) return r;
+  return textContent({ 결과: "추가", 종류: type, 항목: type === "week" ? plWeekBrief(r.row) : r.row });
+}
+
+async function toolLogDay(args, env) {
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 없습니다.");
+  const date = String(args.date || kstToday());
+  if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}"`);
+  const note3 = args.note3 && typeof args.note3 === "object" ? args.note3 : null;
+  const done = Array.isArray(args.blocksDone) ? args.blocksDone.map(String) : [];
+  const undone = Array.isArray(args.blocksUndone) ? args.blocksUndone.map(String) : [];
+  const blocks = plDayBlocks(P, plan, date, plLogOf(P, plan, date)).blocks;
+  const unknown = [...done, ...undone].filter((id) => !blocks.some((b) => b.id === id));
+  if (unknown.length) return errContent(`${date} 에 없는 블록 id: ${unknown.join(", ")} — get_planner(view:"day") 로 확인하세요.`);
+  const lid = `${plan.id}|${date}`;
+  const r = await plannerUpsert(env, "dayLogs", lid, (l) => {
+    const n = { ...l, blocks: { ...(l.blocks || {}) }, steps: { ...(l.steps || {}) }, extra: { ...(l.extra || {}) } };
+    if (note3) n.note3 = { ...(l.note3 || {}), ...Object.fromEntries(["did", "learned", "next"].filter((k) => note3[k] !== undefined).map((k) => [k, String(note3[k]).slice(0, 500)])) };
+    const set = (id, v) => { const b = blocks.find((x) => x.id === id); if (!b) return; if (b.custom) n.extra[id] = { ...(n.extra[id] || {}), done: v }; else if (b.stepKey) n.steps[b.stepKey] = v; else n.blocks[id] = { ...(n.blocks[id] || {}), done: v }; };
+    done.forEach((id) => set(id, true)); undone.forEach((id) => set(id, false));
+    blocks.filter((b) => b.stepKey).forEach((b) => { n.blocks[b.parentId] = { ...(n.blocks[b.parentId] || {}), done: plArr(b.groupKeys).every((k) => n.steps[k]) }; });
+    return n;
+  }, () => ({ id: lid, planId: plan.id, date, blocks: {}, steps: {}, note3: {} }));
+  if (r.isError) return r;
+  const after = plDayBlocks(plannerNormalize({ ...P, dayLogs: [...P.dayLogs.filter((x) => x.id !== lid), r.row] }), plan, date, r.row).blocks;
+  return textContent({ 결과: r.unchanged ? "변경 없음" : "하루 기록 저장", 날짜: date, 세줄기록: r.row.note3 || {}, 완료블록: after.filter((b) => b.done).map((b) => b.id), 학습완료: !!(r.row.blocks && r.row.blocks.study && r.row.blocks.study.done) });
+}
+
+async function toolAddScore(args, env) {
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 없습니다.");
+  const date = String(args.date || kstToday()), score = Number(args.score);
+  if (!isRealDate(date)) return errContent(`date 가 잘못됐습니다: "${date}"`);
+  if (!Number.isFinite(score) || score < 0 || score > 100) return errContent("score 는 0~100 숫자입니다.");
+  const token = args.token != null && String(args.token).trim() ? String(args.token).trim().slice(0, 64) : null;
+  if (token && P.scores.some((x) => x.campusToken === token)) return textContent({ 결과: "이미 반영됨 (같은 token)" });
+  const id = `${plan.id}-sc${Date.now()}`;
+  const row = { id, planId: plan.id, date, score: Math.round(score * 10) / 10, note: String(args.note || "").slice(0, 200), createdAt: Date.now(), ...(token ? { campusToken: token } : {}) };
+  const r = await plannerUpsert(env, "scores", id, (x) => x, () => row);
+  if (r.isError) return r;
+  return textContent({ 결과: "진단 점수 기록", 점수: { id, 날짜: date, 점수: row.score, 메모: row.note }, 기록수: P.scores.filter((x) => x.planId === plan.id).length + 1 });
+}
+
+async function toolPushToTodos(args, env) {
+  const type = String(args.type || "");
+  if (!["week", "quarter", "action"].includes(type)) return errContent("type 은 week·quarter·action 중 하나입니다.");
+  const P = await plannerRead(env);
+  const plan = plPickPlan(P, args.planId);
+  if (!plan) return errContent("플래너에 계획이 없습니다.");
+  let id = String(args.id || "");
+  if (type === "week" && /^w?\d+$/i.test(id)) { const n = Number(id.replace(/\D/g, "")); const w = P.weeks.find((x) => x.planId === plan.id && x.weekNo === n); if (w) id = w.id; }
+  const coll = PL_ITEM_COLL[type], item = P[coll].find((x) => x.id === id);
+  if (!item) return errContent(`${type} id=${id} 가 없습니다. get_planner 로 확인하세요.`);
+  const todos = plList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)).map(([, r]) => r);
+  const had = plLinked(todos, item, type);
+  if (had) return textContent({ 결과: "이미 일정에 있음 (중복 안 만듦)", 일정: todoBrief(had) });
+  const short = plan.short || plan.title;
+  const spec = type === "week"
+    ? { date: item.startDate, endDate: item.endDate, text: `W${item.weekNo} ${item.topic}${item.weeklyGoal ? ` — ${item.weeklyGoal}` : ""}`, memo: `[${short} W${item.weekNo}] 산출물: ${plArr(item.outputs).map((o) => o.text).join(" · ")}${item.appointment ? ` / 외부 약속: ${item.appointment}` : ""}` }
+    : type === "quarter"
+      ? { date: item.startDate, endDate: item.endDate, text: `Q${item.q} 산출물 — ${item.deliverable}`, memo: `[${short} ${item.yearIndex}년차 Q${item.q}] 외부 앵커: ${item.anchor}` }
+      : { date: item.date, endDate: item.endDate, text: item.text, memo: `[${short} 30일 실행]` };
+  // 앱의 「일정으로 보내기」와 같은 칸 (category·memo·plannerRef) + 노션
+  const token = `planner:${type}:${item.id}`;
+  const added = await toolAddTodo({ ...spec, category: plan.category || "", token }, env);
+  if (added.isError) return added;
+  const all = plList(await fbGet("/frw/todos", env.FIREBASE_DB_SECRET)).map(([, r]) => r);
+  const made = all.find((t) => t.campusToken === token);
+  if (made) {
+    await safeSectionWrite("todos", (d) => {
+      const g = findRecordKey(d, made.id); if (!g || g.record.plannerRef) return { done: true };
+      const row = { ...g.record, plannerRef: { planId: plan.id, type, id: item.id } };
+      return { patch: { [g.key]: row }, apply: (dd) => todoWithRow(dd, g.key, row), check: (dd) => { const h = findRecordKey(dd, made.id); return !!h && !!h.record.plannerRef; } };
+    }, env);
+    await plannerUpsert(env, coll, item.id, (x) => ({ ...x, todoIds: [...plArr(x.todoIds), made.id] }));
+  }
+  let obj = {}; try { obj = JSON.parse(added.content[0].text); } catch {}
+  return textContent({ ...obj, 결과: "플래너 → 일정으로 보냄", 연결: made ? `${type} ${item.id} ↔ 일정 ${made.id}` : "연결 실패" });
 }
