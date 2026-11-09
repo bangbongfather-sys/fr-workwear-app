@@ -1997,9 +1997,9 @@ const SECTION_LABELS = {
   investments: "투자", cashFlows: "자금흐름", scheduledExpenses: "예정지출", purchaseSubTabs: "매입 거래처 탭",
   todos: "일정", notes: "중요 메모", recurringSchedules: "정기 일정", yearlyRevenue: "연매출",
   purchaseDateMemos: "매입일 메모", stock: "재고", payables: "미지급", bankDeposits: "입금내역",
-  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록", weeklyGoals: "주간 목표", employees: "직원", payrolls: "급여대장", leaves: "휴가", hrSettings: "인사 설정",
+  prodTrash: "제품 휴지통", taxes: "세무", meetings: "회의", dailyNotes: "하루 기록", weeklyGoals: "주간 목표", planner: "플래너", employees: "직원", payrolls: "급여대장", leaves: "휴가", hrSettings: "인사 설정",
 };
-const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes", "weeklyGoals", "employees", "payrolls", "leaves", "hrSettings"];
+const CLOUD_SECTIONS = ["materials", "laborItems", "products", "apiKey", "quoteHistory", "orders", "clients", "suppliers", "purchaseOrders", "fabricIntakes", "monthlySales", "bids", "ledgers", "clientAR", "accounts", "investments", "cashFlows", "scheduledExpenses", "purchaseSubTabs", "todos", "notes", "recurringSchedules", "yearlyRevenue", "purchaseDateMemos", "stock", "payables", "bankDeposits", "prodTrash", "companySeal", "taxes", "meetings", "dailyNotes", "weeklyGoals", "planner", "employees", "payrolls", "leaves", "hrSettings"];
 
 
 // ─── 통합 검색 매칭 유틸 ───
@@ -2462,7 +2462,7 @@ function planPush({ sections, knownRevs, serverRevs, revsOk, mySigs, serverSigs 
 // 입금 처리는 입금내역(처리완료)과 미수금 원장(입금 기록)을 함께 바꾸는데, 한쪽만 버려지면 원장엔 입금이 있는데
 // 입금내역은 미처리로 남는다(2026-10-30 성목실업·선인안전산업). 그래서 이 두 섹션은 버리지 않고 합친다:
 // 기준(base) = 이 기기가 마지막으로 서버와 맞춘 값. 기준 대비 이 기기에서 바뀐 것(추가·수정·삭제)만 서버 최신본 위에 얹는다.
-const MERGE_SECTIONS = ["bankDeposits", "clientAR"];
+const MERGE_SECTIONS = ["bankDeposits", "clientAR", "planner"];
 function mergeById3(base, mine, theirs, keyOf = (x) => x && x.id) {
   const bm = new Map(), mm = new Map();
   (base || []).forEach(x => { const k = keyOf(x); if (k != null) bm.set(String(k), x); });
@@ -2506,7 +2506,16 @@ function mergeClientAR3(base, mine, theirs) {
   }
   return out;
 }
-const mergeSection3 = (s, base, mine, theirs) => s === "bankDeposits" ? mergeBankDeposits3(base, mine, theirs) : s === "clientAR" ? mergeClientAR3(base, mine, theirs) : mine;
+// 플래너 — 묶음(plans·weeks·dayLogs…)마다 id 기준으로 합친다. 설정처럼 배열이 아닌 칸은 이 기기 것을 얹는다.
+function mergePlanner3(base, mine, theirs) {
+  const B = base || {}, M = mine || {}, T = theirs || {};
+  const out = { ...T, ...M };
+  for (const k of new Set([...Object.keys(T), ...Object.keys(M)])) {
+    if (Array.isArray(M[k]) || Array.isArray(T[k])) out[k] = mergeById3(Array.isArray(B[k]) ? B[k] : [], Array.isArray(M[k]) ? M[k] : [], Array.isArray(T[k]) ? T[k] : []);
+  }
+  return out;
+}
+const mergeSection3 = (s, base, mine, theirs) => s === "bankDeposits" ? mergeBankDeposits3(base, mine, theirs) : s === "clientAR" ? mergeClientAR3(base, mine, theirs) : s === "planner" ? mergePlanner3(base, mine, theirs) : mine;
 
 // 미동기화 상태로 다시 열렸을 때, 어느 섹션이 "내 옛 복사본"인지 가려낸다.
 // dirty 로 표시하던 시점의 서버 rev 보다 지금 서버 rev 가 앞서 있으면 다른 기기가 먼저
@@ -23598,6 +23607,7 @@ function App() {
   // 하루 기록(일별 메모·일기) — { "2026-08-26": { text, star, updatedAt } }
   const [dailyNotes, setDailyNotes] = useState(() => load("frw_daily_notes", {}));
   const [weeklyGoals, setWeeklyGoals] = useState(() => load("frw_weekly_goals", {})); // 일정 › 주간 목표 (주 일요일 키)
+  const [planner, setPlanner] = useState(() => load("frw_planner", {})); // 일정 › 플래너 (연·분기·주·하루 계획) — 처음 한 번 마스터플랜을 넣는다
   // 인사 관리 — 직원 · 달별 급여대장 · 휴가 · 설정(급여일)
   const [employees, setEmployees] = useState(() => load("frw_employees", []));
   const [payrolls, setPayrolls] = useState(() => load("frw_payrolls", {}));
@@ -24271,6 +24281,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     if (d.notes !== undefined) setNotes(d.notes);
     if (d.dailyNotes !== undefined && d.dailyNotes && typeof d.dailyNotes === "object") setDailyNotes(d.dailyNotes);
     if (d.weeklyGoals !== undefined && d.weeklyGoals && typeof d.weeklyGoals === "object" && !Array.isArray(d.weeklyGoals)) setWeeklyGoals(d.weeklyGoals);
+    if (d.planner !== undefined && d.planner && typeof d.planner === "object" && !Array.isArray(d.planner)) { const pl = plannerNormalize(d.planner); setPlanner(pl); mergeBase.current.planner = JSON.parse(JSON.stringify(pl)); }
     if (d.employees !== undefined && Array.isArray(d.employees)) setEmployees(d.employees.filter(Boolean));
     if (d.payrolls !== undefined && d.payrolls && typeof d.payrolls === "object" && !Array.isArray(d.payrolls)) setPayrolls(d.payrolls);
     if (d.leaves !== undefined && Array.isArray(d.leaves)) setLeaves(d.leaves.filter(Boolean));
@@ -24316,7 +24327,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       const savedDirty = load("frw_dirty_sections", []);
       dirtySections.current = new Set(Array.isArray(savedDirty) && savedDirty.length ? savedDirty : CLOUD_SECTIONS);
     }
+    let plannerLoadOk = false;
     cloudLoad().then(d => {
+      // 클라우드에 계획이 이미 있으면 절대 넣지 않는다 (이 기기에 미동기화 변경이 있어 클라우드 값을 안 받는 경우에도)
+      plannerLoadOk = !!d && !plannerHasPlans(plannerNormalize(d.planner));
       if (hasUnsynced) {
         // 충돌 감지용 서버 리비전만 기억하고 데이터는 로컬 유지
         if (d && typeof d._rev === "number") lastKnownRev.current = d._rev;
@@ -24357,6 +24371,8 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       .catch(() => setSyncStatus("error"))
       .finally(() => {
         initialized.current = true;
+        // 플래너 기본 계획(전문가 성장 마스터플랜) — 클라우드를 받은 뒤, 계획이 하나도 없을 때만 넣는다 (덮어쓰기 없음)
+        if (plannerLoadOk) setTimeout(() => setPlanner(p => plannerHasPlans(p) ? p : plannerSeed(p)), 1200);
         // 미동기화 변경이 있으면 저장 effect를 깨워 로컬 → 클라우드 푸시
         if (hasUnsynced) setOnlineRetryTick(t => t + 1);
       });
@@ -24536,7 +24552,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         const r = await fetch(`${FB_URL}/section/${s}`, { cache: "no-store" });
         if (!r.ok) continue;
         const raw = await r.json();
-        const theirs = raw ? fbUnescapeKeys(raw) : (s === "clientAR" ? {} : { items: [] });
+        const theirs = raw ? (s === "planner" ? plannerNormalize(fbUnescapeKeys(raw)) : fbUnescapeKeys(raw)) : (s === "bankDeposits" ? { items: [] } : {});
         mergedVals[s] = mergeSection3(s, mergeBase.current[s], cur[s], theirs);
         conflicts.splice(conflicts.indexOf(s), 1);
         pushable.push(s);
@@ -24587,6 +24603,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       // 합친 값을 화면에도 반영 (저장한 값과 같아질 때까지 한 번 더 저장될 수 있다 — rev 가 맞아 그대로 통과)
       if (mergedVals.bankDeposits !== undefined) setBankDeposits(mergedVals.bankDeposits);
       if (mergedVals.clientAR !== undefined) setClientAR(mergedVals.clientAR);
+      if (mergedVals.planner !== undefined) setPlanner(mergedVals.planner);
       if (Object.keys(mergedVals).length) showToast(`${Object.keys(mergedVals).map(s => SECTION_LABELS[s] || s).join("·")} — 다른 기기에서 바뀐 내용과 이 기기 변경을 합쳐 저장했습니다`, "success");
       cloudBackupDaily(cur); // 백업은 항상 전체 로컬 스냅샷으로 (부분 페이로드 아님)
       // 저장하는 사이 또 입력이 들어왔으면 바로 한 번 더 (짧게 묶어서).
@@ -24639,7 +24656,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_materials", materials); save("frw_labor", laborItems);
     save("frw_products", stripProductImages(products)); save("frw_apikey", apiKey);
     save("frw_orders", orders); save("frw_clients", clients); save("frw_suppliers", suppliers); save("frw_purchase_orders", purchaseOrders); save("frw_intakes", fabricIntakes); save("frw_monthly_sales", monthlySales); save("frw_bids", bids); save("frw_ledgers", ledgers); save("frw_client_ar", clientAR); save("frw_todos", todos);
-    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_weekly_goals", weeklyGoals); save("frw_employees", employees); save("frw_payrolls", payrolls); save("frw_leaves", leaves); save("frw_hr_settings", hrSettings); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
+    save("frw_notes", notes); save("frw_daily_notes", dailyNotes); save("frw_weekly_goals", weeklyGoals); save("frw_planner", planner); save("frw_employees", employees); save("frw_payrolls", payrolls); save("frw_leaves", leaves); save("frw_hr_settings", hrSettings); save("frw_recurring", recurringSchedules); save("frw_taxes", taxes); save("frw_meetings", meetings);
     save("frw_accounts", accounts); save("frw_investments", investments); save("frw_cashflows", cashFlows); save("frw_scheduled_expenses", scheduledExpenses); save("frw_purchase_subtabs", purchaseSubTabs);
     save("frw_yearly_revenue", yearlyRevenue);
     save("frw_purchase_date_memos", purchaseDateMemos);
@@ -24649,7 +24666,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     save("frw_prod_trash", prodTrash);
     save("frw_company_seal", companySeal);
     // 섹션 key → 현재 값 매핑 (클라우드 top-level key 기준). dirty 판별·부분 푸시·백업에 공통 사용.
-    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, employees, payrolls, leaves, hrSettings };
+    const cur = { materials, laborItems, products, apiKey, quoteHistory: savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, planner, employees, payrolls, leaves, hrSettings };
     // 저장 페이로드는 항상 이 최신 스냅샷으로 만든다 (타이머가 걸린 시점의 옛 값이 아니라).
     latestSnapshot.current = cur;
     if (!initialized.current) { prevSnapshot.current = cur; return; }
@@ -24669,7 +24686,7 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
     markDirtyPersist();
     if (syncTimer.current) clearTimeout(syncTimer.current);
     syncTimer.current = setTimeout(() => { syncTimer.current = null; runSave(0); }, 600);
-  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, employees, payrolls, leaves, hrSettings, onlineRetryTick]);
+  }, [materials, laborItems, products, apiKey, savedQuotes, orders, clients, suppliers, purchaseOrders, fabricIntakes, monthlySales, bids, ledgers, clientAR, accounts, investments, cashFlows, scheduledExpenses, purchaseSubTabs, todos, notes, recurringSchedules, yearlyRevenue, purchaseDateMemos, stock, payables, bankDeposits, prodTrash, companySeal, taxes, meetings, dailyNotes, weeklyGoals, planner, employees, payrolls, leaves, hrSettings, onlineRetryTick]);
 
   // 미저장 변경이 있는 채로 탭/창을 닫으려 하면 경고 (저장 대기·재시도 중이거나 에러 상태)
   useEffect(() => {
