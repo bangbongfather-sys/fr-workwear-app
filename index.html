@@ -32153,8 +32153,13 @@ const PL_CSS = `
 .pl-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); padding: 0 10px 0 12px; font: inherit; font-size: 13px; font-weight: 700; color: var(--text1); max-width: 100%; }
 .pl-chip select { border: 0; background: transparent; font: inherit; color: inherit; padding: 0; min-height: 0; height: auto; appearance: none; -webkit-appearance: none; cursor: pointer; max-width: 220px; text-overflow: ellipsis; }
 .pl-kicker { font-size: 12px; font-weight: 700; color: var(--text3); }
-.pl-title { margin: 2px 0 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.25; }
+.pl-title { margin: 2px 0 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.25; white-space: nowrap; position: relative; }
+.pl-title input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.pl.narrow .pl-title { font-size: 21px; }
+.pl.narrow .pl-title small { font-size: 13px; margin-left: 4px; }
+.pl.narrow .pl-tool { min-width: 34px; height: 34px; padding: 0 8px; }
 .pl-title small { font-size: 15px; color: var(--text2); font-weight: 600; margin-left: 6px; }
+.pl .pl-tool { min-height: 0; }
 .pl-tool { min-width: 36px; height: 36px; border: 0; border-radius: 9px; background: var(--surface2); color: var(--text1); font: inherit; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 10px; cursor: pointer; position: relative; }
 .pl-tool input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
 .pl-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
@@ -32162,11 +32167,11 @@ const PL_CSS = `
 .pl-day .wk { font-size: 12px; font-weight: 600; color: var(--text2); }
 .pl-day .num { width: 34px; height: 34px; border-radius: 17px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; }
 .pl-day .bar { width: 18px; height: 3px; border-radius: 2px; }
-.pl-day.sel .num { background: var(--text1); color: var(--surface); }
+.pl-day.sel .num { background: #DB6B2E; color: #fff; }
 .pl-day.today:not(.sel) .num { box-shadow: inset 0 0 0 2px #DB6B2E; color: #DB6B2E; }
 .pl-day.off .wk, .pl-day.off .num { color: var(--text3); }
 .pl-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: var(--surface2); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
-.pl-tabs button { border: 0; min-height: 34px; border-radius: 8px; background: transparent; font: inherit; font-size: 14px; color: var(--text2); cursor: pointer; }
+.pl-tabs button { border: 0; min-height: 34px; height: 34px; border-radius: 8px; background: transparent; font: inherit; font-size: 14px; color: var(--text2); cursor: pointer; }
 .pl-tabs button[aria-selected=true] { background: var(--surface); color: var(--text1); font-weight: 700; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
 .pl-sec { padding: 16px; border-bottom: 8px solid var(--surface2); }
 .pl-sec:last-child { border-bottom: 0; }
@@ -32203,9 +32208,10 @@ body.dark .pl-warn, .pl.dark .pl-warn { color: #F6B38A; background: rgba(219,107
 .pl-blk.tiny .pl-blk-main { align-items: center; padding: 0 6px 0 10px; }
 .pl-blk.tiny .ttl { font-size: 11px; font-weight: 700; }
 .pl-blk.done .ttl { text-decoration: line-through; opacity: 0.7; }
+.pl .pl-chk { min-height: 0; min-width: 0; }
 .pl-chk { flex: none; width: 26px; height: 26px; border-radius: 13px; border: 2px solid currentColor; background: transparent; color: inherit; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; opacity: 0.85; }
 .pl-chk.on { background: currentColor; opacity: 1; }
-.pl-chk.on svg { stroke: var(--surface); }
+.pl-chk.on svg { stroke: #fff; }
 .pl-blk.tiny .pl-chk { width: 18px; height: 18px; border-width: 1.5px; }
 .pl-step { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 10px; border-top: 1px dashed currentColor; border-top-color: rgba(127,127,127,0.35); font-size: 11px; min-height: 0; overflow: hidden; }
 .pl-step .tx { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -32235,9 +32241,10 @@ body.dark .pl-warn, .pl.dark .pl-warn { color: #F6B38A; background: rgba(219,107
 .pl-send .tx { flex: 1; min-width: 0; }
 .pl-send .tx b { display: block; font-size: 13px; }
 .pl-send .tx span { font-size: 11px; color: var(--text3); }
-.pl-mx { display: grid; grid-template-columns: 82px repeat(7, minmax(0, 1fr)); row-gap: 2px; }
+.pl-mx { display: grid; grid-template-columns: 72px repeat(7, minmax(0, 1fr)); row-gap: 2px; }
 .pl-mx .hd { text-align: center; padding: 6px 0; border-radius: 8px 8px 0 0; }
-.pl-mx .hd b { display: block; font-size: 12px; }
+.pl-mx .hd b { display: block; font-size: 12px; line-height: 1.3; }
+.pl-mx .hd em { display: block; font-style: normal; font-size: 11px; color: var(--text3); }
 .pl-mx .hd span { display: block; font-size: 10px; font-weight: 800; margin-top: 2px; }
 .pl-mx .lb { display: flex; flex-direction: column; justify-content: center; min-height: 44px; }
 .pl-mx .lb b { font-size: 13px; }
@@ -32252,12 +32259,13 @@ body.dark .pl-warn, .pl.dark .pl-warn { color: #F6B38A; background: rgba(219,107
 .pl-cal .c i { width: 5px; height: 5px; border-radius: 3px; display: block; }
 .pl-cal .c.out b { color: var(--text3); opacity: 0.6; }
 .pl-cal .c.band { background: rgba(219,107,46,0.07); }
-.pl-cal .c.sel b { background: var(--text1); color: var(--surface); font-weight: 800; }
+.pl-cal .c.sel b { background: #DB6B2E; color: #fff; font-weight: 800; }
 .pl-cal .c.today:not(.sel) b { box-shadow: inset 0 0 0 2px #DB6B2E; color: #DB6B2E; font-weight: 800; }
 .pl-row-link { display: grid; grid-template-columns: 38px 1fr auto; column-gap: 8px; align-items: center; min-height: 48px; border: 0; border-bottom: 1px solid var(--divider); background: transparent; width: 100%; text-align: left; font: inherit; color: var(--text1); cursor: pointer; padding: 0; }
 .pl-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--divider); font-size: 12px; }
+.pl .pl-crumb button { min-height: 28px; }
 .pl-crumb button { border: 0; font: inherit; color: var(--text2); background: var(--surface2); border-radius: 6px; padding: 4px 8px; cursor: pointer; min-height: 28px; }
-.pl-crumb button.on { color: var(--surface); background: var(--text1); font-weight: 700; }
+.pl-crumb button.on { color: #fff; background: #DB6B2E; font-weight: 700; }
 .pl-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .pl-tiles > div { border: 1px solid var(--divider); border-radius: 12px; padding: 10px; min-width: 0; }
 .pl-tiles .k { font-size: 11px; color: var(--text3); }
@@ -32272,8 +32280,9 @@ body.dark .pl-warn, .pl.dark .pl-warn { color: #F6B38A; background: rgba(219,107
 .pl-q .card { margin-bottom: 12px; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--divider); background: var(--row-bg); min-width: 0; }
 .pl-q.now .card { border: 1.5px solid #DB6B2E; background: rgba(219,107,46,0.05); }
 .pl-seg { display: flex; gap: 4px; }
+.pl .pl-seg button { min-height: 32px; height: 32px; }
 .pl-seg button { min-height: 32px; border: 0; border-radius: 8px; background: var(--surface2); color: var(--text2); font: inherit; font-size: 12px; padding: 0 10px; cursor: pointer; }
-.pl-seg button[aria-selected=true] { background: var(--text1); color: var(--surface); font-weight: 700; }
+.pl-seg button[aria-selected=true] { background: #DB6B2E; color: #fff; font-weight: 700; }
 .pl-rings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
 .pl-rings > div { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
 .pl-rings b { font-size: 12px; }
@@ -32323,6 +32332,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   const C = darkMode ? PL_COLOR_DARK : PL_COLOR;
   const tint = (k) => (PL_COLOR[k] || "#4E5968") + (darkMode ? "33" : "18");
   const wide = boxW >= 900;
+  const narrow = boxW < 520;
   const today = plToday();
   const nowD = new Date(clock);
   const nowMin = nowD.getHours() * 60 + nowD.getMinutes();
@@ -32402,7 +32412,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   const theme = plThemeOf(P, plan, date);
   const stats = plWeekStats(P, plan, monday);
   const studyTarget = plan.studyTarget || 4, noteTarget = plan.noteTarget || 4;
-  const modeLabel = day.mode === "weekend" ? "쉬는 날" : day.mode === "normal" ? "평소 모드" : "성수기 유지 모드";
+  const modeLabel = day.mode === "weekend" ? "쉬는 날" : day.mode === "normal" ? "평소 모드" : day.mode === "peak-study" ? "성수기 · 학습일" : "성수기 유지 모드";
   const inPlan = date >= plan.startDate && date <= plan.endDate;
   const kicker = [yearRec ? `${yearRec.yearIndex}년차` : null, quarter ? `Q${quarter.q}` : null, inPlan ? `W${weekNo}` : "계획 기간 밖", view === "day" ? modeLabel : null].filter(Boolean).join(" · ");
   const ym = date.slice(0, 7);
@@ -32432,20 +32442,20 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
         </label>
         {plan.category && <span className="pl-muted">분류 · {plan.category}</span>}
       </div>
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ minWidth: 0 }}>
-          <div className="pl-kicker">{view === "road" ? `${plan.startDate.replace(/-/g, ".")} – ${plan.endDate.replace(/-/g, ".")} · ${plan.weeklyHours || ""}` : kicker}</div>
-          <h2 className="pl-title">{titleOf()}</h2>
-        </div>
+      <div>
+        <div className="pl-kicker">{view === "road" ? `${plan.startDate.replace(/-/g, ".")} – ${plan.endDate.replace(/-/g, ".")} · ${plan.weeklyHours || ""}` : kicker}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <h2 className="pl-title" style={{ minWidth: 0 }}>{titleOf()}{view !== "road" && <input type="date" aria-label="날짜 고르기" value={date} onChange={e => e.target.value && setDate(e.target.value)} />}</h2>
         {(view === "day" || view === "week" || view === "review") && (
           <div style={{ display: "flex", gap: 4, flex: "none" }}>
             <button type="button" className="pl-tool" aria-label={view === "day" ? "전날" : "이전 주"} onClick={() => shift(view === "day" ? -1 : -7)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg></button>
             <button type="button" className="pl-tool" onClick={() => setDate(plToday())}>오늘</button>
             <button type="button" className="pl-tool" aria-label={view === "day" ? "다음 날" : "다음 주"} onClick={() => shift(view === "day" ? 1 : 7)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg></button>
-            <label className="pl-tool" aria-label="날짜 고르기"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>
-              <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} /></label>
+            {!narrow && <label className="pl-tool" aria-label="날짜 고르기"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></svg>
+              <input type="date" value={date} onChange={e => e.target.value && setDate(e.target.value)} /></label>}
           </div>
         )}
+      </div>
       </div>
       {(view === "day" || view === "week") && (
         <div className="pl-strip" role="group" aria-label="이번 주 날짜">
@@ -32488,6 +32498,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
           // 앞 단계를 이미 끝냈다면 다음 미완료 단계를 보여준다
           const st = (log && log.steps) || {};
           while (stepIdx < b.steps.length - 1 && st[b.steps[stepIdx].key]) stepIdx++;
+          stepEnd = plMin(b.start) + b.steps.slice(0, stepIdx + 1).reduce((a, x) => a + Number(x.mins || 0), 0);
         }
         now = { b, stepIdx, left: Math.max(0, stepEnd - nowMin) };
       }
@@ -32702,7 +32713,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     );
     const rows = [
       { k: "study", label: "학습 블록", count: `${stats.study} / ${studyTarget}`, on: (d) => d.study, tap: (d) => { const l = plLogOf(P, plan, d.date); const cur = !!(l && l.blocks && l.blocks.study && l.blocks.study.done); setBlock(d.date, "study", { done: !cur }); } },
-      { k: "note", label: "1페이지 노트", count: `${stats.note} / ${noteTarget}`, on: (d) => d.note, tap: (d) => setStep(d.date, "s2", !d.note) },
+      { k: "note", label: "노트", count: `${stats.note} / ${noteTarget}`, on: (d) => d.note, tap: (d) => setStep(d.date, "s2", !d.note) },
       ...(mxMore ? [
         { k: "ex", label: "운동", count: `${stats.days.filter(d => d.ex).length} / 5`, on: (d) => d.ex, tap: (d) => setBlock(d.date, "ex", { done: !d.ex }) },
         { k: "log", label: "3줄 기록", count: `${stats.days.filter(d => d.log).length} / 5`, on: (d) => d.log, tap: (d) => { setDate(d.date); setView("day"); } },
@@ -32715,7 +32726,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
           <span />
           {stats.days.map(d => { const dw = plDow(d.date), th = plThemeOf(P, plan, d.date); return (
             <div key={d.date} className={`hd${d.date === today ? " col-today" : ""}`}>
-              <b style={{ color: dw === 0 || dw === 6 ? "var(--text3)" : "var(--text1)" }}>{PL_WK[dw]} {Number(d.date.slice(8))}</b>
+              <b style={{ color: dw === 0 || dw === 6 ? "var(--text3)" : "var(--text1)" }}>{PL_WK[dw]}</b><em>{Number(d.date.slice(8))}</em>
               <span style={{ color: th ? C[th.track] : "var(--text3)" }}>{th ? th.track : "·"}</span>
             </div>); })}
           {rows.map(r => (
@@ -33013,7 +33024,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   };
 
   return (
-    <div className={`pl${darkMode ? " dark" : ""}`} ref={boxRef}>
+    <div className={`pl${darkMode ? " dark" : ""}${narrow ? " narrow" : ""}`} ref={boxRef}>
       <style>{PL_CSS}</style>
       {head}
       {view === "day" && renderDay()}
