@@ -32151,6 +32151,21 @@ function plDayBlocks(P, plan, ymd, log) {
   });
   return { blocks: [...blocks, ...extras].sort(byStart), mode: peak ? (studyDay ? "peak-study" : "peak") : "normal" };
 }
+// 일정(todo)의 시각 — 타임테이블과 같은 규칙: 끌어서 정한 startMin 이 먼저, 없으면 제목의 「14:00」「14:00-15:30」
+function plTodoTime(t) {
+  if (!t) return null;
+  if (Number.isFinite(t.startMin)) { const s = Number(t.startMin); const d = Number(t.durMin) > 0 ? Number(t.durMin) : 60; return { s, e: Math.min(1440, s + d) }; }
+  const m = /([01]?\d|2[0-3]):([0-5]\d)(?:\s*[-~–]\s*([01]?\d|2[0-3]):([0-5]\d))?/.exec(t.text || "");
+  if (!m) return null;
+  const s = Number(m[1]) * 60 + Number(m[2]);
+  const e = m[3] != null ? Number(m[3]) * 60 + Number(m[4]) : s + 60;
+  return { s, e: Math.max(e, s + 30) };
+}
+function plTodosOn(todos, ymd) { return (todos || []).filter(t => t && t.date && t.date <= ymd && ymd <= (t.endDate || t.date)); }
+// 그 날 시각이 있는 일정을 플래너 블록 모양으로
+function plTodoBlocks(todos, ymd) {
+  return plTodosOn(todos, ymd).map(t => { const tm = plTodoTime(t); return tm ? { id: "t" + t.id, todo: t, kind: "todo", label: t.text || "", baseLabel: t.text || "", start: plHM(tm.s), end: plHM(Math.min(1439, tm.e)), done: !!t.done, steps: [] } : null; }).filter(Boolean);
+}
 // 겹치는 블록은 나란히 — 블록마다 몇 번째 줄(lane)인지와 그 묶음의 줄 수(lanes)
 function plLanes(blocks) {
   const res = {}; let group = [], groupEnd = -1;
@@ -32424,7 +32439,7 @@ function PlRing({ v, total, color = "#DB6B2E", size = 60, label }) {
 }
 const PlCheckIcon = ({ size = 14 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true"><path d="M5 12l5 5 9-10" /></svg>;
 
-function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, notionCreate, darkMode, onOpenSchedule }) {
+function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, notionCreate, darkMode, onOpenSchedule, onRenameTodo, jump }) {
   const P = React.useMemo(() => plannerNormalize(planner), [planner]);
   const [planId, setPlanId] = React.useState(() => load("frw_planner_plan", ""));
   const [view, setView] = React.useState(() => load("frw_planner_view", "day"));
@@ -32449,6 +32464,8 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   React.useEffect(() => { const iv = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(iv); }, []);
   React.useEffect(() => { save("frw_planner_view", view); }, [view]);
   React.useEffect(() => { if (planId) save("frw_planner_plan", planId); }, [planId]);
+  // 타임테이블에서 플래너 블록을 누르면 그 날 하루 보기로
+  React.useEffect(() => { if (jump && jump.date) { setDate(jump.date); setView("day"); } }, [jump && jump.n]);
 
   const plan = P.plans.find(p => p.id === planId) || P.plans[0] || null;
   const C = darkMode ? PL_COLOR_DARK : PL_COLOR;
@@ -32482,11 +32499,23 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   const setNote = (ymd, key, val) => updateLog(ymd, l => ({ ...l, note3: { ...(l.note3 || {}), [key]: val } }));
   // ── 블록 끌기 · 이름 바꾸기 · 새 일정 ──
   const setExtra = (ymd, xid, patch) => updateLog(ymd, l => { const ex = { ...(l.extra || {}) }; if (patch === null) delete ex[xid]; else ex[xid] = { ...(ex[xid] || {}), ...patch }; return { ...l, extra: ex }; });
-  const patchBlock = (ymd, b, patch) => b.custom ? setExtra(ymd, b.id, patch) : setBlock(ymd, b.id, patch);
+  const patchBlock = (ymd, b, patch) => {
+    if (b.todo) {
+      // 일정(타임테이블과 같은 칸) — 시각은 startMin·durMin 으로
+      if (patch.start || patch.end) {
+        const st = plMin(patch.start || b.start), en = plMin(patch.end || b.end);
+        setTodos(prev => (prev || []).map(t => t.id === b.todo.id ? { ...t, startMin: st, durMin: Math.max(10, en - st) } : t));
+      }
+      if (patch.done !== undefined && !!patch.done !== !!b.done && toggleTodo) toggleTodo(b.todo.id);
+      return;
+    }
+    return b.custom ? setExtra(ymd, b.id, patch) : setBlock(ymd, b.id, patch);
+  };
   const grpOf = (b) => ({ id: b.parentId, steps: plArr(b.groupKeys).map(k => ({ key: k })) });
-  const toggleDone = (ymd, b) => b.stepKey ? setStep(ymd, b.stepKey, !b.done, grpOf(b)) : patchBlock(ymd, b, { done: !b.done });
+  const toggleDone = (ymd, b) => b.todo ? (toggleTodo && toggleTodo(b.todo.id)) : b.stepKey ? setStep(ymd, b.stepKey, !b.done, grpOf(b)) : patchBlock(ymd, b, { done: !b.done });
   const renameBlock = (ymd, b, field, val) => {
     const v = String(val == null ? "" : val).trim();
+    if (b.todo) { if (v && v !== b.todo.text) { if (onRenameTodo) onRenameTodo(b.todo.id, v); else setTodos(prev => (prev || []).map(t => t.id === b.todo.id ? { ...t, text: v } : t)); } return; }
     if (field === "label") {
       if (b.custom) setExtra(ymd, b.id, { label: v || "새 일정" });
       else setBlock(ymd, b.id, { label: v && v !== b.baseLabel ? v : "" });
@@ -32773,9 +32802,12 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
       if (b.kind === "ops" || b.kind === "wrap") return { bg: darkMode ? "rgba(219,107,46,0.16)" : "#FDF1E8", fg: darkMode ? "#F6B38A" : "#8A3F18" };
       if (b.kind === "exercise") return { bg: darkMode ? "rgba(45,106,79,0.25)" : "#EAF2EE", fg: darkMode ? "#86C9A6" : "#2D6A4F" };
       if (b.kind === "custom") return { bg: darkMode ? "rgba(46,90,172,0.28)" : "#E8EEF8", fg: darkMode ? "#8DB0F0" : "#2E5AAC" };
+      if (b.kind === "todo") return { bg: darkMode ? "rgba(219,107,46,0.22)" : "rgba(219,107,46,0.13)", fg: darkMode ? "#F6B38A" : "#AB4F1F", ring: "inset 3px 0 0 #DB6B2E" };
       return { bg: "var(--surface2)", fg: "var(--text2)" };
     };
     const nextSlot = () => isToday ? Math.min(1380, Math.ceil((nowMin + 1) / 60) * 60) : 1080;
+    const ttBlocks = plTodoBlocks(todos, date);
+    const shown = [...blocks, ...ttBlocks];
     const timeline = (
       <div style={{ padding: "12px 16px 8px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
@@ -32817,7 +32849,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
         <div className="pl-tlbox" ref={tlRef} data-st={Math.round(scrollTo)}>
           <div className="pl-tl" style={{ height: (e0 - s0) * PPM + 18 }} onClick={e => { if (e.target.closest(".pl-blk")) return; const r = e.currentTarget.getBoundingClientRect(); emptyTap(date, (e.clientY - r.top - 8) / PPM); }}>
             {hours.map(m => <div key={m} className="pl-hr" style={{ top: y(m) - 7 }}><span>{plHM(m)}</span><span /></div>)}
-            {(() => { const LN = plLanes(blocks); return blocks.map(b => {
+            {(() => { const LN = plLanes(shown); return shown.map(b => {
               const dg = drag && drag.date === date && drag.id === b.id ? drag : null;
               const ln = LN[b.id] || { lane: 0, lanes: 1 };
               const bS = dg ? dg.start : b.start, bE = dg ? dg.end : b.end;
@@ -32851,7 +32883,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
                   </>) : (
                     <div className="pl-blk-main">
                       <div className="tx">
-                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.stepNo ? `${b.stepNo} ` : ""}{b.label}{b.kind === "study" && theme && (!b.stepKey || b.stepKey === (b.groupKeys || [])[0]) ? ` · ${theme.track}` : ""}{tiny && b.stepKey ? <span style={{ fontWeight: 500, opacity: 0.85 }}> · {bS}</span> : null}</div>}
+                        {ed && ed.field === "label" ? editor("label") : <div className="ttl">{b.todo ? <span className="pl-tag" style={{ background: "#DB6B2E", color: "#fff", marginRight: 5, padding: "0 5px", fontSize: 10 }}>일정</span> : null}{b.stepNo ? `${b.stepNo} ` : ""}{b.label}{b.kind === "study" && theme && (!b.stepKey || b.stepKey === (b.groupKeys || [])[0]) ? ` · ${theme.track}` : ""}{tiny && b.stepKey ? <span style={{ fontWeight: 500, opacity: 0.85 }}> · {bS}</span> : null}</div>}
                         {!tiny && <div className="tm">{bS} – {bE}{b.stepKey ? ` · ${plMin(bE) - plMin(bS)}분` : ""}</div>}
                         {!tiny && b.stepKey && h >= 46 && (ed && ed.field === b.stepKey ? editor(b.stepKey) : <div className="nt" data-step={b.stepKey}>{b.doing}</div>)}
                         {!tiny && b.stepKey && h >= 70 && b.aiRole && <div className="nt">AI · {b.aiRole}</div>}
@@ -33283,7 +33315,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   // 주간 7일 시간표 (시안 D · PC) — 칸을 누르면 그 블록 완료, 날짜 머리를 누르면 그날 하루 보기
   const renderWeekCal = () => {
     const days7 = [0, 1, 2, 3, 4, 5, 6].map(i => plAdd(monday, i));
-    const dd = days7.map(d => { const lg = plLogOf(P, plan, d); return { d, dw: plDow(d), th: plThemeOf(P, plan, d), ...plDayBlocks(P, plan, d, lg) }; });
+    const dd = days7.map(d => { const lg = plLogOf(P, plan, d); const r = plDayBlocks(P, plan, d, lg); return { d, dw: plDow(d), th: plThemeOf(P, plan, d), ...r, blocks: [...r.blocks, ...plTodoBlocks(todos, d)] }; });
     const all = dd.flatMap(x => x.blocks);
     const s0 = 0, e0 = 1440;
     const PPM = 0.95, Y = (m) => (m - s0) * PPM + 8;
@@ -33291,12 +33323,13 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     const wcScroll = Math.max(0, ((days7.includes(today) ? Math.min(nowMin, firstStart + 180) : firstStart) - 50) * PPM);
     const hours = []; for (let m = s0; m <= e0; m += 60) hours.push(m);
     const sun = days7[6];
-    const wkTodos = todos.filter(t => t && plan.category && t.category === plan.category && t.date && t.date <= sun && monday <= (t.endDate || t.date)).slice(0, 4);
+    const wkTodos = todos.filter(t => t && plan.category && t.category === plan.category && t.date && t.date <= sun && monday <= (t.endDate || t.date) && !plTodoTime(t)).slice(0, 4);
     const toneOf = (b, th) => {
       if (b.kind === "study" && th) return [tint(th.track), C[th.track]];
       if (b.kind === "ops" || b.kind === "wrap") return [darkMode ? "rgba(219,107,46,0.16)" : "#FDF1E8", darkMode ? "#F6B38A" : "#8A3F18"];
       if (b.kind === "exercise") return [darkMode ? "rgba(45,106,79,0.25)" : "#EAF2EE", darkMode ? "#86C9A6" : "#2D6A4F"];
       if (b.kind === "custom") return [darkMode ? "rgba(46,90,172,0.28)" : "#E8EEF8", darkMode ? "#8DB0F0" : "#2E5AAC"];
+      if (b.kind === "todo") return [darkMode ? "rgba(219,107,46,0.24)" : "rgba(219,107,46,0.14)", darkMode ? "#F6B38A" : "#AB4F1F"];
       return ["var(--surface2)", "var(--text2)"];
     };
     return (
@@ -33471,6 +33504,14 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // 「일정 | 플래너」 전환 — 플래너는 기존 일정 화면과 따로 그린다 (기존 하위 탭은 그대로)
   const [schedMode, setSchedMode] = React.useState(() => load("frw_schedule_mode", "schedule"));
   React.useEffect(() => { save("frw_schedule_mode", schedMode); }, [schedMode]);
+  // 타임테이블 ↔ 플래너 — 타임테이블에 그 날 플래너 블록을 따로 줄로 보여 준다 (누르면 플래너 하루)
+  const [ttPlanner, setTtPlanner] = React.useState(() => load("frw_tt_planner", true));
+  React.useEffect(() => { save("frw_tt_planner", ttPlanner); }, [ttPlanner]);
+  const [plannerJump, setPlannerJump] = React.useState(null);
+  const plN = React.useMemo(() => plannerNormalize(planner), [planner]);
+  const plPlan = plN.plans.find(p => p.id === load("frw_planner_plan", "")) || plN.plans[0] || null;
+  const plBlocksOn = (ds) => (!ttPlanner || !plPlan) ? [] : plDayBlocks(plN, plPlan, ds, plLogOf(plN, plPlan, ds)).blocks;
+  const openPlannerDay = (ds) => { setPlannerJump({ date: ds, n: Date.now() }); setSchedMode("planner"); };
   React.useEffect(() => { save("frw_schedule_subtab", scheduleSub); }, [scheduleSub]);
   const today = new Date();
   const ymd = (d) => {
@@ -34365,6 +34406,14 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
   // 레일이 둘 있어도 모달이 위에 있는 한 그쪽이 잡힌다.
   const renderTimetable = (opts) => {
     const compact = !!(opts && opts.compact);
+    const plDark = darkMode || (typeof document !== "undefined" && document.body.classList.contains("glass"));
+    const plColor = (b) => { const k = b.kind === "study" ? "규격" : b.kind === "exercise" ? "제품" : b.kind === "custom" ? "소재" : (b.kind === "ops" || b.kind === "wrap") ? "권위" : "진단"; return (plDark ? PL_COLOR_DARK : PL_COLOR)[k]; };
+    const plToggle = !compact && plPlan ? (
+      <button onClick={() => setTtPlanner(v => !v)} title={ttPlanner ? "플래너 블록 숨기기" : "플래너 블록(운동·학습 등) 함께 보기"}
+        style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
+          border: ttPlanner ? "1px solid rgba(109,74,184,0.45)" : "1px solid var(--border)", background: ttPlanner ? "rgba(109,74,184,0.12)" : "var(--surface2)",
+          color: ttPlanner ? (plDark ? "#B9A2EE" : "#6D4AB8") : "var(--text3)" }}>{ttPlanner ? "플래너 함께" : "플래너 숨김"}</button>
+    ) : null;
           const selD = (() => { const [y, m, d] = selectedDate.split("-").map(Number); return new Date(y, m - 1, d); })();
           const WD2 = ["일", "월", "화", "수", "목", "금", "토"];
           const isToday = selectedDate === todayKey;
@@ -34389,6 +34438,10 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           // 어느 쪽이든 그 범위 밖에 일정이 있으면 자동으로 늘려서 잘리지 않게 한다.
           let startH = ttFull ? 0 : 8, endH = ttFull ? 24 : 22;
           timed.forEach(x => { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(x.e / 60))); });
+          const plDay = compact ? [] : plBlocksOn(selectedDate);
+          plDay.forEach(b => { startH = Math.min(startH, Math.floor(plMin(b.start) / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(plMin(b.end) / 60))); });
+          const plW = plDay.length ? "min(34%, 160px)" : "0px";
+          const todoLeft = plDay.length ? `calc(50px + ${plW})` : 46;
           const hours = []; for (let h = startH; h <= endH; h++) hours.push(h);
           const railH = (endH - startH) * HOUR_H;
           const yOf = (min) => (min - startH * 60) / 60 * HOUR_H;
@@ -34410,6 +34463,8 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
             const WHOUR = 46;
             let ws = ttFull ? 0 : 8, we = ttFull ? 24 : 22;
             perDay.forEach(d => d.timed.forEach(x => { ws = Math.min(ws, Math.floor(x.s / 60)); we = Math.max(we, Math.min(24, Math.ceil(x.e / 60))); }));
+            const plWeek = Object.fromEntries(wkDays.map(ds => [ds, plBlocksOn(ds)]));
+            Object.values(plWeek).forEach(list => list.forEach(b => { ws = Math.min(ws, Math.floor(plMin(b.start) / 60)); we = Math.max(we, Math.min(24, Math.ceil(plMin(b.end) / 60))); }));
             const wHours = []; for (let h = ws; h <= we; h++) wHours.push(h);
             const wRailH = (we - ws) * WHOUR;
             const wY = (min) => (min - ws * 60) / 60 * WHOUR;
@@ -34442,6 +34497,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                   </div>
                   <span style={{ flex: 1 }} />
                   <span style={{ fontSize: 11, color: "var(--text3)" }}>{wkCount}건 · 완료 {wkDone}</span>
+                  {plToggle}
                   <button onClick={() => setTtFull(v => !v)} title={ttFull ? "업무 시간대만 보기" : "하루 전체 보기"}
                     style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
                       border: ttFull ? "1px solid rgba(219,107,46,0.45)" : "1px solid var(--border)",
@@ -34536,6 +34592,17 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                             style={{ position: "relative", height: wRailH + 14, borderRadius: 9, cursor: "copy",
                               background: isT ? "rgba(219,107,46,0.05)" : "transparent",
                               outline: overHere ? "2px dashed rgba(219,107,46,0.55)" : "none", outlineOffset: -1 }}>
+                            {(plWeek[day.date] || []).map(b => {
+                              const c = plColor(b), top = wY(plMin(b.start)) + 2, hh = Math.max(12, wY(plMin(b.end)) - wY(plMin(b.start)) - 2);
+                              return (
+                                <div key={"pl-" + b.id} data-tt-block="1" role="button" tabIndex={0} title={`플래너 · ${b.label} ${b.start}–${b.end} — 누르면 플래너 하루 보기`}
+                                  onClick={(e) => { e.stopPropagation(); openPlannerDay(day.date); }} onKeyDown={(e) => { if (e.key === "Enter") openPlannerDay(day.date); }}
+                                  style={{ position: "absolute", left: 2, right: 2, top, height: hh, borderRadius: 6, boxSizing: "border-box", overflow: "hidden", padding: "1px 5px", cursor: "pointer",
+                                    background: c + "1A", border: `1px dashed ${c}88`, color: c, opacity: b.done ? 0.5 : 0.95, zIndex: 0, fontSize: 9.5, fontWeight: 800, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                                  <span style={{ textDecoration: b.done ? "line-through" : "none" }}>{b.stepNo ? b.stepNo + " " : ""}{b.label}</span>
+                                </div>
+                              );
+                            })}
                             {day.timed.map(x => {
                               const top = wY(x.s) + 2;
                               const hh = Math.max(20, wY(x.e) - wY(x.s) - 3);
@@ -34619,6 +34686,19 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                     <span style={{ flex: 1, height: 1, background: "var(--divider)" }} />
                   </div>
                 ))}
+                {plDay.map(b => {
+                  const c = plColor(b), top = yOf(plMin(b.start)) + 6, hh = Math.max(14, yOf(plMin(b.end)) - yOf(plMin(b.start)) - 2);
+                  return (
+                    <div key={"pl-" + b.id} data-tt-block="1" role="button" tabIndex={0} title={`플래너 · ${b.label} ${b.start}–${b.end} — 누르면 플래너 하루 보기`}
+                      onClick={(e) => { e.stopPropagation(); openPlannerDay(selectedDate); }} onKeyDown={(e) => { if (e.key === "Enter") openPlannerDay(selectedDate); }}
+                      style={{ position: "absolute", left: 46, width: plW, top, height: hh, borderRadius: 7, boxSizing: "border-box", overflow: "hidden", padding: "2px 6px", cursor: "pointer",
+                        background: c + "1A", border: `1px dashed ${c}88`, color: c, opacity: b.done ? 0.55 : 1, zIndex: 0 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: b.done ? "line-through" : "none" }}>{b.done ? "✓ " : ""}{b.stepNo ? b.stepNo + " " : ""}{b.label}</div>
+                      {hh >= 30 && <div style={{ fontSize: 9.5, opacity: 0.8, fontVariantNumeric: "tabular-nums" }}>{b.start}–{b.end}</div>}
+                    </div>
+                  );
+                })}
+                {plDay.length > 0 && <div style={{ position: "absolute", left: 46, width: plW, top: -14, fontSize: 9.5, fontWeight: 800, color: plDark ? "#B9A2EE" : "#6D4AB8", pointerEvents: "none" }}>플래너</div>}
                 {timed.map(x => {
                   const top = yOf(x.s) + 6;
                   const h = Math.max(20, yOf(x.e) - yOf(x.s) - 2);
@@ -34630,7 +34710,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                     <React.Fragment key={x.t.id}>
                     {/* 조절 중에는 끝나는 시각과 소요 시간을 블록 옆에 띄운다 — 손잡이를 잡은 손에 가리지 않게 */}
                     {resizing && (
-                      <div style={{ position: "absolute", left: 46, top: yOf(x.e), transform: "translateY(-50%)", zIndex: 5, pointerEvents: "none",
+                      <div style={{ position: "absolute", left: todoLeft, top: yOf(x.e), transform: "translateY(-50%)", zIndex: 5, pointerEvents: "none",
                         display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999,
                         background: "#DB6B2E", color: "#fff", fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap",
                         boxShadow: "0 2px 10px rgba(219,107,46,0.45)" }}>
@@ -34644,7 +34724,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                       onContextMenu={(e) => openCtx(e, { id: x.t.id })}
                       onPointerDown={(e) => beginDrag(e, x.t)} draggable={false}
                       title="눌러서 제목 수정 · 두 번 누르면 자세히 · 끌어서 시간 이동"
-                      style={{ position: "absolute", left: 46, right: 2, top, height: h, borderRadius: 8, boxSizing: "border-box", overflow: "hidden", cursor: dragTodoId === x.t.id ? "grabbing" : "grab", padding: "3px 9px", touchAction: "pan-y", userSelect: "none",
+                      style={{ position: "absolute", left: todoLeft, right: 2, top, height: h, borderRadius: 8, boxSizing: "border-box", overflow: "hidden", cursor: dragTodoId === x.t.id ? "grabbing" : "grab", padding: "3px 9px", touchAction: "pan-y", userSelect: "none",
                         background: done ? "var(--surface2)" : "rgba(219,107,46,0.12)",
                         borderLeft: `3px solid ${done ? "#64748B" : "#DB6B2E"}`, opacity: dragTodoId === x.t.id ? 0.3 : done ? 0.6 : 1,
                         outline: resizing ? "2px solid #DB6B2E" : "none", outlineOffset: -1, zIndex: resizing ? 4 : 1 }}>
@@ -34754,6 +34834,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 )}
                 <span style={{ flex: 1 }} />
                 {dayTodos.length > 0 && <span style={{ fontSize: 11, color: "var(--text3)" }}>{dayTodos.length}건 · 완료 {doneCnt}</span>}
+                {plToggle}
                 <button onClick={() => setTtFull(v => !v)}
                   title={ttFull ? "업무 시간대(08~22시)만 보기" : "새벽·심야까지 하루 전체(00~24시) 보기"}
                   style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
@@ -34874,6 +34955,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
       {schedMode === "planner" ? (
         <PlannerView planner={planner} setPlanner={setPlanner} todos={todos} setTodos={setTodos} toggleTodo={toggleTodo} notionCreate={notionCreate} darkMode={darkMode}
+          onRenameTodo={updateTodo} jump={plannerJump}
           onOpenSchedule={(d) => { setSchedMode("schedule"); setScheduleSub("calendar"); jumpToDate(d); }} />
       ) : (<>
       {scheduleSub === "calendar" && (<>
