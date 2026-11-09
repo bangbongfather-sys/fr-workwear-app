@@ -34438,7 +34438,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
     const compact = !!(opts && opts.compact);
     const plDark = darkMode || (typeof document !== "undefined" && document.body.classList.contains("glass"));
     const plColor = (b) => { const k = b.kind === "study" ? "규격" : b.kind === "exercise" ? "제품" : b.kind === "custom" ? "소재" : (b.kind === "ops" || b.kind === "wrap") ? "권위" : "진단"; return (plDark ? PL_COLOR_DARK : PL_COLOR)[k]; };
-    const plToggle = !compact && plPlan ? (
+    const plToggle = plPlan ? (
       <button onClick={() => setTtPlanner(v => !v)} title={ttPlanner ? "플래너 블록 숨기기" : "플래너 블록(운동·학습 등) 함께 보기"}
         style={{ height: 24, padding: "0 9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap",
           border: ttPlanner ? "1px solid rgba(109,74,184,0.45)" : "1px solid var(--border)", background: ttPlanner ? "rgba(109,74,184,0.12)" : "var(--surface2)",
@@ -34468,7 +34468,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
           // 어느 쪽이든 그 범위 밖에 일정이 있으면 자동으로 늘려서 잘리지 않게 한다.
           let startH = ttFull ? 0 : 8, endH = ttFull ? 24 : 22;
           timed.forEach(x => { startH = Math.min(startH, Math.floor(x.s / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(x.e / 60))); });
-          const plDay = compact ? [] : plBlocksOn(selectedDate);
+          const plDay = plBlocksOn(selectedDate);
           plDay.forEach(b => { startH = Math.min(startH, Math.floor(plMin(b.start) / 60)); endH = Math.max(endH, Math.min(24, Math.ceil(plMin(b.end) / 60))); });
           const plW = plDay.length ? "min(34%, 160px)" : "0px";
           const todoLeft = plDay.length ? `calc(50px + ${plW})` : 46;
@@ -34843,7 +34843,22 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
                 ) : (
                   <span style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", letterSpacing: -0.3 }}>{isToday ? "오늘 타임테이블" : "타임테이블"}</span>
                 )}
-                <span style={{ fontSize: 12, color: "var(--text3)" }}>{selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}</span>
+                {/* 날짜 옮기기 — ‹ 전날 · 날짜(누르면 달력) · 다음 날 › · 오늘 */}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
+                  <button type="button" aria-label="전날 타임테이블" title="전날" onClick={() => jumpToDate(shiftDate(selectedDate, -1))}
+                    style={{ width: 30, height: 30, minHeight: 30, padding: 0, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg></button>
+                  <label title="날짜 고르기" style={{ position: "relative", display: "inline-flex", alignItems: "center", height: 30, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", fontSize: 12.5, fontWeight: 700, color: isToday ? "#DB6B2E" : "var(--text1)", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    {selD.getMonth() + 1}월 {selD.getDate()}일 ({WD2[selD.getDay()]}){isToday ? " · 오늘" : ""}
+                    <input type="date" aria-label="날짜 고르기" value={selectedDate} onChange={e => e.target.value && jumpToDate(e.target.value)}
+                      style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", height: "100%", minHeight: 0, cursor: "pointer", border: 0, padding: 0 }} />
+                  </label>
+                  <button type="button" aria-label="다음 날 타임테이블" title="다음 날" onClick={() => jumpToDate(shiftDate(selectedDate, 1))}
+                    style={{ width: 30, height: 30, minHeight: 30, padding: 0, borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text1)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg></button>
+                  {!isToday && <button type="button" onClick={() => jumpToDate(todayKey)} title="오늘로"
+                    style={{ height: 30, minHeight: 30, padding: "0 10px", borderRadius: 8, border: "1px solid rgba(219,107,46,0.45)", background: "rgba(219,107,46,0.10)", color: "#DB6B2E", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>오늘</button>}
+                </span>
                 {(taxByDate[selectedDate] || []).length > 0 && (
                   <div style={{ order: 99, flexBasis: "100%", display: "flex", flexDirection: "column", gap: 5, marginTop: 4 }}>
                     {(taxByDate[selectedDate] || []).map(r => (
