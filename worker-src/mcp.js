@@ -597,7 +597,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-10-ledger-memo", note: "장부 메모 칸: 누르면 넓은 입력 상자 · 플래너 PC 세 칸 비율 조정(넓은 화면에서 달력·상세 칸 확대) · 인사 관리 기본급 수정(이 달부터 계속 적용 · 변경 이력) · 플래너 「+ 새 계획」(투자 전문가 1년 플랜 템플릿) 포함 · 플래너 새 화면(오늘 두 줄·주간·목표, 아침 계획·하루 마감) · 타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-10-sms-gap", note: "은행 문자 누락 → 잔액으로 찾아 입금내역에 자동으로 채움 · 장부 메모 칸: 누르면 넓은 입력 상자 · 플래너 PC 세 칸 비율 조정(넓은 화면에서 달력·상세 칸 확대) · 인사 관리 기본급 수정(이 달부터 계속 적용 · 변경 이력) · 플래너 「+ 새 계획」(투자 전문가 1년 플랜 템플릿) 포함 · 플래너 새 화면(오늘 두 줄·주간·목표, 아침 계획·하루 마감) · 타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -701,6 +701,16 @@ async function toolGetSection(args, env) {
   if (section.startsWith("_deposit_add:")) {
     let a; try { a = JSON.parse(section.slice(13)); } catch { return errContent("_deposit_add 인자 JSON 이 잘못됐습니다."); }
     return compact(await depositAdd(env, a || {}));
+  }
+  // 은행 문자 점검 — 서버가 받은 문자 묶음(잔액 포함)과 최근 받은 기록. "_banksms:2026-10-22" 면 그 날 것만.
+  if (section === "_banksms" || section.startsWith("_banksms:")) {
+    const day = section.slice(9);
+    const [chain, log, cfg] = await Promise.all([fbGet("/frw_bank_sms_chain", env.FIREBASE_DB_SECRET), fbGet("/frw_bank_sms_log", env.FIREBASE_DB_SECRET), fbGet("/frw_bank_sms", env.FIREBASE_DB_SECRET)]);
+    const list = Object.values(chain || {}).filter((x) => x && x.date).sort((x, y) => `${x.date} ${x.time || ""}`.localeCompare(`${y.date} ${y.time || ""}`));
+    const pick = (day ? list.filter((x) => x.date === day) : list.slice(-30)).map((x) => ({ 날짜: x.date, 시각: x.time, 종류: x.kind === "in" ? "입금" : "출금", 금액: x.amount, 잔액: x.bal, 이름: x.name, 받은때: x.at }));
+    return compact({ 연결: !!(cfg && cfg.token), 계좌앞자리: (cfg && cfg.acctHint) || "", 마지막입금문자: (cfg && cfg.lastAt) || "", 문자수: list.length, 출금문자수: list.filter((x) => x.kind !== "in").length,
+      첫날: list.length ? list[0].date : "", 문자: pick,
+      최근기록: asList(log).slice(0, 15).map((l) => ({ 때: l.at, 결과: l.ok ? (l.kind || "") : `실패: ${l.error || ""}`, 금액: l.amount, 이름: l.name, 묶음: l.multi })) });
   }
   if (section === "_deposit_inbox" || section.startsWith("_deposit_inbox:")) {
     let o = {}; if (section.length > 15) { try { o = JSON.parse(section.slice(15)); } catch {} }
