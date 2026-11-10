@@ -32433,6 +32433,185 @@ body.glass .pl-blk-in { background: #1d1f27; }
 .pl-in { min-height: 44px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--text1); min-width: 0; }
 `;
 
+// 플래너 새 화면(v2) — 색은 변수로 (밝은 화면 기본, 어두운·유리 화면은 .dark)
+const P2_CSS = `
+.p2 { --g: #FFFFFF; --s0: #F6F7F9; --s1: #F1F3F6; --s2: #E6E9EE; --line: #ECEEF2; --t1: #191F28; --t2: #4E5968; --t3: #6B7684; --t4: #B0B8C1; --acc: #DB6B2E; --acct: #AB4F1F; --onacc: #FFFFFF; --ok: #2D6A4F;
+  background: var(--g); color: var(--t1); border: 1px solid var(--line); border-radius: 20px; overflow: clip; font-variant-numeric: tabular-nums; position: relative; }
+.p2.dark { --g: #16181F; --s0: #1B1D24; --s1: #1E2129; --s2: #262A34; --line: #22252E; --t1: #F4F5F7; --t2: #B4BAC6; --t3: #8A92A0; --t4: #4A5060; --acc: #E8793B; --acct: #F2A27A; --onacc: #16181F; --ok: #86C9A6; border-color: rgba(255,255,255,0.08); }
+.p2 * { box-sizing: border-box; word-break: keep-all; }
+.p2 button, .p2 input, .p2 textarea, .p2 select { font-family: inherit; min-height: 0; }
+.p2 .grow { flex: 1; min-width: 0; }
+.p2-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.p2-mute { font-size: 12px; color: var(--t3); }
+.p2-i { display: inline-block; width: 8px; height: 8px; border-radius: 4px; flex: none; }
+.p2-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 20px 0; border-bottom: 1px solid var(--line); }
+.p2-tabs { display: flex; gap: 22px; }
+.p2-tabs button { border: 0; background: transparent; padding: 14px 0 12px; font-size: 17px; font-weight: 500; color: var(--t3); border-bottom: 2px solid transparent; cursor: pointer; }
+.p2-tabs button.on { font-weight: 800; color: var(--t1); border-bottom-color: var(--acc); }
+.p2-pill { display: inline-flex; align-items: center; height: 34px; border-radius: 17px; background: var(--s1); padding: 0 12px; font-size: 13px; color: var(--t2); white-space: nowrap; }
+.p2-pill select { border: 0; background: transparent; color: inherit; font-size: 13px; padding: 0; height: auto; }
+.p2-link { border: 0; background: transparent; color: var(--t3); font-size: 12px; padding: 10px 6px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.p2-one { padding: 0 0 24px; max-width: 760px; margin: 0 auto; }
+.p2-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; padding: 18px 20px 0; }
+.p2-kick { font-size: 13px; color: var(--t3); }
+.p2-title { margin: 2px 0 0; font-size: 28px; font-weight: 800; letter-spacing: -0.6px; line-height: 1.25; white-space: nowrap; }
+.p2.narrow .p2-title { font-size: 22px; }
+.p2.narrow .p2-round { width: 36px; height: 36px; }
+.p2.narrow .p2-head { padding: 16px 16px 0; }
+.p2-title label { position: relative; cursor: pointer; }
+.p2-title input[type=date] { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; border: 0; padding: 0; }
+.p2-round { width: 40px; height: 40px; border: 0; border-radius: 20px; background: var(--s1); color: var(--t1); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.p2-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); padding: 14px 12px 0; }
+.p2-strip button { border: 0; background: transparent; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 64px; cursor: pointer; color: var(--t1); }
+.p2-strip .wk { font-size: 12px; color: var(--t3); }
+.p2-strip .num { width: 36px; height: 36px; border-radius: 18px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 700; }
+.p2-strip .dot { width: 5px; height: 5px; border-radius: 3px; }
+.p2-strip .sel .num { background: var(--acc); color: var(--onacc); }
+.p2-strip .today:not(.sel) .num { box-shadow: inset 0 0 0 2px var(--acc); color: var(--acct); }
+.p2-prog { padding: 14px 20px 0; display: flex; flex-direction: column; gap: 8px; }
+.p2-prog .line { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--t2); }
+.p2-prog .line > span:first-child { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.p2-prog .line i { width: 8px; height: 8px; border-radius: 4px; flex: none; }
+.p2-prog .line b { color: var(--t1); }
+.p2-prog .line > span:last-child { color: var(--t3); flex: none; }
+.p2-prog .bar, .p2-bar { height: 4px; border-radius: 2px; background: var(--s2); }
+.p2-prog .bar div, .p2-bar div { height: 100%; border-radius: 2px; background: var(--acc); }
+.p2-bar { margin: 2px 0 6px; }
+.p2-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: calc(100% - 40px); margin: 14px 20px 0; height: 56px; border: 0; border-radius: 16px; background: var(--s1); padding: 0 16px; color: var(--t1); cursor: pointer; text-align: left; }
+.p2-banner b { font-size: 15px; white-space: nowrap; }
+.p2-banner span { font-size: 13px; color: var(--t3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.p2-banner.hot { box-shadow: inset 0 0 0 1.5px var(--acc); }
+.p2-sec .p2-banner { width: 100%; margin: 0; }
+.p2-lanehd { display: grid; column-gap: 6px; padding: 18px 12px 8px; align-items: end; }
+.p2-lanehd > div { display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px; }
+.p2-lanehd h3 { margin: 0; font-size: 14px; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+.p2-lanehd h3 i { width: 8px; height: 8px; border-radius: 2px; background: var(--acc); }
+.p2-lanehd span { font-size: 12px; color: var(--t3); }
+.p2-lanes { display: grid; grid-auto-rows: minmax(56px, auto); column-gap: 6px; row-gap: 4px; padding: 0 12px; }
+.p2-time { grid-column: 1; font-size: 11px; color: var(--t3); text-align: right; padding-top: 6px; border-top: 1px solid var(--line); }
+.p2-card { border-radius: 12px; padding: 8px 4px 8px 10px; display: flex; gap: 2px; min-width: 0; cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: pan-y; position: relative; }
+.p2-card .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.p2-card .ttl { font-size: 14px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.p2-card .sub { font-size: 12px; color: var(--t3); overflow: hidden; text-overflow: ellipsis; }
+.p2-card .sub b { color: var(--t1); }
+.p2-card .tag { font-size: 11px; font-weight: 700; color: var(--t3); margin-top: 2px; }
+.p2-card .tag.warn { color: var(--acct); }
+.p2-card.done .ttl { text-decoration: line-through; color: var(--t3); }
+.p2-card.cal { background: color-mix(in srgb, var(--acc) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 45%, transparent); }
+.p2-card.cal.done { background: var(--s0); box-shadow: inset 0 0 0 1px var(--line); }
+.p2-card.now { box-shadow: inset 0 0 0 1.5px var(--tc, var(--acc)); padding: 10px; }
+.p2-card.sel { box-shadow: inset 0 0 0 2px var(--acc); }
+.p2-card.drag { z-index: 5; box-shadow: 0 10px 24px rgba(0,0,0,0.3), inset 0 0 0 2px var(--acc); }
+.p2-card .nowtag { font-size: 11px; font-weight: 800; color: var(--acct); }
+.p2-card.now .ttl { font-size: 15px; font-weight: 800; }
+.p2-end { margin-top: 8px; height: 44px; border: 0; border-radius: 10px; background: var(--t1); color: var(--g); font-size: 14px; font-weight: 800; cursor: pointer; }
+.p2-chk { display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.p2-chkbtn { width: 36px; height: 40px; margin: -6px 0; border: 0; background: transparent; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; cursor: pointer; }
+.p2-gap { border: 0; border-radius: 12px; background: transparent; box-shadow: inset 0 0 0 1px var(--s2); font-size: 12px; color: var(--t3); text-align: left; padding: 0 10px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p2-gap b { color: var(--acct); margin-left: 4px; }
+.p2-empty { margin: 4px 20px; padding: 22px 16px; border-radius: 14px; background: var(--s0); font-size: 14px; color: var(--t3); text-align: center; }
+.p2-btn { height: 48px; border: 0; border-radius: 14px; background: var(--acc); color: var(--onacc); font-size: 15px; font-weight: 800; padding: 0 16px; cursor: pointer; }
+.p2-btn.soft { background: var(--s1); color: var(--t1); font-weight: 700; font-size: 14px; }
+.p2-btn.lg { height: 56px; border-radius: 16px; font-size: 17px; width: 100%; }
+.p2-btn.soft.lg { font-size: 15px; }
+.p2-btn.sm { height: 40px; border-radius: 20px; font-size: 13px; padding: 0 14px; }
+.p2-lanehd .p2-btn { height: 44px; border-radius: 12px; font-size: 13px; padding: 0 8px; }
+.p2-sec { padding: 22px 20px 0; }
+.p2-sechd { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.p2-sechd h3 { margin: 0; font-size: 15px; font-weight: 800; }
+.p2-sechd span { font-size: 12px; color: var(--t3); }
+.p2-row { display: flex; align-items: center; gap: 10px; min-height: 50px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.p2-row:last-child { border-bottom: 0; }
+.p2-rowbtn { border: 0; background: transparent; color: inherit; font-size: 15px; text-align: left; padding: 12px 0; cursor: pointer; }
+.p2-h { font-size: 22px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.3; }
+.p2-lbl { margin: 0 0 6px; font-size: 13px; font-weight: 700; color: var(--t3); }
+.p2-fld { display: flex; flex-direction: column; gap: 6px; }
+.p2-fld label { font-size: 13px; color: var(--t3); }
+.p2-fld input, .p2-fld textarea, .p2-in { border: 0; border-radius: 14px; background: var(--s1); padding: 12px 14px; font-size: 15px; line-height: 1.5; color: var(--t1); width: 100%; min-width: 0; resize: vertical; box-shadow: none; }
+.p2-fld input, .p2-in { height: 48px; padding: 0 14px; }
+.p2-fld input.lg { height: 54px; border-radius: 16px; font-size: 16px; font-weight: 700; padding: 0 16px; }
+.p2-box { margin: 22px 20px 0; background: var(--s1); border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.p2-dayhd { display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px; align-items: center; padding: 0 0 6px; text-align: center; font-size: 12px; color: var(--t3); }
+.p2-dayhd h3 { margin: 0; font-size: 15px; font-weight: 800; color: var(--t1); text-align: left; }
+.p2-dayhd b { color: var(--t1); font-size: 13px; }
+.p2-dayrow { display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px; align-items: center; border-radius: 14px; margin: 0 -8px; padding: 0 8px; }
+.p2-dayrow.today { background: var(--s1); }
+.p2-dayrow .main { display: flex; align-items: center; gap: 4px; min-height: 60px; border: 0; background: transparent; color: var(--t1); text-align: left; padding: 0; cursor: pointer; min-width: 0; }
+.p2-dayrow .dn { width: 48px; flex: none; }
+.p2-dayrow .dn em { display: block; font-style: normal; font-size: 12px; color: var(--t3); }
+.p2-dayrow.today .dn em { color: var(--acct); }
+.p2-dayrow .dn b { display: block; font-size: 17px; font-weight: 800; }
+.p2-dayrow .nm { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; }
+.p2-dayrow .sm { display: block; font-size: 12px; color: var(--t3); margin-top: 1px; }
+.p2-dayrow .dotbtn { width: 44px; height: 44px; border: 0; background: transparent; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.p2-dot { width: 18px; height: 18px; border-radius: 9px; display: block; }
+.p2-exp > button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 52px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--t1); font-size: 15px; padding: 0; cursor: pointer; text-align: left; }
+.p2-exp .bd { padding: 0 0 14px; }
+.p2-lane { display: grid; grid-template-columns: 76px minmax(0, 1fr); column-gap: 10px; padding: 6px 0; font-size: 13px; line-height: 1.5; }
+.p2-lane > span:first-child { font-weight: 800; }
+.p2-detail { display: flex; flex-direction: column; gap: 16px; }
+.p2-ico { width: 44px; height: 44px; border-radius: 22px; background: var(--s2); color: var(--t2); display: flex; align-items: center; justify-content: center; flex: none; }
+.p2-ico.cal { border-radius: 12px; background: color-mix(in srgb, var(--acc) 14%, transparent); color: var(--acc); }
+.p2 input.p2-dtitle { background: transparent !important; border: 0 !important; box-shadow: none !important; }
+.p2-dtitle { display: block; width: 100%; border: 0; background: transparent; padding: 0; font-size: 22px; font-weight: 800; color: var(--t1); height: 32px; box-shadow: none; border-radius: 0; }
+.p2-timein { flex: 1; min-width: 0; height: 52px; border: 0; border-radius: 14px; background: var(--s2); font-size: 19px; font-weight: 700; color: var(--t1); text-align: center; padding: 0 8px; box-shadow: none; }
+.p2-right .p2-timein, .p2-right .p2-fld input, .p2-right .p2-fld textarea { background: var(--s1); }
+.p2-chips { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.p2-chips button { height: 40px; border: 0; border-radius: 12px; background: transparent; box-shadow: inset 0 0 0 1px var(--t4); font-size: 13px; color: var(--t2); padding: 0 10px; cursor: pointer; }
+.p2-chips button.on { background: var(--t1); color: var(--g); font-weight: 800; box-shadow: none; }
+.p2-sw { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; cursor: pointer; }
+.p2-sw b { display: block; font-size: 15px; }
+.p2-sw em { display: block; font-style: normal; font-size: 12px; color: var(--t3); }
+.p2-sw input { width: 22px; height: 22px; accent-color: var(--acc); margin: 0; flex: none; }
+.p2-sw.sm { min-height: 40px; }
+.p2-sw.sm b { font-size: 14px; font-weight: 500; }
+.p2-acts { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px; }
+.p2-acts .p2-btn { white-space: nowrap; padding: 0 8px; }
+.p2-sheetwrap { position: fixed; inset: 0; z-index: 400; background: rgba(0,0,0,0.5); display: flex; align-items: flex-end; justify-content: center; }
+.p2-sheet { width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; background: var(--s1); border-radius: 24px 24px 0 0; padding: 10px 20px calc(24px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -12px 40px rgba(0,0,0,0.4); }
+.p2-sheet .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--t4); margin: 0 auto 14px; }
+.p2-ov { position: fixed; inset: 0; z-index: 410; background: rgba(0,0,0,0.55); display: flex; align-items: stretch; justify-content: center; }
+.p2-ovbox { width: 100%; max-width: 480px; background: var(--g); padding: 12px 20px calc(28px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 24px; overflow-y: auto; }
+@media (min-width: 720px) { .p2-ov { align-items: center; } .p2-ovbox { border-radius: 24px; max-height: 92vh; } }
+.p2-ovbox > *, .p2-detail > *, .p2-left > * { flex-shrink: 0; }
+.p2-ovhd { display: flex; align-items: center; justify-content: space-between; }
+.p2-ovhd b { font-size: 14px; color: var(--t2); }
+.p2-big { margin: 6px 0 0; font-size: 28px; font-weight: 800; letter-spacing: -0.6px; line-height: 1.25; }
+.p2-lead { margin: 8px 0 0; font-size: 15px; line-height: 1.55; color: var(--t2); }
+.p2-two { display: flex; gap: 6px; flex: none; }
+.p2-two button { height: 40px; border: 0; border-radius: 20px; background: transparent; box-shadow: inset 0 0 0 1px var(--t4); color: var(--t2); font-size: 13px; padding: 0 14px; cursor: pointer; }
+.p2-two button.on { background: var(--t1); color: var(--g); font-weight: 800; box-shadow: none; }
+.p2-segs { display: flex; height: 12px; border-radius: 6px; overflow: hidden; gap: 2px; }
+.p2-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.p2-stats > div { background: var(--s1); border-radius: 14px; padding: 12px; min-width: 0; }
+.p2-stats span { display: block; font-size: 12px; color: var(--t3); }
+.p2-stats b { display: block; font-size: 19px; font-weight: 800; margin-top: 2px; }
+.p2-next { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 14px; font-size: 14px; color: var(--t2); }
+.p2-next i { width: 8px; height: 8px; border-radius: 4px; flex: none; }
+.p2-next b { color: var(--t1); }
+.p2-3col { display: grid; grid-template-columns: 264px minmax(0, 1fr) 348px; align-items: stretch; min-height: 640px; }
+.p2-left { border-right: 1px solid var(--line); padding: 20px; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.p2-left .p2-sec { padding: 0; }
+.p2-mid { min-width: 0; padding-bottom: 24px; }
+.p2-right { border-left: 1px solid var(--line); padding: 20px; min-width: 0; }
+.p2.desk .p2-lanes { grid-auto-rows: minmax(50px, auto); column-gap: 10px; padding: 0 20px; }
+.p2.desk .p2-lanehd { column-gap: 10px; padding: 18px 20px 8px; }
+.p2.desk .p2-card .ttl { font-size: 15px; }
+.p2.desk .p2-card .sub { white-space: nowrap; }
+.p2-card.split { padding: 8px 6px; }
+.p2-card.split .p2-chkbtn, .p2-card.split .sub { display: none; }
+.p2-card.split .ttl { font-size: 13px; }
+.p2.desk .p2-card { padding: 8px 4px 8px 14px; align-items: center; }
+.p2.desk .p2-card.now { padding: 12px 14px; }
+.p2.desk .p2-end { align-self: flex-start; padding: 0 22px; }
+.p2-mcal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); text-align: center; row-gap: 2px; }
+.p2-mcal .w { font-size: 11px; color: var(--t3); padding-bottom: 6px; }
+.p2-mcal button { height: 30px; border: 0; background: transparent; color: var(--t1); font-size: 13px; border-radius: 15px; cursor: pointer; padding: 0; }
+.p2-mcal button.out { color: var(--t4); }
+.p2-mcal button.today:not(.sel) { box-shadow: inset 0 0 0 1.5px var(--acc); color: var(--acct); font-weight: 700; }
+.p2-mcal button.sel { background: var(--acc); color: var(--onacc); font-weight: 800; }
+`;
+
 function PlRing({ v, total, color = "#DB6B2E", size = 60, label }) {
   const r = size / 2 - 5, c = 2 * Math.PI * r, f = total > 0 ? Math.min(1, v / total) : 0;
   return (
@@ -32445,7 +32624,7 @@ function PlRing({ v, total, color = "#DB6B2E", size = 60, label }) {
 }
 const PlCheckIcon = ({ size = 14 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden="true"><path d="M5 12l5 5 9-10" /></svg>;
 
-function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, notionCreate, darkMode, onOpenSchedule, onRenameTodo, jump }) {
+function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, notionCreate, darkMode, onOpenSchedule, onRenameTodo, onToggleCalendar, onRemoveTodo, jump }) {
   const P = React.useMemo(() => plannerNormalize(planner), [planner]);
   const [planId, setPlanId] = React.useState(() => load("frw_planner_plan", ""));
   const [view, setView] = React.useState(() => load("frw_planner_view", "day"));
@@ -32459,6 +32638,13 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
   const [scoreDraft, setScoreDraft] = React.useState({ date: plToday(), score: "", note: "" });
   const [boxRef, boxW] = useBoxWidth(800);
   const sentRef = React.useRef(new Set());
+  // 새 화면(v2) ↔ 이전 화면(v1)
+  const [ui, setUi] = React.useState(() => load("frw_planner_ui", "v2"));
+  React.useEffect(() => { save("frw_planner_ui", ui); }, [ui]);
+  const [sel, setSel] = React.useState(null);          // 고른 블록 {id}
+  const [ritual, setRitual] = React.useState(null);    // "morning" | "shutdown"
+  const [laneOn, setLaneOn] = React.useState({ pl: true, cal: true });
+  const [goalsOpen, setGoalsOpen] = React.useState("");
   const [drag, setDrag] = React.useState(null);       // 끄는 중인 블록 {date, id, start, end}
   const [editBlk, setEditBlk] = React.useState(null); // 이름 고치는 블록 {date, id, field, value}
   const tlRef = React.useRef(null), wcRef = React.useRef(null);
@@ -32723,8 +32909,9 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
           </select>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
         </label>
-        {plan.category && <span className="pl-muted">분류 · {plan.category}</span>}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>{plan.category && <span className="pl-muted">분류 · {plan.category}</span>}<button type="button" className="pl-btn ghost sm" onClick={() => setUi("v2")}>새 화면</button></span>
       </div>}
+      {desk && <div style={{ display: "flex", justifyContent: "flex-end" }}><button type="button" className="pl-btn ghost sm" onClick={() => setUi("v2")}>새 화면</button></div>}
       <div>
         <div className="pl-kicker">{view === "road" ? `${plan.startDate.replace(/-/g, ".")} – ${plan.endDate.replace(/-/g, ".")} · ${plan.weeklyHours || ""}` : kicker}</div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
@@ -33512,6 +33699,587 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
       </div>
     );
   };
+
+  // ═══ 새 화면 (v2) — 오늘(플래너 | 캘린더 일정 두 줄) · 주간 · 목표, 아침 계획 · 하루 마감 ═══
+  const renderV2 = () => {
+    const isDark = darkMode || (typeof document !== "undefined" && document.body.classList.contains("glass"));
+    const K = isDark ? PL_COLOR_DARK : PL_COLOR;
+    const tone = (b, th) => {
+      const a = isDark ? "24" : "1F";
+      if (b.kind === "study" && th) return PL_COLOR[th.track] ? (isDark ? PL_COLOR_DARK[th.track] : PL_COLOR[th.track]) + a : "var(--s1)";
+      if (b.kind === "exercise") return (isDark ? "#86C9A6" : "#2D6A4F") + a;
+      if (b.kind === "ops" || b.kind === "wrap") return (isDark ? "#F2A27A" : "#C2410C") + a;
+      if (b.kind === "custom") return (isDark ? "#8DB0F0" : "#2E5AAC") + a;
+      return "var(--s1)";
+    };
+    const tab = view === "week" ? "week" : (view === "road" || view === "review") ? "goals" : "today";
+    const isToday = date === today;
+    const d0 = plDate(date);
+    const Chk = ({ on, square, color, size = 22 }) => (
+      <span className="p2-chk" style={{ width: size, height: size, borderRadius: square ? Math.round(size * 0.28) : size / 2, border: on ? 0 : `2px solid ${color || "var(--t4)"}`, background: on ? (square ? "var(--acc)" : "var(--ok)") : "transparent" }}>
+        {on && <svg width={size * 0.58} height={size * 0.58} viewBox="0 0 24 24" fill="none" stroke="var(--g)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10" /></svg>}
+      </span>
+    );
+    const Arrow = ({ d }) => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d={d} /></svg>;
+
+    // ── 머리 ──
+    const tabs = (
+      <div className="p2-top">
+        <nav className="p2-tabs" aria-label="플래너 보기">
+          {[["today", "오늘", "day"], ["week", "주간", "week"], ["goals", "목표", "road"]].map(([k, l, v]) => (
+            <button key={k} type="button" aria-current={tab === k ? "page" : undefined} className={tab === k ? "on" : ""} onClick={() => { setView(v); setSel(null); }}>{l}</button>
+          ))}
+        </nav>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button type="button" className="p2-link" onClick={() => setUi("v1")}>이전 화면</button>
+          {P.plans.length > 1 ? (
+            <label className="p2-pill"><span className="p2-sr">계획 고르기</span>
+              <select value={plan.id} onChange={e => setPlanId(e.target.value)}>{P.plans.map(p => <option key={p.id} value={p.id}>{p.short || p.title}</option>)}</select></label>
+          ) : <span className="p2-pill">{plan.short || plan.title}</span>}
+        </div>
+      </div>
+    );
+    const dateNav = (step) => (
+      <div style={{ display: "flex", gap: 6, flex: "none" }}>
+        <button type="button" className="p2-round" aria-label={step === 1 ? "전날" : "이전 주"} onClick={() => shift(-step)}><Arrow d="M15 18l-6-6 6-6" /></button>
+        {!(step === 1 ? isToday : (monday <= today && today <= plAdd(monday, 6))) && <button type="button" className="p2-round" style={{ width: "auto", padding: "0 12px", fontSize: 13, fontWeight: 700 }} onClick={() => setDate(plToday())}>오늘</button>}
+        <button type="button" className="p2-round" aria-label={step === 1 ? "다음 날" : "다음 주"} onClick={() => shift(step)}><Arrow d="M9 18l6-6-6-6" /></button>
+      </div>
+    );
+
+    // ── 오늘: 두 줄 ──
+    const plBlocks = laneOn.pl ? day.blocks : [];
+    const calBlocks = laneOn.cal ? plTodoBlocks(todos, date) : [];
+    const untimed = plTodosOn(todos, date).filter(t => !plTodoTime(t));
+    const picks = (log && log.picks) || {};
+    const pickRows = week ? [...plArr(week.outputs).map(o => ({ id: o.id, text: o.text, done: !!o.done })), ...(week.appointment ? [{ id: "appt", text: week.appointment, done: !!week.apptDone, appt: true }] : [])].filter(o => picks[o.id]) : [];
+    const setOut = (oid, on) => week && upsert("weeks", week.id, w => oid === "appt" ? { ...w, apptDone: on } : { ...w, outputs: plArr(w.outputs).map(o => o.id === oid ? { ...o, done: on } : o) });
+    const doneN = day.blocks.filter(b => b.done).length;
+    const nowBlk = isToday ? (day.blocks.filter(x => plMin(x.start) <= nowMin && nowMin < plMin(x.end)).find(x => !x.done) || null) : null;
+    const overlapMin = (c) => day.blocks.reduce((a, b) => a + Math.max(0, Math.min(plMin(b.end), plMin(c.end)) - Math.max(plMin(b.start), plMin(c.start))), 0);
+    const durTxt = (m) => m >= 60 ? `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}` : `${m}분`;
+
+    const lanes = () => {
+      const all = [...plBlocks, ...calBlocks];
+      if (!all.length) return <div className="p2-empty">이 날은 비어 있어요. 아래 버튼으로 블록이나 일정을 넣어 보세요.</div>;
+      const bounds = [...new Set(all.flatMap(b => [plMin(b.start), plMin(b.end)]))].sort((a, b) => a - b);
+      const row = (m) => bounds.indexOf(m) + 1;
+      const LP = plLanes(plBlocks), LC = plLanes(calBlocks);
+      const n = laneOn.pl ? Math.max(1, ...plBlocks.map(b => LP[b.id].lanes)) : 0;
+      const m = laneOn.cal ? Math.max(1, ...calBlocks.map(b => LC[b.id].lanes)) : 0;
+      const cols = `44px ${n ? `repeat(${n}, minmax(0, ${1 / n}fr))` : ""} ${m ? `repeat(${m}, minmax(0, ${1 / m}fr))` : ""}`;
+      const colOf = (ln, base, total) => ln.lanes === 1 ? `${base} / ${base + total}` : `${base + ln.lane} / ${ln.lane === ln.lanes - 1 ? base + total : base + ln.lane + 1}`;
+      // 플래너 줄의 빈 시간 (첫 블록과 마지막 블록 사이)
+      const gaps = [];
+      if (plBlocks.length) {
+        const first = Math.min(...plBlocks.map(b => plMin(b.start))), last = Math.max(...plBlocks.map(b => plMin(b.end)));
+        let run = null;
+        for (let i = 0; i < bounds.length - 1; i++) {
+          const s = bounds[i], e = bounds[i + 1];
+          const free = s >= first && e <= last && !plBlocks.some(b => plMin(b.start) < e && plMin(b.end) > s);
+          if (free) { if (run) run.e = e; else run = { s, e }; } else if (run) { gaps.push(run); run = null; }
+        }
+        if (run) gaps.push(run);
+      }
+      const card = (b, isCal) => {
+        const dg = drag && drag.date === date && drag.id === b.id ? drag : null;
+        const th = theme, on = sel && sel.id === b.id;
+        const isNow = !isCal && nowBlk && nowBlk.id === b.id;
+        const ov = isCal ? overlapMin(b) : 0;
+        const title = `${b.stepNo ? b.stepNo + " " : ""}${b.label}`;
+        return (
+          <div key={b.id} role="button" tabIndex={0} className={`p2-card${isCal ? " cal" : ""}${b.done ? " done" : ""}${on ? " sel" : ""}${isNow ? " now" : ""}${dg ? " drag" : ""}${!desk && (isCal ? LC[b.id] : LP[b.id]).lanes > 1 ? " split" : ""}`}
+            style={{ gridColumn: isCal ? colOf(LC[b.id], 2 + n, m) : colOf(LP[b.id], 2, n), gridRow: `${row(plMin(b.start))} / ${row(plMin(b.end))}`, background: isCal ? undefined : (b.done ? "var(--s0)" : isNow ? "var(--s1)" : tone(b, th)), "--tc": !isCal && b.kind === "study" && th ? K[th.track] : undefined }}
+            aria-label={`${title} ${b.start}–${b.end}${b.done ? " 완료" : ""} — 누르면 고치기`}
+            onPointerDown={e => startDrag(e, date, b, "move", 1.2, () => setSel({ id: b.id }))}
+            onKeyDown={e => { if (e.key === "Enter") setSel({ id: b.id }); }}>
+            <div className="tx">
+              {isNow && <div className="nowtag">지금</div>}
+              <div className="ttl">{title}</div>
+              <div className="sub">{dg ? `${dg.start}–${dg.end}` : isNow ? <>{b.doing || `${b.start}–${b.end}`} · <b>{Math.max(0, plMin(b.end) - nowMin)}분</b> 남음</> : `${b.start}–${b.end}${desk && (b.doing || b.note) ? ` · ${b.doing || b.note}` : ""}`}</div>
+              {isCal && ov > 0 && <div className="tag warn">플래너와 {durTxt(ov)} 겹침</div>}
+              {isCal && b.todo.ttOnly && <div className="tag">타임테이블에만</div>}
+              {isNow && <button type="button" className="p2-end" onClick={() => toggleDone(date, { ...b, done: false })}>끝</button>}
+            </div>
+            {!isNow && <button type="button" className="p2-chkbtn" aria-label={`${title} ${b.done ? "완료 취소" : "완료"}`} aria-pressed={b.done} onClick={() => toggleDone(date, b)}><Chk on={b.done} square={isCal} color={isCal ? "var(--acc)" : undefined} /></button>}
+          </div>
+        );
+      };
+      return (
+        <div className="p2-lanes" style={{ gridTemplateColumns: cols }}>
+          {bounds.slice(0, -1).map((t, i) => <span key={t} className="p2-time" style={{ gridRow: i + 1 }}>{plHM(t)}</span>)}
+          {plBlocks.map(b => card(b, false))}
+          {n > 0 && gaps.map(g => (
+            <button key={"g" + g.s} type="button" className="p2-gap" style={{ gridColumn: `2 / ${2 + n}`, gridRow: `${row(g.s)} / ${row(g.e)}` }} onClick={() => addPlannerBlock(g.s, g.e)}>빈 시간 {durTxt(g.e - g.s)} <b>+ 넣기</b></button>
+          ))}
+          {calBlocks.map(b => card(b, true))}
+        </div>
+      );
+    };
+    const addPlannerBlock = (s, e) => {
+      const st = s != null ? s : (isToday ? Math.min(1380, Math.ceil((nowMin + 1) / 30) * 30) : 1080);
+      const xid = "x" + Date.now();
+      setExtra(date, xid, { start: plHM(st), end: plHM(Math.min(1439, e != null ? Math.min(e, st + 60) : st + 60)), label: "새 블록" });
+      setSel({ id: xid });
+    };
+    const addCalItem = () => {
+      const st = isToday ? Math.min(1380, Math.ceil((nowMin + 1) / 30) * 30) : 1080;
+      const id = Date.now();
+      setTodos(prev => [...(prev || []), { id, date, endDate: "", text: "새 일정", memo: "", done: false, createdAt: id, atts: [], ttOnly: true, startMin: st, durMin: 60 }]);
+      setSel({ id: "t" + id });
+    };
+    const laneHead = (
+      <div className="p2-lanehd" style={{ gridTemplateColumns: `44px ${laneOn.pl ? "minmax(0,1fr)" : ""} ${laneOn.cal ? "minmax(0,1fr)" : ""}` }}>
+        <span />
+        {laneOn.pl && <div><h3>플래너</h3><span>{doneN} / {day.blocks.length}</span></div>}
+        {laneOn.cal && <div><h3><i />캘린더 일정</h3><span>{calBlocks.length}건</span></div>}
+      </div>
+    );
+    const addRow = (
+      <div className="p2-lanehd" style={{ gridTemplateColumns: `44px ${laneOn.pl ? "minmax(0,1fr)" : ""} ${laneOn.cal ? "minmax(0,1fr)" : ""}`, paddingTop: 10 }}>
+        <span />
+        {laneOn.pl && <button type="button" className="p2-btn soft" onClick={() => addPlannerBlock()}>+ 플래너 블록</button>}
+        {laneOn.cal && <button type="button" className="p2-btn soft" style={{ color: "var(--acct)" }} onClick={addCalItem}>+ 일정</button>}
+      </div>
+    );
+    const inbox = (
+      <section className="p2-sec">
+        <div className="p2-sechd"><h3>보관함</h3><span>{desk ? "시간을 안 정한 일" : "시간을 안 정한 일 · 누르면 시간 넣기"}</span></div>
+        {pickRows.length + untimed.length === 0 && <div className="p2-mute" style={{ padding: "10px 0" }}>비어 있어요.</div>}
+        {pickRows.map(o => (
+          <div key={"p" + o.id} className="p2-row">
+            <button type="button" className="p2-chkbtn" aria-label={`${o.text} ${o.done ? "완료 취소" : "완료"}`} aria-pressed={o.done} onClick={() => setOut(o.id, !o.done)}><Chk on={o.done} /></button>
+            <span className="grow" style={{ textDecoration: o.done ? "line-through" : "none", color: o.done ? "var(--t3)" : undefined }}>{o.text}</span>
+            <span className="p2-mute">{o.appt ? "외부 약속" : "이번 주 산출물"}</span>
+          </div>
+        ))}
+        {untimed.map(t => (
+          <div key={t.id} className="p2-row">
+            <button type="button" className="p2-chkbtn" aria-label={`${t.text} ${t.done ? "완료 취소" : "완료"}`} aria-pressed={!!t.done} onClick={() => toggleTodo && toggleTodo(t.id)}><Chk on={!!t.done} square color="var(--acc)" /></button>
+            <button type="button" className="grow p2-rowbtn" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--t3)" : undefined }} onClick={() => setSel({ id: "u" + t.id })}>{t.text}</button>
+            {t.endDate && t.endDate !== t.date && <span className="p2-mute" style={{ color: "var(--acct)" }}>~{plMD(t.endDate)}</span>}
+          </div>
+        ))}
+      </section>
+    );
+    const planned = !!(log && log.planned), closed = !!(log && log.closed);
+    const wrapAt = (day.blocks.find(b => b.kind === "wrap") || {}).start || "16:45";
+    const todayView = () => (<>
+      <div className="p2-head">
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="p2-kick">{[inPlan ? `W${weekNo}` : "계획 기간 밖", theme && day.mode !== "weekend" ? `${theme.track}의 날` : "쉬는 날", day.mode === "peak" ? "성수기 유지" : null].filter(Boolean).join(" · ")}</div>
+          <h2 className="p2-title"><label>{d0.getMonth() + 1}월 {d0.getDate()}일 {PL_WK[d0.getDay()]}요일<input type="date" aria-label="날짜 고르기" value={date} onChange={e => e.target.value && setDate(e.target.value)} /></label></h2>
+        </div>
+        {dateNav(1)}
+      </div>
+      {!desk && (
+        <div className="p2-strip" role="group" aria-label="이번 주 날짜">
+          {[0, 1, 2, 3, 4, 5, 6].map(i => { const d = plAdd(date, i - plDow(date)), dw = plDow(d), th = plThemeOf(P, plan, d); return (
+            <button key={d} type="button" className={`${d === date ? "sel" : ""}${d === today ? " today" : ""}`} aria-pressed={d === date} aria-label={`${plMD(d)} ${PL_WK[dw]}요일`} onClick={() => { setDate(d); setSel(null); }}>
+              <span className="wk">{PL_WK[dw]}</span><span className="num">{Number(d.slice(8))}</span><span className="dot" style={{ background: th ? K[th.track] : "transparent" }} />
+            </button>); })}
+        </div>
+      )}
+      {theme && day.mode !== "weekend" && (
+        <div className="p2-prog">
+          <div className="line"><span><i style={{ background: K[theme.track] }} />{log && log.focus ? <b>{log.focus}</b> : (day.mode === "peak" ? "성수기 유지 — 오늘은 학습 없이 운영을 늘립니다" : theme.description)}</span><span>{doneN} / {day.blocks.length}</span></div>
+          <div className="bar" role="img" aria-label={`오늘 ${day.blocks.length}개 중 ${doneN}개 완료`}><div style={{ width: `${day.blocks.length ? Math.round(100 * doneN / day.blocks.length) : 0}%` }} /></div>
+        </div>
+      )}
+      {isToday && !planned && nowMin < 13 * 60 && (
+        <button type="button" className="p2-banner" onClick={() => setRitual("morning")}><b>오늘 계획 세우기</b><span>주제 확인 · 꼭 할 한 가지 ›</span></button>
+      )}
+      {laneHead}
+      {lanes()}
+      {addRow}
+      {!desk && inbox}
+      <button type="button" className={`p2-banner${isToday && !closed && nowMin >= plMin(wrapAt) ? " hot" : ""}`} style={{ marginTop: 18 }} onClick={() => setRitual("shutdown")}>
+        <b>{closed ? "하루 마감 완료" : "하루 마감하기"}</b><span>{closed ? "다시 열기 ›" : `${wrapAt} · 3줄 기록 ›`}</span>
+      </button>
+    </>);
+
+    // ── 고른 블록 상세 ──
+    const selBlock = (() => {
+      if (!sel) return null;
+      if (sel.id.startsWith("u")) { const t = untimed.find(x => "u" + x.id === sel.id); return t ? { id: sel.id, todo: t, untimed: true, kind: "todo", label: t.text || "", start: "", end: "", done: !!t.done, steps: [] } : null; }
+      return [...day.blocks, ...plTodoBlocks(todos, date)].find(b => b.id === sel.id) || null;
+    })();
+    const detail = (b) => {
+      const isCal = !!b.todo, th = theme;
+      const kindTxt = isCal ? (b.todo.ttOnly ? "타임테이블 전용 일정" : "캘린더 일정") : b.stepKey ? `학습 ${b.stepNo}${th ? " · " + th.track : ""}` : b.custom ? "오늘만 넣은 블록" : "플래너 블록";
+      const dur = b.untimed ? 0 : plMin(b.end) - plMin(b.start);
+      const setTimes = (s, e) => {
+        if (b.untimed) { setTodos(prev => (prev || []).map(t => t.id === b.todo.id ? { ...t, startMin: s, durMin: Math.max(10, e - s) } : t)); setSel({ id: "t" + b.todo.id }); }
+        else patchBlock(date, b, { start: plHM(s), end: plHM(Math.min(1439, e)) });
+      };
+      const noteField = b.stepKey || "note";
+      const noteVal = isCal ? (b.todo.memo || "") : b.stepKey ? (b.doing || "") : (b.note || "");
+      return (
+        <div className="p2-detail">
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span className={`p2-ico${isCal ? " cal" : ""}`} style={!isCal && b.kind === "study" && th ? { color: K[th.track], background: tone(b, th) } : undefined} aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{isCal ? <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></> : <path d="M3 5h7a2 2 0 012 2v12a2 2 0 00-2-2H3zM21 5h-7a2 2 0 00-2 2v12a2 2 0 012-2h7z" />}</svg>
+            </span>
+            <div className="grow" style={{ minWidth: 0 }}>
+              <label htmlFor="p2-dt" className="p2-mute">{kindTxt}</label>
+              <input id="p2-dt" className="p2-dtitle" type="text" key={b.id + "|" + b.label} defaultValue={b.label} onBlur={e => { if (e.target.value.trim() && e.target.value.trim() !== b.label) renameBlock(date, b, "label", e.target.value); }} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+            </div>
+            <button type="button" className="p2-round" aria-label="닫기" onClick={() => setSel(null)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+          </div>
+          {b.untimed ? (
+            <button type="button" className="p2-btn soft" onClick={() => { const st = isToday ? Math.min(1380, Math.ceil((nowMin + 1) / 30) * 30) : 1080; setTimes(st, st + 60); }}>시간 넣기 (타임라인에 올리기)</button>
+          ) : (<>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <input type="time" aria-label="시작 시각" className="p2-timein" value={b.start} onChange={e => { const v = plMin(e.target.value); if (v != null) setTimes(v, Math.max(v + 5, v + dur)); }} />
+              <Arrow d="M5 12h14M13 6l6 6-6 6" />
+              <input type="time" aria-label="끝 시각" className="p2-timein" value={b.end} onChange={e => { const v = plMin(e.target.value); if (v != null && v > plMin(b.start)) setTimes(plMin(b.start), v); }} />
+            </div>
+            <div className="p2-chips" role="group" aria-label="길이">
+              {[15, 30, 45, 60, 75, 90, 120, 180].map(mn => <button key={mn} type="button" aria-pressed={dur === mn} className={dur === mn ? "on" : ""} onClick={() => setTimes(plMin(b.start), plMin(b.start) + mn)}>{mn}분</button>)}
+            </div>
+          </>)}
+          <div className="p2-fld"><label htmlFor="p2-dn">{b.stepKey ? "할 일" : "메모"}</label>
+            <textarea id="p2-dn" rows={2} key={b.id + "|n|" + noteVal} defaultValue={noteVal} placeholder={b.stepKey ? "이 단계에서 할 일" : "메모"} onBlur={e => { if (e.target.value.trim() !== noteVal) renameBlock(date, b, noteField, e.target.value); }} /></div>
+          {b.stepKey && <div className="p2-fld"><label htmlFor="p2-da">AI 역할</label>
+            <input id="p2-da" type="text" key={b.id + "|a|" + (b.aiRole || "")} defaultValue={b.aiRole || ""} onBlur={e => { if (e.target.value.trim() !== (b.aiRole || "")) renameBlock(date, b, "ai:" + b.stepKey, e.target.value); }} onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} /></div>}
+          {isCal ? (
+            <label className="p2-sw"><span><b>달력에도 표시</b><em>끄면 타임테이블에만 보입니다</em></span>
+              <input type="checkbox" checked={!b.todo.ttOnly} onChange={() => onToggleCalendar ? onToggleCalendar(b.todo.id) : setTodos(prev => (prev || []).map(t => { if (t.id !== b.todo.id) return t; const n2 = { ...t }; if (t.ttOnly) delete n2.ttOnly; else n2.ttOnly = true; return n2; }))} /></label>
+          ) : !b.custom && (
+            <button type="button" className="p2-btn soft" onClick={() => saveTemplate(date, day.mode, day.blocks)}>오늘 시간표를 매일 틀로 저장</button>
+          )}
+          <div className="p2-acts">
+            <button type="button" className="p2-btn" onClick={() => toggleDone(date, b)}>{b.done ? "완료 취소" : "완료로 표시"}</button>
+            <button type="button" className="p2-btn soft" onClick={() => {
+              if (isCal) { if (!window.confirm(`「${b.label}」 일정을 지울까요?`)) return; if (onRemoveTodo && !b.todo.ttOnly) onRemoveTodo(b.todo.id); else removeTtOnly(b.todo.id); }
+              else if (b.custom) setExtra(date, b.id, null);
+              else setBlock(date, b.id, { hidden: true });
+              setSel(null);
+            }}>{isCal || b.custom ? "삭제" : "오늘만 빼기"}</button>
+          </div>
+        </div>
+      );
+    };
+
+    // ── 아침 계획 · 하루 마감 ──
+    const overlay = (title, body) => (
+      <div className="p2-ov" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="p2-ovbox">
+          <div className="p2-ovhd"><button type="button" className="p2-round" aria-label="닫기" onClick={() => setRitual(null)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg></button><b>{title}</b><span style={{ width: 40 }} /></div>
+          {body}
+        </div>
+      </div>
+    );
+    const morning = () => {
+      const rest = week ? [...plArr(week.outputs).filter(o => !o.done).map(o => ({ id: o.id, text: o.text })), ...(week.appointment && !week.apptDone ? [{ id: "appt", text: week.appointment }] : [])] : [];
+      const studyMin = day.blocks.filter(b => b.kind === "study").reduce((a, b) => a + plMin(b.end) - plMin(b.start), 0);
+      const sorted = [...day.blocks].sort((a, b) => plMin(a.start) - plMin(b.start));
+      const segs = []; let freeMin = 0;
+      sorted.forEach((b, i) => { if (i > 0) { const g = plMin(b.start) - plMin(sorted[i - 1].end); if (g > 0) { segs.push({ w: g, bg: "var(--s0)" }); freeMin += g; } } segs.push({ w: plMin(b.end) - plMin(b.start), bg: b.kind === "study" && theme ? K[theme.track] : b.kind === "exercise" ? (isDark ? "#86C9A6" : "#2D6A4F") : (b.kind === "ops" || b.kind === "wrap") ? (isDark ? "#F2A27A" : "#C2410C") : "var(--t4)" }); });
+      return overlay("오늘 계획", (<>
+        <div>
+          <div className="p2-kick">{d0.getMonth() + 1}월 {d0.getDate()}일 {PL_WK[d0.getDay()]}요일{inPlan ? ` · W${weekNo}` : ""}</div>
+          <h2 className="p2-big">{theme && day.mode !== "weekend" ? <>오늘은 <span style={{ color: K[theme.track] }}>{theme.track}</span>의 날</> : "오늘은 쉬는 날"}</h2>
+          {theme && day.mode !== "weekend" && <p className="p2-lead">{theme.description} · {theme.hours}</p>}
+        </div>
+        {rest.length > 0 && (
+          <section><h3 className="p2-lbl">이번 주에 남은 산출물</h3>
+            {rest.map(o => (
+              <div key={o.id} className="p2-row" style={{ minHeight: 56 }}>
+                <span className="grow">{o.text}</span>
+                <div className="p2-two" role="group" aria-label={o.text}>
+                  <button type="button" aria-pressed={!!picks[o.id]} className={picks[o.id] ? "on" : ""} onClick={() => updateLog(date, l => ({ ...l, picks: { ...(l.picks || {}), [o.id]: true } }))}>오늘</button>
+                  <button type="button" aria-pressed={!picks[o.id]} className={!picks[o.id] ? "on" : ""} onClick={() => updateLog(date, l => ({ ...l, picks: { ...(l.picks || {}), [o.id]: false } }))}>나중에</button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+        <div className="p2-fld"><label htmlFor="p2-focus" className="p2-lbl">오늘 꼭 할 한 가지</label>
+          <input id="p2-focus" type="text" className="lg" placeholder="예: 원단 5종 스펙 표 초안" key={"f" + date + ((log && log.focus) || "")} defaultValue={(log && log.focus) || ""} onBlur={e => { const v = e.target.value.trim(); if (v !== ((log && log.focus) || "")) updateLog(date, l => ({ ...l, focus: v })); }} /></div>
+        {sorted.length > 0 && (
+          <section style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <h3 className="p2-lbl" style={{ margin: 0 }}>오늘 시간표</h3>
+            <div className="p2-segs" role="img" aria-label={`${sorted[0].start}부터 ${sorted[sorted.length - 1].end}까지`}>{segs.map((s, i) => <div key={i} style={{ flex: s.w, background: s.bg }} />)}</div>
+            <div className="p2-mute" style={{ display: "flex", justifyContent: "space-between" }}><span>{sorted[0].start}</span><span>{sorted[sorted.length - 1].end}</span></div>
+            <div className="p2-stats"><div><span>블록</span><b>{day.blocks.length}개</b></div><div><span>학습</span><b>{studyMin ? durTxt(studyMin) : "없음"}</b></div><div><span>빈 시간</span><b>{freeMin ? durTxt(freeMin) : "없음"}</b></div></div>
+          </section>
+        )}
+        <button type="button" className="p2-btn lg" style={{ marginTop: "auto" }} onClick={() => { updateLog(date, l => ({ ...l, planned: true })); setRitual(null); }}>이대로 시작</button>
+        <div className="p2-mute" style={{ textAlign: "center" }}>「오늘」로 고른 산출물은 보관함에 들어갑니다</div>
+      </>));
+    };
+    const shutdown = () => {
+      const n3 = (log && log.note3) || {};
+      const st = (log && log.steps) || {};
+      const stepBlocks = day.blocks.filter(b => b.stepKey);
+      const undoneCal = plTodosOn(todos, date).filter(t => !t.done && !(t.endDate && t.endDate > date));
+      const undonePl = day.blocks.filter(b => !b.done);
+      const tmr = plAdd(date, 1), tth = plThemeOf(P, plan, tmr);
+      return overlay("하루 마감", (<>
+        <div>
+          <div className="p2-kick">{d0.getMonth() + 1}월 {d0.getDate()}일 {PL_WK[d0.getDay()]}요일</div>
+          <h2 className="p2-big">{day.blocks.length ? `${day.blocks.length}개 중 ${doneN}개를 끝냈어요` : "오늘 블록은 없었어요"}</h2>
+        </div>
+        <div className="p2-stats">
+          <div><span>학습 단계</span><b style={{ color: stepBlocks.length && stepBlocks.every(b => st[b.stepKey]) ? "var(--ok)" : undefined }}>{stepBlocks.filter(b => st[b.stepKey]).length} / {stepBlocks.length}</b></div>
+          <div><span>이번 주 학습</span><b>{stats.study} / {studyTarget}</b></div>
+          <div><span>이번 주 노트</span><b>{stats.note} / {noteTarget}</b></div>
+        </div>
+        {(undoneCal.length > 0 || undonePl.length > 0) && (
+          <section><h3 className="p2-lbl">못 끝낸 것</h3>
+            {undoneCal.map(t => (
+              <div key={t.id} className="p2-row" style={{ minHeight: 56 }}>
+                <span className="grow">{t.text}</span>
+                <button type="button" className="p2-btn soft sm" onClick={() => { setTodos(prev => (prev || []).map(x => x.id === t.id ? { ...x, date: tmr, endDate: x.endDate && x.endDate >= tmr ? x.endDate : "" } : x)); showToast("내일로 넘겼어요", "success"); }}>내일로</button>
+              </div>
+            ))}
+            {undonePl.length > 0 && <div className="p2-mute" style={{ padding: "8px 0", lineHeight: 1.6 }}>플래너 블록 · {undonePl.map(b => `${b.stepNo ? b.stepNo + " " : ""}${b.label}`).join(", ")}</div>}
+          </section>
+        )}
+        <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <h3 className="p2-lbl" style={{ margin: 0 }}>3줄 기록</h3>
+          {[["did", "한 것", "오늘 실제로 한 것"], ["learned", "배운 것", "새로 알게 된 것 한 줄"], ["next", "내일 첫 작업", "내일 앉자마자 할 것"]].map(([k, l, ph]) => (
+            <div key={k} className="p2-fld"><label htmlFor={`p2-n-${k}`} style={{ fontSize: 15, fontWeight: 700, color: "var(--t1)" }}>{l}</label>
+              <textarea id={`p2-n-${k}`} rows={2} placeholder={ph} value={n3[k] || ""} onChange={e => setNote(date, k, e.target.value)} /></div>
+          ))}
+        </section>
+        {tth && <div className="p2-next"><i style={{ background: K[tth.track] }} /><span>내일은 <b>{tth.track}</b>의 날 · {tth.description}</span></div>}
+        <button type="button" className="p2-btn lg" style={{ marginTop: "auto" }} onClick={() => { updateLog(date, l => ({ ...l, closed: true })); setRitual(null); showToast("하루를 마감했어요", "success"); }}>마감하기</button>
+      </>));
+    };
+
+    // ── 주간 ──
+    const weekView = () => {
+      const outs = week ? [...plArr(week.outputs).map(o => ({ id: o.id, text: o.text, done: !!o.done })), ...(week.appointment ? [{ id: "appt", text: week.appointment, done: !!week.apptDone, appt: true }] : [])] : [];
+      const od = outs.filter(o => o.done).length;
+      const wTodo = week ? linkedTodo(week, "week") : null;
+      const dot = (on, off) => <span className="p2-dot" style={{ background: on ? "var(--ok)" : off ? "var(--s0)" : "transparent", border: on || off ? 0 : "2px solid var(--t4)" }} />;
+      return (<>
+        <div className="p2-head">
+          <div className="grow"><div className="p2-kick">{plMD(monday).replace("/", ".")} – {plMD(plAdd(monday, 6)).replace("/", ".")}{yearRec ? ` · ${yearRec.yearIndex}년차` : ""}{quarter ? ` Q${quarter.q}` : ""}</div><h2 className="p2-title">W{weekNo}</h2></div>
+          {dateNav(7)}
+        </div>
+        {week ? (<>
+          <section className="p2-sec" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="p2-mute" style={{ display: "flex", alignItems: "center", gap: 8 }}><i className="p2-i" style={{ background: K[week.track] }} />{week.track} · 이번 주 주제</div>
+            <div className="p2-h">{week.topic}</div>
+            <div className="p2-fld"><label htmlFor="p2-goal" className="p2-sr">주간 목표</label>
+              <input id="p2-goal" className="lg" type="text" placeholder="이번 주에 꼭 끝낼 한 가지" value={week.weeklyGoal || ""} onChange={e => { const v = e.target.value; upsert("weeks", week.id, w => ({ ...w, weeklyGoal: v })); }} /></div>
+          </section>
+          <section className="p2-sec">
+            <div className="p2-sechd"><h3>산출물</h3><span>{od} / {outs.length}</span></div>
+            <div className="p2-bar" role="img" aria-label={`산출물 ${outs.length}개 중 ${od}개 완료`}><div style={{ width: `${outs.length ? Math.round(100 * od / outs.length) : 0}%` }} /></div>
+            {outs.map(o => (
+              <div key={o.id} className="p2-row" style={{ minHeight: 56 }}>
+                <button type="button" className="p2-chkbtn" aria-label={`${o.text} ${o.done ? "완료 취소" : "완료"}`} aria-pressed={o.done} onClick={() => setOut(o.id, !o.done)}><Chk on={o.done} size={24} /></button>
+                <span className="grow"><span style={{ display: "block", textDecoration: o.done ? "line-through" : "none", color: o.done ? "var(--t3)" : undefined }}>{o.text}</span>{o.appt && <span style={{ fontSize: 12, color: "var(--acct)" }}>외부 약속</span>}</span>
+              </div>
+            ))}
+          </section>
+        </>) : (
+          <section className="p2-sec"><div className="p2-h">W{weekNo}는 아직 세부 계획이 없어요</div><div className="p2-mute" style={{ marginTop: 6 }}>Claude에게 「W{weekNo} 계획 넣어 줘」라고 하면 채워 줍니다.</div></section>
+        )}
+        <section className="p2-sec">
+          <div className="p2-dayhd"><h3>요일</h3><span>학습</span><span>노트</span></div>
+          {stats.days.map(d => { const dw = plDow(d.date), off = dw === 0 || dw === 6, th = plThemeOf(P, plan, d.date); const bl = plDayBlocks(P, plan, d.date, plLogOf(P, plan, d.date)).blocks; return (
+            <div key={d.date} className={`p2-dayrow${d.date === today ? " today" : ""}`}>
+              <button type="button" className="main" onClick={() => { setDate(d.date); setView("day"); }} aria-label={`${plMD(d.date)} ${PL_WK[dw]}요일 열기`}>
+                <span className="dn"><em>{PL_WK[dw]}</em><b style={{ color: off ? "var(--t3)" : undefined }}>{Number(d.date.slice(8))}</b></span>
+                <span className="grow" style={{ minWidth: 0 }}>
+                  <span className="nm" style={{ color: off ? "var(--t3)" : undefined }}>{th && !off && <i className="p2-i" style={{ background: K[th.track] }} />}{th && !off ? th.track : "쉬는 날"}</span>
+                  <span className="sm">{bl.length ? `${d.date === today ? "오늘 · " : ""}${bl.length}개 중 ${bl.filter(b => b.done).length}개` : ""}</span>
+                </span>
+              </button>
+              <button type="button" className="dotbtn" aria-label={`${PL_WK[dw]} 학습 ${d.study ? "완료" : off ? "없음" : "예정"}`} aria-pressed={d.study} onClick={() => updateLog(d.date, x => ({ ...x, steps: { ...(x.steps || {}), s0: !d.study, s1: !d.study, s2: !d.study }, blocks: { ...(x.blocks || {}), study: { ...((x.blocks || {}).study || {}), done: !d.study } } }))}>{dot(d.study, off)}</button>
+              <button type="button" className="dotbtn" aria-label={`${PL_WK[dw]} 노트 ${d.note ? "완료" : off ? "없음" : "예정"}`} aria-pressed={d.note} onClick={() => setStep(d.date, "s2", !d.note)}>{dot(d.note, off)}</button>
+            </div>); })}
+          <div className="p2-dayhd" style={{ paddingTop: 10 }}><span className="p2-mute" style={{ textAlign: "left" }}>기준 · 주 {studyTarget}회</span><b>{stats.study} / {studyTarget}</b><b>{stats.note} / {noteTarget}</b></div>
+        </section>
+        <div className="p2-sec" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <button type="button" className={`p2-banner${anchorDone ? "" : " hot"}`} onClick={() => { setGoalsOpen("month"); setView("road"); }}><b>{Number(ym.slice(5))}월 외부 앵커 {anchorDone ? "완료" : "미정"}</b><span>루틴 {routines.filter(r => (monthRec.routines || {})["r_" + r.id]).length} / {routines.length} ›</span></button>
+          {week && (wTodo
+            ? <button type="button" className="p2-btn soft lg" onClick={() => onOpenSchedule && onOpenSchedule(week.startDate)}>W{week.weekNo} 일정에 있음{wTodo.done ? " · 완료" : ""} — 일정에서 보기</button>
+            : <><button type="button" className="p2-btn lg" onClick={() => sendToTodos("week", week, { date: week.startDate, endDate: week.endDate, text: `W${week.weekNo} ${week.topic}${week.weeklyGoal ? ` — ${week.weeklyGoal}` : ""}`, memo: `[${plan.short || plan.title} W${week.weekNo}] 산출물: ${plArr(week.outputs).map(o => o.text).join(" · ")}${week.appointment ? ` / 외부 약속: ${week.appointment}` : ""}` })}>W{week.weekNo} 일정으로 보내기</button>
+              <div className="p2-mute" style={{ textAlign: "center" }}>{plMD(week.startDate)}~{plMD(week.endDate)} 일정 1건 · 노션 페이지 1개</div></>)}
+        </div>
+      </>);
+    };
+
+    // ── 목표 ──
+    const goalsView = () => {
+      const years = P.years.filter(y => y.planId === plan.id).sort((a, b) => a.yearIndex - b.yearIndex);
+      const span = plDate(plan.endDate) - plDate(plan.startDate);
+      const pos = Math.max(0, Math.min(1, (plDate(today) - plDate(plan.startDate)) / span));
+      const nowYear = plRangeOf(P.years, plan, today), nowQ = plRangeOf(P.quarters, plan, today);
+      const scores = P.scores.filter(s => s.planId === plan.id).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      const last = scores.length ? scores[scores.length - 1] : null;
+      const proofs = plArr(plan.proofs);
+      const W = 350, H = 150, L = 26, T = 10, B = 40;
+      const t0 = plDate(plan.startDate).getTime(), t1 = plDate(plan.endDate).getTime();
+      const X = (d) => L + (W - L) * Math.max(0, Math.min(1, (plDate(d).getTime() - t0) / (t1 - t0)));
+      const Y = (v) => T + (H - T - B) * (1 - Math.max(0, Math.min(100, v)) / 100);
+      const tg = plArr(plan.targets).sort((a, b) => a.yearIndex - b.yearIndex);
+      const tPts = tg.length ? [[plan.startDate, tg[0].from], ...tg.map(t => { const y = years.find(v => v.yearIndex === t.yearIndex); return [y && y.endDate < plan.endDate ? y.endDate : plan.endDate, t.to]; })] : [];
+      const addScore = () => {
+        const v = Number(String(scoreDraft.score).replace(/[^\d.]/g, ""));
+        if (!scoreDraft.date || String(scoreDraft.score).trim() === "" || !isFinite(v) || v < 0 || v > 100) { showToast("점수는 0~100 사이 숫자로 넣어 주세요"); return; }
+        const id = `${plan.id}-sc${Date.now()}`;
+        upsert("scores", id, x => x, () => ({ id, planId: plan.id, date: scoreDraft.date, score: Math.round(v * 10) / 10, note: scoreDraft.note || "", createdAt: Date.now() }));
+        setScoreDraft(d => ({ ...d, score: "", note: "" }));
+      };
+      const dw = plDow(today), wkMon = plMonday(today), wkStats = plWeekStats(P, plan, wkMon);
+      const mRec = P.monthReviews.find(m => m.id === monthId(today.slice(0, 7))) || { routines: {} };
+      const aDone = routines.some(r => r.anchor && (mRec.routines || {})["r_" + r.id]);
+      const qDone = nowQ ? itemDone(nowQ, "quarter") : false;
+      const rules = P.checkRules.filter(r => r.planId === plan.id).map(r => {
+        let s = "예정";
+        if (r.cycle === "매주 금") s = wkStats.study >= studyTarget && wkStats.note >= noteTarget ? "충족" : (dw === 5 || dw === 6 || dw === 0) ? "주의" : "예정";
+        else if (r.cycle === "매월 말") s = aDone ? "충족" : Number(today.slice(8)) >= 22 ? "주의" : "예정";
+        else if (r.cycle === "매 분기") s = qDone ? "충족" : nowQ && plAdd(nowQ.endDate, -21) <= today ? "주의" : "예정";
+        return { ...r, s };
+      });
+      const exp = (k, label, body) => (
+        <div className="p2-exp"><button type="button" aria-expanded={goalsOpen === k} onClick={() => setGoalsOpen(goalsOpen === k ? "" : k)}><span>{label}</span><span className="p2-mute">{goalsOpen === k ? "접기" : "›"}</span></button>{goalsOpen === k && <div className="bd">{body}</div>}</div>
+      );
+      const ymT = ym;
+      return (<>
+        <div className="p2-head"><div className="grow"><div className="p2-kick">{plan.startDate.replace(/-/g, ".")} – {plan.endDate.replace(/-/g, ".")}{plan.weeklyHours ? ` · ${plan.weeklyHours}` : ""}</div><h2 className="p2-title" style={{ fontSize: 24 }}>{plan.title}</h2></div></div>
+        <div className="p2-sec" role="img" aria-label={`전체 기간 중 ${Math.round(pos * 100)}% 지점`} style={{ paddingTop: 8 }}>
+          <div style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${Math.max(1, years.length)}, minmax(0,1fr))`, gap: 3 }}>
+            {years.map((y, i) => <div key={y.id} style={{ height: 6, borderRadius: i === 0 ? "3px 0 0 3px" : i === years.length - 1 ? "0 3px 3px 0" : 0, background: nowYear && nowYear.id === y.id ? "var(--t4)" : "var(--s2)" }} />)}
+            <span style={{ position: "absolute", left: `calc(${pos * 100}% - ${pos * 16}px)`, top: -5, width: 16, height: 16, borderRadius: 8, background: "var(--acc)", boxShadow: "0 0 0 4px var(--g)" }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, years.length)}, minmax(0,1fr))`, fontSize: 12, color: "var(--t3)", marginTop: 8 }}>
+            {years.map((y, i) => <span key={y.id} style={{ textAlign: i === 0 ? "left" : i === years.length - 1 ? "right" : "center", color: nowYear && nowYear.id === y.id ? "var(--t1)" : undefined, fontWeight: nowYear && nowYear.id === y.id ? 700 : 400 }}>{y.yearIndex}년차 · {y.theme}</span>)}
+          </div>
+        </div>
+        {nowQ && (
+          <section className="p2-box">
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b style={{ fontSize: 13, color: "var(--acct)" }}>지금 · {nowQ.yearIndex}년차 Q{nowQ.q}</b><span className="p2-mute">{nowQ.mode} · 주 {nowQ.weeklyHours}</span></div>
+            <div className="p2-h" style={{ fontSize: 18 }}>{nowQ.task}</div>
+            <div className="p2-row" style={{ borderTop: "1px solid var(--line)", borderBottom: 0, paddingTop: 10, minHeight: 52 }}>
+              <button type="button" className="p2-chkbtn" aria-label={`분기 산출물 ${qDone ? "완료 취소" : "완료"}`} aria-pressed={qDone} onClick={() => toggleItemDone(nowQ, "quarter", "quarters")}><Chk on={qDone} size={24} /></button>
+              <span className="grow"><span className="p2-mute" style={{ display: "block" }}>분기 산출물</span><b style={{ fontSize: 15, lineHeight: 1.4, textDecoration: qDone ? "line-through" : "none" }}>{nowQ.deliverable}</b></span>
+            </div>
+            <div className="p2-mute" style={{ fontSize: 13, color: "var(--t2)" }}>외부 앵커 · {nowQ.anchor}</div>
+          </section>
+        )}
+        <section className="p2-sec"><div className="p2-sechd"><h3>3대 증명</h3></div>
+          {proofs.map((p, i) => (
+            <div key={p.key} className="p2-row" style={{ minHeight: 56 }}><span className="grow"><span style={{ display: "block" }}>{p.label}</span><span className="p2-mute">{p.metric}</span></span>
+              <b style={{ fontSize: 17 }}>{i === 0 ? (last ? `${last.score}%` : "— %") : `${p.value || 0}${p.target ? ` / ${p.target}` : "건"}`}</b></div>
+          ))}
+        </section>
+        <section className="p2-sec" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="p2-sechd"><h3>진단 점수</h3><span>점선 · 목표 경로{tPts.length ? ` ${tPts[0][1]} → ${tPts[tPts.length - 1][1]}` : ""}</span></div>
+          <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ maxWidth: 520, display: "block" }} role="img" aria-label={scores.length ? `점수 기록 ${scores.length}개, 최근 ${last.score}%` : "아직 점수 기록 없음"}>
+            {[100, 50, 0].map(v => <g key={v}><line x1={L} x2={W} y1={Y(v)} y2={Y(v)} stroke="var(--line)" /><text x={L - 5} y={Y(v) + 4} fontSize="10" fill="var(--t3)" textAnchor="end">{v}</text></g>)}
+            {years.map(y => <text key={y.id} x={(X(y.startDate < plan.startDate ? plan.startDate : y.startDate) + X(y.endDate > plan.endDate ? plan.endDate : y.endDate)) / 2} y={H - 14} fontSize="10" fill="var(--t3)" textAnchor="middle">{y.yearIndex}년차</text>)}
+            {tPts.length > 1 && <polyline points={tPts.map(([d, v]) => `${X(d)},${Y(v)}`).join(" ")} fill="none" stroke="var(--acc)" strokeWidth="2" strokeDasharray="5 5" />}
+            {scores.length > 1 && <polyline points={scores.map(s => `${X(s.date)},${Y(s.score)}`).join(" ")} fill="none" stroke="var(--t1)" strokeWidth="2" />}
+            {scores.map(s => <circle key={s.id} cx={X(s.date)} cy={Y(s.score)} r="4" fill="var(--t1)" />)}
+          </svg>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 88px auto", gap: 8 }}>
+            <input type="date" aria-label="날짜" className="p2-in" value={scoreDraft.date} onChange={e => setScoreDraft(d => ({ ...d, date: e.target.value }))} />
+            <input type="text" inputMode="decimal" aria-label="점수 (%)" placeholder="점수 %" className="p2-in" value={scoreDraft.score} onChange={e => setScoreDraft(d => ({ ...d, score: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") addScore(); }} />
+            <button type="button" className="p2-btn soft" onClick={addScore}>기록</button>
+          </div>
+          {scores.slice().reverse().slice(0, 4).map(s => (
+            <div key={s.id} className="p2-row"><b style={{ width: 56 }}>{s.score}%</b><span className="grow p2-mute" style={{ fontSize: 13 }}>{s.date.replace(/-/g, ".")}{s.note ? ` · ${s.note}` : ""}</span>
+              <button type="button" className="p2-link" onClick={() => { if (window.confirm("이 점수 기록을 지울까요?")) setPlanner(prev => { const p = plannerNormalize(prev); return { ...p, scores: p.scores.filter(x => x.id !== s.id) }; }); }}>지우기</button></div>
+          ))}
+        </section>
+        <section className="p2-sec"><div className="p2-sechd"><h3>점검</h3></div>
+          {rules.map(r => <div key={r.id} className="p2-row" style={{ minHeight: 52 }}><span className="p2-mute" style={{ width: 70, flex: "none", fontSize: 13 }}>{r.cycle}</span><span className="grow" style={{ fontSize: 14 }}>{r.standard}</span><b style={{ fontSize: 12, color: r.s === "주의" ? "var(--acct)" : r.s === "충족" ? "var(--ok)" : "var(--t3)" }}>{r.s}</b></div>)}
+        </section>
+        <section className="p2-sec" style={{ paddingTop: 10 }}>
+          {exp("years", "연차·분기 계획 전체", (<>
+            {years.map(y => (
+              <div key={y.id} style={{ padding: "10px 0" }}>
+                <b style={{ fontSize: 15 }}>{y.yearIndex}년차 · {y.theme}</b> <span className="p2-mute">{y.period}</span>
+                {[...plArr(plan.tracks).map(t => t.key), "진단"].map(k => (y.items || {})[k] ? <div key={k} className="p2-lane"><span style={{ color: K[k] }}>{k}</span><span>{y.items[k]}</span></div> : null)}
+                {P.quarters.filter(q => q.planId === plan.id && q.yearIndex === y.yearIndex).sort((a, b) => a.q - b.q).map(q => { const dn = itemDone(q, "quarter"); return (
+                  <div key={q.id} className="p2-row" style={{ alignItems: "flex-start", padding: "10px 0" }}>
+                    <button type="button" className="p2-chkbtn" aria-label={`Q${q.q} 산출물 ${dn ? "완료 취소" : "완료"}`} aria-pressed={dn} onClick={() => toggleItemDone(q, "quarter", "quarters")}><Chk on={dn} /></button>
+                    <span className="grow" style={{ fontSize: 14, lineHeight: 1.5 }}><b>Q{q.q}</b> <span className="p2-mute">{q.months} · {q.mode} · 주 {q.weeklyHours}</span><br />{q.deliverable}<br /><span className="p2-mute">{q.task} / 앵커: {q.anchor}</span></span>
+                  </div>); })}
+              </div>
+            ))}
+          </>))}
+          {exp("month", `${Number(ymT.slice(5))}월 루틴·월간 1페이지`, (<>
+            {routines.map(r => { const k = "r_" + r.id, on = !!(monthRec.routines || {})[k], dd = plRoutineDate(r.rule, ymT); return (
+              <div key={r.id} className="p2-row" style={{ minHeight: 52 }}>
+                <button type="button" className="p2-chkbtn" aria-label={`${r.task} ${on ? "완료 취소" : "완료"}`} aria-pressed={on} onClick={() => updateMonth(ymT, m => ({ ...m, routines: { ...(m.routines || {}), [k]: !on } }))}><Chk on={on} /></button>
+                <span className="grow" style={{ fontSize: 14, textDecoration: on ? "line-through" : "none" }}>{r.task}</span>
+                <span className="p2-mute" style={{ flex: "none" }}>{dd ? (dd.from === dd.to ? plMD(dd.from) : `${plMD(dd.from)}~${plMD(dd.to)}`) : r.when}</span>
+              </div>); })}
+            {[["learned", "배운 것 3"], ["unknown", "모르는 것 3"], ["nextAnchor", "다음 달 앵커"]].map(([k, l]) => (
+              <div key={k} className="p2-fld" style={{ marginTop: 10 }}><label htmlFor={`p2-m-${k}`}>{l}</label><textarea id={`p2-m-${k}`} rows={k === "nextAnchor" ? 1 : 3} value={monthRec[k] || ""} onChange={e => { const v = e.target.value; updateMonth(ymT, m => ({ ...m, [k]: v })); }} /></div>
+            ))}
+          </>))}
+          {exp("themes", "요일 주제", (<>
+            {P.themes.filter(t => t.planId === plan.id).sort((a, b) => a.weekday - b.weekday).map(t => <div key={t.id} className="p2-lane"><span style={{ color: K[t.track] }}>{PL_WK[t.weekday]} · {t.track}</span><span>{t.description} <span className="p2-mute">{t.hours}</span></span></div>)}
+            <div className="p2-mute" style={{ paddingTop: 8 }}>하루 틀은 오늘 화면에서 블록을 고친 뒤 「오늘 시간표를 매일 틀로 저장」을 누르면 바뀝니다.</div>
+          </>))}
+        </section>
+      </>);
+    };
+
+    // ── PC 왼쪽: 달력 · 보관함 · 보이는 줄 ──
+    const sideCal = () => {
+      const first = `${ym}-01`, gs = plAdd(first, -plDow(first));
+      const cells = []; for (let i = 0; i < 42; i++) { const d = plAdd(gs, i); if (i >= 35 && d.slice(0, 7) !== ym) break; cells.push(d); }
+      return (
+        <section aria-label="달력">
+          <div className="p2-sechd"><h3>{Number(ym.slice(5))}월</h3><span>{ym.slice(0, 4)}</span></div>
+          <div className="p2-mcal">
+            {["일", "월", "화", "수", "목", "금", "토"].map(w => <span key={w} className="w">{w}</span>)}
+            {cells.map(d => <button key={d} type="button" className={`${d === date ? "sel" : ""}${d === today ? " today" : ""}${d.slice(0, 7) !== ym ? " out" : ""}`} aria-label={plMD(d)} aria-pressed={d === date} onClick={() => { setDate(d); setSel(null); }}>{Number(d.slice(8))}</button>)}
+          </div>
+        </section>
+      );
+    };
+
+    const body = tab === "today" ? todayView() : tab === "week" ? weekView() : goalsView();
+    return (
+      <div className={`p2${isDark ? " dark" : ""}${desk ? " desk" : ""}${narrow ? " narrow" : ""}`} ref={boxRef}>
+        <style>{P2_CSS}</style>
+        {tabs}
+        {desk && tab === "today" ? (
+          <div className="p2-3col">
+            <aside className="p2-left">
+              {sideCal()}
+              {inbox}
+              <section style={{ marginTop: "auto" }}>
+                <h3 className="p2-lbl">보이는 줄</h3>
+                <label className="p2-sw sm"><span><b>플래너</b></span><input type="checkbox" checked={laneOn.pl} onChange={() => setLaneOn(v => ({ ...v, pl: !v.pl || !v.cal ? true : false }))} /></label>
+                <label className="p2-sw sm"><span><b>캘린더 일정</b></span><input type="checkbox" checked={laneOn.cal} onChange={() => setLaneOn(v => ({ ...v, cal: !v.cal || !v.pl ? true : false }))} /></label>
+              </section>
+            </aside>
+            <main className="p2-mid">{body}</main>
+            <aside className="p2-right" aria-label="고른 항목">
+              {selBlock ? detail(selBlock) : (
+                <div className="p2-detail">
+                  <div className="p2-mute" style={{ lineHeight: 1.6 }}>블록이나 일정을 누르면 여기에서 시간·이름·메모를 고칩니다. 끌면 시간이 옮겨집니다.</div>
+                  <div className="p2-stats" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}><div><span>이번 주 학습</span><b>{stats.study} / {studyTarget}</b></div><div><span>이번 주 노트</span><b>{stats.note} / {noteTarget}</b></div></div>
+                </div>
+              )}
+            </aside>
+          </div>
+        ) : (
+          <div className="p2-one">{body}</div>
+        )}
+        {!(desk && tab === "today") && selBlock && tab === "today" && (
+          <div className="p2-sheetwrap" onClick={e => { if (e.target === e.currentTarget) setSel(null); }}><div className="p2-sheet" role="dialog" aria-label="블록 고치기"><div className="grab" aria-hidden="true" />{detail(selBlock)}</div></div>
+        )}
+        {ritual === "morning" && morning()}
+        {ritual === "shutdown" && shutdown()}
+      </div>
+    );
+  };
+
+  if (ui === "v2") return renderV2();
 
   if (desk) return renderDesk();
 
@@ -35000,7 +35768,7 @@ function ScheduleTab({ todos, setTodos, notes = [], setNotes, dailyNotes = {}, s
 
       {schedMode === "planner" ? (
         <PlannerView planner={planner} setPlanner={setPlanner} todos={todos} setTodos={setTodos} toggleTodo={toggleTodo} notionCreate={notionCreate} darkMode={darkMode}
-          onRenameTodo={updateTodo} jump={plannerJump}
+          onRenameTodo={updateTodo} onToggleCalendar={toggleCalendarVisible} onRemoveTodo={removeTodo} jump={plannerJump}
           onOpenSchedule={(d) => { setSchedMode("schedule"); setScheduleSub("calendar"); jumpToDate(d); }} />
       ) : (<>
       {scheduleSub === "calendar" && (<>

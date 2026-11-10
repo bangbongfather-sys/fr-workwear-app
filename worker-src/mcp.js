@@ -596,7 +596,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-09-tt-date", note: "타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-10-planner-v2", note: "플래너 새 화면(오늘 두 줄·주간·목표, 아침 계획·하루 마감) · 타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
