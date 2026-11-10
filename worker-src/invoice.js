@@ -51,7 +51,8 @@ export async function invoiceOcr(env, body) {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", signal: ctrl.signal,
       headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model, max_tokens: 4000, messages: [{ role: "user", content }] }),
+      // 생각(thinking) 분량도 max_tokens 에 들어간다 — 4000이면 품목 많은 명세서의 JSON이 중간에 끊길 수 있다
+      body: JSON.stringify({ model, max_tokens: 16000, messages: [{ role: "user", content }] }),
     });
     clearTimeout(tm);
     const j = await r.json().catch(() => ({}));

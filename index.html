@@ -1979,6 +1979,29 @@ window.fetch = (input, init) => {
   } catch { /* 패치 실패 시 원본 fetch로 */ }
   return _njFetch(input, init);
 };
+// ─── Claude API 호출 (브라우저에서 직접) ───
+// 앱의 AI 기능(ERP 캡쳐 인식·명세서 읽기·견적서/발주서 작성·세무 메일 읽기)이 모두 이 함수를 쓴다.
+// 모델을 바꿀 때는 CLAUDE_MODEL 한 줄만 고치면 된다. (서버 쪽 명세서 읽기·리서치는 worker-src 에 따로 있다)
+//
+// Sonnet 4.6 → 5.5 로 올리며 달라진 점을 여기서 한 번에 처리한다:
+//  · 생각(thinking)이 기본으로 켜져 있어 응답 첫 칸이 글이 아닐 수 있다 → 글 칸만 골라 읽는다
+//  · 생각 분량도 max_tokens 에 들어간다 → 한도를 넉넉히 (모자라면 표·문서가 중간에 끊긴다)
+//  · 안전 정책으로 답을 거절하면 오류가 아니라 stop_reason "refusal" 로 온다 → 먼저 확인
+// effort: 답하기 전에 얼마나 따져 볼지. 표 읽기는 "medium", 받은 값을 문서로 옮기는 일은 "low".
+const CLAUDE_MODEL = "claude-sonnet-5-5";
+const CLAUDE_MODEL_LABEL = "Claude Sonnet 5.5";
+async function claudeText(apiKey, content, { effort = "medium", maxTokens = 16000 } = {}) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": String(apiKey || "").trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens, output_config: { effort }, messages: [{ role: "user", content }] }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j.error && j.error.message) || `API 오류 (HTTP ${res.status})`);
+  if (j.stop_reason === "refusal") throw new Error("AI가 이 요청을 처리하지 않았습니다(안전 정책). 내용을 바꿔 다시 시도해 주세요.");
+  if (j.stop_reason === "max_tokens") throw new Error("답이 너무 길어 중간에 끊겼습니다. 분량(사진·품목 수)을 줄여 다시 시도해 주세요.");
+  return (j.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+}
 const GMAIL_CLIENT_ID = "483707566941-58n12qi4jeepusbeg09n26iurt0199u7.apps.googleusercontent.com";
 const GMAIL_SCOPES = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.send";
 const DRIVE_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile";
@@ -20521,14 +20544,7 @@ function InvoiceIntakeModal({ onClose, fabricIntakes = [], setFabricIntakes, sup
       if (r && r.ok) out = r;
       else if (r && r.code === "no_key" && apiKey.trim()) {
         const prompt = INVOICE_PROMPT_CLIENT(supplier, knownNames) + (images.length > 1 ? `\n- 사진 ${images.length}장은 같은 명세서의 여러 쪽이거나 여러 장입니다. 모두 합쳐 items 하나로 만든다.` : "");
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
-          body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 4000, messages: [{ role: "user", content: [...images.map(im => ({ type: "image", source: { type: "base64", media_type: im.type, data: im.data } })), { type: "text", text: prompt }] }] }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error((j.error && j.error.message) || `API 오류 (HTTP ${res.status})`);
-        out = parseInvoiceJsonClient((j.content || []).filter(b => b.type === "text").map(b => b.text).join("\n"));
+        out = parseInvoiceJsonClient(await claudeText(apiKey, [...images.map(im => ({ type: "image", source: { type: "base64", media_type: im.type, data: im.data } })), { type: "text", text: prompt }]));
       } else if (r && r.code === "no_key") throw new Error("사진 읽기에는 Claude API 키가 필요해요. 견적 관리 탭에서 API 키를 넣어 주세요.");
       else throw new Error((r && r.error) || "서버에 연결하지 못했습니다");
       if (!out.items.length) { setErr(out.memo ? `품목을 읽지 못했어요 — ${out.memo}` : "품목을 읽지 못했어요. 표가 잘 보이게 다시 찍어 주세요."); return; }
@@ -20833,27 +20849,14 @@ function PurchaseListView({ fabricIntakes, setFabricIntakes, materials, laborIte
     }
     setImgParsing(true);
     try {
-      // 캡쳐 이미지를 OCR 친화 크기로 압축 (너무 줄이면 글자 뭉개짐 → 1600px/0.85)
-      const dataUrl = await compressImage(file, 1600, 0.85);
+      // 캡쳐는 되도록 원래 크기로 — 모델이 긴 변 2576px까지 그대로 읽는다 (줄이면 촘촘한 표의 숫자가 뭉개진다)
+      const dataUrl = await compressImage(file, 2576, 0.9);
       const m = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
       if (!m) throw new Error("이미지 변환 실패");
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6", max_tokens: 3000,
-          messages: [{ role: "user", content: [
-            { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
-            { type: "text", text: "이 이미지는 ERP/엑셀의 거래내역 표 캡쳐입니다. 각 데이터 행을 아래 형식의 탭 구분 텍스트(TSV)로 추출하세요.\n\n형식(한 줄에 한 품목): 품목명\\t수량\\t단가\\t합계\n\n규칙:\n- 헤더 행, 합계/소계 행, 부가세 행은 제외\n- 숫자는 콤마·원 없이 순수 숫자만\n- 합계 컬럼이 이미지에 없으면 수량×단가를 계산해서 넣기\n- 품목명에 사이즈 표기(예: 105, XL)가 별도 컬럼이면 품목명 끝에 붙이지 말고 무시\n- 표가 아니거나 품목을 찾을 수 없으면 정확히 NONE 만 출력\n- 다른 설명 없이 TSV 텍스트만 출력" },
-          ]}],
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error?.message || `API 오류 (HTTP ${res.status})`);
-      }
-      const data = await res.json();
-      const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+      const text = await claudeText(apiKey, [
+        { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } },
+        { type: "text", text: "이 이미지는 ERP/엑셀의 거래내역 표 캡쳐입니다. 각 데이터 행을 아래 형식의 탭 구분 텍스트(TSV)로 추출하세요.\n\n형식(한 줄에 한 품목): 품목명\\t수량\\t단가\\t합계\n\n규칙:\n- 헤더 행, 합계/소계 행, 부가세 행은 제외\n- 숫자는 콤마·원 없이 순수 숫자만\n- 합계 컬럼이 이미지에 없으면 수량×단가를 계산해서 넣기\n- 품목명에 사이즈 표기(예: 105, XL)가 별도 컬럼이면 품목명 끝에 붙이지 말고 무시\n- 표가 아니거나 품목을 찾을 수 없으면 정확히 NONE 만 출력\n- 다른 설명 없이 TSV 텍스트만 출력" },
+      ]);
       if (!text || text === "NONE") { showToast("이미지에서 거래내역 표를 찾지 못했습니다.\n표가 선명하게 보이도록 다시 캡쳐해 주세요."); return; }
       setPasteText(text); // → 기존 파싱·미리보기·단가표 매칭 파이프라인이 이어받음
     } catch (e) {
@@ -25197,15 +25200,9 @@ ${productList}
 6. 마크다운 형식 사용`;
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
-      });
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
-      const data = await res.json();
+      const docText = await claudeText(apiKey, prompt, { effort: "low" });
       // AI 응답에 제품 이미지 자동 부착 (사용자 토글 적용)
-      let aiText = data.content[0].text;
+      let aiText = docText;
       const itemsWithImage = includeImages ? items.filter(({ p }) => p.image && typeof p.image === "string" && p.image.length > 50) : [];
       if (itemsWithImage.length > 0) {
         aiText += `\n\n---\n\n## 제품 이미지\n\n${itemsWithImage.map(({ p }) => `![${p.name}](${p.image})`).join("\n\n")}\n`;
@@ -25296,14 +25293,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
 - 합계 금액은 굵게 강조
 - 끝에 수평선 + "본 발주서는 정식 계약 효력을 가지며..." 면책 한 줄`;
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 3000, messages: [{ role: "user", content: prompt }] }),
-      });
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err?.error?.message || `HTTP ${res.status}`); }
-      const data = await res.json();
-      setPoDraft({ ...poDraft, body: data.content[0].text });
+      const docText = await claudeText(apiKey, prompt, { effort: "low" });
+      setPoDraft({ ...poDraft, body: docText });
     } catch (e) { setPoApiError(`오류: ${e.message}`); }
     finally { setPoGenerating(false); }
   }, [apiKey, poDraft]);
@@ -28382,7 +28373,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   }}>
                   {generating ? "⏳ 생성 중..." : apiKey.trim() ? <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="sparkles" size={14}/>AI 견적서 생성</span> : <span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="document" size={14}/>견적서 생성</span>}
                 </button>
-                <div style={{ fontSize: 11, color: T.empty, marginTop: 8, textAlign: "center" }}>claude-sonnet-4-6 모델</div>
+                <div style={{ fontSize: 11, color: T.empty, marginTop: 8, textAlign: "center" }}>{CLAUDE_MODEL_LABEL} 모델</div>
               </div>
 
               {/* ── 선택한 제품 요약 (우측 하단) ──
@@ -39331,14 +39322,7 @@ JSON 외 텍스트 금지.
 
 제목: ${mail.subject}
 본문: ${body}`;
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey.trim(), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-calls": "true" },
-        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
-      });
-      if (!res.ok) throw new Error(`Claude API ${res.status}`);
-      const data = await res.json();
-      const raw = (data.content || []).map(c => c.text || "").join("");
+      const raw = await claudeText(apiKey, prompt, { effort: "low" });
       const m = raw.match(/\[[\s\S]*\]/);
       const parsed = m ? JSON.parse(m[0]) : [];
       if (!Array.isArray(parsed) || parsed.length === 0) { setMailImport(null); showToast("이 메일에서 납부 정보를 찾지 못했습니다"); return; }
