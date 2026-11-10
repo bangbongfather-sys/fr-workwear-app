@@ -38086,11 +38086,33 @@ function hrCalcRow(src) {
   return { base, allow, meal, taxable, gross, np, hi, lt, ei, it, lo, adv, ded, net: gross - ded,
     manual: { np: hrHas(s.np), hi: hrHas(s.hi), lt: hrHas(s.lt), ei: hrHas(s.ei), lo: hrHas(s.lo) } };
 }
-// 급여대장의 한 줄 입력값: 직원 기본값 위에 그 달에 고친 값(over)을 얹는다
-function hrRowSource(emp, over) {
+// 기본급 변경 이력 — emp.baseHist = [{ from: "2026-11", base: 3200000 }, …] (from 달부터 그 금액).
+// 이력이 없으면 emp.base 하나로 본다. emp.base 는 늘 "가장 최근에 정한 금액"으로 맞춰 둔다.
+function hrBaseHist(emp) {
+  return (Array.isArray(emp && emp.baseHist) ? emp.baseHist : []).filter(h => h && h.from).map(h => ({ from: String(h.from), base: hrNum(h.base) })).sort((a, b) => a.from.localeCompare(b.from));
+}
+// ym 달에 적용되는 기본급
+function hrBaseAt(emp, ym) {
+  const hist = hrBaseHist(emp);
+  if (!hist.length || !ym) return hrNum(emp && emp.base);
+  let v = hist[0].base;
+  for (const h of hist) if (h.from <= ym) v = h.base;
+  return v;
+}
+// fromYm 달부터 기본급을 newBase 로 바꾼 직원 기록을 돌려준다 (그 앞 달은 예전 금액 그대로)
+function hrApplyBase(emp, fromYm, newBase) {
+  const nb = hrNum(newBase);
+  let hist = hrBaseHist(emp);
+  if (!hist.length) hist = [{ from: "0000-00", base: hrNum(emp.base) }];
+  hist = hist.filter(h => h.from < fromYm);
+  if (!hist.length || hist[hist.length - 1].base !== nb) hist.push({ from: fromYm, base: nb });
+  return { ...emp, base: hist[hist.length - 1].base, baseHist: hist, updatedAt: new Date().toISOString() };
+}
+// 급여대장의 한 줄 입력값: 직원 기본값 위에 그 달에 고친 값(over)을 얹는다. ym 을 주면 그 달의 기본급(변경 이력)을 쓴다.
+function hrRowSource(emp, over, ym) {
   const o = over || {};
   return {
-    base: hrHas(o.base) ? o.base : (emp.base || 0),
+    base: hrHas(o.base) ? o.base : hrBaseAt(emp, ym),
     allow: hrHas(o.allow) ? o.allow : (emp.allow || 0),
     meal: hrHas(o.meal) ? o.meal : (hrHas(emp.meal) ? emp.meal : HR_RATES.mealFree),
     it: hrHas(o.it) ? o.it : (emp.incomeTax || 0),
@@ -38210,7 +38232,7 @@ function hrMonthRows(emps, rec, ym, payDay) {
   return (emps || []).filter(e => hrEmployedIn(e, ym))
     .sort((a, b) => HR_BIZ.indexOf(a.biz) - HR_BIZ.indexOf(b.biz) || String(a.joined).localeCompare(String(b.joined)))
     .map(e => ({ empId: e.id, name: e.name, role: e.role, biz: e.biz, emp: e, payDate: hrPayDate(ym, hrEmpPayDay(e, payDay)),
-      calc: hrCalcRow(hrRowSource(e, rec && rec.rows && rec.rows[e.id])), locked: false }));
+      calc: hrCalcRow(hrRowSource(e, rec && rec.rows && rec.rows[e.id], ym)), locked: false }));
 }
 const hrSumRows = (rows) => rows.reduce((t, r) => {
   for (const k of ["base", "allow", "meal", "gross", "np", "hi", "lt", "ei", "it", "lo", "adv", "ded", "net"]) t[k] = (t[k] || 0) + r.calc[k];
@@ -38268,6 +38290,9 @@ function HrEmployeeModal({ draft, setDraft, onSave, onClose, onDelete }) {
     <label style={{ display: "block" }}><span style={hrLabel}>{label}</span>{el}{hint && <span style={{ display: "block", fontSize: 11.5, color: "var(--text3)", marginTop: 5, lineHeight: 1.5 }}>{hint}</span>}</label>
   );
   const preview = hrCalcRow(hrRowSource(draft, null));
+  const thisYm = hrYmd(new Date()).slice(0, 7);
+  const baseChanged = !!draft.id && draft._base0 !== undefined && hrNum(draft.base) !== hrNum(draft._base0);
+  const baseHist = draft.id ? hrBaseHist({ baseHist: draft.baseHist }) : [];
   return (
     <HrModal title={draft.id ? `${draft.name || "직원"} 정보` : "직원 추가"} onClose={onClose}
       footer={<>
@@ -38289,7 +38314,8 @@ function HrEmployeeModal({ draft, setDraft, onSave, onClose, onDelete }) {
       <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--divider)" }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text1)", marginBottom: 12 }}>매달 급여 기본값</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 14 }}>
-          {field("기본급", <input type="text" inputMode="numeric" value={hrWon(draft.base)} onChange={money("base")}/>)}
+          {field("기본급", <input type="text" inputMode="numeric" value={hrWon(draft.base)} onChange={money("base")}/>, draft.id ? "금액을 고치면 언제부터 적용할지 고릅니다" : null)}
+          {baseChanged && field("새 기본급 적용 시작", <input type="month" value={draft._baseFrom || thisYm} onChange={e => setDraft(d => ({ ...d, _baseFrom: e.target.value || thisYm }))}/>, `이 달부터 ${hrWon(draft.base)}원 · 그 앞 달은 ${hrWon(draft._base0)}원 그대로 (입력 실수를 고치는 거면 입사한 달로)`)}
           {field("수당 (과세)", <input type="text" inputMode="numeric" value={hrWon(draft.allow)} onChange={money("allow")}/>)}
           {field("식대", <input type="text" inputMode="numeric" value={hrWon(draft.meal)} onChange={money("meal")}/>, "월 20만 원까지 비과세")}
           {field("소득세 (월)", <input type="text" inputMode="numeric" value={hrWon(draft.incomeTax)} onChange={money("incomeTax")}/>, "홈택스 간이세액표 금액")}
@@ -38305,6 +38331,12 @@ function HrEmployeeModal({ draft, setDraft, onSave, onClose, onDelete }) {
           <span style={{ fontSize: 12 }}> (국민연금 {hrWon(preview.np)} · 건강 {hrWon(preview.hi)} · 요양 {hrWon(preview.lt)} · 고용 {hrWon(preview.ei)} · 소득세 {hrWon(preview.it)} · 지방 {hrWon(preview.lo)})</span>
           {" "}= 실수령 <b style={{ color: "var(--accent-strong)" }}>{hrWon(preview.net)}원</b>
         </div>
+        {baseHist.length > 1 && (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: "var(--text2)", lineHeight: 1.7, fontVariantNumeric: "tabular-nums" }}>
+            <b style={{ color: "var(--text1)" }}>기본급 변경 이력</b>
+            {baseHist.map((h, i) => <div key={h.from}>{i === 0 && h.from === "0000-00" ? "처음" : `${h.from.slice(0, 4)}년 ${Number(h.from.slice(5))}월부터`} · {hrWon(h.base)}원</div>)}
+          </div>
+        )}
       </div>
       <div style={{ marginTop: 16 }}>
         {field("메모", <textarea value={draft.memo || ""} onChange={set("memo")} rows={2} style={{ width: "100%", boxSizing: "border-box", borderRadius: 10, border: "none", background: "var(--input-bg)", color: "var(--input-color)", padding: "10px 14px", fontFamily: "inherit", fontSize: 14, resize: "vertical" }}/>)}
@@ -38564,9 +38596,11 @@ function HrOverview({ emps, lvs, pays, payDay, today, onEditEmp, onNewEmp, onLea
   );
 }
 
-function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
+function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today, onChangeBase, onEditEmp }) {
   const [ym, setYm] = useState(today.slice(0, 7));
   const [selId, setSelId] = useState(null);
+  const [baseAsk, setBaseAsk] = useState(null);   // 방금 기본급 칸을 고친 사람 → 「이 달부터 계속 적용」 물어보기
+  useEffect(() => { setBaseAsk(null); }, [ym]);
   const rec = pays[ym] || null;
   const closed = !!(rec && rec.status === "closed");
   const rows = hrMonthRows(emps, rec, ym, payDay);
@@ -38672,7 +38706,7 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
   const td = (child, opt = {}) => <td style={{ textAlign: "right", padding: opt.input ? "4px 4px" : "10px 10px", fontSize: 13, borderBottom: "1px solid var(--divider)", background: opt.bg, fontWeight: opt.strong ? 800 : 400, fontVariantNumeric: "tabular-nums", color: opt.muted ? "var(--text2)" : "var(--text1)" }}>{child}</td>;
   const cell = (r, field, srcField) => td(
     <HrNumCell value={r.calc[field]} manual={!r.locked && field in r.calc.manual ? r.calc.manual[field] : (!r.locked && rec && rec.rows && rec.rows[r.empId] && hrHas(rec.rows[r.empId][srcField || field]))}
-      disabled={r.locked} onCommit={v => setOver(r.empId, srcField || field, v)}/>, { input: !r.locked });
+      disabled={r.locked} onCommit={v => { setOver(r.empId, srcField || field, v); if (field === "base") setBaseAsk(v !== "" && r.emp && hrNum(v) !== hrBaseAt(r.emp, ym) ? { empId: r.empId, name: r.name, base: hrNum(v) } : null); }}/>, { input: !r.locked });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -38716,8 +38750,15 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
       <section className="card">
         <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
           <span className="section-header-title">급여대장 <span className="section-sub">— {rows.length}명</span></span>
-          <span style={{ fontSize: 12, color: "var(--text3)" }}>{closed ? "마감된 달은 고칠 수 없습니다" : "숫자를 누르면 이 달만 고쳐집니다 · 주황 밑줄 = 직접 고친 값 (지우면 자동)"}</span>
+          <span style={{ fontSize: 12, color: "var(--text3)" }}>{closed ? "마감된 달은 고칠 수 없습니다" : "숫자를 누르면 이 달만 고쳐집니다 · 주황 밑줄 = 직접 고친 값 (지우면 자동) · 기본급은 고친 뒤 「이 달부터 계속 적용」 가능"}</span>
         </div>
+        {baseAsk && !closed && (
+          <div role="status" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "0 0 12px", padding: "12px 14px", borderRadius: 12, background: "var(--accent-tonal)" }}>
+            <span style={{ flex: "1 1 220px", fontSize: 13.5, color: "var(--text1)", lineHeight: 1.5 }}><b>{baseAsk.name}</b> 님 기본급을 <b>{hrWon(baseAsk.base)}원</b>으로 고쳤습니다 — 지금은 {Number(ym.slice(5))}월에만 적용됩니다.</span>
+            <button type="button" onClick={() => { onChangeBase(baseAsk.empId, ym, baseAsk.base); setBaseAsk(null); }} style={hrBtn(true)}>{Number(ym.slice(5))}월부터 계속 적용</button>
+            <button type="button" onClick={() => setBaseAsk(null)} style={hrBtn(false)}>이 달만</button>
+          </div>
+        )}
         {rows.length === 0 ? (
           <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13.5, color: "var(--text3)" }}>{ymLabel}에 재직한 직원이 없습니다</div>
         ) : (
@@ -38763,7 +38804,10 @@ function HrPayroll({ emps, pays, setPayrolls, payDay, setPayDay, today }) {
           <section className="card" style={{ flex: "999 1 520px", minWidth: 0 }}>
             <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
               <span className="section-header-title">임금명세서 — {sel.name} {sel.role}</span>
-              <button type="button" onClick={shareSlip} style={hrBtn(false)}>명세서 이미지 보내기</button>
+              <span style={{ display: "inline-flex", gap: 8, flexWrap: "wrap" }}>
+                {sel.emp && onEditEmp && <button type="button" onClick={() => onEditEmp(sel.emp, ym)} style={hrBtn(false)}>기본급·급여 기본값 고치기</button>}
+                <button type="button" onClick={shareSlip} style={hrBtn(false)}>명세서 이미지 보내기</button>
+              </span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, fontVariantNumeric: "tabular-nums" }}>
               {[["지급", [["기본급", sel.calc.base], ...(sel.calc.allow ? [["수당·상여", sel.calc.allow]] : []), ["식대 (비과세)", sel.calc.meal]], ["지급계", sel.calc.gross]],
@@ -38944,12 +38988,31 @@ function HrTab({ employees = [], setEmployees, payrolls = {}, setPayrolls, leave
   const current = emps.filter(e => !e.leftAt || e.leftAt >= today);
 
   const newEmp = () => setEmpDraft({ id: null, name: "", role: "", biz: HR_BIZ[0], joined: today, probationEnd: "", birthday: "", phone: "", base: "", allow: "", meal: HR_RATES.mealFree, incomeTax: "", memo: "", leftAt: "" });
+  const editEmp = (e, fromYm) => setEmpDraft({ ...e, _base0: hrNum(e.base), ...(fromYm ? { _baseFrom: fromYm } : {}) });
+  // 급여대장에서 「이 달부터 계속 적용」 — 직원 기본급을 그 달부터 바꾸고, 그 달에만 고쳐 둔 값은 지운다
+  const changeBase = (empId, fromYm, base) => {
+    const e = emps.find(x => x.id === empId);
+    if (!e) return;
+    setEmployees(prev => (prev || []).map(x => x && x.id === empId ? hrApplyBase(x, fromYm, base) : x));
+    setPayrolls(prev => {
+      const p = prev && typeof prev === "object" && !Array.isArray(prev) ? prev : {};
+      const r = p[fromYm];
+      if (!r || r.status === "closed" || !r.rows || !r.rows[empId] || !hrHas(r.rows[empId].base)) return p;
+      const { base: _b, ...rest } = r.rows[empId];
+      return { ...p, [fromYm]: { ...r, rows: { ...r.rows, [empId]: rest } } };
+    });
+    showToast(`${e.name} 님 기본급을 ${Number(fromYm.slice(5))}월부터 ${hrWon(base)}원으로 바꿨습니다`, "success");
+  };
   const saveEmp = () => {
     const d = empDraft;
     if (!String(d.name || "").trim()) { showToast("이름을 넣어 주세요"); return; }
     if (!d.joined) { showToast("입사일을 넣어 주세요"); return; }
     if (d.birthday && !/^\d{2}-\d{2}$/.test(d.birthday)) { showToast("생일은 03-15 처럼 월-일로 넣어 주세요"); return; }
-    const rec = { ...d, name: d.name.trim(), role: String(d.role || "").trim(), base: hrNum(d.base), allow: hrNum(d.allow), meal: hrNum(d.meal), incomeTax: hrNum(d.incomeTax), updatedAt: new Date().toISOString() };
+    let rec = { ...d, name: d.name.trim(), role: String(d.role || "").trim(), base: hrNum(d.base), allow: hrNum(d.allow), meal: hrNum(d.meal), incomeTax: hrNum(d.incomeTax), updatedAt: new Date().toISOString() };
+    delete rec._base0; delete rec._baseFrom;
+    // 기본급을 바꿨으면 "언제부터"를 이력에 남긴다 — 그 앞 달 급여대장은 예전 금액 그대로
+    const orig = d.id ? emps.find(e => e.id === d.id) : null;
+    if (orig && hrNum(d.base) !== hrNum(orig.base)) rec = { ...rec, ...(({ base, baseHist }) => ({ base, baseHist }))(hrApplyBase(orig, /^\d{4}-\d{2}$/.test(d._baseFrom || "") ? d._baseFrom : today.slice(0, 7), d.base)) };
     if (rec.id) setEmployees(prev => (prev || []).map(e => e.id === rec.id ? rec : e));
     else setEmployees(prev => [...(prev || []), { ...rec, id: hrNewId(), createdAt: rec.updatedAt }]);
     setEmpDraft(null);
@@ -39006,8 +39069,8 @@ function HrTab({ employees = [], setEmployees, payrolls = {}, setPayrolls, leave
             style={{ height: 38, padding: "0 18px", borderRadius: 100, border: "none", background: on ? "var(--text1)" : "transparent", color: on ? "var(--surface)" : "var(--text2)", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{label}</button>;
         })}
       </nav>
-      {sub === "overview" && <HrOverview emps={emps} lvs={lvs} pays={pays} payDay={payDay} today={today} onEditEmp={e => setEmpDraft({ ...e })} onNewEmp={newEmp} onLeaveStatus={setLeaveStatus} setSub={setSub}/>}
-      {sub === "payroll" && <HrPayroll emps={emps} pays={pays} setPayrolls={setPayrolls} payDay={payDay} setPayDay={d => setHrSettings(s => ({ ...((s && typeof s === "object" && !Array.isArray(s)) ? s : {}), payDay: d }))} today={today}/>}
+      {sub === "overview" && <HrOverview emps={emps} lvs={lvs} pays={pays} payDay={payDay} today={today} onEditEmp={editEmp} onNewEmp={newEmp} onLeaveStatus={setLeaveStatus} setSub={setSub}/>}
+      {sub === "payroll" && <HrPayroll emps={emps} pays={pays} setPayrolls={setPayrolls} onChangeBase={changeBase} onEditEmp={editEmp} payDay={payDay} setPayDay={d => setHrSettings(s => ({ ...((s && typeof s === "object" && !Array.isArray(s)) ? s : {}), payDay: d }))} today={today}/>}
       {sub === "leave" && <HrLeave emps={emps} lvs={lvs} today={today} onNewLeave={newLeave} onEditLeave={editLeave} onLeaveStatus={setLeaveStatus}/>}
       {empDraft && <HrEmployeeModal draft={empDraft} setDraft={setEmpDraft} onSave={saveEmp} onClose={() => setEmpDraft(null)} onDelete={deleteEmp}/>}
       {leaveDraft && <HrLeaveModal draft={leaveDraft} setDraft={setLeaveDraft} emps={current.length ? current : emps} lvs={lvs} today={today} onSave={saveLeave} onClose={() => setLeaveDraft(null)} onDelete={deleteLeave}/>}

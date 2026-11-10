@@ -40,6 +40,23 @@ function calcNet(s) {
   const lo = has(s.lo) ? num(s.lo) : floor10(it * RATES.localOfIt);
   return base + allow + meal - (np + hi + lt + ei + it + lo + num(s.adv));
 }
+// 기본급 변경 이력(baseHist: [{from:"YYYY-MM", base}]) — 앱의 hrBaseAt 과 같은 규칙. 이력이 없으면 e.base.
+export function baseAt(e, ym) {
+  const hist = (Array.isArray(e && e.baseHist) ? e.baseHist : []).filter((h) => h && h.from).map((h) => ({ from: String(h.from), base: num(h.base) })).sort((a, b) => a.from.localeCompare(b.from));
+  if (!hist.length || !ym) return num(e && e.base);
+  let v = hist[0].base;
+  for (const h of hist) if (h.from <= ym) v = h.base;
+  return v;
+}
+// from 달부터 기본급을 base 로 바꾼 직원 기록 (앱의 hrApplyBase 와 같은 규칙)
+export function applyBase(e, from, base) {
+  const nb = num(base);
+  let hist = (Array.isArray(e.baseHist) ? e.baseHist : []).filter((h) => h && h.from).map((h) => ({ from: String(h.from), base: num(h.base) })).sort((a, b) => a.from.localeCompare(b.from));
+  if (!hist.length) hist = [{ from: "0000-00", base: num(e.base) }];
+  hist = hist.filter((h) => h.from < from);
+  if (!hist.length || hist[hist.length - 1].base !== nb) hist.push({ from, base: nb });
+  return { ...e, base: hist[hist.length - 1].base, baseHist: hist };
+}
 const list = (v) => (Array.isArray(v) ? v : v && typeof v === "object" ? Object.values(v) : []).filter(Boolean);
 
 // today(KST) 기준 within 일 안에 급여일이 오는 사람들 → [{ name, date, daysLeft, net, biz }]
@@ -61,7 +78,7 @@ export function upcomingPays(data, today, within = 2) {
       else {
         const o = (rec.rows && rec.rows[e.id]) || {};
         net = calcNet({
-          base: has(o.base) ? o.base : e.base, allow: has(o.allow) ? o.allow : e.allow,
+          base: has(o.base) ? o.base : baseAt(e, ym), allow: has(o.allow) ? o.allow : e.allow,
           meal: has(o.meal) ? o.meal : (has(e.meal) ? e.meal : RATES.mealFree), it: has(o.it) ? o.it : e.incomeTax,
           np: o.np, hi: o.hi, lt: o.lt, ei: o.ei, lo: o.lo, adv: o.adv,
         });

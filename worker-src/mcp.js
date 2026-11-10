@@ -1,6 +1,7 @@
 import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecountRows } from "./ecount.js";
 import { salesSummary, salesImport, salesCadence } from "./sales.js";
 import { notionTodoCreate, notionTodoPatch, notionTodoArchive, notionTodoConfigured } from "./notiontodo.js";
+import { applyBase as hrApplyBase } from "./hr.js";
 import { PL_WK, plArr, plannerNormalize, plMonday, plAdd, plDow, plMin, plWeekOf, plRangeOf, plWeekNo, plLogOf, plThemeOf, plDayBlocks, plWeekStats, plRoutineDate, plTodoBlocks } from "./planner.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
@@ -596,7 +597,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-10-planner-v2", note: "플래너 「+ 새 계획」(투자 전문가 1년 플랜 템플릿) 포함 · 플래너 새 화면(오늘 두 줄·주간·목표, 아침 계획·하루 마감) · 타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-10-hr-base", note: "인사 관리 기본급 수정(이 달부터 계속 적용 · 변경 이력) · 플래너 「+ 새 계획」(투자 전문가 1년 플랜 템플릿) 포함 · 플래너 새 화면(오늘 두 줄·주간·목표, 아침 계획·하루 마감) · 타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -1880,15 +1881,17 @@ const hrNameKey = (s) => String(s || "").replace(/\s+/g, "");
 async function hrRead(env, ym) {
   const [emps, pays] = await Promise.all([fbGet("/frw/employees", env.FIREBASE_DB_SECRET), fbGet("/frw/payrolls", env.FIREBASE_DB_SECRET)]);
   const employees = asList(emps).map((e) => ({ id: e.id, 이름: e.name, 직급: e.role || "", 소속: e.biz || "", 입사일: e.joined || "", 퇴사일: e.leftAt || "",
-    기본급: toNumber(e.base), 수당: toNumber(e.allow), 식대: e.meal, 소득세: toNumber(e.incomeTax), 급여일: e.payDay || "" }));
+    기본급: toNumber(e.base), ...(Array.isArray(e.baseHist) && e.baseHist.length > 1 ? { 기본급이력: e.baseHist.filter(Boolean).map((h) => ({ 부터: h.from === "0000-00" ? "처음" : h.from, 기본급: toNumber(h.base) })) } : {}),
+    수당: toNumber(e.allow), 식대: e.meal, 소득세: toNumber(e.incomeTax), 급여일: e.payDay || "" }));
   const p = pays && typeof pays === "object" ? pays : {};
   return { 직원수: employees.length, 직원: employees, 급여대장달: Object.keys(p).sort(), ...(ym ? { [ym]: p[ym] || null } : {}) };
 }
 // 직원 기본값(기본급·수당·식대·간이세액표 소득세)을 이름으로 찾아 고친다. create:true 면 없는 사람을 새로 등록(입사일 필수).
 // 앱의 직원 저장(saveEmp)과 같은 모양 — 숫자는 정수로, updatedAt 갱신.
+// 이미 있는 직원의 base 를 바꾸면 변경 이력(baseHist)에 남긴다: baseFrom("YYYY-MM", 없으면 이번 달)부터 새 금액, 그 앞 달은 예전 금액.
 async function toolHrEmployee(a, env) {
   const rows = Array.isArray(a.rows) ? a.rows.slice(0, 60) : [];
-  if (!rows.length) return errContent("rows 가 비었습니다 ([{name, base, allow, meal, incomeTax, role, biz, joined}]).");
+  if (!rows.length) return errContent("rows 가 비었습니다 ([{name, base, baseFrom, allow, meal, incomeTax, role, biz, joined}]).");
   const NUM = ["base", "allow", "meal", "incomeTax", "payDay"], TXT = ["role", "biz", "joined", "phone", "memo", "payBank", "payAccount", "payHolder"];
   const now = new Date().toISOString();
   const list = (d) => (Array.isArray(d) ? d.map((r, i) => [String(i), r]) : Object.entries(d || {})).filter(([, r]) => r);
@@ -1903,7 +1906,11 @@ async function toolHrEmployee(a, env) {
       const hit = ents.filter(([, e]) => hrNameKey(e.name) === hrNameKey(r.name) && (!r.biz || !e.biz || String(e.biz) === String(r.biz)));
       const vals = pick(r);
       if (hit.length === 1) {
-        const [k, e] = hit[0]; const row = { ...e, ...vals, updatedAt: now };
+        const [k, e] = hit[0]; let row = { ...e, ...vals, updatedAt: now };
+        if (vals.base !== undefined && vals.base !== Math.round(toNumber(e.base))) {
+          const from = /^\d{4}-\d{2}$/.test(String(r.baseFrom || "")) ? String(r.baseFrom) : kstToday().slice(0, 7);
+          const hb = hrApplyBase(e, from, vals.base); row = { ...row, base: hb.base, baseHist: hb.baseHist };
+        }
         patch[k] = row; if (arr) arr[Number(k)] = row; else obj[k] = row; out.고침.push({ 이름: e.name, ...vals });
       } else if (!hit.length && a.create && vals.joined && /^\d{4}-\d{2}-\d{2}$/.test(vals.joined)) {
         const row = { id: Date.now() * 1000 + Math.floor(Math.random() * 1000), name: String(r.name).trim(), role: "", biz: "", probationEnd: "", birthday: "", phone: "",
