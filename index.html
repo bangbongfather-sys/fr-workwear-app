@@ -12358,6 +12358,63 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   );
 }
 
+// 좁은 표 칸의 메모 입력 — 평소엔 한 줄 칸이고, 누르면 그 자리 위에 넓은 입력 상자가 떠서 길게 적는다.
+// Enter·Esc·바깥 누르기로 닫힌다. 표가 가로로 넘쳐도 잘리지 않게 화면 맨 위(body)에 띄운다.
+function GrowMemoInput({ value, onChange, onEnter, placeholder = "메모", minWidth = 150, style }) {
+  const [box, setBox] = useState(null);
+  const anchor = useRef(null), ta = useRef(null);
+  const place = () => {
+    const el = anchor.current; if (!el) return null;
+    const r = el.getBoundingClientRect(), vw = window.innerWidth, vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    const w = Math.min(380, vw - 16);
+    const left = Math.max(8, Math.min(r.left + w > vw - 8 ? r.right - w : r.left, vw - w - 8));
+    return { left, top: Math.max(8, Math.min(r.top - 4, vh - 170)), width: w };
+  };
+  const fit = () => { const t = ta.current; if (!t) return; t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight + 2, Math.round(window.innerHeight * 0.4)) + "px"; };
+  const open = () => {
+    if (box) return;
+    ReactDOM.flushSync(() => setBox(place()));
+    const t = ta.current; if (!t) return;
+    t.focus(); const n = t.value.length; try { t.setSelectionRange(n, n); } catch {} fit();
+  };
+  const close = () => setBox(null);
+  useEffect(() => {
+    if (!box) return;
+    const re = () => { const p = place(); if (p) setBox(p); };
+    window.addEventListener("scroll", re, true); window.addEventListener("resize", re);
+    return () => { window.removeEventListener("scroll", re, true); window.removeEventListener("resize", re); };
+  }, [!!box]);
+  // Tab 을 누르면 원래 칸 다음(Shift 면 앞) 입력칸으로 넘어간다
+  const tabOut = (back) => {
+    const all = [...document.querySelectorAll("input, select, textarea, button, [tabindex]")].filter(x => !x.disabled && x.tabIndex >= 0 && x !== ta.current && x.offsetParent !== null);
+    const i = all.indexOf(anchor.current); close();
+    const nx = all[i + (back ? -1 : 1)]; if (nx) setTimeout(() => nx.focus(), 0);
+  };
+  return (
+    <>
+      <input ref={anchor} value={value || ""} placeholder={placeholder} readOnly aria-label={placeholder} title="누르면 넓게 적을 수 있어요"
+        onFocus={open} onClick={open}
+        style={{ height: 34, fontSize: 12.5, padding: "0 8px", minWidth, width: "100%", boxSizing: "border-box", textOverflow: "ellipsis", cursor: "text", ...(style || {}) }}/>
+      {box && ReactDOM.createPortal(
+        <div style={{ position: "fixed", zIndex: 600, left: box.left, top: box.top, width: box.width, boxSizing: "border-box", padding: 10, borderRadius: 14,
+          background: "var(--glass-pop, var(--surface))", border: "1.5px solid #DB6B2E", boxShadow: "0 12px 36px rgba(0,0,0,0.35)" }}>
+          <textarea ref={ta} value={value || ""} placeholder={placeholder} aria-label={placeholder} rows={2}
+            onChange={e => { onChange(e.target.value.replace(/[\r\n]+/g, " ")); fit(); }}
+            onBlur={close}
+            onKeyDown={e => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); close(); if (onEnter) onEnter(); }
+              else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+              else if (e.key === "Tab") { e.preventDefault(); tabOut(e.shiftKey); }
+            }}
+            style={{ display: "block", width: "100%", boxSizing: "border-box", minHeight: 64, resize: "none", fontSize: 15, lineHeight: 1.5, padding: "8px 10px", borderRadius: 10, fontFamily: "inherit" }}/>
+          <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--text3)", display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span>Enter 또는 바깥을 누르면 닫힙니다</span><span style={{ fontVariantNumeric: "tabular-nums" }}>{(value || "").length}자</span>
+          </div>
+        </div>, document.body)}
+    </>
+  );
+}
+
 function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyRevenue, setYearlyRevenue, monthlySales = {}, orders = [], darkMode, focusClient, clearFocus, bankDeposits, setBankDeposits, clients = [], pane = "main" }) {
   const today = new Date();
   const defaultYM = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}`;
@@ -13285,7 +13342,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                   청구합계 <span style={{fontSize:10,color:ledgerSort === "totalDesc" || ledgerSort === "totalAsc" ? "#DB6B2E" : "var(--text3)"}}>{ledgerSort === "totalAsc" ? "▲" : "▼"}</span>
                 </th>
                 <th style={{textAlign:"center"}}>입금현황</th>
-                <th>메모</th>
+                <th style={{minWidth:150}}>메모</th>
                 <th style={{textAlign:"center",minWidth:120}}>관리</th>
               </tr></thead>
               <tbody>
@@ -13308,7 +13365,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                             <option value="법인 거래">법인 거래</option>
                           </select>
                         </td>
-                        <td><input value={editDraft.memo||""} onChange={e=>setEditDraft(d=>({...d,memo:e.target.value}))} style={{height:34,fontSize:12,padding:"0 6px"}}/></td>
+                        <td><GrowMemoInput value={editDraft.memo} onChange={v=>setEditDraft(d=>({...d,memo:v}))}/></td>
                         <td style={{textAlign:"center",whiteSpace:"nowrap"}}>
                           <button onClick={saveEdit} style={{background:"#DB6B2E",border:"none",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,borderRadius:6,padding:"5px 9px",marginRight:4,fontFamily:"inherit"}}>저장</button>
                           <button onClick={cancelEdit} style={{background:"none",border:"1px solid var(--border)",cursor:"pointer",color:"var(--text2)",fontSize:12,fontWeight:600,borderRadius:6,padding:"4px 8px",fontFamily:"inherit"}}>취소</button>
@@ -13635,8 +13692,7 @@ function LedgerTab({ ledgers, setLedgers, clientAR = {}, setClientAR, yearlyReve
                       <option value="법인 거래">법인 거래</option>
                     </select>
                   </td>
-                  <td><input placeholder="메모" value={draft.memo} onChange={e => setDraft(d => ({ ...d, memo: e.target.value }))}
-                    onKeyDown={e => e.key === "Enter" && addClient()} style={{ height: 34, fontSize: 12.5 }} /></td>
+                  <td><GrowMemoInput value={draft.memo} onChange={v => setDraft(d => ({ ...d, memo: v }))} onEnter={addClient}/></td>
                   <td style={{ textAlign: "center" }}>
                     <button onClick={addClient} disabled={!draft.name.trim()}
                       style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: draft.name.trim() ? "var(--accent)" : "var(--surface2)", color: draft.name.trim() ? "#fff" : "var(--text3)", fontSize: 12, fontWeight: 700, cursor: draft.name.trim() ? "pointer" : "default", fontFamily: "inherit" }}>추가</button>
