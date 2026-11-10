@@ -10382,6 +10382,17 @@ function bankBalanceGaps(chain, deposits = []) {
       ordered.push(...balOrderGroup(arr.slice(i, j), ordered.length ? ordered[ordered.length - 1].bal : null));
       i = j;
     }
+    // 나중에 직접 채워 넣은 줄(받은 날이 거래일보다 뒤)이 앞뒤 어느 문자와도 잔액이 안 이어지면 점검에서 뺀다 —
+    // 문자 수집을 시작하기 전 날짜를 한 건만 채워 넣으면, 그 사이의 모든 거래가 「빠진 거래」처럼 보이기 때문
+    const isBack = (x) => x.at && String(x.at).slice(0, 10) > x.date;
+    for (let again = true; again;) {
+      again = false;
+      for (let k = 0; k < ordered.length; k++) {
+        const x = ordered[k]; if (!isBack(x)) continue;
+        const pv = ordered[k - 1], nx = ordered[k + 1];
+        if (!(pv && pv.bal + balSign(x) === x.bal) && !(nx && x.bal + balSign(nx) === nx.bal)) { ordered.splice(k, 1); again = true; break; }
+      }
+    }
     ordered.forEach(x => { if (x.kind !== "in") outs++; });
     for (let k = 1; k < ordered.length; k++) {
       const a = ordered[k - 1], b = ordered[k];
