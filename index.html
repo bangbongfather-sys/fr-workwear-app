@@ -32707,7 +32707,7 @@ const P2_CSS = `
 .p2-next { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 14px; font-size: 14px; color: var(--t2); }
 .p2-next i { width: 8px; height: 8px; border-radius: 4px; flex: none; }
 .p2-next b { color: var(--t1); }
-.p2-3col { display: grid; grid-template-columns: 264px minmax(0, 1fr) 348px; align-items: stretch; min-height: 640px; }
+.p2-3col { display: grid; grid-template-columns: 280px minmax(0, 1fr) 360px; align-items: stretch; min-height: 640px; }
 .p2-left { border-right: 1px solid var(--line); padding: 20px; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
 .p2-left .p2-sec { padding: 0; }
 .p2-mid { min-width: 0; padding-bottom: 24px; }
@@ -34448,14 +34448,18 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
     };
 
     const body = tab === "today" ? todayView() : tab === "week" ? weekView() : goalsView();
+    // PC 세 칸 비율 — 화면이 넓을수록 왼쪽 달력·오른쪽 상세 칸도 같이 넓어지고, 그 안의 글자·단추도 칸 너비만큼 키운다
+    const colL = Math.round(Math.min(400, Math.max(280, boxW * 0.21)));
+    const colR = Math.round(Math.min(520, Math.max(360, boxW * 0.27)));
+    const zoomOf = (w, base) => Math.round((1 + (w / base - 1) * 0.75) * 100) / 100;   // 칸이 넓어진 만큼의 3/4 만 키운다 (가운데 시간표 글자와 너무 차이 나지 않게)
     return (
       <div className={`p2${isDark ? " dark" : ""}${desk ? " desk" : ""}${narrow ? " narrow" : ""}`} ref={boxRef}>
         <style>{P2_CSS}</style>
         {tabs}
         {newOpen && <div style={{ padding: "4px 20px 0", maxWidth: 520, marginLeft: "auto", width: "100%", boxSizing: "border-box" }}><style>{PL_CSS}</style>{newPlanPanel}</div>}
         {desk && tab === "today" ? (
-          <div className="p2-3col">
-            <aside className="p2-left">
+          <div className="p2-3col" style={{ gridTemplateColumns: `${colL}px minmax(0, 1fr) ${colR}px` }}>
+            <aside className="p2-left" style={{ zoom: zoomOf(colL, 280) }}>
               {sideCal()}
               {inbox}
               <section style={{ marginTop: "auto" }}>
@@ -34465,7 +34469,7 @@ function PlannerView({ planner, setPlanner, todos = [], setTodos, toggleTodo, no
               </section>
             </aside>
             <main className="p2-mid">{body}</main>
-            <aside className="p2-right" aria-label="고른 항목">
+            <aside className="p2-right" aria-label="고른 항목" style={{ zoom: zoomOf(colR, 360) }}>
               {selBlock ? detail(selBlock) : (
                 <div className="p2-detail">
                   <div className="p2-mute" style={{ lineHeight: 1.6 }}>블록이나 일정을 누르면 여기에서 시간·이름·메모를 고칩니다. 끌면 시간이 옮겨집니다.</div>
