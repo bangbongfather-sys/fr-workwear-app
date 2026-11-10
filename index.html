@@ -10291,6 +10291,16 @@ function mergeBankInbox(prev, inbox) {
     const biz = DEP_BIZ.some(o => o.id === it.biz) ? it.biz : DEP_BIZ_DEFAULT;
     const amt = Math.round(Number(it.amount));
     const name = String(it.name || "").trim();
+    const gapRow = gapRowFor(next, biz, it.date, amt, claimed);
+    if (gapRow) {
+      claimed.add(gapRow.id); have.add(it.ext);
+      const { gapFrom, ...keep } = gapRow;
+      next[next.indexOf(gapRow)] = { ...keep, date: it.date, time: it.time || "", name: name || gapRow.name, memo: String(it.memo || "").trim(),
+        src: it.src === "sms" ? "sms" : it.src === "manual" ? "manual" : "api", ext: it.ext, acct: it.acct || "",
+        ...(it.bal != null && it.bal !== "" ? { bal: Number(it.bal) } : {}) };
+      merged++;
+      return;
+    }
     const cands = next.filter(x => x && !x.ext && !claimed.has(x.id) && depBizOf(x) === biz
       && x.date === it.date && Math.round(Number(x.amount)) === amt);
     const same = cands.find(x => (x.time && it.time && hm(x.time) === hm(it.time)) || (name && payablesNameMatch(x.name, name)));
@@ -10395,7 +10405,35 @@ function bankBalanceGaps(chain, deposits = []) {
   gaps.sort((x, y) => balDt(y.to).localeCompare(balDt(x.to)));
   return { gaps, links, count: list.length, outs, since: list.length ? list.map(x => x.date).sort()[0] : null };
 }
-function BankBalanceCheck({ biz, deposits, okKeys = [], onOk, onImport }) {
+// 잔액 차이로 찾은 「문자 누락 입금」을 입금내역 한 줄로 만든다.
+// 어느 기기에서 만들어도 같은 줄이 되게 id·ext 를 빈틈 키에서 만든다(기기 두 대가 같이 채워도 한 줄).
+const GAP_DEP_NAME = "(문자 누락 입금 — 입금자 확인)";
+const GAP_AUTO_SINCE = "2026-11-10";   // 이 날 이후에 생긴 빈틈만 자동으로 채운다 (그 앞 것은 알림의 「입금내역에 넣기」로)
+function gapDepositRow(g, biz) {
+  const ext = "gap|" + g.key;
+  let h = 0; for (let i = 0; i < ext.length; i++) h = (h * 31 + ext.charCodeAt(i)) >>> 0;
+  const when = (x) => `${Number(x.date.slice(5, 7))}/${Number(x.date.slice(8))}${x.time ? " " + String(x.time).slice(0, 5) : ""}`;
+  return { id: 9000000000000 + h, date: g.to.date, time: "", amount: Math.round(g.diff), name: GAP_DEP_NAME,
+    memo: `잔액 차이로 찾음 · ${when(g.from)} ~ ${when(g.to)} 사이 · 은행 앱에서 입금자 확인`,
+    biz, status: "pending", client: "", link: null, src: "gap", ext, acct: g.acct || "", gapFrom: g.from.date };
+}
+// 실제 입금(문자·엑셀)이 뒤늦게 들어왔을 때 짝이 되는 「문자 누락」 줄 찾기 — 금액이 같고 날짜가 그 빈틈 사이
+const gapRowFor = (rows, biz, date, amt, skip) => rows.find(x => x && x.src === "gap" && !(skip && skip.has(x.id)) && depBizOf(x) === biz
+  && Math.round(Number(x.amount)) === Math.round(Number(amt)) && date <= x.date && date >= (x.gapFrom || x.date));
+// 새로 생긴 빈틈(입금 문자 누락)을 입금내역에 자동으로 채운다. 뒤 문자가 온 지 3분이 지난 것만(순서가 바뀌어 늦게 오는 문자 기다림).
+function fillBalanceGaps(prev, chain, nowKstIso) {
+  if (!chain || !chain.enabled || !Array.isArray(chain.list)) return { next: prev, added: [] };
+  const p = prev || {}, items = Array.isArray(p.items) ? p.items : [], biz = chain.biz || "nj";
+  const res = bankBalanceGaps(chain.list, items.filter(x => x && depBizOf(x) === biz));
+  const ok = new Set(p.gapOk || []), gone = new Set(Array.isArray(p.gone) ? p.gone : []), have = new Set(items.map(x => x && x.ext).filter(Boolean));
+  const limit = new Date(Date.parse(nowKstIso) - 3 * 60000).toISOString();
+  const rows = res.gaps.filter(g => g.diff > 0 && !g.filled && !ok.has(g.key) && g.to.at && String(g.to.at).slice(0, 10) >= GAP_AUTO_SINCE && String(g.to.at) <= limit)
+    .map(g => gapDepositRow(g, biz)).filter(r => !have.has(r.ext) && !gone.has(r.ext));
+  if (!rows.length) return { next: prev, added: [] };
+  const next = [...items, ...rows].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id));
+  return { next: { ...p, items: next, nameMap: p.nameMap || {} }, added: rows };
+}
+function BankBalanceCheck({ biz, deposits, okKeys = [], onOk, onImport, onAdd }) {
   const [data, setData] = useState(null);
   const [showAll, setShowAll] = useState(false);
   useEffect(() => {
@@ -10446,6 +10484,7 @@ function BankBalanceCheck({ biz, deposits, okKeys = [], onOk, onImport }) {
           <span className="bal-msg">잔액이 <b style={{ color: "#F04452" }}>{fmt(g.diff)}원</b> 더 많아요 → 그 사이 <b>입금 {fmt(g.diff)}원</b>이 문자로 안 들어왔어요
             <span className="bal-sub">앞 문자 잔액 {fmt(g.from.bal)}원 · 뒤 문자 {g.to.kind === "in" ? "입금" : "출금"} {fmt(g.to.amount)}원 · 뒤 문자 잔액 {fmt(g.to.bal)}원{noOuts ? " · 출금 문자도 빠졌다면 실제 금액은 더 클 수 있어요" : ""}</span>
           </span>
+          {onAdd && <button type="button" className="bal-btn bal-btn-main" onClick={() => onAdd(g)} title="이 금액을 입금내역에 「문자 누락」 줄로 넣어요 — 입금자는 은행 앱에서 확인해 거래처를 지정하세요">입금내역에 넣기</button>}
           <button type="button" className="bal-btn" onClick={() => onOk && onOk(g.key)} title="직접 확인했으면 이 알림을 숨겨요">확인했어요</button>
         </div>
       ))}
@@ -11021,7 +11060,10 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
           if (!scored.length) return null;
           used.add(scored[0].y.id); return scored[0].y;
         };
+        const gapFix = new Map();
         rest.forEach(x => {
+          const g = gapRowFor(items, biz, x.date, x.amount, used);
+          if (g) { used.add(g.id); gapFix.set(g.id, x); return; }
           if (takeApi(x)) { apiSkipped.push(x); return; }
           fresh.push({ id: ++base, ...strip(x), biz, status: "pending", client: "", link: null });
         });
@@ -11033,15 +11075,17 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
           if (!skip) apiSkipped.forEach(x => fresh.push({ id: ++base, ...strip(x), biz, status: "pending", client: "", link: null }));
           else dup += apiSkipped.length;
         }
-        if (!fresh.length && !rename.size) { showToast(`새 입금 내역이 없습니다. (이미 가져온 ${dup}건 제외)`); return; }
+        if (!fresh.length && !rename.size && !gapFix.size) { showToast(`새 입금 내역이 없습니다. (이미 가져온 ${dup}건 제외)`); return; }
         // 다른 사업자 탭에 같은 입금이 있으면 — 탭을 잘못 고르고 올린 경우가 많다
         const otherKeys = new Set(allItems.filter(x => depBizOf(x) !== biz).map(x => keyOf(x)));
         const otherHit = fresh.filter(x => otherKeys.has(keyOf(x))).length;
         setBankDeposits(prev => ({
           ...(prev || {}),
           items: [
-            ...((((prev || {}).items) || []).map(x => rename.has(x.id)
-              ? { ...x, name: rename.get(x.id).name, memo: x.memo || rename.get(x.id).alt } : x)),
+            ...((((prev || {}).items) || []).map(x => {
+              if (gapFix.has(x.id) && x.src === "gap") { const f = gapFix.get(x.id); const { gapFrom, src, ...keep } = x; return { ...keep, date: f.date, time: f.time || "", name: f.name, memo: f.memo || "" }; }
+              return rename.has(x.id) ? { ...x, name: rename.get(x.id).name, memo: x.memo || rename.get(x.id).alt } : x;
+            })),
             ...fresh,
           ].sort((a, b) => String(b.date||"").localeCompare(String(a.date||"")) || (a.id - b.id)),
           nameMap: ((prev || {}).nameMap) || {},
@@ -11050,6 +11094,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         if (fresh.length) parts.push(`입금 ${fresh.length}건 가져왔습니다`);
         if (dup) parts.push(`중복 ${dup}건 제외`);
         if (rename.size) parts.push(`예전에 올린 ${rename.size}건의 입금자명을 바로잡았습니다`);
+        if (gapFix.size) parts.push(`「문자 누락」 ${gapFix.size}건의 입금자를 채웠습니다`);
         showToast(`✅ ${parts.join(" · ")}` + (otherHit ? `\n⚠️ 「${depBizLabel(DEP_BIZ.find(o => o.id !== biz).id)}」 탭에 같은 입금 ${otherHit}건이 있습니다 — 사업자 탭을 잘못 고르지 않았는지 확인하세요` : ""), otherHit ? "info" : "success");
       } catch (err) { showToast("엑셀 처리 실패: " + err.message); }
     };
@@ -11925,7 +11970,13 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
       {/* 잔액 점검 — 은행 문자 잔액이 안 이어지는 곳 = 문자로 안 들어온 거래 (문자 연결된 탭에만) */}
       <BankBalanceCheck biz={biz} deposits={items} okKeys={(bankDeposits && bankDeposits.gapOk) || []}
         onOk={(k) => setBankDeposits(prev => ({ ...(prev || {}), gapOk: [...new Set([...(((prev || {}).gapOk) || []), k])].slice(-300) }))}
-        onImport={() => fileRef.current && fileRef.current.click()} />
+        onImport={() => fileRef.current && fileRef.current.click()}
+        onAdd={(g) => {
+          const row = gapDepositRow(g, biz);
+          setBankDeposits(prev => { const p = prev || {}, its = Array.isArray(p.items) ? p.items : []; if (its.some(x => x && x.ext === row.ext)) return prev;
+            return { ...p, items: [...its, row].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || (a.id - b.id)), gone: (Array.isArray(p.gone) ? p.gone : []).filter(e => e !== row.ext), nameMap: p.nameMap || {} }; });
+          showToast(`입금내역에 ${Math.round(g.diff).toLocaleString()}원을 「문자 누락」 줄로 넣었습니다 — 입금자를 확인해 거래처를 지정하세요`, "success");
+        }} />
 
       {/* 자동수집 건 중 엑셀로 이미 올린 것과 겹쳐 보이는 것 */}
       {suspects.length > 0 && (
@@ -12148,7 +12199,9 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                               {(dep.time || dep.ext || dep.dupSuspect != null) && (
                                 <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, flexWrap: "wrap" }}>
                                   {dep.time && <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{dep.time.slice(0, 5)}</span>}
-                                  {dep.ext && <span title={dep.src === "manual" ? "빠진 입금을 직접 넣은 건(문자 누락 등)" : dep.src === "api" ? "은행 자동수집으로 들어온 입금" : dep.src === "sms" ? "은행 입금 문자로 자동 등록된 입금" : "엑셀로 올린 입금 — 은행 자동수집과 확인됨"}
+                                  {dep.ext && dep.src === "gap" && <span title="은행 문자가 안 들어와서 잔액 차이로 찾아 넣은 입금 — 금액은 잔액 기준이고, 입금자는 은행 앱에서 확인하세요"
+                                    style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--warning-bg)", color: "var(--warning-text)" }}>문자 누락</span>}
+                                  {dep.ext && dep.src !== "gap" && <span title={dep.src === "manual" ? "빠진 입금을 직접 넣은 건(문자 누락 등)" : dep.src === "api" ? "은행 자동수집으로 들어온 입금" : dep.src === "sms" ? "은행 입금 문자로 자동 등록된 입금" : "엑셀로 올린 입금 — 은행 자동수집과 확인됨"}
                                     style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--accent-tonal)", color: "var(--accent-strong)" }}>{dep.src === "api" ? "자동" : dep.src === "sms" ? "문자" : dep.src === "manual" ? "직접" : "엑셀·확인"}</span>}
                                   {dep.dupSuspect != null && <span style={{ padding: "0 6px", borderRadius: 5, fontSize: 10, fontWeight: 800, lineHeight: "16px", background: "var(--warning-bg)", color: "var(--warning-text)" }}>중복 의심</span>}
                                 </div>
@@ -24452,16 +24505,31 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
         if (!r.ok) return;
         const j = await r.json().catch(() => null);
         const list = j && Array.isArray(j.items) ? j.items : [];
-        if (!list.length || stop) return;
-        let res = null;
-        setBankDeposits(prev => { res = mergeBankInbox(prev, list); return res.next; });
-        setTimeout(() => {
-          if (!res || !(res.added || res.merged)) return;
-          const parts = [];
-          if (res.added) parts.push(`새 입금 ${res.added}건`);
-          if (res.merged) parts.push(`엑셀로 올린 ${res.merged}건 확인`);
-          showToast(`🏦 은행 자동수집 — ${parts.join(" · ")}${res.suspects ? ` · 중복 의심 ${res.suspects}건` : ""}`, "success");
-        }, 0);
+        if (stop) return;
+        if (list.length) {
+          let res = null;
+          setBankDeposits(prev => { res = mergeBankInbox(prev, list); return res.next; });
+          setTimeout(() => {
+            if (!res || !(res.added || res.merged)) return;
+            const parts = [];
+            if (res.added) parts.push(`새 입금 ${res.added}건`);
+            if (res.merged) parts.push(`엑셀로 올린 ${res.merged}건 확인`);
+            showToast(`🏦 은행 자동수집 — ${parts.join(" · ")}${res.suspects ? ` · 중복 의심 ${res.suspects}건` : ""}`, "success");
+          }, 0);
+        }
+        // 은행 문자가 빠진 곳(잔액이 안 이어지는 곳)을 찾아 입금내역에 「문자 누락」 줄로 바로 채운다 — 조용히 빠지는 일이 없게
+        const cr = await fetch("/api/bank/smskey/chain", { cache: "no-store" }).catch(() => null);
+        const chain = cr && cr.ok ? await cr.json().catch(() => null) : null;
+        if (chain && chain.enabled && !stop) {
+          let gr = null;
+          const nowKst = new Date(Date.now() + 9 * 3600e3).toISOString();
+          setBankDeposits(prev => { gr = fillBalanceGaps(prev, chain, nowKst); return gr.next; });
+          setTimeout(() => {
+            if (!gr || !gr.added.length) return;
+            const sum = gr.added.reduce((t, r) => t + r.amount, 0);
+            showToast(`⚠️ 은행 문자가 ${gr.added.length}통 빠졌어요 — 입금 ${sum.toLocaleString()}원을 잔액으로 찾아 입금내역에 「문자 누락」으로 넣었습니다. 입금자를 확인하세요`, "info");
+          }, 0);
+        }
       } catch { /* 연동 전·오프라인 */ } finally { busy = false; }
     };
     run();
