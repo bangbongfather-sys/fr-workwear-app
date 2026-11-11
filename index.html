@@ -17704,11 +17704,12 @@ function ReorderRadar({ darkMode = false, clientsDb = [], onOpenClient, compact 
 // ─── ⌘K 명령창 ───
 // Ctrl/⌘+K (또는 입력칸 밖에서 「/」) 로 연다. 한 칸에 말로 쓰면:
 //  ① 답 — 「가나산공 지난달 매출」「작년 10월 매출」「늦어진 거래처」 → 판매 현황 데이터로 바로 숫자
+//         「솜바지 재고 부족한 사이즈 순서대로」「플리스 100 몇 벌 남았어」 → 재고 현황 데이터로 바로 사이즈별 수량
 //  ② 바로가기 — 탭 이동 · 새 견적 · 다크 모드 · 재고 새로고침 같은 동작
 //  ③ 검색 — 통합 검색과 같은 결과
 //  ④ Claude 에게 묻기 — 위에서 못 하는 건 claude.ai(NJ_SAFETY 커넥터)로 넘긴다 (구독 안, 추가 비용 없음)
 const CMDK_RECENT_KEY = "frw_cmdk_recent";
-const CMDK_EXAMPLES = ["이번 달 매출", "지난달 매출", "작년 10월 매출", "늦어진 거래처", "재고 새로고침", "새 견적"];
+const CMDK_EXAMPLES = ["솜바지 재고 부족한 사이즈 순서대로", "이번 달 매출", "지난달 매출", "작년 10월 매출", "늦어진 거래처", "재고 부족한 거", "새 견적"];
 const CMDK_SALES_WORDS = /(매출|판매|실적|얼마|전표|팔았|주문액|매상)/;
 // 말 속의 기간 → { from, to, month?, label, text(기간을 뺀 나머지) }
 function cmdkParsePeriod(q, today) {
@@ -17753,10 +17754,67 @@ function cmdkParseSales(q, today) {
   return { ...(per || { from: `${today.slice(0, 7)}-01`, to: ymMonthEnd(today.slice(0, 7)), month: today.slice(0, 7), label: "이번 달", text: q, auto: true }), client: rest };
 }
 
+// ── 재고 답 — 「솜바지 재고 부족한 사이즈 순서대로」「플리스 100 몇 벌 남았어」「재고 부족한 거」 ──
+const CMDK_STOCK_WORDS = /(재고|수량|부족|모자|품절|남았|남은|몇\s*(개|벌|장|pc)|사이즈)/i;
+const CMDK_STOCK_SWAP = [["잠바", "점퍼"], ["재킷", "자켓"], ["후리스", "플리스"], ["겨울", "동계"], ["여름", "하계"], ["봄가을", "춘추"], ["간절기", "춘추"]];
+const cmdkNorm = (x) => String(x || "").toLowerCase().replace(/\s+/g, "");
+function cmdkParseStock(q) {
+  if (!CMDK_STOCK_WORDS.test(q)) return null;
+  const sort = /(부족|모자|적은|없는|품절|떨어|바닥|급한)/.test(q) ? "low" : /(많은|넉넉|여유|남는|많이)/.test(q) ? "high" : "size";
+  const text = q.replace(/(재고량|재고|수량|부족한|부족|모자란|모자라는|모자란|적은|없는|품절된|품절|많은|넉넉한|여유|남은|남았어|남았나|남았지|남았니|몇\s*(개|벌|장|pc)|사이즈별로|사이즈별|사이즈|순서대로|순서|순으로|대로|별로|알려\s*줘|보여\s*줘|말해\s*줘|찾아\s*줘|어때|어떻게\s*돼|얼마나|있어|있나|있니|좀|현황|파악|확인|품목|제품|\?|!)/gi, " ").replace(/\s+/g, " ").trim();
+  return { sort, text };
+}
+// 재고 품목을 제품(코드 앞부분)별로 묶고, 말에 맞는 제품만 고른다 → { groups:[{label, code, sum, rows:[{size, qty, safe, unit, name}]}], size, flat }
+function cmdkStockAnswer(stock, sp) {
+  const all = ((stock && stock.items) || []).filter(it => it && it.name);
+  if (!all.length) return { empty: true };
+  const sizeOf = (it) => { const m = String(it.name).match(/\[([^\]]+)\]\s*$/); return m ? m[1].trim() : (String(it.code || "").split("/")[1] || ""); };
+  const baseOf = (it) => String(it.name).replace(/\s*\[[^\]]*\]\s*$/, "").trim();
+  const row = (it) => ({ size: sizeOf(it), qty: Number(it.qty) || 0, safe: parseFloat(it.safeQty) > 0 ? parseFloat(it.safeQty) : null, unit: /^(pc|ea)$/i.test(it.unit || "") ? "" : (it.unit || ""), name: it.name, code: it.code || "" });
+  const sized = (it) => /\//.test(String(it.code || "")) || /\[\d{2,3}\]\s*$/.test(String(it.name));
+  // 말에서 제품 낱말과 사이즈 숫자를 나눈다
+  const STOP = /^(순|거|것|걸|건|게|뭐|뭐야|뭐가|뭐지|중|중에|중에서|제일|가장|어떤|어느|다|전부|전체|모두|우리|지금|현재|급하게|빨리|얼른|순서|목록|리스트|종류|들|한|줄|해|해줘|줘|요|은|는|이|가|을|를)$/;
+  let tokens = sp.text ? sp.text.split(" ").filter(t => t && !STOP.test(t)) : [];
+  const hay = (it) => cmdkNorm(it.name + " " + (it.code || ""));
+  const hits = (t) => { const c = [t, ...CMDK_STOCK_SWAP.filter(([a]) => t.includes(a)).map(([a, b]) => t.replace(a, b))]; if (t === "바지") c.push("하의"); if (t === "티") c.push("티셔츠"); if (t === "셔츠") c.push("남방"); return (it) => c.some(x => hay(it).includes(x)); };
+  // 조사(은·는·이·가·을·를…)가 붙어 안 맞으면 떼고 다시
+  tokens = tokens.map(t => { const n = cmdkNorm(t); if (all.some(hits(n))) return n; const cut = n.replace(/(에서|하고|은|는|이|가|을|를|에|랑|도|만)$/, ""); return cut && cut !== n && all.some(hits(cut)) ? cut : n; });
+  let pool = all, size = null;
+  const words = [];
+  for (const t of tokens) {
+    if (/^\d{2,3}$/.test(t)) {
+      const bySize = pool.filter(it => String(parseInt(sizeOf(it), 10)) === String(parseInt(t, 10)));
+      if (bySize.length) { size = String(parseInt(t, 10)); continue; }
+    }
+    const f = pool.filter(hits(t));
+    if (!f.length) return { none: true, word: t };
+    pool = f; words.push(t);
+  }
+  // 낱말이 없으면(「재고 부족한 거」) 사이즈 있는 제품 전체에서 적은 순 12개
+  if (!words.length) {
+    const rows = all.filter(sized).filter(it => size == null || String(parseInt(sizeOf(it), 10)) === size).map(row).sort((a, b) => sp.sort === "high" ? b.qty - a.qty : a.qty - b.qty);
+    return { flat: rows.slice(0, 12), total: rows.length, size };
+  }
+  const map = new Map();
+  pool.forEach(it => { const code = String(it.code || "").split("/")[0]; const k = /\//.test(String(it.code || "")) ? code : baseOf(it); if (!map.has(k)) map.set(k, { label: baseOf(it), code: /\//.test(String(it.code || "")) ? code : (it.code || ""), rows: [] }); map.get(k).rows.push(row(it)); });
+  const num = (r) => { const n = parseInt(r.size, 10); return Number.isFinite(n) ? n : 9999; };
+  const groups = [...map.values()].map(g => {
+    let rows = size == null ? g.rows : g.rows.filter(r => String(num(r)) === size);
+    rows = rows.sort(sp.sort === "low" ? (a, b) => a.qty - b.qty || num(a) - num(b) : sp.sort === "high" ? (a, b) => b.qty - a.qty || num(a) - num(b) : (a, b) => num(a) - num(b) || a.size.localeCompare(b.size));
+    return { ...g, rows, sum: g.rows.reduce((t, r) => t + r.qty, 0) };
+  }).filter(g => g.rows.length).sort((a, b) => b.sum - a.sum);
+  return { groups, size, focus: groups.length === 1 && groups[0].code ? groups[0].code : words.join(" ") };
+}
+function cmdkStockText(res, sp, when) {
+  const head = `${sp.sort === "low" ? "부족한 순" : sp.sort === "high" ? "많은 순" : "사이즈 순"}${when ? ` · ${when} 기준` : ""}`;
+  if (res.flat) return [`재고 ${head}`, ...res.flat.map((r, i) => `${i + 1}. ${r.name}${r.code ? ` (${String(r.code).split("/")[0]})` : ""} — ${r.qty.toLocaleString()}${r.unit}`)].join("\n");
+  return res.groups.map(g => [`${g.label}${g.code ? ` (${g.code})` : ""} 재고 — ${head}`, ...g.rows.map((r, i) => `${i + 1}. ${r.size || "-"} — ${r.qty.toLocaleString()}${r.unit}`), `합계 ${g.sum.toLocaleString()}`].join("\n")).join("\n\n");
+}
+
 const _cmdkCache = new Map();
 const cmdkGet = (url) => { if (!_cmdkCache.has(url)) _cmdkCache.set(url, fetch(url, { cache: "no-store" }).then(r => r.json()).catch(() => null)); return _cmdkCache.get(url); };
 
-function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null, onSide }) {
+function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null, onSide, stock = null, onStock }) {
   const today = kstTodayYmd();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -17776,7 +17834,12 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
 
   // ── 답 (판매) ──
   const qs = q.trim();
-  const sq = React.useMemo(() => (qs ? cmdkParseSales(qs, today) : null), [qs]);
+  // ── 답 (재고) — 재고를 묻는 말이면 판매 답보다 먼저 ──
+  const stq = React.useMemo(() => (qs ? cmdkParseStock(qs) : null), [qs]);
+  const stAns = React.useMemo(() => (stq ? cmdkStockAnswer(stock, stq) : null), [stq, stock]);
+  const [stCopied, setStCopied] = useState(false);
+  useEffect(() => { setStCopied(false); }, [qs]);
+  const sq = React.useMemo(() => (qs && !stq ? cmdkParseSales(qs, today) : null), [qs, stq]);
   const radarAsk = /(늦어진|늦은|끊긴|끊김|재주문|이탈|주문\s*안\s*한|안\s*산|레이더)/.test(qs);
   useEffect(() => {
     if (!sq || radarAsk) { setAns(null); return; }
@@ -17807,7 +17870,10 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
 
   const items = [];   // { section, id, icon, title, sub, run, right? }
   const navSales = (detail) => () => { window.__frwSalesNav = detail; onNav("sales"); setTimeout(() => window.dispatchEvent(new CustomEvent("frw:sales-nav")), 60); };
-  if (qs && radarAsk && cad) {
+  if (qs && stq && stAns) {
+    items.push({ section: "답", id: "ans:stock", icon: "layers", kind: "stock", stq, res: stAns, title: `재고 — ${stq.text || "전체"}`,
+      run: () => { if (onStock) onStock(stAns.focus || stq.text || ""); else onNav("stock"); } });
+  } else if (qs && radarAsk && cad) {
     const late = cad.rows.filter(r => r.status === "late").sort((a, b) => b.yearValue - a.yearValue);
     const lost = cad.rows.filter(r => r.status === "lost");
     items.push({ section: "답", id: "ans:radar", icon: "radar", kind: "radar", late, lost, title: `늦어진 거래처 ${late.length}곳`, run: navSales({ sub: "radar" }) });
@@ -17849,6 +17915,51 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
 
   const won = (n) => `${Math.round(n || 0).toLocaleString()}원`;
   const answerCard = (it, active) => {
+    if (it.kind === "stock") {
+      const { stq: sp, res } = it;
+      const whenRaw = String((stock && stock.updatedAt) || ""); const wm = whenRaw.match(/(\d{1,2})[-./](\d{1,2})[ T]+(\d{1,2}:\d{2})/);
+      const when = wm ? `${Number(wm[1])}/${Number(wm[2])} ${wm[3]}` : "";
+      const tone = (r) => r.qty <= 0 ? "#F04452" : (r.safe != null ? r.qty < r.safe : r.qty <= 10) ? "#E8793B" : "var(--text1)";
+      const sortLabel = sp.sort === "low" ? "부족한 순" : sp.sort === "high" ? "많은 순" : "사이즈 순";
+      const box = { padding: "14px 16px", borderRadius: 14, background: active ? "rgba(0,180,147,0.10)" : "var(--surface2)", border: `1px solid ${active ? "rgba(0,180,147,0.4)" : "transparent"}` };
+      const headLine = <div style={{ fontSize: 12, fontWeight: 700, color: "#00A37A", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}><Icon name="layers" size={14}/>재고 · {sortLabel}{res.size ? ` · 사이즈 ${res.size}` : ""}{when ? <span style={{ color: "var(--text3)", fontWeight: 600 }}>{when} 기준</span> : null}
+        {(res.groups || res.flat) && <button type="button" onClick={e => { e.stopPropagation(); try { navigator.clipboard.writeText(cmdkStockText(res, sp, when)); setStCopied(true); } catch {} }}
+          style={{ marginLeft: "auto", height: 26, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{stCopied ? "복사됨" : "글로 복사"}</button>}</div>;
+      const foot = <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 10 }}>빨강 = 없음·마이너스 · 주황 = {`안전재고 미만(안 정했으면 10 이하)`} · Enter — 재고 현황에서 보기</div>;
+      if (res.empty) return <div style={box}>{headLine}<div style={{ fontSize: 13, color: "var(--text2)", marginTop: 8 }}>재고 자료가 아직 없어요 — 재고 현황에서 이카운트 재고를 먼저 불러오세요</div></div>;
+      if (res.none) return <div style={box}>{headLine}<div style={{ fontSize: 13, color: "var(--text2)", marginTop: 8 }}>재고 품목에서 「{res.word}」을(를) 찾지 못했어요 — 품명에 들어 있는 낱말로 다시 써 보세요 (예: 솜바지 · 솜점퍼 · 플리스 · 티셔츠 · 남방 · 조끼)</div></div>;
+      const cell = (r, i, label) => (
+        <div key={(r.code || r.name) + i} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", borderRadius: 10, background: "var(--surface)", minWidth: 0 }}>
+          <span style={{ fontSize: 11, color: "var(--text3)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{i + 1}</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+          <b style={{ fontSize: 16, fontWeight: 800, color: tone(r), fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{r.qty.toLocaleString()}<span style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", marginLeft: 1 }}>{r.unit}</span></b>
+        </div>
+      );
+      if (res.flat) return (
+        <div style={box}>{headLine}
+          <div style={{ fontSize: 13, color: "var(--text2)", margin: "6px 0 8px" }}>사이즈 있는 제품 {res.total}종 가운데 {sp.sort === "high" ? "많은" : "적은"} 순 {res.flat.length}개</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 6 }}>{res.flat.map((r, i) => cell(r, i, <>{r.name}{r.code ? <span style={{ fontSize: 10.5, fontWeight: 500, color: "var(--text3)", marginLeft: 5 }}>{String(r.code).split("/")[0]}</span> : null}</>))}</div>
+          {foot}
+        </div>
+      );
+      const shown = res.groups.slice(0, 4);
+      return (
+        <div style={box}>{headLine}
+          {shown.map(g => (
+            <div key={g.code + g.label} style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                <b style={{ fontSize: 15, fontWeight: 800, color: "var(--text1)" }}>{g.label}</b>
+                {g.code && <span style={{ fontSize: 11.5, color: "var(--text3)" }}>{g.code}</span>}
+                <span style={{ fontSize: 12, color: "var(--text2)", marginLeft: "auto", fontVariantNumeric: "tabular-nums" }}>합계 {g.sum.toLocaleString()}</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(118px, 1fr))", gap: 6 }}>{g.rows.map((r, i) => cell(r, i, r.size || "-"))}</div>
+            </div>
+          ))}
+          {res.groups.length > shown.length && <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>외 {res.groups.length - shown.length}개 제품 — 낱말을 더 붙이면 좁혀져요 (예: 2026)</div>}
+          {foot}
+        </div>
+      );
+    }
     if (it.kind === "radar") return (
       <div style={{ padding: "14px 16px", borderRadius: 14, background: active ? "rgba(240,68,82,0.10)" : "var(--surface2)", border: `1px solid ${active ? "rgba(240,68,82,0.4)" : "transparent"}` }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#F04452", display: "flex", alignItems: "center", gap: 6 }}><Icon name="radar" size={14}/>재주문 레이더</div>
@@ -17896,7 +18007,7 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 16px", height: 58, borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
           <Icon name="search" size={18} style={{ color: "var(--text3)" }}/>
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKey}
-            placeholder={narrow ? "말로 물어보기 — 「지난달 매출」" : "무엇이든 — 「가나산공 지난달 매출」 「늦어진 거래처」 「새 견적」"}
+            placeholder={narrow ? "말로 물어보기 — 「솜바지 재고」" : "무엇이든 — 「솜바지 재고 부족한 사이즈」 「가나산공 지난달 매출」 「새 견적」"}
             style={{ flex: 1, minWidth: 0, height: 56, border: "none", outline: "none", background: "transparent", color: "var(--text1)", fontSize: 16, fontFamily: "inherit", boxShadow: "none", padding: 0 }}/>
           {q && <button type="button" onClick={() => { setQ(""); inputRef.current && inputRef.current.focus(); }} aria-label="지우기" style={{ width: 26, height: 26, borderRadius: 13, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={12}/></button>}
           <button type="button" onClick={onClose} style={{ height: 24, padding: "0 7px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{narrow ? "닫기" : "Esc"}</button>
@@ -26627,7 +26738,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   <PaneCtx.Provider value="side">{renderTabBody(sideTab, "side")}</PaneCtx.Provider>
                 </SidePane>
               ), document.body)}
-              {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild} sideIds={SIDE_TAB_IDS} onSide={openSide}/>}
+              {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild} sideIds={SIDE_TAB_IDS} onSide={openSide}
+                stock={stock} onStock={(f) => { if (f) setStockFocusSearch(f); setTab("stock"); }}/>}
               {/* 좁은 화면 전용 검색 버튼 — ⌘K 명령창 열기 (1024px 이하에서만 CSS로 표시) */}
               <button className="gs-mobile-btn no-print" title="통합 검색"
                 onClick={() => setCmdkOpen(true)}
