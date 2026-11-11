@@ -17705,11 +17705,12 @@ function ReorderRadar({ darkMode = false, clientsDb = [], onOpenClient, compact 
 // Ctrl/⌘+K (또는 입력칸 밖에서 「/」) 로 연다. 한 칸에 말로 쓰면:
 //  ① 답 — 「가나산공 지난달 매출」「작년 10월 매출」「늦어진 거래처」 → 판매 현황 데이터로 바로 숫자
 //         「솜바지 재고 부족한 사이즈 순서대로」「플리스 100 몇 벌 남았어」 → 재고 현황 데이터로 바로 사이즈별 수량
+//         「작년 오늘 기준 매출」 → 같은 날짜까지 누계를 작년·올해 나란히 · 「오늘 일정」「세무 일정」「오늘 입금」 → 앱 자료에서 바로
 //  ② 바로가기 — 탭 이동 · 새 견적 · 다크 모드 · 재고 새로고침 같은 동작
 //  ③ 검색 — 통합 검색과 같은 결과
 //  ④ Claude 에게 묻기 — 위에서 못 하는 건 claude.ai(NJ_SAFETY 커넥터)로 넘긴다 (구독 안, 추가 비용 없음)
 const CMDK_RECENT_KEY = "frw_cmdk_recent";
-const CMDK_EXAMPLES = ["솜바지 재고 부족한 사이즈 순서대로", "이번 달 매출", "지난달 매출", "작년 10월 매출", "늦어진 거래처", "재고 부족한 거", "새 견적"];
+const CMDK_EXAMPLES = ["솜바지 재고 부족한 사이즈 순서대로", "작년 오늘 기준 매출 얼마야", "오늘 일정 뭐야", "세무 일정 알려줘", "오늘 입금", "이번 달 매출", "늦어진 거래처", "새 견적"];
 const CMDK_SALES_WORDS = /(매출|판매|실적|얼마|전표|팔았|주문액|매상)/;
 // 말 속의 기간 → { from, to, month?, label, text(기간을 뺀 나머지) }
 function cmdkParsePeriod(q, today) {
@@ -17811,10 +17812,88 @@ function cmdkStockText(res, sp, when) {
   return res.groups.map(g => [`${g.label}${g.code ? ` (${g.code})` : ""} 재고 — ${head}`, ...g.rows.map((r, i) => `${i + 1}. ${r.size || "-"} — ${r.qty.toLocaleString()}${r.unit}`), `합계 ${g.sum.toLocaleString()}`].join("\n")).join("\n\n");
 }
 
+// ── 날짜 말 읽기(앞날 포함) — 「내일」「모레」「이번 주」「다음 달」「11월 15일」「금요일」 → { from, to, label, one } ──
+function cmdkParseWhen(q, today) {
+  const y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
+  const pad = (n) => String(n).padStart(2, "0");
+  const DOW = "일월화수목금토";
+  const md = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}(${DOW[ymdDow(d)]})`;
+  const mondayOf = (d) => addDaysYmd(d, -((ymdDow(d) + 6) % 7));
+  const one = (d, label) => (/^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d)) ? { from: d, to: d, one: true, label: label ? `${label} ${md(d)}` : md(d) } : null);
+  const span = (from, to, label) => ({ from, to, label: `${label} ${md(from)}~${md(to)}` });
+  const monthOf = (ym, label) => ({ from: `${ym}-01`, to: ymMonthEnd(ym), label: label || `${Number(ym.slice(5))}월` });
+  const rules = [
+    [/(\d{4})\s*[년.\-\/]\s*(\d{1,2})\s*[월.\-\/]\s*(\d{1,2})\s*일?/, (g) => one(`${g[1]}-${pad(g[2])}-${pad(g[3])}`)],
+    [/(\d{1,2})\s*월\s*(\d{1,2})\s*일/, (g) => one(`${y}-${pad(g[1])}-${pad(g[2])}`)],
+    [/(\d{1,2})\s*\/\s*(\d{1,2})/, (g) => one(`${y}-${pad(g[1])}-${pad(g[2])}`)],
+    [/모레/, () => one(addDaysYmd(today, 2), "모레")],
+    [/내일|낼/, () => one(addDaysYmd(today, 1), "내일")],
+    [/오늘|금일/, () => one(today, "오늘")],
+    [/그저께|그제/, () => one(addDaysYmd(today, -2), "그저께")],
+    [/어제/, () => one(addDaysYmd(today, -1), "어제")],
+    [/다음\s*주|담주|내주/, () => { const mo = addDaysYmd(mondayOf(today), 7); return span(mo, addDaysYmd(mo, 6), "다음 주"); }],
+    [/이번\s*주|금주/, () => { const mo = mondayOf(today); return span(mo, addDaysYmd(mo, 6), "이번 주"); }],
+    [/지난\s*주|저번\s*주/, () => { const mo = addDaysYmd(mondayOf(today), -7); return span(mo, addDaysYmd(mo, 6), "지난주"); }],
+    [/다음\s*달|담달|내달/, () => monthOf(ymShift(today.slice(0, 7), 1), "다음 달")],
+    [/이번\s*달|이달|금월/, () => monthOf(today.slice(0, 7), "이번 달")],
+    [/지난\s*달|저번\s*달|전월/, () => monthOf(ymShift(today.slice(0, 7), -1), "지난달")],
+    [/(\d{1,2})\s*월/, (g) => (+g[1] >= 1 && +g[1] <= 12 ? monthOf(`${y}-${pad(g[1])}`) : null)],
+    [/(\d{1,2})\s*일(?!정)/, (g) => (+g[1] >= 1 && +g[1] <= 31 ? one(`${today.slice(0, 7)}-${pad(g[1])}`) : null)],
+    [/([일월화수목금토])요일/, (g) => one(addDaysYmd(today, (DOW.indexOf(g[1]) - ymdDow(today) + 7) % 7), `${g[1]}요일`)],
+  ];
+  for (const [re, fn] of rules) { const g = q.match(re); if (!g) continue; const p = fn(g); if (p) return p; }
+  return null;
+}
+const CMDK_TAX_WORDS = /(세무|세금|부가세|부가가치세|원천세|법인세|종소세|종합소득세|지방소득세|4대\s*보험|납부)/;
+const CMDK_SCHED_WORDS = /(일정|스케줄|스케쥴|할\s*일|약속|미팅|회의|뭐\s*해|뭐\s*있|뭐\s*하)/;
+const CMDK_DEP_WORDS = /(입금|들어온\s*돈|들어왔)/;
+// 일정 답 — 그 기간의 일정(달력 + 타임테이블 전용) + 그 안에 납부 기한이 있는 미납 세금
+function cmdkSchedAnswer(todos, taxes, w) {
+  const hm = (t) => (t.startMin != null && t.startMin !== "" && Number.isFinite(Number(t.startMin)) ? `${String(Math.floor(t.startMin / 60)).padStart(2, "0")}:${String(Math.round(t.startMin) % 60).padStart(2, "0")}` : "");
+  const rows = (todos || []).filter(t => t && t.date && t.date <= w.to && (t.endDate || t.date) >= w.from)
+    .map(t => ({ date: t.date < w.from ? w.from : t.date, time: hm(t), text: String(t.text || "").trim() || "(제목 없음)", done: !!t.done, until: t.endDate && t.endDate !== t.date ? t.endDate : "", tt: !!t.ttOnly, cat: t.category || "" }));
+  (taxes || []).filter(x => x && x.dueDate && !x.paidDate && x.dueDate >= w.from && x.dueDate <= w.to)
+    .forEach(x => rows.push({ date: x.dueDate, time: "", text: `${x.taxType || "세금"} 납부 기한${x.biz ? ` · ${String(x.biz).replace(/^주식회사\s*/, "")}` : ""}${Number(x.amount) ? ` · ${Math.round(Number(x.amount)).toLocaleString()}원` : ""}`, done: false, tax: true }));
+  rows.sort((a, b) => a.date.localeCompare(b.date) || (a.time ? 0 : 1) - (b.time ? 0 : 1) || a.time.localeCompare(b.time));
+  return { rows, done: rows.filter(r => r.done).length };
+}
+// 세무 답 — 안 낸 세금을 기한 순으로(기간을 말하면 그 기간에 기한이 있는 것만)
+function cmdkTaxAnswer(taxes, today, w, q = "") {
+  const dd = (d) => Math.round((Date.parse(d) - Date.parse(today)) / 86400000);
+  // 세금 이름을 말했으면 그 세금만 (「부가세 언제야」)
+  const TYPES = [[/부가세|부가가치세/, "부가가치세"], [/원천세/, "원천세"], [/법인세/, "법인세"], [/종소세|종합소득세/, "종합소득세"], [/지방소득세|지방세/, "지방소득세"], [/4대\s*보험/, "4대보험"]];
+  const want = TYPES.filter(([re]) => re.test(q)).map(([, t]) => t);
+  let rows = (taxes || []).filter(x => x && x.dueDate && !x.paidDate && (!want.length || want.includes(x.taxType)));
+  if (w) rows = rows.filter(x => x.dueDate >= w.from && x.dueDate <= w.to);
+  rows = rows.sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate))).map(x => ({ due: x.dueDate, d: dd(x.dueDate), type: x.taxType || "세금", biz: String(x.biz || "").replace(/^주식회사\s*/, ""), amount: Math.round(Number(x.amount) || 0), period: x.period || "" }));
+  const paidRecent = (taxes || []).filter(x => x && x.paidDate).sort((a, b) => String(b.paidDate).localeCompare(String(a.paidDate)))[0] || null;
+  return { rows, sum: rows.reduce((t, r) => t + r.amount, 0), late: rows.filter(r => r.d < 0).length, paidRecent, want };
+}
+// 입금 답 — 그 기간에 들어온 돈
+function cmdkDepAnswer(dep, w) {
+  const rows = ((dep && dep.items) || []).filter(x => x && x.date && x.date >= w.from && x.date <= w.to && Number(x.amount) > 0)
+    .map(x => ({ date: x.date, time: String(x.time || "").slice(0, 5), name: x.client || x.name || "(입금자명 없음)", amount: Math.round(Number(x.amount)), pending: x.status !== "done", gap: x.src === "gap" }))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+  return { rows, sum: rows.reduce((t, r) => t + r.amount, 0), pending: rows.filter(r => r.pending).length };
+}
+// 「작년 오늘 기준 매출」「오늘 기준 매출」「지금까지 매출 누계」 → 같은 날짜까지의 누계를 작년·올해 나란히
+function cmdkParseAsOf(q) {
+  if (!CMDK_SALES_WORDS.test(q)) return null;
+  const last = /(작년|지난\s*해|전년)/.test(q);
+  const asof = /(오늘|현재|지금|이\s*맘때|같은\s*날|동기|이\s*시점)\s*(기준|까지|시점|쯤|대비)?/.test(q);
+  const cum = /(기준|까지|누계|누적|이\s*맘때|같은\s*날|동기|시점|대비)/.test(q);
+  if (!(last && asof) && !(asof && cum) && !/(누계|누적)/.test(q)) return null;
+  if (/(\d{1,2})\s*월|분기|상반기|하반기|주(?!문)|달/.test(q)) return null;      // 기간을 따로 말했으면 기간 답으로
+  const client = q.replace(/(작년|지난\s*해|전년|올해|금년|오늘|현재|지금|이\s*맘때|같은\s*날|동기|이\s*시점|시점|기준|까지|누계|누적|대비|비교|쯤)/g, " ")
+    .replace(/(매출액|매출|판매액|판매|실적|얼마야|얼마나|얼마|전표|팔았어|팔았나|팔았지|주문액|매상|합계|총액|총|금액|알려\s*줘|보여\s*줘|어때|어땠어|좀|현황|\?|!)/g, " ")
+    .replace(/(의|은|는|이|가|에서|에|랑|하고)(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
+  return { focus: last ? "last" : "this", client };
+}
+
 const _cmdkCache = new Map();
 const cmdkGet = (url) => { if (!_cmdkCache.has(url)) _cmdkCache.set(url, fetch(url, { cache: "no-store" }).then(r => r.json()).catch(() => null)); return _cmdkCache.get(url); };
 
-function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null, onSide, stock = null, onStock }) {
+function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null, onSide, stock = null, onStock, todos = [], taxes = [], deposits = null }) {
   const today = kstTodayYmd();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -17839,7 +17918,42 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
   const stAns = React.useMemo(() => (stq ? cmdkStockAnswer(stock, stq) : null), [stq, stock]);
   const [stCopied, setStCopied] = useState(false);
   useEffect(() => { setStCopied(false); }, [qs]);
-  const sq = React.useMemo(() => (qs && !stq ? cmdkParseSales(qs, today) : null), [qs, stq]);
+  // ── 답 (세무 · 일정 · 입금) — 앱에 있는 자료로 바로 ──
+  const quick = React.useMemo(() => {
+    if (!qs || stq) return null;
+    if (CMDK_TAX_WORDS.test(qs)) { const w = cmdkParseWhen(qs, today); return { kind: "tax", w, res: cmdkTaxAnswer(taxes, today, w, qs) }; }
+    if (CMDK_SCHED_WORDS.test(qs)) { const w = cmdkParseWhen(qs, today) || cmdkParseWhen("오늘", today); return { kind: "sched", w, res: cmdkSchedAnswer(todos, taxes, w) }; }
+    if (CMDK_DEP_WORDS.test(qs) && !/(매출|판매|실적|전표|팔았|주문액|매상)/.test(qs)) { const w = cmdkParseWhen(qs, today) || cmdkParseWhen("오늘", today); return { kind: "dep", w, res: cmdkDepAnswer(deposits, w) }; }
+    return null;
+  }, [qs, stq, todos, taxes, deposits]);
+  // ── 답 (매출 — 같은 날짜까지 누계 비교) ──
+  const asq = React.useMemo(() => (qs && !stq && !quick ? cmdkParseAsOf(qs) : null), [qs, stq, quick]);
+  const [asof, setAsof] = useState(null);
+  useEffect(() => {
+    if (!asq) { setAsof(null); return; }
+    const key = `asof|${asq.focus}|${asq.client}`;
+    setAsof(a => (a && a.key === key ? a : { key, loading: true }));
+    const ly = salesShiftYear(today, -1), y = today.slice(0, 4), py = ly.slice(0, 4);
+    const R = { ytdThis: [`${y}-01-01`, today], ytdLast: [`${py}-01-01`, ly], monThis: [`${today.slice(0, 7)}-01`, today], monLast: [`${ly.slice(0, 7)}-01`, ly], dayThis: [today, today], dayLast: [ly, ly], fullLast: [`${py}-01-01`, `${py}-12-31`] };
+    const t = setTimeout(() => {
+      const keys = Object.keys(R);
+      Promise.all(keys.map(k => cmdkGet(`/api/sales?from=${R[k][0]}&to=${R[k][1]}`))).then(list => {
+        const J = Object.fromEntries(keys.map((k, i) => [k, list[i]]));
+        if (keys.some(k => !J[k] || J[k].error || !J[k].totals)) { setAsof({ key, error: true }); return; }
+        let name = null;
+        if (asq.client) {
+          const pool = new Map(); ["ytdThis", "fullLast"].forEach(k => (J[k].clients || []).forEach(c => pool.set(c.name, (pool.get(c.name) || 0) + c.total)));
+          const best = [...pool].map(([n, tot]) => ({ n, tot, s: searchScore(asq.client, [n]) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s || b.tot - a.tot)[0];
+          if (!best) { setAsof({ key, none: true }); return; }
+          name = best.n;
+        }
+        const v = (k) => { if (!name) return { total: J[k].totals.total, count: J[k].totals.slips || J[k].totals.count }; const c = (J[k].clients || []).find(x => x.name === name); return { total: c ? c.total : 0, count: c ? c.count : 0 }; };
+        setAsof({ key, name, ly, V: Object.fromEntries(keys.map(k => [k, v(k)])) });
+      });
+    }, 220);
+    return () => clearTimeout(t);
+  }, [asq && asq.focus, asq && asq.client]);
+  const sq = React.useMemo(() => (qs && !stq && !quick && !asq ? cmdkParseSales(qs, today) : null), [qs, stq, quick, asq]);
   const radarAsk = /(늦어진|늦은|끊긴|끊김|재주문|이탈|주문\s*안\s*한|안\s*산|레이더)/.test(qs);
   useEffect(() => {
     if (!sq || radarAsk) { setAns(null); return; }
@@ -17873,6 +17987,11 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
   if (qs && stq && stAns) {
     items.push({ section: "답", id: "ans:stock", icon: "layers", kind: "stock", stq, res: stAns, title: `재고 — ${stq.text || "전체"}`,
       run: () => { if (onStock) onStock(stAns.focus || stq.text || ""); else onNav("stock"); } });
+  } else if (qs && quick) {
+    const nav = quick.kind === "tax" ? "tax" : quick.kind === "sched" ? "schedule" : "ledger";
+    items.push({ section: "답", id: `ans:${quick.kind}`, icon: quick.kind === "tax" ? "coins" : quick.kind === "sched" ? "calendar" : "inbox", kind: quick.kind, quick, title: quick.kind === "tax" ? "세무 일정" : quick.kind === "sched" ? `일정 — ${quick.w.label}` : `입금 — ${quick.w.label}`, run: () => onNav(nav) });
+  } else if (qs && asq && asof && !asof.none) {
+    items.push({ section: "답", id: "ans:asof", icon: "barChart", kind: "asof", asq, asof, title: `${asof.name || "전체"} · 오늘 날짜 기준 매출`, run: navSales(asof.name ? { sub: "clients", client: asof.name, from: `${today.slice(0, 4)}-01-01`, to: today } : { sub: "summary", from: `${today.slice(0, 4)}-01-01`, to: today }) });
   } else if (qs && radarAsk && cad) {
     const late = cad.rows.filter(r => r.status === "late").sort((a, b) => b.yearValue - a.yearValue);
     const lost = cad.rows.filter(r => r.status === "lost");
@@ -17957,6 +18076,97 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
           ))}
           {res.groups.length > shown.length && <div style={{ fontSize: 12, color: "var(--text3)", marginTop: 8 }}>외 {res.groups.length - shown.length}개 제품 — 낱말을 더 붙이면 좁혀져요 (예: 2026)</div>}
           {foot}
+        </div>
+      );
+    }
+    if (it.kind === "tax" || it.kind === "sched" || it.kind === "dep") {
+      const { quick: Q } = it; const res = Q.res;
+      const C = it.kind === "tax" ? "#E8793B" : it.kind === "sched" ? "#3182F6" : "#00A37A";
+      const box = { padding: "14px 16px", borderRadius: 14, background: active ? `${C}1A` : "var(--surface2)", border: `1px solid ${active ? C + "66" : "transparent"}` };
+      const DOWK = "일월화수목금토";
+      const md = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}(${DOWK[ymdDow(d)]})`;
+      const line = (k, left, mid, right, o = {}) => (
+        <div key={k} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "7px 10px", borderRadius: 10, background: "var(--surface)", minWidth: 0 }}>
+          {left != null && <span style={{ fontSize: 12, fontWeight: 700, color: o.leftColor || "var(--text3)", fontVariantNumeric: "tabular-nums", flexShrink: 0, minWidth: o.leftW || 44 }}>{left}</span>}
+          <span style={{ fontSize: 14, fontWeight: 650, color: o.dim ? "var(--text3)" : "var(--text1)", textDecoration: o.strike ? "line-through" : "none", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mid}</span>
+          {right != null && <span style={{ fontSize: 13.5, fontWeight: 800, color: o.rightColor || "var(--text1)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{right}</span>}
+        </div>
+      );
+      const head = (icon, text, sub) => <div style={{ fontSize: 12, fontWeight: 700, color: C, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}><Icon name={icon} size={14}/>{text}{sub ? <span style={{ color: "var(--text3)", fontWeight: 600 }}>{sub}</span> : null}</div>;
+      const foot = (t) => <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 10 }}>{t}</div>;
+      const list = { display: "flex", flexDirection: "column", gap: 5, marginTop: 8 };
+      if (it.kind === "sched") {
+        const rows = res.rows.slice(0, 14);
+        return (
+          <div style={box}>{head("calendar", `일정 · ${Q.w.label}`)}
+            <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)", marginTop: 4 }}>{res.rows.length ? <>{res.rows.length}건{res.done ? <span style={{ fontSize: 13, color: "var(--text3)", fontWeight: 700 }}> · 끝낸 것 {res.done}건</span> : null}</> : "일정이 없어요"}</div>
+            {rows.length > 0 && <div style={list}>{rows.map((r, i) => line(i, Q.w.one ? (r.time || (r.tax ? "세금" : "종일")) : `${md(r.date)}${r.time ? " " + r.time : ""}`, <>{r.text}{r.until ? <span style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 500 }}> ~{md(r.until)}</span> : null}{r.tt ? <span style={{ fontSize: 10.5, color: "var(--text3)", fontWeight: 600, marginLeft: 6 }}>타임테이블</span> : null}</>, r.done ? "완료" : null, { strike: r.done, dim: r.done, leftW: Q.w.one ? 44 : 96, leftColor: r.tax ? "#E8793B" : undefined, rightColor: "var(--text3)" }))}</div>}
+            {res.rows.length > rows.length && foot(`외 ${res.rows.length - rows.length}건`)}
+            {foot("Enter — 일정 탭 열기 · 「내일 일정」「이번 주 일정」「11월 20일 일정」처럼 날짜를 바꿔 물을 수 있어요")}
+          </div>
+        );
+      }
+      if (it.kind === "tax") {
+        const rows = res.rows.slice(0, 10);
+        return (
+          <div style={box}>{head("coins", `세무 일정${res.want.length ? ` · ${res.want.join("·")}` : ""}${Q.w ? ` · ${Q.w.label}` : " · 안 낸 세금"}`)}
+            {res.rows.length ? <>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 22, fontWeight: 800, color: "var(--text1)" }}>{res.rows.length}건 · {radarWon(res.sum)}</span>
+                {res.late > 0 && <b style={{ fontSize: 12.5, color: "#F04452" }}>기한 지난 것 {res.late}건</b>}
+              </div>
+              <div style={list}>{rows.map((r, i) => line(i, r.d < 0 ? `${-r.d}일 지남` : r.d === 0 ? "오늘" : `D-${r.d}`, <>{r.type}{r.period ? ` ${r.period}` : ""}<span style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 500 }}> · {md(r.due)}{r.biz ? ` · ${r.biz}` : ""}</span></>, r.amount ? won(r.amount) : "금액 미정", { leftW: 62, leftColor: r.d < 0 ? "#F04452" : r.d <= 7 ? "#E8793B" : "var(--text2)" }))}</div>
+              {res.rows.length > rows.length && foot(`외 ${res.rows.length - rows.length}건`)}
+            </> : <>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text1)", marginTop: 4 }}>{Q.w ? "그 기간에 낼 세금으로 등록된 게 없어요" : res.want.length ? `안 낸 ${res.want.join("·")}로 등록된 게 없어요` : "안 낸 세금으로 등록된 게 없어요"}</div>
+              <div style={{ ...list, gap: 3 }}>{TAX_CALENDAR_HINTS.map(([k, v]) => <div key={k} style={{ fontSize: 12.5, color: "var(--text2)" }}><b style={{ color: "var(--text1)" }}>{k}</b> — {v}</div>)}</div>
+            </>}
+            {foot("Enter — 세무 관리 열기 · 세무 관리에 등록해 둔 납부 기록 기준이에요")}
+          </div>
+        );
+      }
+      const rows = res.rows.slice(0, 10);
+      return (
+        <div style={box}>{head("inbox", `입금 · ${Q.w.label}`)}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 24, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{res.rows.length ? won(res.sum) : "들어온 입금이 없어요"}</span>
+            {res.rows.length > 0 && <span style={{ fontSize: 12.5, color: "var(--text3)" }}>{res.rows.length}건{res.pending ? ` · 거래처 지정 전 ${res.pending}건` : ""}</span>}
+          </div>
+          {rows.length > 0 && <div style={list}>{rows.map((r, i) => line(i, Q.w.one ? (r.time || "—") : `${md(r.date)}${r.time ? " " + r.time : ""}`, <>{r.name}{r.gap ? <span style={{ fontSize: 10.5, color: "#E8793B", fontWeight: 700, marginLeft: 6 }}>문자 누락</span> : null}</>, won(r.amount), { leftW: Q.w.one ? 44 : 96 }))}</div>}
+          {res.rows.length > rows.length && foot(`외 ${res.rows.length - rows.length}건`)}
+          {foot("Enter — 장부 열기 · 입금내역에 들어와 있는 것 기준이에요 (「어제 입금」「이번 주 입금」도 돼요)")}
+        </div>
+      );
+    }
+    if (it.kind === "asof") {
+      const { asq: A, asof: R } = it;
+      const box = { padding: "14px 16px", borderRadius: 14, background: active ? "rgba(49,130,246,0.10)" : "var(--surface2)", border: `1px solid ${active ? "rgba(49,130,246,0.4)" : "transparent"}` };
+      const mdS = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}`;
+      const title = <div style={{ fontSize: 12, fontWeight: 700, color: "#3182F6", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}><Icon name="barChart" size={14}/>{R.name || "전체 매출"} · {A.focus === "last" ? `작년 오늘(${mdS(today)}) 기준` : `오늘(${mdS(today)}) 기준`}</div>;
+      if (R.loading) return <div style={box}>{title}<div style={{ fontSize: 13, color: "var(--text3)", marginTop: 8 }}>계산하는 중…</div></div>;
+      if (R.error) return <div style={box}>{title}<div style={{ fontSize: 13, color: "var(--text3)", marginTop: 8 }}>판매 현황을 불러오지 못했어요</div></div>;
+      const V = R.V, py = R.ly.slice(0, 4), yy = today.slice(0, 4), mon = Number(today.slice(5, 7)), day = Number(today.slice(8));
+      const pct = (a, b) => (b > 0 ? (a - b) / b * 100 : null);
+      const chg = (cur, prev) => { const d = pct(cur, prev); return d == null ? <span style={{ color: "var(--text3)" }}>—</span> : <b style={{ color: d >= 0 ? "#00A37A" : "#F04452" }}>{d >= 0 ? "▲" : "▼"} {Math.abs(d).toFixed(0)}%</b>; };
+      const main = A.focus === "last" ? V.ytdLast : V.ytdThis, other = A.focus === "last" ? V.ytdThis : V.ytdLast;
+      const tight = window.innerWidth < 640;   // 휴대폰에서는 칸을 좁혀 「증감」까지 한 화면에
+      const rowsT = [[tight ? `1/1~${mon}/${day}` : `1/1 ~ ${mon}/${day} 누계`, V.ytdLast, V.ytdThis], [tight ? `${mon}/1~${mon}/${day}` : `${mon}월 1일 ~ ${day}일`, V.monLast, V.monThis], [`${mon}/${day} 하루`, V.dayLast, V.dayThis]];
+      const th = { fontSize: 11, fontWeight: 700, color: "var(--text3)", textAlign: "right", padding: tight ? "4px 5px" : "4px 8px" };
+      const td = { fontSize: tight ? 12 : 13.5, fontWeight: 700, color: "var(--text1)", textAlign: "right", padding: tight ? "7px 5px" : "7px 8px", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+      const prog = V.fullLast.total > 0 ? V.ytdLast.total / V.fullLast.total * 100 : null;
+      return (
+        <div style={box}>{title}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{radarWon(main.total)}</span>
+            <span style={{ fontSize: 12, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{won(main.total)} · {A.focus === "last" ? `${py}년 1/1 ~ ${mon}/${day}` : `${yy}년 1/1 ~ ${mon}/${day}`} · 전표 {main.count}건</span>
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 4 }}>{A.focus === "last" ? `올해 같은 기간 ${radarWon(other.total)}` : `작년 같은 기간 ${radarWon(other.total)}`} <span style={{ marginLeft: 4 }}>{chg(V.ytdThis.total, V.ytdLast.total)}</span> <span style={{ color: "var(--text3)" }}>(올해가 작년보다)</span></div>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10, background: "var(--surface)", borderRadius: 10, overflow: "hidden" }}>
+            <thead><tr><th style={{ ...th, textAlign: "left" }}>구간</th><th style={th}>{py}년</th><th style={th}>{yy}년</th><th style={th}>증감</th></tr></thead>
+            <tbody>{rowsT.map(([label, a, b]) => <tr key={label} style={{ borderTop: "1px solid var(--divider)" }}><td style={{ ...td, textAlign: "left", fontWeight: 600, fontSize: tight ? 11.5 : 12.5, color: "var(--text2)" }}>{label}</td><td style={td}>{radarWon(a.total)}</td><td style={td}>{radarWon(b.total)}</td><td style={{ ...td, fontSize: tight ? 11.5 : 12.5 }}>{chg(b.total, a.total)}</td></tr>)}</tbody>
+          </table>
+          <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 8 }}>{py}년 한 해 전체 <b style={{ color: "var(--text1)" }}>{radarWon(V.fullLast.total)}</b>{prog != null ? ` — 작년 이 날짜까지 ${prog.toFixed(0)}%를 채웠어요` : ""}</div>
+          <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>Enter — 판매 현황에서 자세히 보기 · 판매 현황에 올린 이카운트 판매 자료 기준이에요</div>
         </div>
       );
     }
@@ -26739,7 +26949,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </SidePane>
               ), document.body)}
               {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild} sideIds={SIDE_TAB_IDS} onSide={openSide}
-                stock={stock} onStock={(f) => { if (f) setStockFocusSearch(f); setTab("stock"); }}/>}
+                stock={stock} onStock={(f) => { if (f) setStockFocusSearch(f); setTab("stock"); }}
+                todos={todos} taxes={taxes} deposits={bankDeposits}/>}
               {/* 좁은 화면 전용 검색 버튼 — ⌘K 명령창 열기 (1024px 이하에서만 CSS로 표시) */}
               <button className="gs-mobile-btn no-print" title="통합 검색"
                 onClick={() => setCmdkOpen(true)}
