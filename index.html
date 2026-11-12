@@ -17750,15 +17750,23 @@ const CMDK_EXAMPLES = ["솜바지 재고 부족한 사이즈 순서대로", "작
 const CMDK_SALES_WORDS = /(매출|판매|실적|얼마|전표|팔았|주문액|매상)/;
 // 말 속의 기간 → { from, to, month?, label, text(기간을 뺀 나머지) }
 function cmdkParsePeriod(q, today) {
+  // 「24년」「'24년」 → 2024년 (두 자리 연도)
+  q = String(q).replace(/(^|[^\d])['’]?(\d{2})\s*년/g, (_, a, yy) => `${a}20${yy}년`);
   const y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7));
   const pad = (n) => String(n).padStart(2, "0");
   const monthOf = (yy, mm) => { const ym = `${yy}-${pad(mm)}`; return { from: `${ym}-01`, to: ymMonthEnd(ym), month: ym, label: `${yy}년 ${mm}월` }; };
   const mondayOf = (d) => addDaysYmd(d, -((ymdDow(d) + 6) % 7));
+  const dayOf = (yy, mm, dd) => { const d = `${yy}-${pad(mm)}-${pad(dd)}`; return isNaN(Date.parse(d)) ? null : { from: d, to: d, label: `${yy}년 ${+mm}월 ${+dd}일` }; };
   const rules = [
+    [/(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일/, (g) => dayOf(+g[1], +g[2], +g[3])],
+    [/(\d{4})\s*[.\-\/]\s*(\d{1,2})\s*[.\-\/]\s*(\d{1,2})/, (g) => dayOf(+g[1], +g[2], +g[3])],
     [/(\d{4})\s*년\s*(\d{1,2})\s*월/, (g) => monthOf(+g[1], +g[2])],
+    [/(\d{4})\s*[.\-\/]\s*(\d{1,2})(?![\d])/, (g) => (+g[2] >= 1 && +g[2] <= 12 ? monthOf(+g[1], +g[2]) : null)],
     [/(재작년)\s*(\d{1,2})\s*월/, (g) => monthOf(y - 2, +g[2])],
     [/(작년|지난\s*해|전년)\s*(\d{1,2})\s*월/, (g) => monthOf(y - 1, +g[2])],
     [/(?:올해|금년|이번\s*해)?\s*(\d{1,2})\s*월/, (g) => +g[1] >= 1 && +g[1] <= 12 ? monthOf(+g[1] > m ? y - 1 : y, +g[1]) : null],
+    [/(\d{4})\s*년\s*([1-4])\s*분기/, (g) => { const qn = +g[2]; return { from: `${g[1]}-${pad(qn * 3 - 2)}-01`, to: ymMonthEnd(`${g[1]}-${pad(qn * 3)}`), label: `${g[1]}년 ${qn}분기` }; }],
+    [/(\d{4})\s*년\s*(상반기|하반기)/, (g) => g[2] === "상반기" ? { from: `${g[1]}-01-01`, to: `${g[1]}-06-30`, label: `${g[1]}년 상반기` } : { from: `${g[1]}-07-01`, to: `${g[1]}-12-31`, label: `${g[1]}년 하반기` }],
     [/(\d{4})\s*년/, (g) => ({ from: `${g[1]}-01-01`, to: `${g[1]}-12-31`, label: `${g[1]}년` })],
     [/(?:(올해|금년|작년|지난\s*해)\s*)?([1-4])\s*분기/, (g) => { const yy = g[1] && /작년|지난/.test(g[1]) ? y - 1 : y; const qn = +g[2]; return { from: `${yy}-${pad(qn * 3 - 2)}-01`, to: ymMonthEnd(`${yy}-${pad(qn * 3)}`), label: `${yy}년 ${qn}분기` }; }],
     [/(?:(올해|금년|작년|지난\s*해)\s*)?(상반기|하반기)/, (g) => { const yy = g[1] && /작년|지난/.test(g[1]) ? y - 1 : y; return g[2] === "상반기" ? { from: `${yy}-01-01`, to: `${yy}-06-30`, label: `${yy}년 상반기` } : { from: `${yy}-07-01`, to: `${yy}-12-31`, label: `${yy}년 하반기` }; }],
@@ -17786,7 +17794,7 @@ function cmdkParseSales(q, today) {
   const asks = CMDK_SALES_WORDS.test(q);
   if (!per && !asks) return null;
   const rest = (per ? per.text : q)
-    .replace(/(매출액|매출|판매액|판매|실적|얼마야|얼마|전표|팔았어|팔았나|팔았지|주문액|매상|합계|총액|총|금액|알려\s*줘|보여\s*줘|어때|어땠어|좀|현황|\?|!)/g, " ")
+    .replace(/(매출액|매출|판매액|판매|실적|얼마야|얼마|전표|팔았어|팔았나|팔았지|주문액|매상|합계|총액|총|금액|상세\s*조회|상세|조회|자세히|자세하게|내역|분석|정리|거래처별|보여\s*줘|알려\s*줘|어때|어땠어|좀|현황|\?|!)/g, " ")
     .replace(/(의|은|는|이|가|에서|에|랑|하고)(?=\s|$)/g, " ").replace(/\s+/g, " ").trim();
   return { ...(per || { from: `${today.slice(0, 7)}-01`, to: ymMonthEnd(today.slice(0, 7)), month: today.slice(0, 7), label: "이번 달", text: q, auto: true }), client: rest };
 }
@@ -18038,15 +18046,19 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
         let name = null, total = cur.totals.total, count = cur.totals.slips || cur.totals.count, pTotal = prev && !prev.error ? prev.totals.total : null;
         if (sq.client) {
           const best = (cur.clients || []).map(c => ({ c, s: searchScore(sq.client, [c.name]) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s || b.c.total - a.c.total)[0];
-          if (!best) {
-            const known = cad && cad.rows.find(r => searchScore(sq.client, [r.name]) > 0);
-            if (!known) { setAns({ key, none: true }); return; }
-            name = known.name; total = 0; count = 0;
-          } else { name = best.c.name; total = best.c.total; count = best.c.count; }
-          const pc = prev && !prev.error ? (prev.clients || []).find(c => c.name === name) : null;
-          pTotal = prev && !prev.error ? (pc ? pc.total : 0) : null;
+          const known = !best && cad && cad.rows.find(r => searchScore(sq.client, [r.name]) > 0);
+          if (best) { name = best.c.name; total = best.c.total; count = best.c.count; }
+          else if (known) { name = known.name; total = 0; count = 0; }
+          if (name) {
+            const pc = prev && !prev.error ? (prev.clients || []).find(c => c.name === name) : null;
+            pTotal = prev && !prev.error ? (pc ? pc.total : 0) : null;
+          }
         }
-        setAns({ key, name, total, count, pTotal, to, partial: sq.to > today });
+        const missing = sq.client && !name ? sq.client : "";   // 거래처를 못 찾으면 전체 매출을 보여 주고 알려 준다
+        const days = Array.isArray(cur.days) ? cur.days.filter(x => x && x.total > 0) : [];
+        const best1 = days.slice().sort((a, b) => b.total - a.total)[0] || null;
+        const top = name ? [] : (cur.clients || []).slice(0, 5).map(c => ({ name: c.name, total: c.total, count: c.count }));
+        setAns({ key, name, total, count, pTotal, to, partial: sq.to > today, missing, top, sold: days.length, best: best1, clientCount: cur.clientCount || (cur.clients || []).length });
       });
     }, 220);
     return () => clearTimeout(t);
@@ -18069,7 +18081,7 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
     const late = cad.rows.filter(r => r.status === "late").sort((a, b) => b.yearValue - a.yearValue);
     const lost = cad.rows.filter(r => r.status === "lost");
     items.push({ section: "답", id: "ans:radar", icon: "radar", kind: "radar", late, lost, title: `늦어진 거래처 ${late.length}곳`, run: navSales({ sub: "radar" }) });
-  } else if (qs && sq && ans && !ans.none) {
+  } else if (qs && sq && ans && !ans.none) {   // 거래처를 못 찾아도 전체 매출 + 안내
     items.push({ section: "답", id: "ans:sales", icon: "barChart", kind: "sales", sq, ans, title: `${ans.name || "전체"} · ${sq.label} 매출`,
       run: navSales(ans.name ? { sub: "clients", client: ans.name, ...(sq.month ? { month: sq.month } : { from: sq.from, to: sq.to }) } : { sub: "summary", ...(sq.month ? { month: sq.month } : { from: sq.from, to: sq.to }) }) });
   }
@@ -18309,6 +18321,7 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
             <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums" }}>{radarWon(ans.total)}</span>
             <span style={{ fontSize: 12, color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{won(ans.total)} · 전표 {ans.count}건</span>
           </div>
+          {ans.missing && <div style={{ fontSize: 12.5, color: "var(--warning-text)", marginTop: 4 }}>「{ans.missing}」 거래처는 이 기간 판매에서 못 찾아 전체 매출을 보여 드려요</div>}
           {ans.pTotal != null && <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 4 }}>
             작년 같은 기간 {radarWon(ans.pTotal)}
             {diff != null && <b style={{ marginLeft: 6, color: diff >= 0 ? "#00A37A" : "#F04452" }}>{diff >= 0 ? "▲" : "▼"} {Math.abs(diff).toFixed(0)}%</b>}
@@ -18317,7 +18330,19 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
             <span style={{ fontSize: 11, fontWeight: 800, padding: "1px 7px", borderRadius: 999, color: S.color, background: S.bg }}>{S.label}</span>
             마지막 주문 {radarMd(cr.last)} ({cr.since}일 전){cr.gap ? ` · 보통 ${cr.gap}일마다` : ""}
           </div>}
-          <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>Enter — 판매 현황에서 자세히 보기{sq.auto ? " · 기간을 같이 쓰면 그 기간으로 (예: 지난달, 작년 10월)" : ""}</div>
+          {!ans.name && ans.total > 0 && (ans.sold > 0 || ans.best) && <div style={{ fontSize: 12.5, color: "var(--text2)", marginTop: 4 }}>
+            판매 있는 날 {ans.sold}일 · 하루 평균 {radarWon(ans.total / Math.max(1, ans.sold))}{ans.best ? ` · 최고 ${radarMd(ans.best.date)} ${radarWon(ans.best.total)}` : ""}{ans.clientCount ? ` · 거래처 ${ans.clientCount}곳` : ""}
+          </div>}
+          {ans.top && ans.top.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8 }}>
+            {ans.top.map((c, i) => (
+              <div key={c.name} style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "6px 10px", borderRadius: 10, background: "var(--surface)", minWidth: 0 }}>
+                <span style={{ fontSize: 11, color: "var(--text3)", flexShrink: 0, minWidth: 14 }}>{i + 1}</span>
+                <span style={{ fontSize: 13.5, fontWeight: 650, color: "var(--text1)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}<span style={{ fontSize: 11.5, color: "var(--text3)", fontWeight: 500 }}> · {c.count}건 · {Math.round(c.total / Math.max(1, ans.total) * 100)}%</span></span>
+                <span style={{ fontSize: 13.5, fontWeight: 800, color: "var(--text1)", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>{radarWon(c.total)}</span>
+              </div>
+            ))}
+          </div>}
+          <div style={{ fontSize: 11.5, color: "var(--text3)", marginTop: 8 }}>Enter — 판매 현황에서 그 기간 날짜별·거래처·전표 보기{sq.auto ? " · 기간을 같이 쓰면 그 기간으로 (예: 지난달, 24년 11월)" : ""}</div>
         </>}
       </div>
     );
