@@ -1777,6 +1777,14 @@
     el.textContent = (el.textContent ? el.textContent + '\n\n' : '') + msg;
   }
   window.addEventListener('error', function(e){
+    // 「Script error.」 + 위치 없음 = 앱 바깥 스크립트(구글 로그인 스크립트·Safari 키보드·확장 기능 등)에서 난 오류.
+    // 브라우저가 내용을 가려서 고칠 정보가 없고 앱 동작에도 영향이 없어, 빨간 띠 대신 콘솔에만 남긴다.
+    // (앱 코드에서 난 오류는 위치가 함께 오므로 그대로 띠에 뜬다)
+    if (/^Script error\.?$/i.test(String(e.message || '')) && !e.filename && !e.lineno && !e.error) {
+      window.__frwOuterErrors = (window.__frwOuterErrors || 0) + 1;
+      try { console.warn('[앱 바깥 스크립트 오류 — 띠에는 안 띄움]', window.__frwOuterErrors); } catch (_) {}
+      return;
+    }
     showErr('⚠️ JS Error: ' + (e.message || 'unknown') + '\nat ' + (e.filename || '') + ':' + (e.lineno || '') + ':' + (e.colno || '') + (e.error && e.error.stack ? '\n' + e.error.stack : ''));
   });
   window.addEventListener('unhandledrejection', function(e){
