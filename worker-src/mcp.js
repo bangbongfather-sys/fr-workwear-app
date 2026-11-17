@@ -2,6 +2,7 @@ import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecoun
 import { salesSummary, salesImport, salesCadence } from "./sales.js";
 import { notionTodoCreate, notionTodoPatch, notionTodoArchive, notionTodoConfigured } from "./notiontodo.js";
 import { applyBase as hrApplyBase } from "./hr.js";
+import { websalesRequest, websalesCancel, websalesStatus, websalesShot } from "./websales.js";
 import { PL_WK, plArr, plannerNormalize, plMonday, plAdd, plDow, plMin, plWeekOf, plRangeOf, plWeekNo, plLogOf, plThemeOf, plDayBlocks, plWeekStats, plRoutineDate, plTodoBlocks } from "./planner.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
@@ -597,7 +598,7 @@ async function toolGetSection(args, env) {
   // 배포 확인용 마커 — 어떤 커밋이 라이브인지 원격에서 검증 (Claude가 배포 상태 점검에 사용)
   if (section === "_version") {
     // 배포 확인용 — 앱(index.html)만 바뀐 커밋은 자동 배포가 안 걸리는 경우가 있어, 앱을 고칠 때 이 값을 같이 올려 배포를 확실히 한다
-    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-12-ledger-sales", note: "명령창 지난해 매출 = 장부 연매출 기준 + 판매 자료 빠진 달·날짜 안내(이 기간 판매 채우기) · 복사 실패가 빨간 띠로 번지지 않게 · 명령창 매출: 「24년 11월 매출 상세조회」 — 두 자리 연도·날짜·분기, 상위 거래처·최고 매출일 · 앱 바깥 「Script error.」(위치 없음)는 빨간 띠에 안 띄움 · 위쪽 검색 단추 → 「AI에게 묻기」 단추(무지개 테두리·빛 구슬) · 명령창 미수금 답 · 판매 현황 「작년 같은 기간 자세히 보기」 · 명령창(⌘K) 답 추가 — 작년 오늘 기준 매출 · 오늘 일정 · 세무 일정 · 오늘 입금 · 명령창(⌘K)에서 말로 재고 묻기 — 「솜바지 재고 부족한 사이즈 순서대로」 · 잔액 점검: 나중에 채운 외딴 줄은 점검에서 제외 · 은행 문자 누락 → 잔액으로 찾아 입금내역에 자동으로 채움 · 장부 메모 칸: 누르면 넓은 입력 상자 · 플래너 PC 세 칸 비율 조정(넓은 화면에서 달력·상세 칸 확대) · 인사 관리 기본급 수정(이 달부터 계속 적용 · 변경 이력) · 플래너 「+ 새 계획」(투자 전문가 1년 플랜 템플릿) 포함 · 플래너 새 화면(오늘 두 줄·주간·목표, 아침 계획·하루 마감) · 타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
+    return { content: [{ type: "text", text: JSON.stringify({ build: "2026-11-17-websales1", note: "이카운트 판매조회 맥 로봇 1단계(설치·로그인 정찰) · _websales 상태·요청·화면 사진 · 명령창 지난해 매출 = 장부 연매출 기준 + 판매 자료 빠진 달·날짜 안내(이 기간 판매 채우기) · 복사 실패가 빨간 띠로 번지지 않게 · 명령창 매출: 「24년 11월 매출 상세조회」 — 두 자리 연도·날짜·분기, 상위 거래처·최고 매출일 · 앱 바깥 「Script error.」(위치 없음)는 빨간 띠에 안 띄움 · 위쪽 검색 단추 → 「AI에게 묻기」 단추(무지개 테두리·빛 구슬) · 명령창 미수금 답 · 판매 현황 「작년 같은 기간 자세히 보기」 · 명령창(⌘K) 답 추가 — 작년 오늘 기준 매출 · 오늘 일정 · 세무 일정 · 오늘 입금 · 명령창(⌘K)에서 말로 재고 묻기 — 「솜바지 재고 부족한 사이즈 순서대로」 · 잔액 점검: 나중에 채운 외딴 줄은 점검에서 제외 · 은행 문자 누락 → 잔액으로 찾아 입금내역에 자동으로 채움 · 장부 메모 칸: 누르면 넓은 입력 상자 · 플래너 PC 세 칸 비율 조정(넓은 화면에서 달력·상세 칸 확대) · 인사 관리 기본급 수정(이 달부터 계속 적용 · 변경 이력) · 플래너 「+ 새 계획」(투자 전문가 1년 플랜 템플릿) 포함 · 플래너 새 화면(오늘 두 줄·주간·목표, 아침 계획·하루 마감) · 타임테이블 날짜 옮기기(‹ 날짜 › 오늘) · 작은 타임테이블에도 플래너 블록 · 블록 설명·AI 역할·메모 직접 고치기 · 플래너 커넥터 읽기·쓰기·수정·삭제 (get_planner·add_planner_item·set_day_timetable·update_planner_item·log_day·add_score·push_to_todos·delete_planner_item·delete_todo)" }) }] };
   }
   // 커넥터가 새 도구 목록을 늦게 받는 경우를 대비한 우회 경로 (get_campus_snapshot 과 동일)
   if (section === "_campus") return textContent(await buildCampusSnapshot(env));
@@ -632,6 +633,15 @@ async function toolGetSection(args, env) {
   // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
   if (section === "_ecount:probe") return textContent(await ecountProbe(env));
   if (section === "_ecount:status") return textContent(await ecountStatus(env));
+  // 이카운트 웹 판매조회 로봇(사무실 맥) — "_websales" 상태 · "_websales:req:{mode,from,to}" 요청 · "_websales:cancel" · "_websales:shot:N" 화면 사진
+  if (section === "_websales") return textContent(await websalesStatus(env));
+  if (section === "_websales:cancel") return textContent(await websalesCancel(env));
+  if (section.startsWith("_websales:req:")) { let a = {}; try { a = JSON.parse(section.slice(14)); } catch { return errContent("_websales:req 인자 JSON 이 잘못됐습니다."); } return textContent(await websalesRequest(env, { ...a, by: "claude" })); }
+  if (section.startsWith("_websales:shot:")) {
+    const x = await websalesShot(env, section.slice(15));
+    if (!x) return errContent("그 번호의 화면 사진이 없습니다.");
+    return { content: [{ type: "text", text: x.name }, { type: "image", data: x.data, mimeType: "image/jpeg" }] };
+  }
   if (section === "_ocr:status") return textContent({ 서버키: !!env.ANTHROPIC_API_KEY, 모델: env.OCR_MODEL || "claude-sonnet-5-5" });
   // 이카운트 판매현황(엑셀로 올린 것) — "_sales" (최근 30일) / "_sales:7" / "_sales:2026-10-01~2026-10-31"
   // 판매현황 「최신 내역 반영하기」 — 앱 버튼이 연 Claude 대화가 먼저 읽는 작업 안내 ("_sales:guide" 또는 "_sales:guide:YYYY-MM-DD~YYYY-MM-DD")
