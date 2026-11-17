@@ -27,6 +27,7 @@ import { salesImport, salesSummary, salesCadence, reorderMarks } from "./worker-
 import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
+import { websalesPending, websalesPush } from "./worker-src/websales.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { newsFeed } from "./worker-src/news.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -148,7 +149,8 @@ export default {
     const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback"
       || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/")
     //  - /api/ecount/push · /api/ecount/pending : 사무실 맥(이카운트 등록 IP)이 요청 확인·재고 보내는 주소 — X-Relay-Key 로 검증
-      || path === "/api/ecount/push" || path === "/api/ecount/pending";
+      || path === "/api/ecount/push" || path === "/api/ecount/pending"
+      || path === "/api/ecount/websales/pending" || path === "/api/ecount/websales/push";
     if (isProtected && !isPublic) {
       if (path === "/mcp" || path === "/mcp/") {
         // /mcp 는 handleMcp 안의 자체 잠금(MCP_TOKEN, ?k=)이 검증한다 — 기존 커넥터 URL 유지.
@@ -222,6 +224,16 @@ export default {
       }
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await ecountRelayPush(env, b, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
+    }
+    // 이카운트 웹 판매조회 로봇(사무실 맥) — 요청 확인·결과 보내기. 재고 중계와 같은 X-Relay-Key 로 검증
+    if (url.pathname === "/api/ecount/websales/pending" || (url.pathname === "/api/ecount/websales/push" && request.method === "POST")) {
+      const key = request.headers.get("X-Relay-Key") || "";
+      if (!env.ECOUNT_API_KEY || key !== await ecountRelayKey(env)) return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다" }), { status: 403, headers: corsHeaders });
+      const dev = request.headers.get("X-Relay-Dev") || "";
+      if (url.pathname.endsWith("/pending")) return new Response(JSON.stringify(await websalesPending(env, dev)), { headers: corsHeaders });
+      let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
+      try { return new Response(JSON.stringify(await websalesPush(env, b, dev)), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
     }
     // 명세서 사진 읽기 (매입 현황 「명세서 찍어 입고」) — GET: 서버 키 있는지 / POST {images,supplier,names}: 읽은 품목 (로그인 필요)

@@ -2,6 +2,7 @@ import { ecountConfigured, ecountStockItems, ecountProbe, buildStockItems, ecoun
 import { salesSummary, salesImport, salesCadence } from "./sales.js";
 import { notionTodoCreate, notionTodoPatch, notionTodoArchive, notionTodoConfigured } from "./notiontodo.js";
 import { applyBase as hrApplyBase } from "./hr.js";
+import { websalesRequest, websalesCancel, websalesStatus, websalesShot } from "./websales.js";
 import { PL_WK, plArr, plannerNormalize, plMonday, plAdd, plDow, plMin, plWeekOf, plRangeOf, plWeekNo, plLogOf, plThemeOf, plDayBlocks, plWeekStats, plRoutineDate, plTodoBlocks } from "./planner.js";
 // ── Claude 커스텀 커넥터용 MCP 서버 (토큰 잠금, stateless Streamable HTTP) ──
 //
@@ -632,6 +633,15 @@ async function toolGetSection(args, env) {
   // 이카운트 — 연결 점검(원본 필드 확인) / 재고 지금 동기화
   if (section === "_ecount:probe") return textContent(await ecountProbe(env));
   if (section === "_ecount:status") return textContent(await ecountStatus(env));
+  // 이카운트 웹 판매조회 로봇(사무실 맥) — "_websales" 상태 · "_websales:req:{mode,from,to}" 요청 · "_websales:cancel" · "_websales:shot:N" 화면 사진
+  if (section === "_websales") return textContent(await websalesStatus(env));
+  if (section === "_websales:cancel") return textContent(await websalesCancel(env));
+  if (section.startsWith("_websales:req:")) { let a = {}; try { a = JSON.parse(section.slice(14)); } catch { return errContent("_websales:req 인자 JSON 이 잘못됐습니다."); } return textContent(await websalesRequest(env, { ...a, by: "claude" })); }
+  if (section.startsWith("_websales:shot:")) {
+    const x = await websalesShot(env, section.slice(15));
+    if (!x) return errContent("그 번호의 화면 사진이 없습니다.");
+    return { content: [{ type: "text", text: x.name }, { type: "image", data: x.data, mimeType: "image/jpeg" }] };
+  }
   if (section === "_ocr:status") return textContent({ 서버키: !!env.ANTHROPIC_API_KEY, 모델: env.OCR_MODEL || "claude-sonnet-5-5" });
   // 이카운트 판매현황(엑셀로 올린 것) — "_sales" (최근 30일) / "_sales:7" / "_sales:2026-10-01~2026-10-31"
   // 판매현황 「최신 내역 반영하기」 — 앱 버튼이 연 Claude 대화가 먼저 읽는 작업 안내 ("_sales:guide" 또는 "_sales:guide:YYYY-MM-DD~YYYY-MM-DD")
