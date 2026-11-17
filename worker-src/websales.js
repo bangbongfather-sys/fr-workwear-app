@@ -54,11 +54,11 @@ export async function websalesPending(env, dev = "") {
 export async function websalesPush(env, b = {}, dev = "") {
   const at = kstAt();
   const steps = (Array.isArray(b.steps) ? b.steps : []).slice(0, 20).map((s) => ({
-    name: clip(s && s.name, 60), url: clip(s && s.url, 300), title: clip(s && s.title, 120), text: clip(s && s.text, 2500),
+    name: clip(s && s.name, 60), url: clip(s && s.url, 300), title: clip(s && s.title, 120), text: clip(s && s.text, 4000),
     inputs: (Array.isArray(s && s.inputs) ? s.inputs : []).slice(0, 40), buttons: (Array.isArray(s && s.buttons) ? s.buttons : []).slice(0, 60).map((x) => clip(x, 60)),
     frames: (Array.isArray(s && s.frames) ? s.frames : []).slice(0, 10).map((x) => clip(x, 200)), note: clip(s && s.note, 500),
   }));
-  const net = (Array.isArray(b.net) ? b.net : []).slice(0, 80).map((x) => ({ url: clip(x && x.url, 300), status: x && x.status, type: clip(x && x.type, 60), body: clip(x && x.body, 600) }));
+  const net = (Array.isArray(b.net) ? b.net : []).slice(0, 80).map((x) => ({ url: clip(x && x.url, 300), status: x && x.status, type: clip(x && x.type, 60), phase: x && x.phase, key: !!(x && x.key), body: clip(x && x.body, x && x.key ? 6000 : 500) }));
   let result = null;
   if (b.mode === "import" && Array.isArray(b.rows) && b.rows.length && DAY.test(b.from || "") && DAY.test(b.to || "")) {
     result = await salesImport(env, { fileName: clip(b.fileName || `맥 로봇 판매조회 ${at}`, 100), from: b.from, to: b.to, rows: b.rows }).catch((e) => ({ ok: false, error: e.message }));

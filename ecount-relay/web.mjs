@@ -11,11 +11,13 @@
 //       node web.mjs import 2024-12-13 2024-12-31
 import { chromium } from "playwright-core";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-17-probe1";
+const VERSION = "2026-11-17-probe2";
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || join(homedir(), "Library/Application Support/nj-ecount");
 const LOGIN_URL = process.env.NJ_LOGIN_URL || "https://login.ecount.com/Login/";
@@ -44,11 +46,23 @@ if (cmd === "check") {
   if (!p || !p.pending) process.exit(0);
   job = { mode: p.mode || "probe", from: p.from || "", to: p.to || "" };
   say("요청 받음", JSON.stringify(job));
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const r = await fetch(APP + "/ecount-relay/web.mjs", { cache: "no-store" });
+    const latest = r.ok ? await r.text() : "";
+    if (latest.includes("NJ SAFETY") && latest !== readFileSync(self, "utf8")) {
+      writeFileSync(self, latest);
+      say("최신 로봇으로 바꿔 실행");
+      const rr = spawnSync(process.execPath, [self, job.mode, job.from, job.to], { stdio: "inherit", env: process.env });
+      process.exit(rr.status == null ? 1 : rr.status);
+    }
+  } catch (e) { say("최신본 확인 실패(있던 것으로 계속):", e.message); }
 } else job = { mode: cmd === "import" ? "import" : "probe", from: a1, to: a2 };
 
 const COM = kc("nj-ecount-com"), ID = kc("nj-ecount-web-id"), PW = kc("nj-ecount-web-pw");
 const t0 = Date.now();
 const steps = [], shots = [], net = [], dialogs = [];
+let phase = 1;   // 어느 단계에서 주고받은 자료인지 (4 이상 = 판매조회 화면)
 let browser = null, page = null;
 const out = { mode: job.mode, from: job.from, to: job.to, ok: false, error: "", version: VERSION };
 
@@ -70,7 +84,7 @@ async function snap(name, note = "", shot = true) {
         .map((e) => ({ tag: e.tagName.toLowerCase(), type: e.type || "", id: e.id || "", name: e.name || "", ph: e.placeholder || "", title: e.title || "" }));
       const buttons = [...document.querySelectorAll("button, a, input[type=button], input[type=submit], [role=button]")].filter(vis)
         .map((e) => (e.innerText || e.value || e.title || e.id || "").trim().replace(/\s+/g, " ")).filter(Boolean).slice(0, 60);
-      return { title: document.title, text: (document.body ? document.body.innerText : "").replace(/\n{2,}/g, "\n").slice(0, 2500), inputs, buttons };
+      return { title: document.title, text: (document.body ? document.body.innerText : "").replace(/\n{2,}/g, "\n").slice(0, 4000), inputs, buttons };
     });
     steps.push({ name, url: page.url(), note, frames: page.frames().map((f) => f.url()).filter((u) => u && u !== "about:blank"), ...d });
     if (shot && shots.length < 8) shots.push({ name, data: (await page.screenshot({ type: "jpeg", quality: 45 })).toString("base64") });
@@ -99,11 +113,15 @@ try {
   page.on("response", async (r) => {
     try {
       const rt = r.request().resourceType(); if (!["xhr", "fetch", "document"].includes(rt)) return;
-      const u = r.url(); if (!/ecount/i.test(u) || net.length >= 80) return;
+      const u = r.url(); let host = ""; try { host = new URL(u).hostname; } catch {}
+      if (!/(^|\.)ecount\.com$/.test(host) || /resource(v3)?\.ecount\.com/.test(host) || net.length >= 80) return;
       const ct = r.headers()["content-type"] || "";
-      let body = ""; if (/json|text\/plain|javascript/.test(ct) && rt !== "document") { body = (await r.text()).slice(0, 600); }
+      let body = ""; if (/json|text\/plain|keypack/.test(ct) && rt !== "document") { body = await r.text(); }
+      // 이카운트는 응답을 base64 로 감싸 보내는 경우가 많다 — 풀어서 기록
+      if (/^[A-Za-z0-9+/=\s]{40,}$/.test(body.slice(0, 200))) { try { const t = Buffer.from(body, "base64").toString("utf8"); if (/^[\[{]/.test(t.trim())) body = t; } catch {} }
       if (/passwd|password|PWD/i.test(body)) body = "(비밀번호 관련 응답 — 기록 안 함)";
-      net.push({ url: u, status: r.status(), type: `${rt} ${ct.split(";")[0]}`, body });
+      const key = phase >= 4 && /Sale|ESD|ESQ|Slip|Search|GetList/i.test(u);
+      net.push({ url: u, status: r.status(), type: `${rt} ${ct.split(";")[0]}`, body: body.slice(0, key ? 6000 : 500), key, phase });
     } catch {}
   });
 
@@ -126,19 +144,28 @@ try {
     if (await findVisible(["input[type=password]"])) await fail(`로그인이 안 됐습니다${dialogs.length ? ` — ${dialogs.join(" / ")}` : " — 화면 사진의 안내 문구를 확인해 주세요"}`);
   } else await snap("2 이미 로그인돼 있음", "", false);
 
-  // ── 2. 판매조회 메뉴 찾기 (정찰) ──
-  const search = await findVisible(["input[placeholder*='메뉴']", "input[title*='메뉴']", "input[placeholder*='검색']", "#searchMenu", "input[id*='menu' i]"]);
-  if (search) {
-    await search.click().catch(() => {}); await search.fill("판매조회"); await sleep(2500);
-    await snap("3 메뉴 검색에 「판매조회」");
-    await search.press("Enter").catch(() => {}); await sleep(6000);
-    await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-    await snap("4 판매조회 열기 시도");
-  } else {
-    const link = await findVisible(["text=판매조회", "a:has-text('판매조회')"]);
-    if (link) { await link.click().catch(() => {}); await sleep(6000); await snap("4 판매조회 열기 시도(메뉴 글자)"); }
-    else await snap("3 메뉴 검색칸을 찾지 못함", "판매조회로 가는 길을 화면 사진을 보고 정해야 합니다");
+  // ── 2. 판매조회 찾아가기 (정찰) — 첫 화면 「이카운트 시작하기」의 「판매조회」 글자를 누른다 ──
+  const closeAlert = async () => { const ok = await findVisible(["button:has-text('확인')", "a:has-text('확인')"]); if (ok) await ok.click().catch(() => {}); };
+  phase = 3;
+  let link = null;
+  for (const f of page.frames()) { try { const l = f.getByText("판매조회", { exact: true }); const n = await l.count(); for (let i = 0; i < n && !link; i++) if (await l.nth(i).isVisible()) link = l.nth(i); } catch {} if (link) break; }
+  if (!link) {   // 안 보이면 메뉴 검색 → 뜨는 목록에서 고르기
+    const search = await findVisible(["#inputFavMSearch", "input[placeholder*='메뉴']"]);
+    if (search) { await search.click().catch(() => {}); await search.type("판매조회", { delay: 120 }); await sleep(2500); await snap("3 메뉴 검색 목록");
+      link = await findVisible(["li:has-text('판매조회')", "a:has-text('판매조회')", "[role=option]:has-text('판매조회')"]); }
   }
+  if (!link) await fail("판매조회로 가는 글자·메뉴를 찾지 못했습니다");
+  await link.scrollIntoViewIfNeeded().catch(() => {});
+  phase = 4;
+  await link.click();
+  await sleep(7000); await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
+  await snap("4 판매조회 화면");
+  // 조회(검색) 단추 — 기본 기간 그대로 한 번 눌러 목록이 어떤 자료로 오는지 본다 (읽기만)
+  phase = 5;
+  const search2 = await findVisible(["button:has-text('검색(F8)')", "button:has-text('검색')", "a:has-text('검색(F8)')", "button:has-text('조회')", "#search", "[data-cid='search']"]);
+  if (search2) { await search2.click().catch(() => {}); await sleep(7000); await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {}); await snap("5 판매조회 검색 뒤"); }
+  else { await page.keyboard.press("F8").catch(() => {}); await sleep(7000); await snap("5 판매조회 F8 뒤", "검색 단추를 못 찾아 F8 을 눌러 봄"); }
+  await closeAlert();
   if (job.mode === "import") out.error = "판매조회 읽기 단계는 아직 준비 중입니다 — 정찰 결과로 마무리할 예정";
   else out.ok = true;
   await finish();
