@@ -24255,7 +24255,9 @@ function App() {
     window.addEventListener("resize", read); window.addEventListener("orientationchange", read);
     return () => { clearTimeout(t); window.removeEventListener("resize", read); window.removeEventListener("orientationchange", read); probe.remove(); };
   }, []);
-  const railR = foldLandscape && insetR >= 44;
+  // 단추 줄 자리 — 기본은 위(본문을 오른쪽 끝까지 넓게 쓴다). 오른쪽 띠에 세로로 놓던 예전 모양은
+  // 이 기기에서 localStorage frw_fold_btns = "side" 일 때만 쓴다.
+  const railR = foldLandscape && insetR >= 44 && load("frw_fold_btns", "top") === "side";
   useEffect(() => {
     document.body.classList.toggle("rail-r", railR);
     document.body.style.setProperty("--inset-r", `${insetR}px`);
