@@ -1745,6 +1745,11 @@
     .po-list-scroll > * { flex-shrink: 0; }
     .po-list-scroll::-webkit-scrollbar { width: 6px; }
     @media (max-width: 980px) { .po-list-scroll { max-height: 52vh; } }
+    /* 가로로 쥔 폴더블 — 화면이 낮아서(약 700px) 목록 위·상세 아래로 쌓으면 둘 다 반 토막이 된다.
+       왼쪽 목록·오른쪽 상세로 나란히 놓고, 목록은 화면 높이만큼 길게. */
+    body.fold-landscape .po-workbench { grid-template-columns: minmax(280px, 37%) minmax(0, 1fr); align-items: start; }
+    body.fold-landscape .po-list-scroll { max-height: max(240px, calc(100vh - 230px)); max-height: max(240px, calc(100dvh - 230px)); }
+    body.fold-landscape .po-detail-pane { min-height: 0; }
   </style>
 </head>
 <body>
@@ -24262,6 +24267,25 @@ function App() {
     document.body.classList.toggle("rail-r", railR);
     document.body.style.setProperty("--inset-r", `${insetR}px`);
   }, [railR, insetR]);
+  // 사파리(터치)에서 입력 칸을 눌렀다 뗀 뒤 '보이는 화면'이 '기준 화면'보다 아래로 밀린 채 남는 일이 있다.
+  // 그러면 위 메뉴 줄·왼쪽 레일·배경 사진(화면에 붙여 둔 것들)만 위로 올라가, 화면이 위아래로 갈라지고 아래쪽 바탕색이 달라 보인다.
+  // 키보드가 내려갔는데도 밀림이 남아 있으면, 지금 보이는 자리 그대로 스크롤 기준을 다시 맞춘다.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv || !(window.matchMedia && window.matchMedia("(pointer: coarse)").matches)) return;
+    let t = null, last = 0;
+    const fix = () => {
+      if (Math.abs((vv.scale || 1) - 1) > 0.01) return;            // 두 손가락으로 확대한 상태 — 건드리지 않는다
+      if (vv.height < window.innerHeight - 60) return;             // 키보드가 올라와 있는 동안은 정상
+      if (Math.abs(vv.offsetTop) < 2 && Math.abs(vv.offsetLeft) < 2) return;
+      if (Date.now() - last < 800) return; last = Date.now();
+      try { window.__frwViewFix = (window.__frwViewFix || 0) + 1; window.scrollTo(vv.pageLeft, vv.pageTop); } catch {}
+    };
+    const on = () => { clearTimeout(t); t = setTimeout(fix, 200); };
+    vv.addEventListener("scroll", on); vv.addEventListener("resize", on);
+    window.addEventListener("focusout", on); window.addEventListener("orientationchange", on);
+    return () => { clearTimeout(t); vv.removeEventListener("scroll", on); vv.removeEventListener("resize", on); window.removeEventListener("focusout", on); window.removeEventListener("orientationchange", on); };
+  }, []);
   const sbCollapsed = (sidebarCollapsed && vw > 768) || foldMode;   // 펼친 폴더블은 늘 레일(아이콘+작은 이름), 핸드폰 서랍은 늘 펼친 모양
   // 펼친 폴더블에서 ☰ 로 레일을 통째로 숨겨 화면을 끝까지 쓴다 (기기에 기억)
   const [foldRailOff, setFoldRailOff] = useState(() => load("frw_fold_rail_off", false));
