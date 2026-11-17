@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-17-probe2";
+const VERSION = "2026-11-17-list1";
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || join(homedir(), "Library/Application Support/nj-ecount");
 const LOGIN_URL = process.env.NJ_LOGIN_URL || "https://login.ecount.com/Login/";
@@ -63,6 +63,7 @@ const COM = kc("nj-ecount-com"), ID = kc("nj-ecount-web-id"), PW = kc("nj-ecount
 const t0 = Date.now();
 const steps = [], shots = [], net = [], dialogs = [];
 let phase = 1;   // 어느 단계에서 주고받은 자료인지 (4 이상 = 판매조회 화면)
+let listReq = null;   // 판매조회 목록 요청 { url, headers, body }
 let browser = null, page = null;
 const out = { mode: job.mode, from: job.from, to: job.to, ok: false, error: "", version: VERSION };
 
@@ -100,6 +101,43 @@ async function findVisible(selectors) {
   return null;
 }
 
+// 붙잡은 목록 요청을 기간만 바꿔 다시 보낸다 — 화면 안에서 보내므로 로그인 상태(쿠키)를 그대로 쓴다. 읽기만.
+async function fetchRange(from, to, dm) {
+  if (!dm) return { error: "화면에서 기본 조회 기간을 찾지 못했습니다" };
+  const [, y1, m1, d1, y2, m2, d2] = dm;
+  const fmts = (y, m, d) => [`${y}${m}${d}`, `${y}-${m}-${d}`, `${y}/${m}/${d}`];
+  const [fy, fmo, fd] = from.split("-"), [ty, tmo, td] = to.split("-");
+  let body = listReq.body, how = [];
+  const swap = (olds, news) => { olds.forEach((o, i) => { if (body.includes(o)) { body = body.split(o).join(news[i]); how.push(`${o}→${news[i]}`); } }); };
+  swap(fmts(y1, m1, d1), fmts(fy, fmo, fd));
+  swap(fmts(y2, m2, d2), fmts(ty, tmo, td));
+  if (!how.length) return { error: "요청 본문에서 기간 날짜를 찾지 못했습니다", how: "" };
+  // 한 쪽에 많이 받기 — 쪽 크기처럼 보이는 값을 크게
+  const sizeRe = /("(?:PAGE_?SIZE|PageSize|pageSize|ROW_?COUNT|RowCount|rowCount|PAGE_ROW_CNT|LIMIT_?CNT)"\s*:\s*)(\d+)/g;
+  if (sizeRe.test(body)) { body = body.replace(sizeRe, (_, k) => `${k}1000`); how.push("쪽 크기 1000"); }
+  const pageRe = /("(?:PAGE_?CURRENT|PAGE_?NO|PageNo|pageNo|PAGE_?INDEX|PageIndex|pageIndex|CURRENT_?PAGE|CurrentPage)"\s*:\s*)(\d+)/;
+  const rows = []; let total = null, outside = 0, keys = "";
+  for (let pg = 1; pg <= 40; pg++) {
+    const b = pageRe.test(body) ? body.replace(pageRe, (_, k) => `${k}${pg}`) : body;
+    const txt = await page.evaluate(async ({ url, headers, b }) => { const r = await fetch(url, { method: "POST", headers, body: b, credentials: "include" }); return `${r.status}\n` + await r.text(); }, { url: listReq.url, headers: listReq.headers, b });
+    const st = txt.slice(0, txt.indexOf("\n")); let raw = txt.slice(txt.indexOf("\n") + 1);
+    if (/^[A-Za-z0-9+/=\s]{40,}$/.test(raw.slice(0, 200))) { try { raw = Buffer.from(raw, "base64").toString("utf8"); } catch {} }
+    let j; try { j = JSON.parse(raw); } catch { return { error: `목록 응답을 읽지 못했습니다 (${st}): ${raw.slice(0, 200)}`, how: how.join(", ") }; }
+    const D = j && j.Data; const list = (D && Array.isArray(D.Data)) ? D.Data : [];
+    if (D && D.TotalCount != null) total = Number(D.TotalCount);
+    if (pg === 1 && list[0]) keys = Object.keys(list[0]).join(", ").slice(0, 600);
+    for (const x of list) {
+      const dn = String(x["SELL.IO_DATE_NO"] || x.IO_DATE_NO || "");
+      const m = dn.match(/(\d{4})[\/.-](\d{2})[\/.-](\d{2})\s*-?\s*(\d*)/); if (!m) continue;
+      const d = `${m[1]}-${m[2]}-${m[3]}`;
+      if (d < from || d > to) { outside++; continue; }
+      rows.push({ d, no: m[4] || "", c: String(x["SELL.CUST_DES"] || x.CUST_DES || ""), name: String(x["SELL.PROD_DES"] || x.PROD_DES || "판매"), total: Number(x["SELL.TOT_AMT"] ?? x.TOT_AMT ?? 0) || 0, slip: true });
+    }
+    if (!list.length || !pageRe.test(body) || (total != null && rows.length + outside >= total)) break;
+  }
+  return { rows, total, outside, keys, how: how.join(", ") };
+}
+
 try {
   if (!COM || !ID || !PW) { out.error = "맥 키체인에 이카운트 회사코드·아이디·비밀번호가 없습니다 — 판매 로봇 설치를 다시 실행하세요"; await finish(); }
   if (!existsSync(CHROME)) { out.error = `Chrome 을 찾지 못했습니다: ${CHROME}`; await finish(); }
@@ -108,6 +146,13 @@ try {
   browser = ctx;
   page = ctx.pages()[0] || await ctx.newPage();
   ctx.on("page", (p) => { steps.push({ name: "새 창 열림", url: p.url() }); });
+  // 판매조회 목록 요청(GetListXFormSlipCommon)을 붙잡아 둔다 — 같은 요청을 기간만 바꿔 다시 보내려고
+  page.on("request", (q) => {
+    try { if (/GetListXFormSlipCommon/i.test(q.url()) && q.method() === "POST" && !listReq) {
+      const h = {}; for (const [k, v] of Object.entries(q.headers())) if (!/^(cookie|host|content-length|origin|referer|user-agent|accept-encoding|connection|sec-)/i.test(k)) h[k] = v;
+      listReq = { url: q.url(), headers: h, body: q.postData() || "" };
+    } } catch {}
+  });
   page.on("dialog", async (d) => { dialogs.push(`[${d.type()}] ${d.message()}`); try { await d.dismiss(); } catch {} });
   // 이카운트 화면이 주고받는 자료(JSON) 기록 — 판매조회 자료가 어떤 모양으로 오는지 보려고
   page.on("response", async (r) => {
@@ -166,8 +211,24 @@ try {
   if (search2) { await search2.click().catch(() => {}); await sleep(7000); await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {}); await snap("5 판매조회 검색 뒤"); }
   else { await page.keyboard.press("F8").catch(() => {}); await sleep(7000); await snap("5 판매조회 F8 뒤", "검색 단추를 못 찾아 F8 을 눌러 봄"); }
   await closeAlert();
-  if (job.mode === "import") out.error = "판매조회 읽기 단계는 아직 준비 중입니다 — 정찰 결과로 마무리할 예정";
-  else out.ok = true;
+
+  // ── 3. 기간을 바꿔 판매 목록 받기 ──
+  phase = 6;
+  if (!listReq) await fail("판매조회 목록 요청을 붙잡지 못했습니다");
+  const tmplText = (steps.find((s) => /판매조회 화면/.test(s.name)) || {}).text || "";
+  const dm = tmplText.match(/(\d{4})\/(\d{2})\/(\d{2})\s*~\s*(\d{4})\/(\d{2})\/(\d{2})/);
+  steps.push({ name: "6 목록 요청 내용", url: listReq.url, text: `기본 기간: ${dm ? dm[0] : "못 찾음"}\n머리글: ${JSON.stringify(listReq.headers).slice(0, 600)}\n본문:\n${listReq.body.slice(0, 3200)}` });
+  const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const want = { from: /^\d{4}-\d{2}-\d{2}$/.test(job.from) ? job.from : new Date(Date.now() + 9 * 3600e3 - 6 * 864e5).toISOString().slice(0, 10), to: /^\d{4}-\d{2}-\d{2}$/.test(job.to) ? job.to : today };
+  const res = await fetchRange(want.from, want.to, dm);
+  steps.push({ name: "7 기간 바꿔 받기", note: res.error || "", text: `요청 기간 ${want.from} ~ ${want.to}\n바꾼 곳: ${res.how || "-"}\n전체 건수(이카운트): ${res.total ?? "?"} · 받은 줄: ${res.rows ? res.rows.length : 0} · 합계: ${res.rows ? res.rows.reduce((t, r) => t + r.total, 0) : 0}\n기간 밖 줄: ${res.outside || 0}\n처음 3줄: ${JSON.stringify((res.rows || []).slice(0, 3))}\n마지막 3줄: ${JSON.stringify((res.rows || []).slice(-3))}\n원본 첫 줄 열 이름: ${res.keys || ""}` });
+  if (res.error) await fail(res.error);
+  if (job.mode === "import") {
+    if (res.total != null && res.rows.length < res.total) await fail(`이카운트는 ${res.total}건이라는데 ${res.rows.length}건만 받았습니다 — 반영하지 않았습니다`);
+    if (res.outside) await fail(`요청 기간 밖 날짜가 ${res.outside}줄 섞여 왔습니다 — 기간 바꾸기가 안 먹은 것 같아 반영하지 않았습니다`);
+    out.rows = res.rows; out.from = want.from; out.to = want.to; out.fileName = `맥 로봇 판매조회 ${today}`;
+  }
+  out.ok = true;
   await finish();
 } catch (e) {
   await fail(`실행 중 오류: ${e.message}`);
