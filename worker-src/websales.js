@@ -40,6 +40,7 @@ export async function websalesCancel(env) { await fbPut(env, REQ, null); return 
 
 // 맥이 1분마다 묻는다 — 걸린 요청이 있으면 가져간다(claim)
 export async function websalesPending(env, dev = "") {
+  if (dev === "setup") return { pending: false, setup: true };   // 설치 때 인증키만 확인 — 요청을 가져가지 않는다
   try { await fbPut(env, SEEN, Date.now()); } catch {}
   const req = await fbGet(env, REQ).catch(() => null);
   if (!req || !req.atMs) return { pending: false };
