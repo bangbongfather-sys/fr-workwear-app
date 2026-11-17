@@ -3,7 +3,9 @@
 #
 # 이카운트 공개 API 에는 판매 조회가 없어서, 이 맥이 Chrome 을 화면 없이 띄워 이카운트 웹에 로그인하고
 # 판매조회를 읽어 회사 앱 「판매 현황」에 넣는다.
-#  - 먼저 「이카운트 재고 중계」가 이 맥에 설치돼 있어야 한다 (같은 인증키로 회사 앱과 통신)
+#  - 회사 앱과는 재고 중계와 같은 인증키(이카운트 API 인증키)로 통신한다. 재고 중계가 깔린 맥이면 그 키를 그대로 쓰고,
+#    없는 맥(개인 맥북 등)이면 회사코드·API 인증키를 키체인에 받기만 한다 — 재고 중계는 깔지 않는다
+#    (재고 조회는 사무실 IP 에서만 되므로, 다른 맥이 재고 요청을 가로채 실패하지 않게)
 #  - 이카운트 웹 아이디·비밀번호는 이 맥의 「키체인」에만 저장한다 (파일·회사 앱 서버에 남기지 않음)
 #  - 정해진 시간에 돌지 않는다: 회사 앱(또는 Claude)이 요청을 걸면 1분마다 확인하다가 그때만 실행
 #  - 실행할 프로그램(web.mjs)은 실행할 때마다 회사 앱에서 최신본을 받는다
@@ -31,10 +33,21 @@ fi
 
 echo ""
 echo "=== NJ SAFETY 이카운트 판매조회 로봇 설치 ==="
-if [ -z "$(kc nj-ecount-key)" ]; then
-  echo "이 맥에 「이카운트 재고 중계」가 없습니다. 먼저 재고 중계를 설치해 주세요:"
-  echo "  bash <(curl -fsSL $APP/ecount-relay/install.sh)"
-  exit 1
+if [ -z "$(kc nj-ecount-key)" ] || [ -z "$(kc nj-ecount-com)" ]; then
+  echo ""
+  echo "이 맥에는 이카운트 재고 중계가 없어서, 회사 앱과 통신할 인증 정보를 받습니다. (재고 중계는 설치하지 않습니다)"
+  echo "API 인증키는 사무실 맥 재고 중계에 넣은 것과 같은 「실서버 인증키」입니다 (이카운트 API 인증키 발급 화면에서 확인)."
+  [ -n "$(kc nj-ecount-com)" ] || { read -r -p "이카운트 회사코드: " COM < /dev/tty; [ -n "$COM" ] || { echo "빈 값입니다. 다시 실행해 주세요."; exit 1; }; security add-generic-password -U -a "$USER" -s nj-ecount-com -w "$COM"; }
+  if [ -z "$(kc nj-ecount-key)" ]; then
+    read -r -s -p "실서버 API 인증키 (붙여넣고 Enter — 화면에는 안 보입니다): " KEY < /dev/tty; echo ""
+    [ -n "$KEY" ] || { echo "빈 값입니다. 다시 실행해 주세요."; exit 1; }
+    # 회사 앱이 이 키를 알아보는지 먼저 확인 (틀린 키를 넣고 끝나지 않게)
+    RK=$(printf %s "$KEY" | shasum -a 256 | awk '{print $1}')
+    CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 20 "$APP/api/ecount/websales/pending" -H "X-Relay-Key: $RK" -H "X-Relay-Dev: setup")
+    if [ "$CODE" != "200" ]; then echo "회사 앱이 이 인증키를 알아보지 못했습니다 (응답 $CODE). 사무실 맥 재고 중계와 같은 실서버 키인지 확인해 주세요."; exit 1; fi
+    security add-generic-password -U -a "$USER" -s nj-ecount-key -w "$KEY"; unset KEY
+    echo "인증키 확인됨."
+  fi
 fi
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 if [ ! -x "$CHROME" ]; then echo "Google Chrome 이 없습니다. Chrome 을 설치한 뒤 다시 실행해 주세요."; exit 1; fi
