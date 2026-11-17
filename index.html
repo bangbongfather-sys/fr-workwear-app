@@ -1259,15 +1259,21 @@
     body.rail-r .header-top div[style*="display: flex"], body.rail-r .header-top .sync-group { flex-direction: column !important; gap: 12px !important; align-items: center !important; }
     body.rail-r .header-top .sync-badge.sb-safety { margin: 0 !important; }
     body.rail-r .app-header .header-wrap { padding: 0 !important; }
-    body.rail-r .app-header .header-top { position: fixed; z-index: 120; right: 0; top: calc(env(safe-area-inset-top) + 118px); bottom: max(12px, env(safe-area-inset-bottom));
+    body.rail-r .app-header .header-top { position: fixed; z-index: 120; right: 0; top: calc(env(safe-area-inset-top) + var(--rail-top, 118px)); bottom: max(12px, env(safe-area-inset-bottom));
       width: var(--inset-r); padding: 0 !important; margin: 0; flex-direction: column !important; justify-content: flex-start !important; align-items: center !important; gap: 12px !important; overflow-y: auto; scrollbar-width: none; }
     body.rail-r .app-header .hdr-center { display: none !important; }
     body.rail-r .hdr-actions { flex-direction: column !important; gap: 12px !important; align-items: center !important; }
     body.rail-r .header-top button, body.rail-r .header-top .sync-badge { width: 52px !important; height: 52px !important; min-width: 52px; padding: 0 !important; border-radius: 26px !important; justify-content: center !important; flex-shrink: 0; }
     body.rail-r .header-top .hdr-side-label, body.rail-r .header-top .sync-badge .sb-label, body.rail-r .header-top .install-label-full { display: none !important; }
     body.rail-r .header-top .sync-badge { display: inline-flex !important; align-items: center; }
+    /* 띠 안의 「AI에게 묻기」 — 글자 없이 빛 구슬 동그라미만 (52px 동그라미 안에 글자가 넘쳐 잘렸다) */
+    body.rail-r .header-top .ai-ask { gap: 0 !important; overflow: hidden; }
+    body.rail-r .header-top .ai-ask .ai-txt, body.rail-r .header-top .ai-ask kbd { display: none !important; }
+    body.rail-r .header-top .ai-ask .ai-orb { width: 38px; height: 38px; }
+    /* 화면이 낮으면(가로로 쥔 폴더블) 단추 사이를 조금 좁혀 한 줄에 다 들어가게 */
+    @media (max-height: 760px) { body.rail-r .app-header .header-top, body.rail-r .hdr-actions, body.rail-r .header-top div[style*="display: flex"], body.rail-r .header-top .sync-group { gap: 9px !important; } }
     /* 버튼에서 여는 메뉴(서브창·테마)는 띠 왼쪽으로 펼친다 */
-    body.rail-r .hdr-actions [role="menu"] { position: fixed !important; right: calc(var(--inset-r) + 8px) !important; top: calc(env(safe-area-inset-top) + 118px) !important; left: auto !important; margin: 0 !important; max-height: calc(100vh - 140px); overflow-y: auto; }
+    body.rail-r .hdr-actions [role="menu"] { position: fixed !important; right: calc(var(--inset-r) + 8px) !important; top: calc(env(safe-area-inset-top) + var(--rail-top, 118px)) !important; left: auto !important; margin: 0 !important; max-height: calc(100vh - 140px); overflow-y: auto; }
     body.fold.rail-r .app-main { padding-right: max(var(--side-pad, 0px), calc(var(--inset-r) + 6px)) !important; }
     /* 핸드폰 서랍 메뉴 — 상태 표시줄 밑까지 그리므로 위쪽은 비켜 둔다 */
     @media (max-width: 768px) { .app-sidebar { padding-top: env(safe-area-inset-top) !important; } }
@@ -24235,7 +24241,16 @@ function App() {
     const probe = document.createElement("div");
     probe.style.cssText = "position:fixed;top:0;right:0;height:1px;width:env(safe-area-inset-right);visibility:hidden;pointer-events:none;";
     document.body.appendChild(probe);
-    const read = () => { let v = probe.getBoundingClientRect().width || 0; try { const d = Number(sessionStorage.getItem("frw_debug_inset_r")); if (d) v = d; } catch {} setInsetR(Math.round(v)); };
+    const read = () => {
+      let v = probe.getBoundingClientRect().width || 0; try { const d = Number(sessionStorage.getItem("frw_debug_inset_r")); if (d) v = d; } catch {} setInsetR(Math.round(v));
+      // 띠에서 단추를 놓기 시작할 높이 — 시계·배터리 표시(화면 맨 위에서 약 196px까지) 바로 아래.
+      // Safari 주소 줄이 위에 있으면 그만큼 화면이 아래에서 시작하므로 덜 내려도 된다(예전 값 118 = 주소 줄 약 82px 일 때).
+      // 새 Safari 처럼 전체 화면(주소 줄 없음)이면 204 까지 내린다. 시험용: sessionStorage frw_debug_rail_top = 숫자.
+      const shortSide = Math.min(window.screen.width || 0, window.screen.height || 0) || window.innerHeight;
+      let top = Math.max(118, Math.min(204, 204 - Math.max(0, shortSide - window.innerHeight)));
+      try { const d = Number(sessionStorage.getItem("frw_debug_rail_top")); if (d) top = d; } catch {}
+      document.body.style.setProperty("--rail-top", `${Math.round(top)}px`);
+    };
     read(); const t = setTimeout(read, 400);
     window.addEventListener("resize", read); window.addEventListener("orientationchange", read);
     return () => { clearTimeout(t); window.removeEventListener("resize", read); window.removeEventListener("orientationchange", read); probe.remove(); };
@@ -40163,11 +40178,11 @@ JSON 외 텍스트 금지.
 
       {/* 필터 + 추가 */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <select value={filterYear} onChange={e => setFilterYear(e.target.value)} style={inp}>
+        <select value={filterYear} onChange={e => setFilterYear(e.target.value)} style={{ ...inp, width: "auto", minWidth: 110 }}>
           <option value="all">전체 연도</option>
           {years.map(y => <option key={y} value={y}>{y}년</option>)}
         </select>
-        <select value={filterBiz} onChange={e => setFilterBiz(e.target.value)} style={inp}>
+        <select value={filterBiz} onChange={e => setFilterBiz(e.target.value)} style={{ ...inp, width: "auto", minWidth: 150, maxWidth: "100%" }}>
           <option value="">전체 사업장</option>
           {TAX_BIZ.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
