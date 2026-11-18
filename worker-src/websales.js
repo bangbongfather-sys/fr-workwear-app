@@ -29,7 +29,7 @@ export async function websalesRequest(env, { mode = "probe", from = "", to = "",
   if (!["probe", "import"].includes(mode)) return { ok: false, error: "mode 는 probe 또는 import 입니다" };
   if (mode === "import" && (!DAY.test(from) || !DAY.test(to) || from > to)) return { ok: false, error: "가져올 기간(from·to, YYYY-MM-DD)이 필요합니다" };
   const cur = await fbGet(env, REQ).catch(() => null);
-  if (cur && cur.atMs && Date.now() - cur.atMs < REQ_TTL) return { ok: true, already: true, message: "이미 걸린 요청이 있어요 — 맥이 처리 중이거나 곧 가져갑니다", req: { mode: cur.mode, from: cur.from, to: cur.to, at: cur.at } };
+  if (cur && cur.atMs && Date.now() - cur.atMs < REQ_TTL) return { ok: true, already: true, message: "이미 걸린 요청이 있어요 — 맥이 처리 중이거나 곧 가져갑니다", req: { mode: cur.mode, from: cur.from, to: cur.to, at: cur.at, atMs: cur.atMs } };
   const req = { mode, from: DAY.test(from) ? from : "", to: DAY.test(to) ? to : "", at: kstAt(), atMs: Date.now(), by: clip(by, 30) };
   await fbPut(env, REQ, req);
   const seen = Number(await fbGet(env, SEEN).catch(() => 0)) || 0;
@@ -63,7 +63,8 @@ export async function websalesPush(env, b = {}, dev = "") {
   if (b.mode === "import" && Array.isArray(b.rows) && b.rows.length && DAY.test(b.from || "") && DAY.test(b.to || "")) {
     result = await salesImport(env, { fileName: clip(b.fileName || `맥 로봇 판매조회 ${at}`, 100), from: b.from, to: b.to, rows: b.rows }).catch((e) => ({ ok: false, error: e.message }));
   }
-  const log = { at, dev: clip(dev, 20), mode: clip(b.mode, 10), from: clip(b.from, 10), to: clip(b.to, 10), ok: !!b.ok && (!result || result.ok !== false),
+  const cur = await fbGet(env, REQ).catch(() => null);   // 어느 요청의 결과인지 남긴다 (앱이 「내가 건 요청이 끝났나」를 안다)
+  const log = { at, atMs: Date.now(), reqAtMs: Number(cur && cur.atMs) || 0, dev: clip(dev, 20), mode: clip(b.mode, 10), from: clip(b.from, 10), to: clip(b.to, 10), ok: !!b.ok && (!result || result.ok !== false),
     error: clip(b.error, 600), dialogs: (Array.isArray(b.dialogs) ? b.dialogs : []).slice(0, 10).map((x) => clip(x, 300)), steps, net,
     rows: Array.isArray(b.rows) ? b.rows.length : 0, result, version: clip(b.version, 30), took: Number(b.took) || 0 };
   await fbPut(env, LOG, log);
@@ -80,6 +81,18 @@ export async function websalesStatus(env) {
   return { 맥: s ? { 마지막확인: new Date(s + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " "), 켜짐: Date.now() - s < 5 * 60e3 } : "아직 설치 전",
     걸린요청: req ? { mode: req.mode, from: req.from, to: req.to, at: req.at, 가져감: !!req.claim } : null,
     마지막실행: log, 사진: Array.isArray(shots) ? shots.map((x, i) => `${i}: ${x && x.name}`) : [] };
+}
+// 앱(판매 현황 화면)용 짧은 상태 — 맥이 켜져 있나 · 걸린 요청 · 마지막 실행 결과 (기록·사진 빼고)
+export async function websalesBrief(env) {
+  const [req, log, seen] = await Promise.all([fbGet(env, REQ).catch(() => null), fbGet(env, LOG).catch(() => null), fbGet(env, SEEN).catch(() => null)]);
+  const s = Number(seen) || 0;
+  const live = req && req.atMs && Date.now() - req.atMs < REQ_TTL ? req : null;
+  const r = log && log.result;
+  return { ok: true, now: Date.now(),
+    mac: { seen: s, alive: !!s && Date.now() - s < 5 * 60e3, installed: !!s },
+    req: live ? { mode: live.mode, from: live.from, to: live.to, at: live.at, atMs: live.atMs, claimed: !!(live.claim && Date.now() - Number(live.claim.ts) < CLAIM_TTL) } : null,
+    last: log ? { at: log.at, atMs: Number(log.atMs) || 0, reqAtMs: Number(log.reqAtMs) || 0, mode: log.mode, from: log.from, to: log.to, ok: !!log.ok, error: clip(log.error || (r && r.ok === false && r.error) || "", 300),
+      rows: Number(log.rows) || 0, count: r && r.count != null ? r.count : null, total: r && r.total != null ? r.total : null } : null };
 }
 export async function websalesShot(env, i) {
   const shots = await fbGet(env, SHOTS).catch(() => null);

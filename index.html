@@ -17978,13 +17978,27 @@ function cmdkParseAsOf(q) {
   return { focus: last ? "last" : "this", client };
 }
 
-// 판매 현황에 이카운트 판매조회를 다시 읽어 넣도록 Claude 창을 연다 (「최신 내역 반영하기」와 같은 요청 문구)
-function salesFillAsk(f, t2) {
-  const prompt = `NJ SAFETY 회사 앱 「판매 현황」에 이카운트 판매조회 최신 내역을 반영해줘 (기간 ${f} ~ ${t2}).\n먼저 NJ_SAFETY 커넥터의 get_business_section 으로 section "_sales:guide:${f}~${t2}" 를 읽고, 거기 적힌 순서대로 Chrome 에서 이카운트 판매조회를 읽어 반영한 뒤 결과를 알려줘.`;
-  try { navigator.clipboard.writeText(prompt).catch(() => {}); } catch {}
-  window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, "_blank", "noopener");
-  showToast("Claude 창을 열었어요 — 이카운트에 로그인된 Chrome 에서 진행돼요. 요청 문구는 복사돼 있어요.", "success");
+// ── 판매 로봇 — 맥이 이카운트 판매조회를 읽어 판매 현황에 넣는다. 단추만 누르면 되니 핸드폰에서도 된다 ──
+// 요청을 걸면 맥이 1분 안에 가져가 이카운트에서 읽어 온다(2~3분). 맥이 꺼져(잠들어) 있으면 켜질 때까지 6시간 기다린다.
+const SALES_ROBOT_WAIT = "frw_sales_robot_wait";   // 내가 건 요청 번호(atMs) — 판매 현황 화면이 「끝났나」를 볼 때 쓴다
+const robotMd = (d) => String(d || "").slice(5).replace("-", ".");
+const robotAgo = (ms) => { const m = Math.max(1, Math.round((Date.now() - ms) / 60e3)); return m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
+async function salesRobotAsk(f, t2) {
+  try {
+    const j = await (await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: f, to: t2 }) })).json();
+    if (!j || j.ok === false) { showToast(`요청하지 못했어요 — ${(j && j.error) || "서버 응답이 이상해요"}`, "error"); return null; }
+    const st = j.status || {}, req = st.req || j.req || {}, mac = st.mac || {};
+    if (req.atMs) { try { localStorage.setItem(SALES_ROBOT_WAIT, String(req.atMs)); } catch {} }
+    try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
+    if (j.already) showToast(`이미 가져오는 중이에요 (${robotMd(req.from)}~${robotMd(req.to)}) — 끝나면 판매 현황에 반영돼요.`, "info");
+    else if (mac.alive) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 맥에 요청했어요 — 2~3분 뒤 반영돼요.`, "success");
+    else if (mac.installed) showToast(`요청을 걸어 뒀어요. 지금은 맥이 꺼져(잠들어) 있어요(마지막 확인 ${robotAgo(mac.seen)}) — 맥을 켜면 바로 시작돼요.`, "info");
+    else showToast("요청은 걸었지만, 판매 로봇이 설치된 맥이 아직 없어요.", "info");
+    return st;
+  } catch { showToast("요청을 보내지 못했어요 — 인터넷 연결을 확인해 주세요", "error"); return null; }
 }
+// 명령창·빠진 기간 안내의 「이 기간 판매 채우기」 — 판매 로봇에 그 기간을 맡긴다
+function salesFillAsk(f, t2) { salesRobotAsk(f, t2); }
 // 장부 「연매출 추이」(확정 매출) — 지난해들의 달별 금액. 기간이 「지난해의 온전한 달들」이면 그 합과 달별 값을 돌려준다
 function cmdkLedgerYear(yearly, from, to, today) {
   if (!Array.isArray(yearly) || !from || !to) return null;
@@ -18524,7 +18538,40 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
-  // 「최신 내역 반영하기」 — 이카운트 API 에 판매 조회가 없어서, Claude 가 브라우저로 판매조회 화면을 읽어 넣는다.
+  // 「최신 내역 반영하기」 — 판매 로봇(맥)에 맡긴다. 기본 기간: 이번 달(월초 7일까지는 지난달부터) ~ 이번 달 말일.
+  const [robot, setRobot] = useState(null);   // 판매 로봇 상태 { mac, req, last }
+  useEffect(() => {
+    let alive = true, timer = null;
+    const step = async () => {
+      clearTimeout(timer);
+      let j = null; try { j = await (await fetch("/api/sales/robot", { cache: "no-store" })).json(); } catch {}
+      if (!alive) return;
+      let wait = 0; try { wait = Number(localStorage.getItem(SALES_ROBOT_WAIT)) || 0; } catch {}
+      if (!j || !j.ok) { if (wait) timer = setTimeout(step, 15000); return; }
+      setRobot(j);
+      if (wait && j.last && j.last.reqAtMs === wait) {            // 내가 건 요청이 끝났다
+        try { localStorage.removeItem(SALES_ROBOT_WAIT); } catch {}
+        if (j.last.ok) { showToast(`이카운트 판매 내역을 반영했어요 — ${robotMd(j.last.from)}~${robotMd(j.last.to)} · ${fmt(j.last.count != null ? j.last.count : j.last.rows)}건${j.last.total != null ? ` · ${won(j.last.total)}` : ""}`, "success"); setTick(t => t + 1); }
+        else showToast(`이카운트에서 가져오지 못했어요 — ${j.last.error || "원인을 알 수 없어요"}`, "error");
+      } else if (wait && !j.req && Date.now() - wait > 90e3) { try { localStorage.removeItem(SALES_ROBOT_WAIT); } catch {} }   // 취소됐거나 너무 오래돼 사라진 요청
+      if (j.req) timer = setTimeout(step, 6000);
+    };
+    step();
+    const onVis = () => { if (document.visibilityState === "visible") step(); };
+    window.addEventListener("frw-sales-robot", step); document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; clearTimeout(timer); window.removeEventListener("frw-sales-robot", step); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+  const robotRefresh = () => {
+    if (robot && robot.mac && !robot.mac.installed) return claudeRefresh();   // 로봇을 안 깐 경우엔 예전 방식(Claude 가 Chrome 으로)
+    const d = Number(today.slice(8));
+    salesRobotAsk(d <= 7 ? `${ymShift(today.slice(0, 7), -1)}-01` : `${today.slice(0, 8)}01`, ymMonthEnd(today.slice(0, 7)));
+  };
+  const robotCancel = async () => {
+    try { await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cancel: true }) }); } catch {}
+    try { localStorage.removeItem(SALES_ROBOT_WAIT); } catch {}
+    try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
+  };
+  // 예전 방식 — 이카운트 API 에 판매 조회가 없어서, Claude 가 브라우저로 판매조회 화면을 읽어 넣는다 (PC 의 Chrome 필요).
   // 작업 순서는 서버(_sales:guide)에 있어서 이카운트 화면이 바뀌면 거기만 고치면 된다. 기본 기간: 이번 달(월초 7일까지는 지난달부터) ~ 이번 달 말일.
   const claudeRefresh = async () => {
     const d = Number(today.slice(8));
@@ -19407,13 +19454,33 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         </>}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {data && data.lastImport && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }} title={data.lastImport.fileName}><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: "#00B493", marginRight: 6, verticalAlign: "1px" }}/>마지막 업로드 {md(data.lastImport.at.slice(0, 10))} {data.lastImport.at.slice(11)} · {md(data.lastImport.from)}~{md(data.lastImport.to)}</span>}
-          <button type="button" onClick={claudeRefresh} title="Claude 가 Chrome 으로 이카운트 판매조회를 읽어 최신 내역을 반영해요 (이카운트 로그인 필요)"
+          <button type="button" onClick={robotRefresh} disabled={!!(robot && robot.req)} title="맥이 이카운트 판매조회를 읽어 최신 내역을 반영해요 — 핸드폰에서도 눌러 둘 수 있어요 (맥이 켜져 있을 때 진행)"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", borderRadius: 10, border: "none", background: "var(--text1)", color: "var(--surface)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
-            <Icon name="sparkles" size={14}/>최신 내역 반영하기
+            <Icon name="sparkles" size={14}/>{robot && robot.req ? "가져오는 중…" : "최신 내역 반영하기"}
           </button>
           {uploadBtn(true)}
         </div>
       </div>
+
+      {robot && robot.req && (() => {
+        const r = robot.req, mac = robot.mac || {};
+        const off = !r.claimed && !mac.alive;
+        return (
+          <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: off ? "rgba(255,176,60,0.10)" : "rgba(49,130,246,0.07)", borderColor: off ? "rgba(255,176,60,0.45)" : "rgba(49,130,246,0.35)" }}>
+            <span style={{ width: 9, height: 9, borderRadius: 5, background: off ? "#F5A623" : "#3182F6", flexShrink: 0, animation: off ? "none" : "aiPulse 1.4s ease-in-out infinite" }}/>
+            <div style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, lineHeight: 1.6, color: "var(--text1)" }}>
+              <b>{r.claimed ? "맥이 이카운트에서 판매 내역을 가져오는 중이에요" : off ? "맥이 꺼져(잠들어) 있어서 기다리는 중이에요" : "맥에 요청을 걸었어요 — 1분 안에 시작해요"}</b>
+              <span style={{ color: "var(--text2)" }}> · {robotMd(r.from)}~{robotMd(r.to)}</span>
+              <div style={{ fontSize: 12, color: "var(--text3)" }}>
+                {r.claimed ? "보통 2~3분 걸려요. 이 화면을 닫아도 계속 진행되고, 끝나면 자동으로 새로 읽어요."
+                  : off ? `맥을 마지막으로 확인한 건 ${mac.seen ? robotAgo(mac.seen) : "아직 없음"}이에요. 맥을 켜면(뚜껑을 열면) 바로 시작되고, 요청은 6시간 동안 기다려요.`
+                  : "이 화면을 닫아도 계속 진행돼요."}
+              </div>
+            </div>
+            {!r.claimed && <button type="button" onClick={robotCancel} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>요청 취소</button>}
+          </div>
+        );
+      })()}
 
       {preview && (
         <div className="card" style={{ background: "rgba(49,130,246,0.06)", borderColor: "rgba(49,130,246,0.35)" }}>
