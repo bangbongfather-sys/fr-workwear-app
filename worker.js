@@ -27,7 +27,7 @@ import { salesImport, salesSummary, salesCadence, reorderMarks } from "./worker-
 import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
-import { websalesPending, websalesPush, websalesRequest, websalesCancel, websalesBrief, websalesGhAuth } from "./worker-src/websales.js";
+import { websalesPending, websalesPush, websalesRequest, websalesCancel, websalesBrief, websalesGhAuth, websalesAuthNeed, websalesAuthTake, websalesAuthGive } from "./worker-src/websales.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { newsFeed } from "./worker-src/news.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -150,7 +150,7 @@ export default {
       || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/")
     //  - /api/ecount/push · /api/ecount/pending : 사무실 맥(이카운트 등록 IP)이 요청 확인·재고 보내는 주소 — X-Relay-Key 로 검증
       || path === "/api/ecount/push" || path === "/api/ecount/pending"
-      || path === "/api/ecount/websales/pending" || path === "/api/ecount/websales/push";
+      || path === "/api/ecount/websales/pending" || path === "/api/ecount/websales/push" || path === "/api/ecount/websales/auth";
     if (isProtected && !isPublic) {
       if (path === "/mcp" || path === "/mcp/") {
         // /mcp 는 handleMcp 안의 자체 잠금(MCP_TOKEN, ?k=)이 검증한다 — 기존 커넥터 URL 유지.
@@ -227,12 +227,18 @@ export default {
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
     }
     // 이카운트 웹 판매조회 로봇 — 요청 확인·결과 보내기. 맥: 재고 중계와 같은 X-Relay-Key / GitHub Actions: 실행 증명(OIDC)
-    if (url.pathname === "/api/ecount/websales/pending" || (url.pathname === "/api/ecount/websales/push" && request.method === "POST")) {
+    if (url.pathname === "/api/ecount/websales/pending" || url.pathname === "/api/ecount/websales/auth" || (url.pathname === "/api/ecount/websales/push" && request.method === "POST")) {
       const key = request.headers.get("X-Relay-Key") || "", bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
       const okKey = !!key && !!env.ECOUNT_API_KEY && key === await ecountRelayKey(env);
       if (!okKey && !(bearer && await websalesGhAuth(env, bearer))) return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다" }), { status: 403, headers: corsHeaders });
       const dev = request.headers.get("X-Relay-Dev") || "";
       if (url.pathname.endsWith("/pending")) return new Response(JSON.stringify(await websalesPending(env, dev)), { headers: corsHeaders });
+      // 추가 보안 인증(문자) — POST {hint,error}: 인증번호가 필요하다고 알림 / GET: 앱에서 넣은 번호 받아 가기
+      if (url.pathname.endsWith("/auth")) {
+        if (request.method !== "POST") return new Response(JSON.stringify(await websalesAuthTake(env)), { headers: corsHeaders });
+        let a = {}; try { a = await request.json(); } catch {}
+        return new Response(JSON.stringify(await websalesAuthNeed(env, a)), { headers: corsHeaders });
+      }
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await websalesPush(env, b, dev)), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
@@ -255,7 +261,8 @@ export default {
       try {
         if (request.method === "POST") {
           let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
-          const r = b && b.cancel ? await websalesCancel(env) : await websalesRequest(env, { mode: "import", from: String(b.from || ""), to: String(b.to || ""), by: "app" });
+          const r = b && b.cancel ? await websalesCancel(env) : b && b.code != null ? await websalesAuthGive(env, b.code)
+            : await websalesRequest(env, { mode: "import", from: String(b.from || ""), to: String(b.to || ""), by: "app" });
           return new Response(JSON.stringify({ ...r, status: await websalesBrief(env) }), { headers: corsHeaders });
         }
         return new Response(JSON.stringify(await websalesBrief(env)), { headers: corsHeaders });

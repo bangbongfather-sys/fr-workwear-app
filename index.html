@@ -17992,8 +17992,9 @@ async function salesRobotAsk(f, t2) {
     if (req.atMs) { try { localStorage.setItem(SALES_ROBOT_WAIT, String(req.atMs)); } catch {} }
     try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
     if (j.already) showToast(`이미 가져오는 중이에요 (${robotMd(req.from)}~${robotMd(req.to)}) — 끝나면 판매 현황에 반영돼요.`, "info");
-    else if (ghOk) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 요청했어요 — 3~4분 뒤 반영돼요.`, "success");
+    else if (ghOk) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 요청했어요. 곧 문자 인증번호를 물어볼 수 있으니 이 화면을 열어 두세요.`, "success");
     else if (mac.alive) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 맥에 요청했어요 — 2~3분 뒤 반영돼요.`, "success");
+    else if (st.gh && st.gh.on) showToast("요청을 걸었어요 — 맥이 2분 안에 시작하지 않으면 다른 로봇이 이어받아요.", "info");
     else if (mac.installed) showToast(`요청을 걸어 뒀어요. 지금은 맥이 꺼져(잠들어) 있어요(마지막 확인 ${robotAgo(mac.seen)}) — 맥을 켜면 바로 시작돼요.`, "info");
     else showToast("요청은 걸었지만, 판매 로봇이 설치된 맥이 아직 없어요.", "info");
     return st;
@@ -18542,6 +18543,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   }, []);
   // 「최신 내역 반영하기」 — 판매 로봇(맥)에 맡긴다. 기본 기간: 이번 달(월초 7일까지는 지난달부터) ~ 이번 달 말일.
   const [robot, setRobot] = useState(null);   // 판매 로봇 상태 { mac, req, last }
+  const [robotCode, setRobotCode] = useState("");        // 이카운트 추가 보안 인증 — 문자로 온 인증번호
+  const [robotSending, setRobotSending] = useState(false);
   useEffect(() => {
     let alive = true, timer = null;
     const step = async () => {
@@ -18556,7 +18559,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         if (j.last.ok) { showToast(`이카운트 판매 내역을 반영했어요 — ${robotMd(j.last.from)}~${robotMd(j.last.to)} · ${fmt(j.last.count != null ? j.last.count : j.last.rows)}건${j.last.total != null ? ` · ${won(j.last.total)}` : ""}`, "success"); setTick(t => t + 1); }
         else showToast(`이카운트에서 가져오지 못했어요 — ${j.last.error || "원인을 알 수 없어요"}`, "error");
       } else if (wait && !j.req && Date.now() - wait > 90e3) { try { localStorage.removeItem(SALES_ROBOT_WAIT); } catch {} }   // 취소됐거나 너무 오래돼 사라진 요청
-      if (j.req) timer = setTimeout(step, 6000);
+      if (j.req) timer = setTimeout(step, j.req.auth || j.req.claimed ? 3000 : 6000);   // 인증번호를 기다리는 동안은 더 자주 본다
     };
     step();
     const onVis = () => { if (document.visibilityState === "visible") step(); };
@@ -18567,6 +18570,18 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     if (robot && robot.mac && !robot.mac.installed && !(robot.gh && robot.gh.on)) return claudeRefresh();   // 로봇을 안 깐 경우엔 예전 방식(Claude 가 Chrome 으로)
     const d = Number(today.slice(8));
     salesRobotAsk(d <= 7 ? `${ymShift(today.slice(0, 7), -1)}-01` : `${today.slice(0, 8)}01`, ymMonthEnd(today.slice(0, 7)));
+  };
+  // 이카운트가 처음 보는 곳(GitHub 로봇)의 로그인에 문자 인증을 요구하면 — 대표님이 받은 인증번호를 로봇에 건넨다
+  const robotSendCode = async () => {
+    const c = robotCode.replace(/\D/g, ""); if (c.length < 4 || robotSending) return;
+    setRobotSending(true);
+    try {
+      const j = await (await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: c }) })).json();
+      if (j && j.ok) { setRobotCode(""); showToast("인증번호를 로봇에 건넸어요 — 이어서 진행해요.", "success"); }
+      else showToast((j && j.error) || "인증번호를 보내지 못했어요", "error");
+    } catch { showToast("인증번호를 보내지 못했어요 — 인터넷 연결을 확인해 주세요", "error"); }
+    setRobotSending(false);
+    try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
   };
   const robotCancel = async () => {
     try { await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cancel: true }) }); } catch {}
@@ -19465,22 +19480,40 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
       </div>
 
       {robot && robot.req && (() => {
-        const r = robot.req, mac = robot.mac || {};
+        const r = robot.req, mac = robot.mac || {}, au = r.auth;
         const ghOk = !!(robot.gh && robot.gh.on && r.gh && r.gh.ok), ghErr = robot.gh && robot.gh.on && r.gh && !r.gh.ok ? r.gh.error : "";
-        const off = !r.claimed && !mac.alive && !ghOk;
+        const ghCan = !!(robot.gh && robot.gh.on) && !ghErr;       // 맥이 안 가져가면 GitHub 로봇이 이어받는다
+        const off = !r.claimed && !mac.alive && !ghOk && !ghCan;
+        const need = !!(au && au.state === "need"), checking = !!(au && (au.state === "given" || au.state === "taken"));
+        const tone = need ? ["rgba(219,107,46,0.10)", "rgba(219,107,46,0.5)", "#DB6B2E"] : off ? ["rgba(255,176,60,0.10)", "rgba(255,176,60,0.45)", "#F5A623"] : ["rgba(49,130,246,0.07)", "rgba(49,130,246,0.35)", "#3182F6"];
         return (
-          <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: off ? "rgba(255,176,60,0.10)" : "rgba(49,130,246,0.07)", borderColor: off ? "rgba(255,176,60,0.45)" : "rgba(49,130,246,0.35)" }}>
-            <span style={{ width: 9, height: 9, borderRadius: 5, background: off ? "#F5A623" : "#3182F6", flexShrink: 0, animation: off ? "none" : "aiPulse 1.4s ease-in-out infinite" }}/>
+          <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: tone[0], borderColor: tone[1] }}>
+            <span style={{ width: 9, height: 9, borderRadius: 5, background: tone[2], flexShrink: 0, animation: off ? "none" : "aiPulse 1.4s ease-in-out infinite" }}/>
             <div style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, lineHeight: 1.6, color: "var(--text1)" }}>
-              <b>{r.claimed ? "로봇이 이카운트에서 판매 내역을 가져오는 중이에요" : off ? "맥이 꺼져(잠들어) 있어서 기다리는 중이에요" : ghOk ? "로봇을 깨웠어요 — 1분쯤 뒤 시작해요" : "맥에 요청을 걸었어요 — 1분 안에 시작해요"}</b>
+              <b>{need ? "이카운트가 본인 인증을 요구해요 — 문자로 온 인증번호를 넣어 주세요"
+                : checking ? "인증번호를 확인하는 중이에요"
+                : r.claimed ? "로봇이 이카운트에서 판매 내역을 가져오는 중이에요"
+                : off ? "맥이 꺼져(잠들어) 있어서 기다리는 중이에요"
+                : ghOk ? "로봇을 깨웠어요 — 1분쯤 뒤 시작해요" : "맥에 요청을 걸었어요 — 1분 안에 시작해요"}</b>
               <span style={{ color: "var(--text2)" }}> · {robotMd(r.from)}~{robotMd(r.to)}</span>
               <div style={{ fontSize: 12, color: "var(--text3)" }}>
-                {r.claimed ? "보통 2~3분 걸려요. 이 화면을 닫아도 계속 진행되고, 끝나면 자동으로 새로 읽어요."
+                {need ? <>{au.error ? <b style={{ color: "var(--negative-text, #E5484D)" }}>{au.error} </b> : null}{au.hint ? `${au.hint} 번호로 ` : ""}이카운트가 보낸 문자의 숫자를 넣으면 로봇이 이어서 진행해요. 3분 안에 넣어 주세요.</>
+                  : checking ? "맞으면 바로 판매 내역을 가져오기 시작해요."
+                  : r.claimed ? "보통 2~3분 걸려요. 이 화면을 닫아도 계속 진행되고, 끝나면 자동으로 새로 읽어요. 이카운트가 본인 인증을 요구하면 여기에 인증번호 칸이 떠요."
                   : off ? `${ghErr ? `GitHub 로봇을 깨우지 못했어요(${ghErr}). ` : ""}맥을 마지막으로 확인한 건 ${mac.seen ? robotAgo(mac.seen) : "아직 없음"}이에요. 맥을 켜면(뚜껑을 열면) 바로 시작되고, 요청은 6시간 동안 기다려요.`
+                  : ghOk ? "이카운트가 문자로 본인 인증을 요구하면 여기에 인증번호 칸이 떠요 — 이 화면을 잠시 열어 두세요."
+                  : ghCan ? "맥이 2분 안에 시작하지 않으면 다른 로봇이 이어받아요. 그때는 문자 인증번호를 물어볼 수 있어요."
                   : "이 화면을 닫아도 계속 진행돼요."}
               </div>
             </div>
-            {!r.claimed && <button type="button" onClick={robotCancel} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>요청 취소</button>}
+            {need && (
+              <form onSubmit={e => { e.preventDefault(); robotSendCode(); }} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input value={robotCode} onChange={e => setRobotCode(e.target.value.replace(/\D/g, "").slice(0, 8))} inputMode="numeric" autoComplete="one-time-code" placeholder="인증번호" aria-label="문자 인증번호"
+                  style={{ width: 128, height: 40, fontSize: 18, fontWeight: 800, letterSpacing: 3, textAlign: "center", fontVariantNumeric: "tabular-nums" }}/>
+                <button type="submit" className="btn-orange" disabled={robotCode.length < 4 || robotSending} style={{ height: 40, padding: "0 16px", borderRadius: 10, fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap" }}>{robotSending ? "보내는 중…" : "보내기"}</button>
+              </form>
+            )}
+            {(!r.claimed || need) && <button type="button" onClick={robotCancel} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>요청 취소</button>}
           </div>
         );
       })()}
