@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-18-gh3";
+const VERSION = "2026-11-18-gh4";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -200,7 +200,7 @@ try {
       // 이카운트는 응답을 base64 로 감싸 보내는 경우가 많다 — 풀어서 기록
       if (/^[A-Za-z0-9+/=\s]{40,}$/.test(body.slice(0, 200))) { try { const t = Buffer.from(body, "base64").toString("utf8"); if (/^[\[{]/.test(t.trim())) body = t; } catch {} }
       if (/passwd|password|PWD/i.test(body)) body = "(비밀번호 관련 응답 — 기록 안 함)";
-      const key = phase >= 4 && /Sale|ESD|ESQ|Slip|Search|GetList/i.test(u);
+      const key = (phase >= 4 && /Sale|ESD|ESQ|Slip|Search|GetList/i.test(u)) || /second_auth/i.test(u);
       net.push({ url: u, status: r.status(), type: `${rt} ${ct.split(";")[0]}`, body: body.slice(0, key ? 6000 : 500), key, phase });
     } catch {}
   });
@@ -232,6 +232,17 @@ try {
       for (const f of page.frames()) { try { const t = (await f.evaluate(() => (document.body ? document.body.innerText : ""))).replace(/\n{2,}/g, "\n").trim(); if (t) parts.push(`[${f.url().slice(0, 120)}]\n${t.slice(0, 1800)}`); } catch {} }
       await snap("2-1 추가 보안 인증", "", true);
       steps.push({ name: "2-2 추가 보안 인증 안내문", text: parts.join("\n\n").slice(0, 3900), frames: page.frames().map((f) => f.url()).filter((u) => u && u !== "about:blank") });
+      // 인증 창이 어떤 요소로 이루어졌는지(무엇을 눌러야 하는지) 기록 — 다음 단계(문자 인증 고르기)를 맞추려고
+      try {
+        const html = await page.evaluate(() => {
+          let best = null;
+          for (const e of document.querySelectorAll("body *")) { const t = e.innerText || ""; if (t.includes("SMS") && t.includes("추가 인증이 필요")) { if (!best || best.contains(e)) best = e; } }
+          if (!best) return "";
+          const c = best.cloneNode(true); c.querySelectorAll("script,style,svg,path").forEach((x) => x.remove());
+          return c.outerHTML.replace(/\s+/g, " ").replace(/ (style|data-[\w-]+|aria-[\w-]+)="[^"]*"/g, "").slice(0, 3900);
+        });
+        steps.push({ name: "2-3 추가 보안 인증 화면 구조", text: html });
+      } catch (e) { steps.push({ name: "2-3 추가 보안 인증 화면 구조", note: `읽기 실패: ${e.message}` }); }
       out.error = "이카운트가 「추가 보안 인증」을 요구합니다 (처음 보는 기기·위치에서의 로그인) — 로봇은 여기서 멈췄습니다";
       await finish();
     }

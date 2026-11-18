@@ -51,10 +51,12 @@ export async function websalesGhAuth(env, token) {
   } catch { return false; }
 }
 // GitHub Actions 로봇 깨우기 (workflow_dispatch). 토큰이 없으면 아무것도 안 한다(맥만 쓴다).
-// ※ 2026-11-18 실제로 돌려 보니, 이카운트가 GitHub 서버(해외·처음 보는 위치)의 로그인에는 매번 「추가 보안 인증」(문자·메일 본인 인증)을
-//   요구해서 로봇이 로그인하지 못한다. 그런데 GitHub 로봇이 요청을 먼저 가져가 실패로 끝내 버리면 맥이 처리할 기회가 없어진다.
-//   그래서 기본은 꺼 둔다 — Cloudflare 변수 WEBSALES_GH 를 "on" 으로 둘 때만 깨운다.
-const ghOn = (env) => !!env.GITHUB_ACTIONS_TOKEN && env.WEBSALES_GH === "on";
+// ※ 이카운트는 GitHub 서버(해외·처음 보는 위치)의 로그인에 매번 「추가 보안 인증」(문자 본인 인증)을 요구한다.
+//   그래서 GitHub 로봇은 문자 인증을 고른 뒤 멈춰서 기다리고, 대표님이 앱에 인증번호를 넣으면 이어서 진행한다(아래 websalesAuth*).
+//   맥은 평소 쓰던 인터넷이라 인증 없이 되므로, 맥이 켜져 있으면 맥에 먼저 맡긴다. 끄려면 Cloudflare 변수 WEBSALES_GH = "off".
+const ghOn = (env) => !!env.GITHUB_ACTIONS_TOKEN && env.WEBSALES_GH !== "off";
+const MAC_LIVE = 150e3;      // 맥은 1분마다 묻는다 — 2분 30초 안에 물었으면 켜져 있는 것으로 본다
+const GH_FALLBACK = 100e3;   // 맥에 맡겼는데 이만큼 지나도 안 가져가면 GitHub 로봇을 깨운다
 async function ghWake(env) {
   if (!ghOn(env)) return null;
   try {
@@ -75,16 +77,18 @@ export async function websalesRequest(env, { mode = "probe", from = "", to = "",
   if (cur && cur.atMs && Date.now() - cur.atMs < REQ_TTL) {
     // 아직 아무도 안 가져갔고, GitHub 를 못 깨웠거나 깨운 지 10분이 넘었으면 한 번 더 깨운다
     const taken = cur.claim && Date.now() - Number(cur.claim.ts) < CLAIM_TTL;
-    if (!taken && (!cur.gh || !cur.gh.ok || Date.now() - Number(cur.gh.ts) > 10 * 60e3)) { const gh = await ghWake(env); if (gh) await fbPut(env, REQ, { ...cur, gh }).catch(() => {}); }
+    if (!taken && cur.only !== "mac" && (!cur.gh || !cur.gh.ok || Date.now() - Number(cur.gh.ts) > 10 * 60e3)) { const gh = await ghWake(env); if (gh) await fbPut(env, REQ, { ...cur, gh }).catch(() => {}); }
     return { ok: true, already: true, message: "이미 걸린 요청이 있어요 — 맥이 처리 중이거나 곧 가져갑니다", req: { mode: cur.mode, from: cur.from, to: cur.to, at: cur.at, atMs: cur.atMs } };
   }
   const req = { mode, from: DAY.test(from) ? from : "", to: DAY.test(to) ? to : "", at: kstAt(), atMs: Date.now(), by: clip(by, 30) };
   if (only === "github" || only === "mac") req.only = only;   // 점검용 — 한쪽 로봇만 가져가게
   await fbPut(env, REQ, req);
-  const gh = await ghWake(env);
-  if (gh) { req.gh = gh; await fbPut(env, REQ, req).catch(() => {}); }
   const seen = Number(await fbGet(env, SEEN).catch(() => 0)) || 0;
   const alive = seen && Date.now() - seen < 5 * 60e3;
+  // 맥이 방금까지 묻고 있었으면 맥에 먼저 맡긴다(인증 문자 없이 됨). 아니면 GitHub 로봇을 바로 깨운다.
+  const macFirst = only !== "github" && seen && Date.now() - seen < MAC_LIVE;
+  const gh = only === "mac" || macFirst ? null : await ghWake(env);
+  if (gh) { req.gh = gh; await fbPut(env, REQ, req).catch(() => {}); }
   if (gh && gh.ok) return { ok: true, queued: true, req, robot: "GitHub 로봇을 깨웠어요 — 1분쯤 뒤 시작" };
   return { ok: true, queued: true, req, gh: gh ? gh.error : undefined, mac: alive ? "켜져 있음 — 1분 안에 시작" : (seen ? `마지막 확인 ${Math.round((Date.now() - seen) / 60e3)}분 전 — 맥이 꺼져 있거나 설치 전일 수 있어요` : "아직 맥이 한 번도 확인하지 않았어요 — 설치가 필요합니다") };
 }
@@ -135,17 +139,50 @@ export async function websalesStatus(env) {
     걸린요청: req ? { mode: req.mode, from: req.from, to: req.to, at: req.at, 가져감: !!req.claim } : null,
     마지막실행: log, 사진: Array.isArray(shots) ? shots.map((x, i) => `${i}: ${x && x.name}`) : [] };
 }
+// ── 추가 보안 인증(문자) — 로봇이 「인증번호가 필요해요」를 알리고, 앱에서 넣은 번호를 받아 간다 ──
+//   REQ.auth = { state: "need" | "given", hint: "010****3079", at, error, code }   (code 는 로봇이 받아 가는 즉시 지운다)
+const AUTH_TTL = 5 * 60e3;
+export async function websalesAuthNeed(env, b = {}) {          // 로봇 → 서버: 인증번호가 필요하다 (틀렸을 때 다시 부르면 error 와 함께)
+  const req = await fbGet(env, REQ).catch(() => null);
+  if (!req || !req.atMs) return { ok: false, cancelled: true };
+  await fbPut(env, REQ, { ...req, claim: req.claim ? { ...req.claim, ts: Date.now() } : req.claim, auth: { state: "need", hint: clip(b.hint, 30), at: Date.now(), error: clip(b.error, 120) } });
+  return { ok: true };
+}
+export async function websalesAuthTake(env) {                  // 로봇 → 서버: 넣은 번호가 있으면 받아 간다
+  const req = await fbGet(env, REQ).catch(() => null);
+  if (!req || !req.atMs) return { cancelled: true };
+  const a = req.auth;
+  if (!a || a.state !== "given" || !a.code) return { wait: true };
+  await fbPut(env, REQ, { ...req, auth: { state: "taken", hint: a.hint || "", at: a.at } });
+  return { code: String(a.code) };
+}
+export async function websalesAuthGive(env, code) {            // 앱 → 서버: 대표님이 넣은 인증번호
+  const c = String(code || "").replace(/\D/g, "");
+  if (c.length < 4 || c.length > 8) return { ok: false, error: "인증번호는 숫자 4~8자리예요" };
+  const req = await fbGet(env, REQ).catch(() => null);
+  if (!req || !req.atMs || !req.auth || req.auth.state !== "need") return { ok: false, error: "지금은 인증번호를 기다리고 있지 않아요" };
+  if (Date.now() - Number(req.auth.at) > AUTH_TTL) return { ok: false, error: "시간이 지났어요 — 요청을 취소하고 다시 눌러 주세요" };
+  await fbPut(env, REQ, { ...req, auth: { ...req.auth, state: "given", code: c, error: "" } });
+  return { ok: true };
+}
+
 // 앱(판매 현황 화면)용 짧은 상태 — 맥이 켜져 있나 · 걸린 요청 · 마지막 실행 결과 (기록·사진 빼고)
 export async function websalesBrief(env) {
   const [req, log, seen] = await Promise.all([fbGet(env, REQ).catch(() => null), fbGet(env, LOG).catch(() => null), fbGet(env, SEEN).catch(() => null)]);
   const s = Number(seen) || 0;
-  const live = req && req.atMs && Date.now() - req.atMs < REQ_TTL ? req : null;
+  let live = req && req.atMs && Date.now() - req.atMs < REQ_TTL ? req : null;
+  // 맥에 맡겼는데 한참 안 가져가면(잠들었거나 꺼짐) GitHub 로봇을 깨운다
+  if (live && !live.claim && !live.gh && live.only !== "mac" && Date.now() - live.atMs > GH_FALLBACK && ghOn(env)) {
+    const gh = await ghWake(env); if (gh) { live = { ...live, gh }; await fbPut(env, REQ, live).catch(() => {}); }
+  }
+  const au = live && live.auth;
   const r = log && log.result;
   return { ok: true, now: Date.now(),
     mac: { seen: s, alive: !!s && Date.now() - s < 5 * 60e3, installed: !!s },
     gh: { on: ghOn(env) },
     req: live ? { mode: live.mode, from: live.from, to: live.to, at: live.at, atMs: live.atMs, claimed: !!(live.claim && Date.now() - Number(live.claim.ts) < CLAIM_TTL), by: (live.claim && live.claim.dev) || "",
-      gh: live.gh ? { ok: !!live.gh.ok, error: live.gh.error || "" } : null } : null,
+      gh: live.gh ? { ok: !!live.gh.ok, error: live.gh.error || "" } : null,
+      auth: au ? { state: au.state, hint: au.hint || "", at: Number(au.at) || 0, error: au.error || "" } : null } : null,
     last: log ? { at: log.at, atMs: Number(log.atMs) || 0, reqAtMs: Number(log.reqAtMs) || 0, mode: log.mode, from: log.from, to: log.to, ok: !!log.ok, error: clip(log.error || (r && r.ok === false && r.error) || "", 300),
       rows: Number(log.rows) || 0, count: r && r.count != null ? r.count : null, total: r && r.total != null ? r.total : null } : null };
 }
