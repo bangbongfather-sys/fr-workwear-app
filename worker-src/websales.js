@@ -51,8 +51,12 @@ export async function websalesGhAuth(env, token) {
   } catch { return false; }
 }
 // GitHub Actions 로봇 깨우기 (workflow_dispatch). 토큰이 없으면 아무것도 안 한다(맥만 쓴다).
+// ※ 2026-11-18 실제로 돌려 보니, 이카운트가 GitHub 서버(해외·처음 보는 위치)의 로그인에는 매번 「추가 보안 인증」(문자·메일 본인 인증)을
+//   요구해서 로봇이 로그인하지 못한다. 그런데 GitHub 로봇이 요청을 먼저 가져가 실패로 끝내 버리면 맥이 처리할 기회가 없어진다.
+//   그래서 기본은 꺼 둔다 — Cloudflare 변수 WEBSALES_GH 를 "on" 으로 둘 때만 깨운다.
+const ghOn = (env) => !!env.GITHUB_ACTIONS_TOKEN && env.WEBSALES_GH === "on";
 async function ghWake(env) {
-  if (!env.GITHUB_ACTIONS_TOKEN) return null;
+  if (!ghOn(env)) return null;
   try {
     const r = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO || GH_REPO}/actions/workflows/${GH_WORKFLOW}/dispatches`, { method: "POST",
       headers: { Authorization: `Bearer ${env.GITHUB_ACTIONS_TOKEN}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "nj-websales", "Content-Type": "application/json" },
@@ -139,7 +143,7 @@ export async function websalesBrief(env) {
   const r = log && log.result;
   return { ok: true, now: Date.now(),
     mac: { seen: s, alive: !!s && Date.now() - s < 5 * 60e3, installed: !!s },
-    gh: { on: !!env.GITHUB_ACTIONS_TOKEN },
+    gh: { on: ghOn(env) },
     req: live ? { mode: live.mode, from: live.from, to: live.to, at: live.at, atMs: live.atMs, claimed: !!(live.claim && Date.now() - Number(live.claim.ts) < CLAIM_TTL), by: (live.claim && live.claim.dev) || "",
       gh: live.gh ? { ok: !!live.gh.ok, error: live.gh.error || "" } : null } : null,
     last: log ? { at: log.at, atMs: Number(log.atMs) || 0, reqAtMs: Number(log.reqAtMs) || 0, mode: log.mode, from: log.from, to: log.to, ok: !!log.ok, error: clip(log.error || (r && r.ok === false && r.error) || "", 300),
