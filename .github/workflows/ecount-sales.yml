@@ -1,0 +1,47 @@
+# 이카운트 판매조회 로봇 — 맥이 꺼져 있어도 회사 앱 「판매 현황 › 최신 내역 반영하기」가 되게 한다.
+#  - 회사 앱이 요청을 걸면 이 워크플로를 깨운다(workflow_dispatch). 정해진 시간에 저절로 돌지는 않는다.
+#  - 이카운트 회사코드·아이디·비밀번호는 저장소 Settings › Secrets and variables › Actions 에만 둔다.
+#  - 회사 앱과는 GitHub 가 발급하는 실행 증명(OIDC)으로 통신한다 — main 의 이 파일만 받아 준다.
+#  - 이 저장소는 공개라 실행 기록도 공개된다. 로봇은 금액·거래처·화면 내용을 기록에 찍지 않는다.
+name: 이카운트 판매조회 로봇
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = 걸린 요청 처리 · selftest = 점검(로그인하지 않음)"
+        type: choice
+        options: [check, selftest]
+        default: check
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: ecount-sales
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          sparse-checkout: ecount-relay
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 준비 (브라우저 조종 도구 · 한글 글꼴)
+        run: |
+          cd ecount-relay
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund --silent playwright-core@1.49.1
+          sudo apt-get install -y -qq fonts-nanum >/dev/null 2>&1 || true
+      - name: 로봇 실행
+        env:
+          MODE: ${{ inputs.mode }}
+          NJ_ECOUNT_COM: ${{ secrets.ECOUNT_COM_CODE }}
+          NJ_ECOUNT_WEB_ID: ${{ secrets.ECOUNT_WEB_ID }}
+          NJ_ECOUNT_WEB_PW: ${{ secrets.ECOUNT_WEB_PW }}
+        run: |
+          case "$MODE" in selftest) M=selftest ;; *) M=check ;; esac
+          node ecount-relay/web.mjs "$M"

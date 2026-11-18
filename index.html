@@ -17978,8 +17978,9 @@ function cmdkParseAsOf(q) {
   return { focus: last ? "last" : "this", client };
 }
 
-// ── 판매 로봇 — 맥이 이카운트 판매조회를 읽어 판매 현황에 넣는다. 단추만 누르면 되니 핸드폰에서도 된다 ──
-// 요청을 걸면 맥이 1분 안에 가져가 이카운트에서 읽어 온다(2~3분). 맥이 꺼져(잠들어) 있으면 켜질 때까지 6시간 기다린다.
+// ── 판매 로봇 — 로봇이 이카운트 판매조회를 읽어 판매 현황에 넣는다. 단추만 누르면 되니 핸드폰에서도 된다 ──
+// 요청을 걸면 GitHub 로봇(맥이 꺼져 있어도 됨)이나 맥 중 먼저 가져간 쪽이 이카운트에서 읽어 온다(3~4분).
+// GitHub 로봇이 연결돼 있지 않으면 맥만 쓴다 — 맥이 꺼져(잠들어) 있으면 켜질 때까지 6시간 기다린다.
 const SALES_ROBOT_WAIT = "frw_sales_robot_wait";   // 내가 건 요청 번호(atMs) — 판매 현황 화면이 「끝났나」를 볼 때 쓴다
 const robotMd = (d) => String(d || "").slice(5).replace("-", ".");
 const robotAgo = (ms) => { const m = Math.max(1, Math.round((Date.now() - ms) / 60e3)); return m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
@@ -17987,10 +17988,11 @@ async function salesRobotAsk(f, t2) {
   try {
     const j = await (await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: f, to: t2 }) })).json();
     if (!j || j.ok === false) { showToast(`요청하지 못했어요 — ${(j && j.error) || "서버 응답이 이상해요"}`, "error"); return null; }
-    const st = j.status || {}, req = st.req || j.req || {}, mac = st.mac || {};
+    const st = j.status || {}, req = st.req || j.req || {}, mac = st.mac || {}, ghOk = !!(st.gh && st.gh.on && req.gh && req.gh.ok);
     if (req.atMs) { try { localStorage.setItem(SALES_ROBOT_WAIT, String(req.atMs)); } catch {} }
     try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
     if (j.already) showToast(`이미 가져오는 중이에요 (${robotMd(req.from)}~${robotMd(req.to)}) — 끝나면 판매 현황에 반영돼요.`, "info");
+    else if (ghOk) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 요청했어요 — 3~4분 뒤 반영돼요.`, "success");
     else if (mac.alive) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 맥에 요청했어요 — 2~3분 뒤 반영돼요.`, "success");
     else if (mac.installed) showToast(`요청을 걸어 뒀어요. 지금은 맥이 꺼져(잠들어) 있어요(마지막 확인 ${robotAgo(mac.seen)}) — 맥을 켜면 바로 시작돼요.`, "info");
     else showToast("요청은 걸었지만, 판매 로봇이 설치된 맥이 아직 없어요.", "info");
@@ -18562,7 +18564,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     return () => { alive = false; clearTimeout(timer); window.removeEventListener("frw-sales-robot", step); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   const robotRefresh = () => {
-    if (robot && robot.mac && !robot.mac.installed) return claudeRefresh();   // 로봇을 안 깐 경우엔 예전 방식(Claude 가 Chrome 으로)
+    if (robot && robot.mac && !robot.mac.installed && !(robot.gh && robot.gh.on)) return claudeRefresh();   // 로봇을 안 깐 경우엔 예전 방식(Claude 가 Chrome 으로)
     const d = Number(today.slice(8));
     salesRobotAsk(d <= 7 ? `${ymShift(today.slice(0, 7), -1)}-01` : `${today.slice(0, 8)}01`, ymMonthEnd(today.slice(0, 7)));
   };
@@ -19454,7 +19456,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         </>}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {data && data.lastImport && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }} title={data.lastImport.fileName}><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: "#00B493", marginRight: 6, verticalAlign: "1px" }}/>마지막 업로드 {md(data.lastImport.at.slice(0, 10))} {data.lastImport.at.slice(11)} · {md(data.lastImport.from)}~{md(data.lastImport.to)}</span>}
-          <button type="button" onClick={robotRefresh} disabled={!!(robot && robot.req)} title="맥이 이카운트 판매조회를 읽어 최신 내역을 반영해요 — 핸드폰에서도 눌러 둘 수 있어요 (맥이 켜져 있을 때 진행)"
+          <button type="button" onClick={robotRefresh} disabled={!!(robot && robot.req)} title="로봇이 이카운트 판매조회를 읽어 최신 내역을 반영해요 — 핸드폰에서도 누를 수 있어요"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", borderRadius: 10, border: "none", background: "var(--text1)", color: "var(--surface)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
             <Icon name="sparkles" size={14}/>{robot && robot.req ? "가져오는 중…" : "최신 내역 반영하기"}
           </button>
@@ -19464,16 +19466,17 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
 
       {robot && robot.req && (() => {
         const r = robot.req, mac = robot.mac || {};
-        const off = !r.claimed && !mac.alive;
+        const ghOk = !!(robot.gh && robot.gh.on && r.gh && r.gh.ok), ghErr = robot.gh && robot.gh.on && r.gh && !r.gh.ok ? r.gh.error : "";
+        const off = !r.claimed && !mac.alive && !ghOk;
         return (
           <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: off ? "rgba(255,176,60,0.10)" : "rgba(49,130,246,0.07)", borderColor: off ? "rgba(255,176,60,0.45)" : "rgba(49,130,246,0.35)" }}>
             <span style={{ width: 9, height: 9, borderRadius: 5, background: off ? "#F5A623" : "#3182F6", flexShrink: 0, animation: off ? "none" : "aiPulse 1.4s ease-in-out infinite" }}/>
             <div style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, lineHeight: 1.6, color: "var(--text1)" }}>
-              <b>{r.claimed ? "맥이 이카운트에서 판매 내역을 가져오는 중이에요" : off ? "맥이 꺼져(잠들어) 있어서 기다리는 중이에요" : "맥에 요청을 걸었어요 — 1분 안에 시작해요"}</b>
+              <b>{r.claimed ? "로봇이 이카운트에서 판매 내역을 가져오는 중이에요" : off ? "맥이 꺼져(잠들어) 있어서 기다리는 중이에요" : ghOk ? "로봇을 깨웠어요 — 1분쯤 뒤 시작해요" : "맥에 요청을 걸었어요 — 1분 안에 시작해요"}</b>
               <span style={{ color: "var(--text2)" }}> · {robotMd(r.from)}~{robotMd(r.to)}</span>
               <div style={{ fontSize: 12, color: "var(--text3)" }}>
                 {r.claimed ? "보통 2~3분 걸려요. 이 화면을 닫아도 계속 진행되고, 끝나면 자동으로 새로 읽어요."
-                  : off ? `맥을 마지막으로 확인한 건 ${mac.seen ? robotAgo(mac.seen) : "아직 없음"}이에요. 맥을 켜면(뚜껑을 열면) 바로 시작되고, 요청은 6시간 동안 기다려요.`
+                  : off ? `${ghErr ? `GitHub 로봇을 깨우지 못했어요(${ghErr}). ` : ""}맥을 마지막으로 확인한 건 ${mac.seen ? robotAgo(mac.seen) : "아직 없음"}이에요. 맥을 켜면(뚜껑을 열면) 바로 시작되고, 요청은 6시간 동안 기다려요.`
                   : "이 화면을 닫아도 계속 진행돼요."}
               </div>
             </div>

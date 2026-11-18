@@ -1,4 +1,9 @@
-// NJ SAFETY — 이카운트 웹 판매조회 로봇 (사무실 맥에서 실행)
+// NJ SAFETY — 이카운트 웹 판매조회 로봇 (맥 또는 GitHub Actions 에서 실행)
+//
+// GitHub Actions 에서 돌 때(.github/workflows/ecount-sales.yml — 맥이 꺼져 있어도 되게):
+//  - 회사코드·아이디·비밀번호는 GitHub 저장소의 Secrets 에서 환경 변수로만 받는다
+//  - 회사 앱과는 GitHub 가 그때그때 발급하는 실행 증명(OIDC)으로 통신한다 — 따로 넣어 둘 인증키가 없다
+//  - 저장소가 공개라 실행 기록도 공개된다 → 화면·금액·거래처·오류 문구는 기록에 찍지 않고 회사 앱으로만 보낸다
 //
 // 이카운트 공개 API 에는 판매 「조회」가 없어서, 맥의 Chrome 을 화면 없이(헤드리스) 띄워 이카운트 웹에 로그인하고
 // 판매조회 화면을 읽어 회사 앱으로 보낸다. 이 파일은 맥이 실행할 때마다 회사 앱에서 최신본을 받아 쓴다.
@@ -17,22 +22,33 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-17-list1";
+const VERSION = "2026-11-18-gh1";
+const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
-const DIR = process.env.NJ_DIR || join(homedir(), "Library/Application Support/nj-ecount");
+const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
 const LOGIN_URL = process.env.NJ_LOGIN_URL || "https://login.ecount.com/Login/";
-const CHROME = process.env.NJ_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const DEV = "office-mac";
+const CHROME = process.env.NJ_CHROME || (GH ? "/usr/bin/google-chrome" : "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
+const DEV = GH ? "github" : "office-mac";
 
-const kc = (s) => { if (process.env["NJ_KC_" + s]) return process.env["NJ_KC_" + s]; try { return execFileSync("security", ["find-generic-password", "-a", userInfo().username, "-s", s, "-w"], { encoding: "utf8" }).trim(); } catch { return ""; } };
+const ENVKEY = { "nj-ecount-key": "NJ_ECOUNT_KEY", "nj-ecount-com": "NJ_ECOUNT_COM", "nj-ecount-web-id": "NJ_ECOUNT_WEB_ID", "nj-ecount-web-pw": "NJ_ECOUNT_WEB_PW" };
+const kc = (s) => { if (process.env["NJ_KC_" + s]) return process.env["NJ_KC_" + s]; if (process.env[ENVKEY[s]]) return process.env[ENVKEY[s]].trim(); if (GH) return ""; try { return execFileSync("security", ["find-generic-password", "-a", userInfo().username, "-s", s, "-w"], { encoding: "utf8" }).trim(); } catch { return ""; } };
 const sha256 = async (t) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const say = (...a) => console.log(new Date().toISOString().slice(0, 19).replace("T", " "), ...a);
+const quiet = (t) => (GH ? "(자세한 내용은 회사 앱 기록에)" : t);   // 공개되는 실행 기록에는 자세한 내용을 찍지 않는다
 
 const KEY = kc("nj-ecount-key");
 const RELAY = process.env.NJ_RELAY || (KEY ? await sha256(KEY) : "");
-const H = { "Content-Type": "application/json", "X-Relay-Key": RELAY, "X-Relay-Dev": DEV };
-async function api(path, body) {
+// GitHub Actions 실행 증명(OIDC) — 몇 분만 유효해서 회사 앱을 부를 때마다 새로 받는다
+const OIDC = GH && process.env.ACTIONS_ID_TOKEN_REQUEST_URL && process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+async function oidc() {
+  const r = await fetch(`${process.env.ACTIONS_ID_TOKEN_REQUEST_URL}&audience=nj-websales`, { headers: { Authorization: `bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` } });
+  const j = await r.json().catch(() => ({})); if (!j.value) throw new Error(`실행 증명을 받지 못했습니다 (${r.status})`); return j.value;
+}
+const CAN_AUTH = !!(RELAY || OIDC);
+async function api(path, body, dev = DEV) {
+  const H = { "Content-Type": "application/json", "X-Relay-Dev": dev };
+  if (RELAY) H["X-Relay-Key"] = RELAY; else if (OIDC) { try { H.Authorization = `Bearer ${await oidc()}`; } catch (e) { return { error: e.message }; } }
   const r = await fetch(APP + path, body ? { method: "POST", headers: H, body: JSON.stringify(body) } : { headers: H });
   const t = await r.text(); try { return JSON.parse(t); } catch { return { error: `응답 읽기 실패 ${r.status}: ${t.slice(0, 200)}` }; }
 }
@@ -40,13 +56,32 @@ async function api(path, body) {
 // ── 무엇을 할지 ──
 const [cmd = "check", a1 = "", a2 = ""] = process.argv.slice(2);
 let job;
+if (cmd === "selftest") {
+  // 점검 — 회사 앱 인증 · Chrome 실행 · 이카운트 로그인 화면이 열리는지만 본다 (로그인하지 않는다. 요청도 가져가지 않는다)
+  const p = await api("/api/ecount/websales/pending", null, "setup");
+  say("회사 앱 인증:", p && p.setup ? "됨" : `안 됨 (${(p && p.error) || "응답 이상"})`);
+  say("비밀 값:", ["nj-ecount-com", "nj-ecount-web-id", "nj-ecount-web-pw"].map((k) => (kc(k) ? "있음" : "없음")).join(" · "), "(회사코드 · 아이디 · 비밀번호)");
+  let ok = !!(p && p.setup);
+  try {
+    if (!existsSync(CHROME)) throw new Error("Chrome 없음");
+    const b = await chromium.launch({ executablePath: CHROME, headless: true, args: GH ? ["--no-sandbox"] : [] });
+    const pg = await b.newPage({ locale: "ko-KR", timezoneId: "Asia/Seoul" });
+    await pg.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 45000 }); await pg.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+    const form = await pg.locator("input[type=password]").count();
+    say("Chrome 실행: 됨 · 이카운트 로그인 화면:", form ? "열림" : "입력 칸이 안 보임", "· 주소:", new URL(pg.url()).hostname);
+    if (!form) ok = false;
+    await b.close();
+  } catch (e) { say("Chrome·이카운트 화면 점검 실패:", e.message.split("\n")[0]); ok = false; }
+  process.exit(ok ? 0 : 1);
+}
 if (cmd === "check") {
-  if (!RELAY) process.exit(0);
+  if (!CAN_AUTH) { if (GH) { say("회사 앱과 통신할 실행 증명이 없습니다"); process.exit(1); } process.exit(0); }
   const p = await api("/api/ecount/websales/pending");
-  if (!p || !p.pending) process.exit(0);
+  if (GH && p && p.error) { say("회사 앱이 받아 주지 않았습니다:", p.error); process.exit(1); }
+  if (!p || !p.pending) { if (GH) say(p && p.busy ? "다른 로봇이 이미 처리 중 — 끝" : "걸린 요청 없음 — 끝"); process.exit(0); }
   job = { mode: p.mode || "probe", from: p.from || "", to: p.to || "" };
   say("요청 받음", JSON.stringify(job));
-  try {
+  if (!GH) try {
     const self = fileURLToPath(import.meta.url);
     const r = await fetch(APP + "/ecount-relay/web.mjs", { cache: "no-store" });
     const latest = r.ok ? await r.text() : "";
@@ -70,8 +105,8 @@ const out = { mode: job.mode, from: job.from, to: job.to, ok: false, error: "", 
 async function finish() {
   out.steps = steps; out.shots = shots; out.net = net; out.dialogs = dialogs; out.took = Math.round((Date.now() - t0) / 1000);
   try { if (browser) await browser.close(); } catch {}
-  const r = RELAY ? await api("/api/ecount/websales/push", out) : { error: "인증키 없음" };
-  say(out.ok ? "끝" : `실패: ${out.error}`, "→ 회사 앱:", JSON.stringify(r).slice(0, 300));
+  const r = CAN_AUTH ? await api("/api/ecount/websales/push", out) : { error: "인증키 없음" };
+  say(out.ok ? "끝" : `실패: ${quiet(out.error)}`, "→ 회사 앱:", GH ? (r && r.saved ? "받음" : `못 받음 (${(r && r.error) || "응답 이상"})`) : JSON.stringify(r).slice(0, 300));
   process.exit(out.ok ? 0 : 1);
 }
 
@@ -139,10 +174,10 @@ async function fetchRange(from, to, dm) {
 }
 
 try {
-  if (!COM || !ID || !PW) { out.error = "맥 키체인에 이카운트 회사코드·아이디·비밀번호가 없습니다 — 판매 로봇 설치를 다시 실행하세요"; await finish(); }
+  if (!COM || !ID || !PW) { out.error = GH ? "GitHub 저장소 Secrets 에 이카운트 회사코드·아이디·비밀번호(ECOUNT_COM_CODE · ECOUNT_WEB_ID · ECOUNT_WEB_PW)가 없습니다" : "맥 키체인에 이카운트 회사코드·아이디·비밀번호가 없습니다 — 판매 로봇 설치를 다시 실행하세요"; await finish(); }
   if (!existsSync(CHROME)) { out.error = `Chrome 을 찾지 못했습니다: ${CHROME}`; await finish(); }
   const prof = join(DIR, "web-profile"); mkdirSync(prof, { recursive: true });
-  const ctx = await chromium.launchPersistentContext(prof, { executablePath: CHROME, headless: true, viewport: { width: 1440, height: 900 }, locale: "ko-KR", timezoneId: "Asia/Seoul", acceptDownloads: true, args: ["--disable-blink-features=AutomationControlled"] });
+  const ctx = await chromium.launchPersistentContext(prof, { executablePath: CHROME, headless: true, viewport: { width: 1440, height: 900 }, locale: "ko-KR", timezoneId: "Asia/Seoul", acceptDownloads: true, args: ["--disable-blink-features=AutomationControlled", ...(GH ? ["--no-sandbox"] : [])] });
   browser = ctx;
   page = ctx.pages()[0] || await ctx.newPage();
   ctx.on("page", (p) => { steps.push({ name: "새 창 열림", url: p.url() }); });

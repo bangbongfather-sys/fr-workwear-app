@@ -1,4 +1,9 @@
-// ── 이카운트 웹 판매조회 로봇 (사무실 맥) ──
+// ── 이카운트 웹 판매조회 로봇 (맥 · GitHub Actions) ──
+//
+// 맥이 꺼져 있어도 되게, 요청이 걸리면 GitHub Actions(.github/workflows/ecount-sales.yml)도 같이 깨운다.
+//  - 깨우기: env.GITHUB_ACTIONS_TOKEN (이 저장소의 Actions 쓰기 권한만 있는 토큰, Cloudflare Secret)
+//  - GitHub 쪽 로봇의 인증: GitHub 가 발급하는 실행 증명(OIDC) — 이 저장소 main 의 그 워크플로만 받아 준다
+//  - 맥과 GitHub 중 먼저 가져간 쪽이 처리하고, 다른 쪽은 「이미 처리 중」을 보고 그냥 끝낸다
 //
 // 이카운트 공개 API 에는 판매 「조회」가 없다. 그래서 사무실 맥이 이카운트 웹에 로그인해(헤드리스 Chrome)
 // 판매조회 화면을 읽어 회사 앱 「판매 현황」에 넣는다. 이 파일은 서버 쪽 — 요청 걸기·맥이 가져가기·결과 받기.
@@ -14,6 +19,7 @@ import { salesImport } from "./sales.js";
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 const REQ = "/frw_websales_req", LOG = "/frw_websales_log", SHOTS = "/frw_websales_shots", SEEN = "/frw_websales_seen";
+const GH_REPO = "bangbongfather-sys/fr-workwear-app", GH_WORKFLOW = "ecount-sales.yml", GH_ISS = "https://token.actions.githubusercontent.com", GH_AUD = "nj-websales";
 const CLAIM_TTL = 12 * 60e3;   // 맥이 가져간 뒤 12분 안에 결과가 없으면 다시 가져갈 수 있게
 const REQ_TTL = 6 * 3600e3;    // 6시간 넘게 아무도 안 가져간 요청은 버린다 (맥이 꺼져 있던 경우)
 
@@ -24,24 +30,65 @@ const kstAt = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 16)
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const clip = (s, n) => String(s == null ? "" : s).slice(0, n);
 
+// GitHub Actions 실행 증명(OIDC 토큰) 검사 — 서명(GitHub 공개 키) · 저장소 · main 가지 · 워크플로 파일 · 유효 시간
+let _jwks = null, _jwksAt = 0;
+const b64u = (t) => Uint8Array.from(atob(String(t).replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(String(t).length / 4) * 4, "=")), (c) => c.charCodeAt(0));
+export async function websalesGhAuth(env, token) {
+  try {
+    const [h, p, sg] = String(token || "").split("."); if (!h || !p || !sg) return false;
+    const head = JSON.parse(new TextDecoder().decode(b64u(h))), pl = JSON.parse(new TextDecoder().decode(b64u(p)));
+    const repo = (env && env.GITHUB_REPO) || GH_REPO, now = Date.now() / 1000;
+    if (head.alg !== "RS256" || pl.iss !== GH_ISS || pl.aud !== GH_AUD || pl.repository !== repo || pl.ref !== "refs/heads/main") return false;
+    if (!String(pl.job_workflow_ref || "").startsWith(`${repo}/.github/workflows/${GH_WORKFLOW}@refs/heads/main`)) return false;
+    if (!(Number(pl.exp) > now - 30) || (pl.nbf && Number(pl.nbf) > now + 60)) return false;
+    const load = async () => { const r = await fetch(`${GH_ISS}/.well-known/jwks`); if (!r.ok) return false; _jwks = (await r.json()).keys || []; _jwksAt = Date.now(); return true; };
+    if (!_jwks || Date.now() - _jwksAt > 3600e3) { if (!(await load())) return false; }
+    let jwk = _jwks.find((k) => k.kid === head.kid);
+    if (!jwk) { if (!(await load())) return false; jwk = _jwks.find((k) => k.kid === head.kid); }
+    if (!jwk || jwk.kty !== "RSA") return false;
+    const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64u(sg), new TextEncoder().encode(`${h}.${p}`));
+  } catch { return false; }
+}
+// GitHub Actions 로봇 깨우기 (workflow_dispatch). 토큰이 없으면 아무것도 안 한다(맥만 쓴다).
+async function ghWake(env) {
+  if (!env.GITHUB_ACTIONS_TOKEN) return null;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO || GH_REPO}/actions/workflows/${GH_WORKFLOW}/dispatches`, { method: "POST",
+      headers: { Authorization: `Bearer ${env.GITHUB_ACTIONS_TOKEN}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "nj-websales", "Content-Type": "application/json" },
+      body: JSON.stringify({ ref: "main", inputs: { mode: "check" } }) });
+    if (r.status === 204) return { ok: true, ts: Date.now() };
+    const why = r.status === 401 ? "토큰이 만료됐거나 틀렸어요" : r.status === 403 ? "토큰에 Actions 쓰기 권한이 없어요" : r.status === 404 ? "토큰이 이 저장소를 못 보거나 워크플로 파일이 없어요" : `GitHub 응답 ${r.status}`;
+    return { ok: false, ts: Date.now(), error: why };
+  } catch (e) { return { ok: false, ts: Date.now(), error: clip(e && e.message, 120) }; }
+}
+
 // 요청 걸기 — mode "probe" | "import", from·to (import 일 때 필수)
 export async function websalesRequest(env, { mode = "probe", from = "", to = "", by = "app" } = {}) {
   if (!["probe", "import"].includes(mode)) return { ok: false, error: "mode 는 probe 또는 import 입니다" };
   if (mode === "import" && (!DAY.test(from) || !DAY.test(to) || from > to)) return { ok: false, error: "가져올 기간(from·to, YYYY-MM-DD)이 필요합니다" };
   const cur = await fbGet(env, REQ).catch(() => null);
-  if (cur && cur.atMs && Date.now() - cur.atMs < REQ_TTL) return { ok: true, already: true, message: "이미 걸린 요청이 있어요 — 맥이 처리 중이거나 곧 가져갑니다", req: { mode: cur.mode, from: cur.from, to: cur.to, at: cur.at, atMs: cur.atMs } };
+  if (cur && cur.atMs && Date.now() - cur.atMs < REQ_TTL) {
+    // 아직 아무도 안 가져갔고, GitHub 를 못 깨웠거나 깨운 지 10분이 넘었으면 한 번 더 깨운다
+    const taken = cur.claim && Date.now() - Number(cur.claim.ts) < CLAIM_TTL;
+    if (!taken && (!cur.gh || !cur.gh.ok || Date.now() - Number(cur.gh.ts) > 10 * 60e3)) { const gh = await ghWake(env); if (gh) await fbPut(env, REQ, { ...cur, gh }).catch(() => {}); }
+    return { ok: true, already: true, message: "이미 걸린 요청이 있어요 — 맥이 처리 중이거나 곧 가져갑니다", req: { mode: cur.mode, from: cur.from, to: cur.to, at: cur.at, atMs: cur.atMs } };
+  }
   const req = { mode, from: DAY.test(from) ? from : "", to: DAY.test(to) ? to : "", at: kstAt(), atMs: Date.now(), by: clip(by, 30) };
   await fbPut(env, REQ, req);
+  const gh = await ghWake(env);
+  if (gh) { req.gh = gh; await fbPut(env, REQ, req).catch(() => {}); }
   const seen = Number(await fbGet(env, SEEN).catch(() => 0)) || 0;
   const alive = seen && Date.now() - seen < 5 * 60e3;
-  return { ok: true, queued: true, req, mac: alive ? "켜져 있음 — 1분 안에 시작" : (seen ? `마지막 확인 ${Math.round((Date.now() - seen) / 60e3)}분 전 — 맥이 꺼져 있거나 설치 전일 수 있어요` : "아직 맥이 한 번도 확인하지 않았어요 — 설치가 필요합니다") };
+  if (gh && gh.ok) return { ok: true, queued: true, req, robot: "GitHub 로봇을 깨웠어요 — 1분쯤 뒤 시작" };
+  return { ok: true, queued: true, req, gh: gh ? gh.error : undefined, mac: alive ? "켜져 있음 — 1분 안에 시작" : (seen ? `마지막 확인 ${Math.round((Date.now() - seen) / 60e3)}분 전 — 맥이 꺼져 있거나 설치 전일 수 있어요` : "아직 맥이 한 번도 확인하지 않았어요 — 설치가 필요합니다") };
 }
 export async function websalesCancel(env) { await fbPut(env, REQ, null); return { ok: true, cancelled: true }; }
 
 // 맥이 1분마다 묻는다 — 걸린 요청이 있으면 가져간다(claim)
 export async function websalesPending(env, dev = "") {
   if (dev === "setup") return { pending: false, setup: true };   // 설치 때 인증키만 확인 — 요청을 가져가지 않는다
-  try { await fbPut(env, SEEN, Date.now()); } catch {}
+  if (dev !== "github") { try { await fbPut(env, SEEN, Date.now()); } catch {} }   // 「맥이 켜져 있나」는 맥이 물을 때만 갱신
   const req = await fbGet(env, REQ).catch(() => null);
   if (!req || !req.atMs) return { pending: false };
   if (Date.now() - req.atMs > REQ_TTL) { await fbPut(env, REQ, null).catch(() => {}); return { pending: false, expired: true }; }
@@ -90,7 +137,9 @@ export async function websalesBrief(env) {
   const r = log && log.result;
   return { ok: true, now: Date.now(),
     mac: { seen: s, alive: !!s && Date.now() - s < 5 * 60e3, installed: !!s },
-    req: live ? { mode: live.mode, from: live.from, to: live.to, at: live.at, atMs: live.atMs, claimed: !!(live.claim && Date.now() - Number(live.claim.ts) < CLAIM_TTL) } : null,
+    gh: { on: !!env.GITHUB_ACTIONS_TOKEN },
+    req: live ? { mode: live.mode, from: live.from, to: live.to, at: live.at, atMs: live.atMs, claimed: !!(live.claim && Date.now() - Number(live.claim.ts) < CLAIM_TTL), by: (live.claim && live.claim.dev) || "",
+      gh: live.gh ? { ok: !!live.gh.ok, error: live.gh.error || "" } : null } : null,
     last: log ? { at: log.at, atMs: Number(log.atMs) || 0, reqAtMs: Number(log.reqAtMs) || 0, mode: log.mode, from: log.from, to: log.to, ok: !!log.ok, error: clip(log.error || (r && r.ok === false && r.error) || "", 300),
       rows: Number(log.rows) || 0, count: r && r.count != null ? r.count : null, total: r && r.total != null ? r.total : null } : null };
 }

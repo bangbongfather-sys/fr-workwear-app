@@ -27,7 +27,7 @@ import { salesImport, salesSummary, salesCadence, reorderMarks } from "./worker-
 import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
-import { websalesPending, websalesPush, websalesRequest, websalesCancel, websalesBrief } from "./worker-src/websales.js";
+import { websalesPending, websalesPush, websalesRequest, websalesCancel, websalesBrief, websalesGhAuth } from "./worker-src/websales.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { newsFeed } from "./worker-src/news.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -226,10 +226,11 @@ export default {
       try { return new Response(JSON.stringify(await ecountRelayPush(env, b, request.headers.get("X-Relay-Dev") || "")), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: `서버 처리 실패: ${e?.message ?? e}` }), { status: 500, headers: corsHeaders }); }
     }
-    // 이카운트 웹 판매조회 로봇(사무실 맥) — 요청 확인·결과 보내기. 재고 중계와 같은 X-Relay-Key 로 검증
+    // 이카운트 웹 판매조회 로봇 — 요청 확인·결과 보내기. 맥: 재고 중계와 같은 X-Relay-Key / GitHub Actions: 실행 증명(OIDC)
     if (url.pathname === "/api/ecount/websales/pending" || (url.pathname === "/api/ecount/websales/push" && request.method === "POST")) {
-      const key = request.headers.get("X-Relay-Key") || "";
-      if (!env.ECOUNT_API_KEY || key !== await ecountRelayKey(env)) return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다" }), { status: 403, headers: corsHeaders });
+      const key = request.headers.get("X-Relay-Key") || "", bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+      const okKey = !!key && !!env.ECOUNT_API_KEY && key === await ecountRelayKey(env);
+      if (!okKey && !(bearer && await websalesGhAuth(env, bearer))) return new Response(JSON.stringify({ error: "인증키가 맞지 않습니다" }), { status: 403, headers: corsHeaders });
       const dev = request.headers.get("X-Relay-Dev") || "";
       if (url.pathname.endsWith("/pending")) return new Response(JSON.stringify(await websalesPending(env, dev)), { headers: corsHeaders });
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
