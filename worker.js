@@ -27,7 +27,7 @@ import { salesImport, salesSummary, salesCadence, reorderMarks } from "./worker-
 import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
-import { websalesPending, websalesPush } from "./worker-src/websales.js";
+import { websalesPending, websalesPush, websalesRequest, websalesCancel, websalesBrief } from "./worker-src/websales.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { newsFeed } from "./worker-src/news.js";
 import { handleBankApi } from "./worker-src/bank.js";
@@ -247,6 +247,18 @@ export default {
       let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
       try { return new Response(JSON.stringify(await salesImport(env, b)), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    // 판매 로봇(맥이 이카운트 판매조회를 읽어 옴) — 앱 단추용 (로그인 필요). 핸드폰에서도 누를 수 있다.
+    //   GET: 짧은 상태 / POST {from,to}: 그 기간 가져오기 요청 / POST {cancel:true}: 걸린 요청 취소
+    if (url.pathname === "/api/sales/robot") {
+      try {
+        if (request.method === "POST") {
+          let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
+          const r = b && b.cancel ? await websalesCancel(env) : await websalesRequest(env, { mode: "import", from: String(b.from || ""), to: String(b.to || ""), by: "app" });
+          return new Response(JSON.stringify({ ...r, status: await websalesBrief(env) }), { headers: corsHeaders });
+        }
+        return new Response(JSON.stringify(await websalesBrief(env)), { headers: corsHeaders });
+      } catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
     }
     // 뉴스 탭 — 구글 뉴스 RSS 를 서버가 직접 받아 JSON 으로 (?feed=ko-economy | fr-safety | fr-industry | global-fr, &fresh=1 이면 캐시 무시)
     if (url.pathname === "/api/news") {
