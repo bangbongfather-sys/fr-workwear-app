@@ -262,7 +262,7 @@ export default {
         if (request.method === "POST") {
           let b = {}; try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); }
           const r = b && b.cancel ? await websalesCancel(env) : b && b.code != null ? await websalesAuthGive(env, b.code)
-            : await websalesRequest(env, { mode: "import", from: String(b.from || ""), to: String(b.to || ""), by: "app" });
+            : await websalesRequest(env, { mode: "import", from: String(b.from || ""), to: String(b.to || ""), by: "app", only: b.via === "sms" ? "github" : "" });
           return new Response(JSON.stringify({ ...r, status: await websalesBrief(env) }), { headers: corsHeaders });
         }
         return new Response(JSON.stringify(await websalesBrief(env)), { headers: corsHeaders });

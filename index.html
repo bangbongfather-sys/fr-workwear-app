@@ -17984,9 +17984,10 @@ function cmdkParseAsOf(q) {
 const SALES_ROBOT_WAIT = "frw_sales_robot_wait";   // 내가 건 요청 번호(atMs) — 판매 현황 화면이 「끝났나」를 볼 때 쓴다
 const robotMd = (d) => String(d || "").slice(5).replace("-", ".");
 const robotAgo = (ms) => { const m = Math.max(1, Math.round((Date.now() - ms) / 60e3)); return m < 60 ? `${m}분 전` : m < 1440 ? `${Math.round(m / 60)}시간 전` : `${Math.round(m / 1440)}일 전`; };
-async function salesRobotAsk(f, t2) {
+// via "sms" = 맥을 기다리지 않고 곧바로 GitHub 로봇으로 — 이카운트가 보내는 문자 인증번호를 앱에 넣어 주면 진행된다
+async function salesRobotAsk(f, t2, via = "") {
   try {
-    const j = await (await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: f, to: t2 }) })).json();
+    const j = await (await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: f, to: t2, via }) })).json();
     if (!j || j.ok === false) { showToast(`요청하지 못했어요 — ${(j && j.error) || "서버 응답이 이상해요"}`, "error"); return null; }
     const st = j.status || {}, req = st.req || j.req || {}, mac = st.mac || {}, ghOk = !!(st.gh && st.gh.on && req.gh && req.gh.ok);
     if (req.atMs) { try { localStorage.setItem(SALES_ROBOT_WAIT, String(req.atMs)); } catch {} }
@@ -18566,10 +18567,12 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     window.addEventListener("frw-sales-robot", step); document.addEventListener("visibilitychange", onVis);
     return () => { alive = false; clearTimeout(timer); window.removeEventListener("frw-sales-robot", step); document.removeEventListener("visibilitychange", onVis); };
   }, []);
-  const robotRefresh = () => {
+  const robotRefresh = async (via = "") => {
     if (robot && robot.mac && !robot.mac.installed && !(robot.gh && robot.gh.on)) return claudeRefresh();   // 로봇을 안 깐 경우엔 예전 방식(Claude 가 Chrome 으로)
     const d = Number(today.slice(8));
-    salesRobotAsk(d <= 7 ? `${ymShift(today.slice(0, 7), -1)}-01` : `${today.slice(0, 8)}01`, ymMonthEnd(today.slice(0, 7)));
+    // 맥을 기다리던 요청이 있으면 물리고, 문자 인증 로봇으로 다시 건다
+    if (via === "sms" && robot && robot.req && !robot.req.claimed) { try { await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cancel: true }) }); } catch {} }
+    salesRobotAsk(d <= 7 ? `${ymShift(today.slice(0, 7), -1)}-01` : `${today.slice(0, 8)}01`, ymMonthEnd(today.slice(0, 7)), via);
   };
   // 이카운트가 처음 보는 곳(GitHub 로봇)의 로그인에 문자 인증을 요구하면 — 대표님이 받은 인증번호를 로봇에 건넨다
   const robotSendCode = async () => {
@@ -19471,10 +19474,16 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         </>}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {data && data.lastImport && <span style={{ fontSize: 11.5, color: "var(--text3)", whiteSpace: "nowrap" }} title={data.lastImport.fileName}><span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 4, background: "#00B493", marginRight: 6, verticalAlign: "1px" }}/>마지막 업로드 {md(data.lastImport.at.slice(0, 10))} {data.lastImport.at.slice(11)} · {md(data.lastImport.from)}~{md(data.lastImport.to)}</span>}
-          <button type="button" onClick={robotRefresh} disabled={!!(robot && robot.req)} title="로봇이 이카운트 판매조회를 읽어 최신 내역을 반영해요 — 핸드폰에서도 누를 수 있어요"
+          <button type="button" onClick={() => robotRefresh()} disabled={!!(robot && robot.req)} title="로봇이 이카운트 판매조회를 읽어 최신 내역을 반영해요 — 핸드폰에서도 누를 수 있어요"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", borderRadius: 10, border: "none", background: "var(--text1)", color: "var(--surface)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
             <Icon name="sparkles" size={14}/>{robot && robot.req ? "가져오는 중…" : "최신 내역 반영하기"}
           </button>
+          {robot && robot.gh && robot.gh.on && !robot.req && (
+            <button type="button" onClick={() => robotRefresh("sms")} title="맥을 기다리지 않고 바로 진행해요 — 이카운트가 핸드폰으로 보내는 인증번호를 넣어 주면 반영돼요"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 36, padding: "0 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              <Icon name="phone" size={14}/>문자 인증으로 반영
+            </button>
+          )}
           {uploadBtn(true)}
         </div>
       </div>
@@ -19513,6 +19522,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
                 <button type="submit" className="btn-orange" disabled={robotCode.length < 4 || robotSending} style={{ height: 40, padding: "0 16px", borderRadius: 10, fontSize: 13.5, fontWeight: 800, whiteSpace: "nowrap" }}>{robotSending ? "보내는 중…" : "보내기"}</button>
               </form>
             )}
+            {!r.claimed && !ghOk && ghCan && <button type="button" onClick={() => robotRefresh("sms")} className="btn-orange" style={{ height: 32, padding: "0 12px", borderRadius: 9, fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" }}>문자 인증으로 바로 진행</button>}
             {(!r.claimed || need) && <button type="button" onClick={robotCancel} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>요청 취소</button>}
           </div>
         );

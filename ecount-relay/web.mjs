@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-18-gh4";
+const VERSION = "2026-11-18-sms1";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -224,7 +224,8 @@ try {
     let extra = false;
     for (let i = 0; i < 20; i++) { await sleep(1000); if (/추가\s*보안\s*인증/.test(await bodyText())) { extra = true; break; } if (i >= 2 && !(await findVisible(["input[type=password]"]))) break; }
     await snap("2 로그인 뒤", dialogs.length ? `확인창: ${dialogs.join(" / ")}` : "");
-    // 「추가 보안 인증」 — 아무것도 누르지 않고(인증 문자·메일을 함부로 보내지 않게) 안내문만 읽어 보고 멈춘다
+    // 「추가 보안 인증」(처음 보는 기기·위치) — 문자(SMS) 인증을 골라 놓고, 대표님이 회사 앱에 인증번호를 넣어 주면 이어서 진행한다.
+    // 인증번호는 대표님만 받는다 — 로봇은 넣어 준 번호를 그대로 한 번 입력할 뿐이고, 기록에 남기지 않는다.
     if (extra) {
       let base = (await bodyText()).length;
       for (let i = 0; i < 15; i++) { await sleep(1000); const n = (await bodyText()).length; if (n > base + 20 && i >= 3) break; }
@@ -243,8 +244,42 @@ try {
         });
         steps.push({ name: "2-3 추가 보안 인증 화면 구조", text: html });
       } catch (e) { steps.push({ name: "2-3 추가 보안 인증 화면 구조", note: `읽기 실패: ${e.message}` }); }
-      out.error = "이카운트가 「추가 보안 인증」을 요구합니다 (처음 보는 기기·위치에서의 로그인) — 로봇은 여기서 멈췄습니다";
-      await finish();
+      const wrap = () => page.locator(".wrapper-page-inform").last();
+      const struct = async (name) => { try { const html = await page.evaluate(() => { const e = [...document.querySelectorAll(".wrapper-page-inform")].pop(); if (!e) return ""; const c = e.cloneNode(true); c.querySelectorAll("script,style,svg,path").forEach((x) => x.remove()); return c.outerHTML.replace(/\s+/g, " ").replace(/ (style|value|data-[\w-]+|aria-[\w-]+)="[^"]*"/g, "").slice(0, 3900); }); steps.push({ name, text: html }); } catch (e) { steps.push({ name, note: `읽기 실패: ${e.message}` }); } };
+      const hint = ((await bodyText()).match(/01\d\*{2,}\d{2,4}/) || [""])[0];
+      const sms = page.locator(".auth-method", { has: page.locator(".auth-method-title", { hasText: /^\s*SMS\s*$/ }) }).first();
+      if (!(await sms.count())) { out.error = "추가 보안 인증 창에서 문자(SMS) 인증을 찾지 못했습니다"; await finish(); }
+      await sms.click();
+      await sleep(3500);
+      await snap("2-4 문자 인증 고른 뒤"); await struct("2-5 문자 인증 화면 구조");
+      const codeInput = async () => { const loc = wrap().locator("input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([type=password])"); const n = await loc.count(); for (let k = 0; k < n; k++) if (await loc.nth(k).isVisible()) return loc.nth(k); return null; };
+      let inp = await codeInput();
+      if (!inp) {   // 「인증번호 발송」 같은 단추를 한 번 눌러야 칸이 나오는 경우
+        const send = wrap().locator("button, a, [role=button]").filter({ hasText: /발송|전송|받기|보내기|인증번호\s*요청|다음/ }).filter({ hasNotText: /전화상담/ }).first();
+        if (await send.count()) { await send.click().catch(() => {}); await sleep(3500); await snap("2-6 인증번호 보내기 누른 뒤"); await struct("2-7 문자 인증 화면 구조 2"); inp = await codeInput(); }
+      }
+      if (!inp) { out.error = "문자 인증을 골랐지만 인증번호 넣는 칸을 찾지 못했습니다 (화면 구조 기록을 보고 맞춰야 함)"; await finish(); }
+      let passed = false, why = "";
+      for (let attempt = 0; attempt < 2 && !passed; attempt++) {
+        const need = await api("/api/ecount/websales/auth", { hint, error: attempt ? "인증번호가 맞지 않았어요 — 다시 넣어 주세요" : "" });
+        if (need && need.cancelled) { why = "요청이 취소됐습니다"; break; }
+        say("문자 인증번호를 기다리는 중");
+        let code = "";
+        for (let k = 0; k < 58 && !code && !why; k++) { await sleep(3000); const r = await api("/api/ecount/websales/auth"); if (r && r.code) code = String(r.code); else if (r && r.cancelled) why = "요청이 취소됐습니다"; }
+        if (why) break;
+        if (!code) { why = "3분 안에 인증번호가 들어오지 않았습니다"; break; }
+        inp = (await codeInput()) || inp;
+        await inp.click().catch(() => {}); await inp.fill("").catch(() => {}); await page.keyboard.type(code, { delay: 90 });
+        code = "";
+        await sleep(600);
+        const okBtn = wrap().locator("button, a, [role=button]").filter({ hasText: /확인|인증|로그인|완료|다음/ }).filter({ hasNotText: /전화상담|발송|전송|요청|다시|취소/ }).first();
+        if ((await okBtn.count()) && (await okBtn.isVisible().catch(() => false))) await okBtn.click().catch(() => {}); else await page.keyboard.press("Enter");
+        for (let k = 0; k < 20; k++) { await sleep(1000); if (!(await findVisible(["input[type=password]"]))) { passed = true; break; } }
+        await snap(`2-8 인증번호 넣은 뒤 (${attempt + 1}번째)`, "", !passed);
+        if (!passed) await struct("2-9 인증번호 넣은 뒤 화면 구조");
+      }
+      if (!passed) { out.error = `문자 인증을 마치지 못했습니다 — ${why || "인증번호를 넣었지만 로그인으로 넘어가지 않았습니다"}`; await finish(); }
+      say("문자 인증 통과");
     }
     if (await findVisible(["input[type=password]"])) await fail(`로그인이 안 됐습니다${dialogs.length ? ` — ${dialogs.join(" / ")}` : " — 화면 사진의 안내 문구를 확인해 주세요"}`);
   } else await snap("2 이미 로그인돼 있음", "", false);
