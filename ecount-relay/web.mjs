@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-18-gh1";
+const VERSION = "2026-11-18-gh2";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -221,6 +221,17 @@ try {
     await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
     await sleep(3000);
     await snap("2 로그인 뒤", dialogs.length ? `확인창: ${dialogs.join(" / ")}` : "");
+    // 이카운트가 새 기기·새 위치라며 「추가 보안 인증」을 띄우면 — 아무것도 누르지 않고(인증 문자·메일을 함부로 보내지 않게) 안내문만 읽어 보고 멈춘다
+    const bodyText = async () => { let t = ""; for (const f of page.frames()) { try { t += "\n" + (await f.evaluate(() => (document.body ? document.body.innerText : ""))); } catch {} } return t; };
+    if (/추가\s*보안\s*인증/.test(await bodyText())) {
+      await sleep(9000);
+      const parts = [];
+      for (const f of page.frames()) { try { const t = (await f.evaluate(() => (document.body ? document.body.innerText : ""))).replace(/\n{2,}/g, "\n").trim(); if (t) parts.push(`[${f.url().slice(0, 120)}]\n${t.slice(0, 1500)}`); } catch {} }
+      await snap("2-1 추가 보안 인증", "", true);
+      steps.push({ name: "2-2 추가 보안 인증 안내문", text: parts.join("\n\n").slice(0, 3900), frames: page.frames().map((f) => f.url()).filter((u) => u && u !== "about:blank") });
+      out.error = "이카운트가 「추가 보안 인증」을 요구합니다 (처음 보는 기기·위치에서의 로그인) — 로봇은 여기서 멈췄습니다";
+      await finish();
+    }
     if (await findVisible(["input[type=password]"])) await fail(`로그인이 안 됐습니다${dialogs.length ? ` — ${dialogs.join(" / ")}` : " — 화면 사진의 안내 문구를 확인해 주세요"}`);
   } else await snap("2 이미 로그인돼 있음", "", false);
 

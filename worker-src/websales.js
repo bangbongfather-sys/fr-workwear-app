@@ -64,7 +64,7 @@ async function ghWake(env) {
 }
 
 // 요청 걸기 — mode "probe" | "import", from·to (import 일 때 필수)
-export async function websalesRequest(env, { mode = "probe", from = "", to = "", by = "app" } = {}) {
+export async function websalesRequest(env, { mode = "probe", from = "", to = "", by = "app", only = "" } = {}) {
   if (!["probe", "import"].includes(mode)) return { ok: false, error: "mode 는 probe 또는 import 입니다" };
   if (mode === "import" && (!DAY.test(from) || !DAY.test(to) || from > to)) return { ok: false, error: "가져올 기간(from·to, YYYY-MM-DD)이 필요합니다" };
   const cur = await fbGet(env, REQ).catch(() => null);
@@ -75,6 +75,7 @@ export async function websalesRequest(env, { mode = "probe", from = "", to = "",
     return { ok: true, already: true, message: "이미 걸린 요청이 있어요 — 맥이 처리 중이거나 곧 가져갑니다", req: { mode: cur.mode, from: cur.from, to: cur.to, at: cur.at, atMs: cur.atMs } };
   }
   const req = { mode, from: DAY.test(from) ? from : "", to: DAY.test(to) ? to : "", at: kstAt(), atMs: Date.now(), by: clip(by, 30) };
+  if (only === "github" || only === "mac") req.only = only;   // 점검용 — 한쪽 로봇만 가져가게
   await fbPut(env, REQ, req);
   const gh = await ghWake(env);
   if (gh) { req.gh = gh; await fbPut(env, REQ, req).catch(() => {}); }
@@ -93,6 +94,7 @@ export async function websalesPending(env, dev = "") {
   if (!req || !req.atMs) return { pending: false };
   if (Date.now() - req.atMs > REQ_TTL) { await fbPut(env, REQ, null).catch(() => {}); return { pending: false, expired: true }; }
   if (req.claim && Date.now() - Number(req.claim.ts) < CLAIM_TTL) return { pending: false, busy: true };
+  if (req.only && (req.only === "github") !== (dev === "github")) return { pending: false };
   await fbPut(env, REQ, { ...req, claim: { dev: clip(dev, 20), ts: Date.now() } });
   return { pending: true, mode: req.mode, from: req.from, to: req.to, at: req.at };
 }
