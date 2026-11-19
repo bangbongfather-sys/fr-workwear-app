@@ -191,6 +191,10 @@ export async function websalesBrief(env) {
   if (live && !live.claim && !live.gh && live.only !== "mac" && Date.now() - live.atMs > GH_FALLBACK && ghOn(env)) {
     const gh = await ghWake(env); if (gh) { live = { ...live, gh }; await fbPut(env, REQ, live).catch(() => {}); }
   }
+  // GitHub 로봇을 깨웠는데 2분이 지나도 안 가져가면(준비 단계에서 멈춘 경우) 한 번 더 깨운다
+  if (live && !live.claim && live.gh && live.gh.ok && !live.gh.again && Date.now() - Number(live.gh.ts) > 120e3 && ghOn(env)) {
+    const gh = await ghWake(env); if (gh) { live = { ...live, gh: { ...gh, again: true } }; await fbPut(env, REQ, live).catch(() => {}); }
+  }
   const au = live && live.auth;
   const r = log && log.result;
   return { ok: true, now: Date.now(),

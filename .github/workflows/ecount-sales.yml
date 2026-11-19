@@ -15,9 +15,8 @@ on:
 permissions:
   contents: read
   id-token: write
-concurrency:
-  group: ecount-sales
-  cancel-in-progress: false
+# 동시에 두 번 깨워져도 괜찮다 — 회사 앱이 요청을 한 로봇에게만 내준다(다른 쪽은 「이미 처리 중」을 보고 끝).
+# 줄 세우기(concurrency)를 걸면, 앞의 실행이 준비 단계에서 멈췄을 때 다시 깨운 실행까지 같이 묶여 버린다.
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -30,12 +29,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: 준비 (브라우저 조종 도구 · 한글 글꼴)
+      - name: 준비 (브라우저 조종 도구)
+        timeout-minutes: 3
         run: |
           cd ecount-relay
           npm init -y >/dev/null
-          npm install --no-audit --no-fund --silent playwright-core@1.49.1
-          sudo apt-get install -y -qq fonts-nanum >/dev/null 2>&1 || true
+          timeout 60 npm install --no-audit --no-fund --silent playwright-core@1.49.1 || timeout 90 npm install --no-audit --no-fund --silent playwright-core@1.49.1
+      # 한글 글꼴은 화면 사진을 읽기 좋게 할 뿐이다(로봇은 글꼴 없이도 동작). 설치가 멈추는 일이 있어 20초만 기다리고 넘어간다.
+      - name: 한글 글꼴 (안 돼도 계속)
+        continue-on-error: true
+        timeout-minutes: 1
+        run: timeout 20 sudo apt-get install -y -qq fonts-nanum >/dev/null 2>&1 || true
       - name: 로봇 실행
         env:
           MODE: ${{ inputs.mode }}
