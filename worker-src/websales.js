@@ -71,7 +71,7 @@ async function ghWake(env) {
 
 // 요청 걸기 — mode "probe" | "import", from·to (import 일 때 필수)
 export async function websalesRequest(env, { mode = "probe", from = "", to = "", by = "app", only = "" } = {}) {
-  if (!["probe", "import"].includes(mode)) return { ok: false, error: "mode 는 probe 또는 import 입니다" };
+  if (!["probe", "import", "authcheck"].includes(mode)) return { ok: false, error: "mode 는 probe · import · authcheck(로그인 단계 점검, 문자 안 보냄) 입니다" };
   if (mode === "import" && (!DAY.test(from) || !DAY.test(to) || from > to)) return { ok: false, error: "가져올 기간(from·to, YYYY-MM-DD)이 필요합니다" };
   const cur = await fbGet(env, REQ).catch(() => null);
   if (cur && cur.atMs && Date.now() - cur.atMs < REQ_TTL) {

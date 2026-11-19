@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-19-fast1";
+const VERSION = "2026-11-19-fast2";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -92,7 +92,7 @@ if (cmd === "check") {
       process.exit(rr.status == null ? 1 : rr.status);
     }
   } catch (e) { say("최신본 확인 실패(있던 것으로 계속):", e.message); }
-} else job = { mode: cmd === "import" ? "import" : "probe", from: a1, to: a2 };
+} else job = { mode: cmd === "import" ? "import" : cmd === "authcheck" ? "authcheck" : "probe", from: a1, to: a2 };
 
 const COM = kc("nj-ecount-com"), ID = kc("nj-ecount-web-id"), PW = kc("nj-ecount-web-pw");
 const t0 = Date.now();
@@ -208,8 +208,10 @@ try {
   // ── 1. 로그인 ──
   // 정해 둔 시간만큼 쉬지 않고, 다음 화면에 필요한 것이 보이는 즉시 넘어간다 (예전엔 쉬는 시간만 1분 가까이 됐다)
   const until = async (fn, ms, step = 300) => { const t = Date.now(); for (;;) { let v = null; try { v = await fn(); } catch {} if (v) return v; if (Date.now() - t > ms) return null; await sleep(step); } };
+  // 로그인이 끝났는지 — 주소가 로그인 화면(…/Login/, …/login/erp_login, …/erp_login_processor)을 벗어났는가
+  const loggedIn = () => { try { const u = new URL(page.url()); return /^https?:$/.test(u.protocol) && !/login/i.test(u.pathname); } catch { return false; } };
   await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await until(() => findVisible(["input[type=password]"]), 15000);
+  await until(async () => loggedIn() || (await findVisible(["input[type=password]"])), 15000);
   await snap("1 로그인 화면");
   const pw = await findVisible(["input[type=password]"]);
   if (pw) {
@@ -221,14 +223,18 @@ try {
     if (btn) await btn.click(); else await pw.press("Enter");
     // 로그인 결과를 기다린다 — 비밀번호 칸이 사라지면 성공, 「추가 보안 인증」 창이 뜨면 새 기기·새 위치 확인 (늦게 뜨기도 해서 20초까지 본다)
     const bodyText = async () => { let t = ""; for (const f of page.frames()) { try { t += "\n" + (await f.evaluate(() => (document.body ? document.body.innerText : ""))); } catch {} } return t; };
-    let extra = false;
-    for (let i = 0; i < 50; i++) { await sleep(400); if (/추가\s*보안\s*인증/.test(await bodyText())) { extra = true; break; } if (i >= 3 && !(await findVisible(["input[type=password]"]))) break; }
+    // ※ 「비밀번호 칸이 안 보인다」를 성공으로 보면 안 된다 — 로그인을 누르면 이카운트가 다른 주소의 로그인 화면으로 한 번 옮겨 가는데,
+    //   그 사이 잠깐 칸이 없다(2026-11-19 이걸 성공으로 잘못 보고 세 번 실패). 주소가 로그인 화면을 벗어났는지로 판단한다.
+    let extra = false, inside = 0;
+    for (let i = 0; i < 90 && inside < 2; i++) { await sleep(400); if (/추가\s*보안\s*인증/.test(await bodyText())) { extra = true; break; } inside = loggedIn() ? inside + 1 : 0; }
     await snap("2 로그인 뒤", dialogs.length ? `확인창: ${dialogs.join(" / ")}` : "");
     // 「추가 보안 인증」(처음 보는 기기·위치) — 문자(SMS) 인증을 골라 놓고, 대표님이 회사 앱에 인증번호를 넣어 주면 이어서 진행한다.
     // 인증번호는 대표님만 받는다 — 로봇은 넣어 준 번호를 그대로 한 번 입력할 뿐이고, 기록에 남기지 않는다.
     if (extra) {
       await until(async () => (await page.locator(".auth-method").count()) > 0, 15000);
       await snap("2-1 추가 보안 인증", "", true);
+      // 점검(authcheck) — 인증 창까지 오는지만 보고 멈춘다. 문자를 보내지 않는다.
+      if (job.mode === "authcheck") { out.ok = true; out.error = ""; steps.push({ name: "점검 끝", note: "추가 보안 인증 창까지 정상 도달 — 문자는 보내지 않고 멈춤" }); await finish(); }
       // 인증 화면 구조 기록 — 인증번호 칸(또는 「인증」 글자)을 감싼 상자를 찾아 적어 둔다 (넣은 값은 빼고)
       const struct = async (name) => { try { const html = await page.evaluate(() => {
         const ins = [...document.querySelectorAll("input")].filter((e) => e.id !== "com_code" && e.id !== "id" && !["checkbox", "radio", "hidden", "password"].includes(e.type) && e.getBoundingClientRect().width > 0);
@@ -268,14 +274,14 @@ try {
         const okBtn = (await findVisible(["button:has-text('인증번호확인')", "a:has-text('인증번호확인')", "[role=button]:has-text('인증번호확인')", "button:has-text('인증번호 확인')", "a:has-text('인증번호 확인')"]))
           || (await findVisible(["button:has-text('인증 완료')", "button:has-text('확인')"]));
         if (okBtn) await okBtn.click().catch(() => {}); else await page.keyboard.press("Enter");
-        for (let k = 0; k < 40; k++) { await sleep(400); if (!(await findVisible(["input[type=password]"]))) { passed = true; break; } }
+        for (let k = 0, ok2 = 0; k < 50; k++) { await sleep(400); ok2 = loggedIn() ? ok2 + 1 : 0; if (ok2 >= 2) { passed = true; break; } }
         await snap(`2-8 인증번호 넣은 뒤 (${attempt + 1}번째)`, "", !passed);
         if (!passed) await struct("2-9 인증번호 넣은 뒤 화면 구조");
       }
       if (!passed) { out.error = `문자 인증을 마치지 못했습니다 — ${why || "인증번호를 넣었지만 로그인으로 넘어가지 않았습니다"}`; await finish(); }
       say("문자 인증 통과");
     }
-    if (await findVisible(["input[type=password]"])) await fail(`로그인이 안 됐습니다${dialogs.length ? ` — ${dialogs.join(" / ")}` : " — 화면 사진의 안내 문구를 확인해 주세요"}`);
+    if (!loggedIn()) await fail(`로그인이 안 됐습니다${dialogs.length ? ` — ${dialogs.join(" / ")}` : " — 화면 사진의 안내 문구를 확인해 주세요"}`);
   } else await snap("2 이미 로그인돼 있음", "", false);
 
   // ── 2. 판매조회 찾아가기 (정찰) — 첫 화면 「이카운트 시작하기」의 「판매조회」 글자를 누른다 ──
