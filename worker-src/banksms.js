@@ -8,6 +8,7 @@
 //    토큰은 앱(로그인 필요)에서 발급·폐기하고, 새로 발급하면 이전 주소는 즉시 막힌다.
 //  - 출금 문자는 지금은 기록만 하고 입금함에는 넣지 않는다.
 import { BANK_INBOX_PATH } from "./bank.js";
+import { websalesAuthFromSms } from "./websales.js";
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 export const SMS_CFG_PATH = "/frw_bank_sms";
@@ -159,6 +160,9 @@ export async function handleBankSmsPublic(request, env, url) {
     else text = await request.text();
   } catch { return json({ error: "본문을 읽지 못했습니다" }, 400); }
   text = text.slice(0, 4000);   // 여러 통이 붙어 와도 다 읽게
+  // 이카운트 추가 보안 인증 문자(판매 로봇이 로그인할 때) — 판매 로봇에 건네고 끝. 은행 문자 기록에는 남기지 않는다.
+  const auth = await websalesAuthFromSms(env, text);
+  if (auth) return json(auth);
   const now = kstNow();
   const segs = splitBankSms(text, now.slice(0, 10)).slice(0, 10);
   const results = [];

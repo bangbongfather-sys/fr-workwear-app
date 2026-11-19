@@ -145,6 +145,9 @@ const AUTH_TTL = 5 * 60e3;
 export async function websalesAuthNeed(env, b = {}) {          // 로봇 → 서버: 인증번호가 필요하다 (틀렸을 때 다시 부르면 error 와 함께)
   const req = await fbGet(env, REQ).catch(() => null);
   if (!req || !req.atMs) return { ok: false, cancelled: true };
+  // 문자 자동 전달(아이폰 단축어)이 로봇보다 먼저 도착해 번호가 이미 와 있으면 그대로 둔다 (틀려서 다시 묻는 경우는 새로 받는다)
+  const a = req.auth;
+  if (!b.error && a && a.state === "given" && a.code && Date.now() - Number(a.at) < AUTH_TTL) return { ok: true, ready: true };
   await fbPut(env, REQ, { ...req, claim: req.claim ? { ...req.claim, ts: Date.now() } : req.claim, auth: { state: "need", hint: clip(b.hint, 30), at: Date.now(), error: clip(b.error, 120) } });
   return { ok: true };
 }
@@ -156,14 +159,27 @@ export async function websalesAuthTake(env) {                  // 로봇 → 서
   await fbPut(env, REQ, { ...req, auth: { state: "taken", hint: a.hint || "", at: a.at } });
   return { code: String(a.code) };
 }
-export async function websalesAuthGive(env, code) {            // 앱 → 서버: 대표님이 넣은 인증번호
+export async function websalesAuthGive(env, code, { early = false } = {}) {   // 앱 → 서버: 대표님이 넣은 인증번호 (early = 문자 자동 전달)
   const c = String(code || "").replace(/\D/g, "");
   if (c.length < 4 || c.length > 8) return { ok: false, error: "인증번호는 숫자 4~8자리예요" };
   const req = await fbGet(env, REQ).catch(() => null);
-  if (!req || !req.atMs || !req.auth || req.auth.state !== "need") return { ok: false, error: "지금은 인증번호를 기다리고 있지 않아요" };
-  if (Date.now() - Number(req.auth.at) > AUTH_TTL) return { ok: false, error: "시간이 지났어요 — 요청을 취소하고 다시 눌러 주세요" };
-  await fbPut(env, REQ, { ...req, auth: { ...req.auth, state: "given", code: c, error: "" } });
+  const need = !!(req && req.atMs && req.auth && req.auth.state === "need");
+  // 문자는 로봇이 「인증번호 필요」를 알리기 몇 초 전에 먼저 도착할 수 있다 — 로봇이 일을 가져간 뒤(진행 중)라면 미리 받아 둔다
+  const running = !!(req && req.atMs && req.claim && Date.now() - Number(req.claim.ts) < CLAIM_TTL);
+  if (!need && !(early && running)) return { ok: false, error: "지금은 인증번호를 기다리고 있지 않아요" };
+  if (need && Date.now() - Number(req.auth.at) > AUTH_TTL) return { ok: false, error: "시간이 지났어요 — 요청을 취소하고 다시 눌러 주세요" };
+  await fbPut(env, REQ, { ...req, auth: { ...(req.auth || {}), state: "given", code: c, error: "", at: need ? req.auth.at : Date.now() } });
   return { ok: true };
+}
+// 아이폰 단축어가 넘긴 문자가 「인증번호 문자」면(인증 + 6자리 숫자 하나, 은행 거래 문자 아님) 판매 로봇에 건넨다.
+// 로봇이 기다리는 중이 아니면 그냥 버린다. 어느 쪽이든 번호는 기록하지 않는다. 인증번호 문자가 아니면 null (은행 문자로 계속 처리).
+export async function websalesAuthFromSms(env, text) {
+  const t = String(text || "");
+  if (!/인증/.test(t) || /입금|출금|잔액|이체/.test(t)) return null;
+  const codes = t.match(/(?<!\d)\d{6}(?!\d)/g) || [];
+  if (codes.length !== 1) return null;
+  const r = await websalesAuthGive(env, codes[0], { early: true }).catch((e) => ({ ok: false, error: e.message }));
+  return { ok: !!r.ok, kind: "ecount-auth", note: r.ok ? "판매 로봇에 인증번호를 건넸습니다" : (r.error || "건네지 못했습니다") };
 }
 
 // 앱(판매 현황 화면)용 짧은 상태 — 맥이 켜져 있나 · 걸린 요청 · 마지막 실행 결과 (기록·사진 빼고)
