@@ -35,11 +35,10 @@ jobs:
           cd ecount-relay
           npm init -y >/dev/null
           timeout 60 npm install --no-audit --no-fund --silent playwright-core@1.49.1 || timeout 90 npm install --no-audit --no-fund --silent playwright-core@1.49.1
-      # 한글 글꼴은 화면 사진을 읽기 좋게 할 뿐이다(로봇은 글꼴 없이도 동작). 설치가 멈추는 일이 있어 20초만 기다리고 넘어간다.
-      - name: 한글 글꼴 (안 돼도 계속)
+      # 한글 글꼴은 화면 사진을 읽기 좋게 할 뿐이다(로봇은 글꼴 없이도 동작) — 기다리지 않고 뒤에서 깔리게 둔다.
+      - name: 한글 글꼴 (뒤에서, 안 돼도 계속)
         continue-on-error: true
-        timeout-minutes: 1
-        run: timeout 20 sudo apt-get install -y -qq fonts-nanum >/dev/null 2>&1 || true
+        run: nohup sudo timeout 25 apt-get install -y -qq fonts-nanum >/dev/null 2>&1 &
       - name: 로봇 실행
         env:
           MODE: ${{ inputs.mode }}

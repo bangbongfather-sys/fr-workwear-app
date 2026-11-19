@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-19-sms4";
+const VERSION = "2026-11-19-fast1";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -206,8 +206,10 @@ try {
   });
 
   // ── 1. 로그인 ──
+  // 정해 둔 시간만큼 쉬지 않고, 다음 화면에 필요한 것이 보이는 즉시 넘어간다 (예전엔 쉬는 시간만 1분 가까이 됐다)
+  const until = async (fn, ms, step = 300) => { const t = Date.now(); for (;;) { let v = null; try { v = await fn(); } catch {} if (v) return v; if (Date.now() - t > ms) return null; await sleep(step); } };
   await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
+  await until(() => findVisible(["input[type=password]"]), 15000);
   await snap("1 로그인 화면");
   const pw = await findVisible(["input[type=password]"]);
   if (pw) {
@@ -217,33 +219,16 @@ try {
     await com.fill(COM); await id.fill(ID); await pw.fill(PW);
     const btn = await findVisible(["#save", "button:has-text('로그인')", "input[type=submit]", "a:has-text('로그인')", "[role=button]:has-text('로그인')"]);
     if (btn) await btn.click(); else await pw.press("Enter");
-    await page.waitForLoadState("domcontentloaded", { timeout: 30000 }).catch(() => {});
-    await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
     // 로그인 결과를 기다린다 — 비밀번호 칸이 사라지면 성공, 「추가 보안 인증」 창이 뜨면 새 기기·새 위치 확인 (늦게 뜨기도 해서 20초까지 본다)
     const bodyText = async () => { let t = ""; for (const f of page.frames()) { try { t += "\n" + (await f.evaluate(() => (document.body ? document.body.innerText : ""))); } catch {} } return t; };
     let extra = false;
-    for (let i = 0; i < 20; i++) { await sleep(1000); if (/추가\s*보안\s*인증/.test(await bodyText())) { extra = true; break; } if (i >= 2 && !(await findVisible(["input[type=password]"]))) break; }
+    for (let i = 0; i < 50; i++) { await sleep(400); if (/추가\s*보안\s*인증/.test(await bodyText())) { extra = true; break; } if (i >= 3 && !(await findVisible(["input[type=password]"]))) break; }
     await snap("2 로그인 뒤", dialogs.length ? `확인창: ${dialogs.join(" / ")}` : "");
     // 「추가 보안 인증」(처음 보는 기기·위치) — 문자(SMS) 인증을 골라 놓고, 대표님이 회사 앱에 인증번호를 넣어 주면 이어서 진행한다.
     // 인증번호는 대표님만 받는다 — 로봇은 넣어 준 번호를 그대로 한 번 입력할 뿐이고, 기록에 남기지 않는다.
     if (extra) {
-      let base = (await bodyText()).length;
-      for (let i = 0; i < 15; i++) { await sleep(1000); const n = (await bodyText()).length; if (n > base + 20 && i >= 3) break; }
-      const parts = [];
-      for (const f of page.frames()) { try { const t = (await f.evaluate(() => (document.body ? document.body.innerText : ""))).replace(/\n{2,}/g, "\n").trim(); if (t) parts.push(`[${f.url().slice(0, 120)}]\n${t.slice(0, 1800)}`); } catch {} }
+      await until(async () => (await page.locator(".auth-method").count()) > 0, 15000);
       await snap("2-1 추가 보안 인증", "", true);
-      steps.push({ name: "2-2 추가 보안 인증 안내문", text: parts.join("\n\n").slice(0, 3900), frames: page.frames().map((f) => f.url()).filter((u) => u && u !== "about:blank") });
-      // 인증 창이 어떤 요소로 이루어졌는지(무엇을 눌러야 하는지) 기록 — 다음 단계(문자 인증 고르기)를 맞추려고
-      try {
-        const html = await page.evaluate(() => {
-          let best = null;
-          for (const e of document.querySelectorAll("body *")) { const t = e.innerText || ""; if (t.includes("SMS") && t.includes("추가 인증이 필요")) { if (!best || best.contains(e)) best = e; } }
-          if (!best) return "";
-          const c = best.cloneNode(true); c.querySelectorAll("script,style,svg,path").forEach((x) => x.remove());
-          return c.outerHTML.replace(/\s+/g, " ").replace(/ (style|data-[\w-]+|aria-[\w-]+)="[^"]*"/g, "").slice(0, 3900);
-        });
-        steps.push({ name: "2-3 추가 보안 인증 화면 구조", text: html });
-      } catch (e) { steps.push({ name: "2-3 추가 보안 인증 화면 구조", note: `읽기 실패: ${e.message}` }); }
       // 인증 화면 구조 기록 — 인증번호 칸(또는 「인증」 글자)을 감싼 상자를 찾아 적어 둔다 (넣은 값은 빼고)
       const struct = async (name) => { try { const html = await page.evaluate(() => {
         const ins = [...document.querySelectorAll("input")].filter((e) => e.id !== "com_code" && e.id !== "id" && !["checkbox", "radio", "hidden", "password"].includes(e.type) && e.getBoundingClientRect().width > 0);
@@ -256,34 +241,34 @@ try {
       const hint = ((await bodyText()).match(/01\d\*{2,}\d{2,4}/) || [""])[0];
       const sms = page.locator(".auth-method", { has: page.locator(".auth-method-title", { hasText: /^\s*SMS\s*$/ }) }).first();
       if (!(await sms.count())) { out.error = "추가 보안 인증 창에서 문자(SMS) 인증을 찾지 못했습니다"; await finish(); }
-      await sms.click();
-      await sleep(3500);
-      await snap("2-4 문자 인증 고른 뒤"); await struct("2-5 문자 인증 화면 구조");
       // 인증번호 칸 — 이카운트는 숫자 한 칸씩 6칸(이름 없는 글자 칸)을 띄운다. 로그인 칸(회사코드·아이디)은 뺀다.
       const codeInputs = async () => { const loc = page.locator("input"); const list = []; const n = await loc.count();
         for (let k = 0; k < n; k++) { const el = loc.nth(k); try { const a = await el.evaluate((e) => ({ id: e.id, type: e.type })); if (a.id === "com_code" || a.id === "id" || ["checkbox", "radio", "hidden", "password"].includes(a.type)) continue; if (await el.isVisible()) list.push(el); } catch {} }
         return list; };
-      if (!(await codeInputs()).length) { out.error = "문자 인증을 골랐지만 인증번호 넣는 칸을 찾지 못했습니다 (화면 구조 기록을 보고 맞춰야 함)"; await finish(); }
+      await sms.click();
+      await until(async () => (await codeInputs()).length > 0, 12000);
+      await snap("2-4 문자 인증 고른 뒤");
+      if (!(await codeInputs()).length) { await struct("2-5 문자 인증 화면 구조"); out.error = "문자 인증을 골랐지만 인증번호 넣는 칸을 찾지 못했습니다 (화면 구조 기록을 보고 맞춰야 함)"; await finish(); }
       let passed = false, why = "";
       for (let attempt = 0; attempt < 2 && !passed; attempt++) {
         const need = await api("/api/ecount/websales/auth", { hint, error: attempt ? "인증번호가 맞지 않았어요 — 다시 넣어 주세요" : "" });
         if (need && need.cancelled) { why = "요청이 취소됐습니다"; break; }
         say("문자 인증번호를 기다리는 중");
         let code = "";
-        for (let k = 0; k < 88 && !code && !why; k++) { await sleep(3000); const r = await api("/api/ecount/websales/auth"); if (r && r.code) code = String(r.code); else if (r && r.cancelled) why = "요청이 취소됐습니다"; }   // 이카운트 유효시간 5분 — 4분 30초까지 기다린다
+        for (let k = 0; k < 176 && !code && !why; k++) { await sleep(1500); const r = await api("/api/ecount/websales/auth"); if (r && r.code) code = String(r.code); else if (r && r.cancelled) why = "요청이 취소됐습니다"; }   // 이카운트 유효시간 5분 — 4분 30초까지 기다린다
         if (why) break;
         if (!code) { why = "시간 안에 인증번호가 들어오지 않았습니다"; break; }
         const ins = await codeInputs();
         if (!ins.length) { why = "인증번호 칸이 사라졌습니다"; break; }
         if (ins.length >= code.length && ins.length > 1) {          // 한 칸에 한 숫자
-          for (let k = 0; k < code.length; k++) { await ins[k].click().catch(() => {}); await ins[k].fill("").catch(() => {}); await page.keyboard.type(code[k], { delay: 60 }); await sleep(120); }
+          for (let k = 0; k < code.length; k++) { await ins[k].click().catch(() => {}); await ins[k].fill("").catch(() => {}); await page.keyboard.type(code[k], { delay: 40 }); await sleep(60); }
         } else { await ins[0].click().catch(() => {}); await ins[0].fill("").catch(() => {}); await page.keyboard.type(code, { delay: 90 }); }
         code = "";
-        await sleep(700);
+        await sleep(300);
         const okBtn = (await findVisible(["button:has-text('인증번호확인')", "a:has-text('인증번호확인')", "[role=button]:has-text('인증번호확인')", "button:has-text('인증번호 확인')", "a:has-text('인증번호 확인')"]))
           || (await findVisible(["button:has-text('인증 완료')", "button:has-text('확인')"]));
         if (okBtn) await okBtn.click().catch(() => {}); else await page.keyboard.press("Enter");
-        for (let k = 0; k < 25; k++) { await sleep(1000); if (!(await findVisible(["input[type=password]"]))) { passed = true; break; } }
+        for (let k = 0; k < 40; k++) { await sleep(400); if (!(await findVisible(["input[type=password]"]))) { passed = true; break; } }
         await snap(`2-8 인증번호 넣은 뒤 (${attempt + 1}번째)`, "", !passed);
         if (!passed) await struct("2-9 인증번호 넣은 뒤 화면 구조");
       }
@@ -298,9 +283,9 @@ try {
   phase = 3;
   // 로그인 직후에는 첫 화면이 아직 그려지는 중일 수 있다(특히 문자 인증을 막 통과했을 때) — 「판매조회」 글자가 보일 때까지 40초까지 기다린다
   let link = null;
-  for (let t = 0; t < 40 && !link; t++) {
+  for (let t = 0; t < 100 && !link; t++) {
     for (const f of page.frames()) { try { const l = f.getByText("판매조회", { exact: true }); const n = await l.count(); for (let i = 0; i < n && !link; i++) if (await l.nth(i).isVisible()) link = l.nth(i); } catch {} if (link) break; }
-    if (!link) await sleep(1000);
+    if (!link) await sleep(400);
   }
   await snap("3 첫 화면", link ? "" : "「판매조회」 글자가 안 보임");
   if (!link) {   // 안 보이면 메뉴 검색 → 뜨는 목록에서 고르기
@@ -312,21 +297,26 @@ try {
   await link.scrollIntoViewIfNeeded().catch(() => {});
   phase = 4;
   await link.click();
-  await sleep(7000); await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {});
+  // 판매조회 화면은 열리면서 기본 기간 목록을 스스로 한 번 불러온다 — 그 요청이 잡히는 즉시 다음으로 (예전엔 7초씩 두 번 쉬고 검색도 한 번 더 눌렀다)
+  await until(() => listReq, 25000, 250);
+  await sleep(400);
   await snap("4 판매조회 화면");
-  // 조회(검색) 단추 — 기본 기간 그대로 한 번 눌러 목록이 어떤 자료로 오는지 본다 (읽기만)
   phase = 5;
-  const search2 = await findVisible(["button:has-text('검색(F8)')", "button:has-text('검색')", "a:has-text('검색(F8)')", "button:has-text('조회')", "#search", "[data-cid='search']"]);
-  if (search2) { await search2.click().catch(() => {}); await sleep(7000); await page.waitForLoadState("networkidle", { timeout: 20000 }).catch(() => {}); await snap("5 판매조회 검색 뒤"); }
-  else { await page.keyboard.press("F8").catch(() => {}); await sleep(7000); await snap("5 판매조회 F8 뒤", "검색 단추를 못 찾아 F8 을 눌러 봄"); }
+  if (!listReq) {   // 스스로 안 불러오면 조회(검색) 단추를 눌러 본다 (읽기만)
+    const search2 = await findVisible(["button:has-text('검색(F8)')", "button:has-text('검색')", "a:has-text('검색(F8)')", "button:has-text('조회')", "#search", "[data-cid='search']"]);
+    if (search2) await search2.click().catch(() => {}); else await page.keyboard.press("F8").catch(() => {});
+    await until(() => listReq, 20000, 250);
+    await snap("5 판매조회 검색 뒤", search2 ? "" : "검색 단추를 못 찾아 F8 을 눌러 봄");
+  }
   await closeAlert();
 
   // ── 3. 기간을 바꿔 판매 목록 받기 ──
   phase = 6;
   if (!listReq) await fail("판매조회 목록 요청을 붙잡지 못했습니다");
   const tmplText = (steps.find((s) => /판매조회 화면/.test(s.name)) || {}).text || "";
-  const dm = tmplText.match(/(\d{4})\/(\d{2})\/(\d{2})\s*~\s*(\d{4})\/(\d{2})\/(\d{2})/);
-  steps.push({ name: "6 목록 요청 내용", url: listReq.url, text: `기본 기간: ${dm ? dm[0] : "못 찾음"}\n머리글: ${JSON.stringify(listReq.headers).slice(0, 600)}\n본문:\n${listReq.body.slice(0, 3200)}` });
+  const dm = listReq.body.match(/"BASE_DATE_FROM"\s*:\s*"(\d{4})(\d{2})(\d{2})"[\s\S]*?"BASE_DATE_TO"\s*:\s*"(\d{4})(\d{2})(\d{2})"/)   // 요청 본문의 기본 기간 (화면 글자를 기다리지 않아도 됨)
+    || tmplText.match(/(\d{4})\/(\d{2})\/(\d{2})\s*~\s*(\d{4})\/(\d{2})\/(\d{2})/);
+  steps.push({ name: "6 목록 요청 내용", url: listReq.url, text: `기본 기간: ${dm ? `${dm[1]}/${dm[2]}/${dm[3]} ~ ${dm[4]}/${dm[5]}/${dm[6]}` : "못 찾음"}\n머리글: ${JSON.stringify(listReq.headers).slice(0, 600)}\n본문:\n${listReq.body.slice(0, 3200)}` });
   const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
   const want = { from: /^\d{4}-\d{2}-\d{2}$/.test(job.from) ? job.from : new Date(Date.now() + 9 * 3600e3 - 6 * 864e5).toISOString().slice(0, 10), to: /^\d{4}-\d{2}-\d{2}$/.test(job.to) ? job.to : today };
   const res = await fetchRange(want.from, want.to, dm);
