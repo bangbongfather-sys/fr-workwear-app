@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-19-sms3";
+const VERSION = "2026-11-19-sms4";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -335,7 +335,7 @@ try {
   if (job.mode === "import") {
     if (res.total != null && res.rows.length < res.total) await fail(`이카운트는 ${res.total}건이라는데 ${res.rows.length}건만 받았습니다 — 반영하지 않았습니다`);
     if (res.outside) await fail(`요청 기간 밖 날짜가 ${res.outside}줄 섞여 왔습니다 — 기간 바꾸기가 안 먹은 것 같아 반영하지 않았습니다`);
-    out.rows = res.rows; out.from = want.from; out.to = want.to; out.fileName = `맥 로봇 판매조회 ${today}`;
+    out.rows = res.rows; out.from = want.from; out.to = want.to; out.fileName = `${GH ? "문자 인증 로봇" : "맥 로봇"} 판매조회 ${today}`;
   }
   out.ok = true;
   await finish();
