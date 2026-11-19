@@ -18533,6 +18533,15 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
       .then(j => { if (!dead) setMoves(j && !j.error ? j : null); }).catch(() => {});
     return () => { dead = true; };
   }, [from, to, pFrom, pTo, tick]);
+  // 「오늘 매출 · 어제 대비」 카드 — 보고 있는 기간과 상관없이 최근 3주의 날짜별 매출을 따로 읽는다 (어제가 쉬는 날이면 그 앞 판매일과 비교)
+  const [recentDays, setRecentDays] = useState(null);   // { days:[{date,total,count}], last:{at,…} }
+  useEffect(() => {
+    let dead = false;
+    const f = new Date(Date.parse(today) - 21 * 86400e3).toISOString().slice(0, 10);
+    fetch(`/api/sales?from=${f}&to=${today}`, { cache: "no-store" }).then(r => r.json())
+      .then(j => { if (!dead && j && !j.error) setRecentDays({ days: j.days || [], last: j.lastImport || null }); }).catch(() => {});
+    return () => { dead = true; };
+  }, [today, tick]);
   const rangeFirst = useRef(true);   // 처음(새로고침 직후)엔 기억해 둔 선택을 지우지 않는다 — 기간을 바꿀 때만
   useEffect(() => { if (rangeFirst.current) { rangeFirst.current = false; return; } setSelDay(null); setAllClients(false); setAllProducts(false); setSlipLimit(60); }, [from, to]);
   const pickSub = (id) => { setSubTab(id); try { localStorage.setItem(subKey, id); } catch {} };
@@ -18955,6 +18964,32 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11.5, fontWeight: 800, background: diffPct >= 0 ? "var(--positive-bg)" : "var(--negative-bg)", color: diffPct >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{diffPct >= 0 ? "▲" : "▼"} {Math.abs(diffPct).toFixed(0)}%</span>
   );
 
+  // 오늘 매출과 어제(직전 판매일) 대비 변화
+  const todayCard = (() => {
+    if (!recentDays) return null;
+    const days = recentDays.days || [];
+    const tDay = days.find(d => d.date === today) || { date: today, total: 0, count: 0 };
+    const pDay = [...days].reverse().find(d => d.date < today && d.total);
+    if (!pDay && !tDay.total) return null;
+    const dl = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}(${SALES_DOW[ymdDow(d)]})`;
+    const yst = new Date(Date.parse(today) - 86400e3).toISOString().slice(0, 10);
+    const diff = pDay ? tDay.total - pDay.total : null, pct = pDay && pDay.total ? diff / pDay.total * 100 : null;
+    const last = recentDays.last, fresh = !!(last && last.at && last.at.slice(0, 10) === today);
+    const mw = (n) => { const x = manWon(n); return /원$/.test(x) ? x : `${x}원`; };   // 1만 원 미만은 manWon 이 이미 「원」을 붙인다
+    const tv = tDay.total ? manWon(tDay.total) : "0";
+    return kpiCard(`오늘 매출 · ${dl(today)}`, tv, /원$/.test(tv) ? "" : "원", <>
+      {won(tDay.total)} · {fmt(tDay.count || 0)}건
+      {pDay && (
+        <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(127,127,127,0.25)" }}>
+          <span>{pDay.date === yst ? "어제" : "직전 판매일"} {dl(pDay.date)}</span>
+          <b style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{mw(pDay.total)}</b>
+          <b style={{ color: diff >= 0 ? "var(--positive-text, #03B26C)" : "var(--negative-text, #F04452)" }}>{diff >= 0 ? "▲" : "▼"} {pct != null ? `${Math.abs(pct).toFixed(0)}% · ` : ""}{diff >= 0 ? "+" : "−"}{mw(Math.abs(diff))}</b>
+        </span>
+      )}
+      <span style={{ display: "block", marginTop: 4, opacity: 0.85 }}>{fresh ? `오늘 ${last.at.slice(11)} 반영 기준 · 오늘 매출은 진행 중` : "오늘 내역은 아직 반영 전일 수 있어요"}</span>
+    </>);
+  })();
+
   // ── 서브탭 화면 ──
   const summaryView = data && (
     <>
@@ -18970,6 +19005,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
           </span>
           {prevHas && <span style={{ display: "block", marginTop: 8 }}>{cmpBtn(false)}</span>}
         </>, true)}
+        {todayCard}
         {kpiCard("하루 평균", daysWithSales ? manWon(t.total / daysWithSales) : "—", daysWithSales ? "원" : "", daysWithSales ? `판매 있는 날 ${daysWithSales}일${prevHas && prevDays ? ` · ${prevLabel} ${manWon(prevFullTotal / prevDays)}원` : ""}` : "")}
         {kpiCard(t.slips > 0 && !hasItems ? "전표" : "건수", fmt(t.count), "건", t.count ? `전표당 평균 ${manWon(t.total / t.count)}원${prevHas ? ` · ${prevLabel}${cmpCut ? " 같은 날까지" : ""} ${fmt(prevCount)}건` : ""}` : "")}
         {kpiCard("거래처", fmt(data.clientCount), "곳", clientsAll[0] ? `1위 ${clientsAll[0].name} ${Math.round(clientsAll[0].total / Math.max(1, t.total) * 100)}%${prevHas ? ` · ${prevLabel} ${fmt(prev.clientCount || prevClients)}곳` : ""}` : "")}
