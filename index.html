@@ -19252,6 +19252,17 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         <div className="card" style={{ flex: "999 1 560px", minWidth: 0 }}>
           <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>
             <span className="section-header-title"><Icon name="clients" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>거래처별 매출 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 4 }}>{data.clientCount}곳</span></span>
+            {/* 비교할 해 — 위쪽 「비교」와 같은 설정이라 요약·달력도 함께 바뀐다 */}
+            <div role="group" aria-label="비교할 해" style={{ display: "inline-flex", alignItems: "center", gap: 2, padding: 3, borderRadius: 10, background: "var(--surface2)", marginLeft: "auto", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text3)", padding: "0 6px 0 4px" }}>비교</span>
+              {["1", "2", "3", "prev"].map(k => {
+                const y0 = Number(from.slice(0, 4)), on = cmp === k;
+                const label = k === "prev" ? "직전 기간" : `${y0 - Number(k)}년`;
+                return <button key={k} type="button" onClick={() => pickCmp(k)} aria-pressed={on}
+                  title={k === "prev" ? "바로 앞 같은 길이 기간과 비교" : `${y0 - Number(k)}년 같은 기간과 비교`}
+                  style={{ height: 26, padding: "0 10px", borderRadius: 8, border: "none", background: on ? "var(--surface)" : "transparent", boxShadow: on ? "0 1px 3px rgba(0,0,0,0.15)" : "none", color: on ? "var(--text1)" : "var(--text3)", fontSize: 12, fontWeight: on ? 800 : 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{label}</button>;
+              })}
+            </div>
             <label style={{ display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 10px", borderRadius: 9, background: "var(--surface2)", color: "var(--text3)" }}>
               <Icon name="search" size={13}/>
               <input type="text" value={clientQ} onChange={e => { setClientQ(e.target.value); setAllClients(true); }} placeholder="거래처 검색" aria-label="거래처 검색" style={{ border: "none", background: "transparent", outline: "none", fontSize: 12.5, color: "var(--text1)", width: 130, fontFamily: "inherit" }}/>
@@ -19261,8 +19272,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
             <>
               <div style={{ overflowX: "auto" }}>
                 <div style={{ minWidth: 540 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 64px 64px", gap: 8, alignItems: "center", padding: "4px 8px 6px", fontSize: 11, fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)" }}>
-                    <div>#</div><div>거래처</div><div style={{ textAlign: "right" }}>전표</div><div style={{ textAlign: "right" }}>매출</div><div style={{ textAlign: "right" }}>비중</div><div style={{ textAlign: "right" }}>{prevLabel}</div><div style={{ textAlign: "right" }}>마지막</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 76px 64px", gap: 8, alignItems: "center", padding: "4px 8px 6px", fontSize: 11, fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)" }}>
+                    <div>#</div><div>거래처</div><div style={{ textAlign: "right" }}>전표</div><div style={{ textAlign: "right" }}>매출</div><div style={{ textAlign: "right" }}>비중</div><div style={{ textAlign: "right", whiteSpace: "nowrap" }} title={`${prevLabel}${cmpCut ? " 같은 날까지" : ""} 대비`}>{cmpYears ? `${pFrom.slice(2, 4)}년 대비` : "직전 대비"}</div><div style={{ textAlign: "right" }}>마지막</div>
                   </div>
                   {(allClients ? clientsShown : clientsShown.slice(0, 15)).map((c) => {
                     const rank = clientsAll.indexOf(c) + 1; const on = c.name === curClient;
@@ -19270,13 +19281,13 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
                     const pd = pc && pc.total ? (c.total - pc.total) / Math.abs(pc.total) * 100 : null;
                     return (
                       <button key={c.name} type="button" onClick={() => setSelClient(c.name)}
-                        style={{ width: "100%", display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 64px 64px", gap: 8, alignItems: "center", padding: "9px 8px", border: "none", borderBottom: "1px solid var(--border)", borderRadius: on ? 8 : 0, background: on ? "rgba(49,130,246,0.08)" : "transparent", boxShadow: on ? "inset 3px 0 0 #3182F6" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", fontSize: 13, color: "var(--text1)" }}>
+                        style={{ width: "100%", display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 76px 64px", gap: 8, alignItems: "center", padding: "9px 8px", border: "none", borderBottom: "1px solid var(--border)", borderRadius: on ? 8 : 0, background: on ? "rgba(49,130,246,0.08)" : "transparent", boxShadow: on ? "inset 3px 0 0 #3182F6" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", fontSize: 13, color: "var(--text1)" }}>
                         <div style={{ fontWeight: 800, color: rank <= 3 ? "#DB6B2E" : "var(--text3)", fontSize: 12 }}>{rank}</div>
                         <div style={{ fontWeight: on ? 800 : 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
                         <div style={{ textAlign: "right", color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{c.count}</div>
                         <div style={{ textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: c.total < 0 ? "var(--negative-text)" : "var(--text1)" }}>{fmt(c.total)}</div>
                         <div style={{ textAlign: "right", color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{(c.total / Math.max(1, t.total) * 100).toFixed(1)}%</div>
-                        <div style={{ textAlign: "right", fontSize: 11.5, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: pd == null ? "var(--text3)" : pd >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{pd == null ? (prevHas ? "신규" : "—") : `${pd >= 0 ? "+" : ""}${pd.toFixed(0)}%`}</div>
+                        <div title={pc ? `${prevLabel}${cmpCut ? " 같은 날까지" : ""} ${fmt(pc.total)}원` : `${prevLabel}에는 거래 없음`} style={{ textAlign: "right", fontSize: 11.5, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: pd == null ? "var(--text3)" : pd >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{pd == null ? (prevHas ? "신규" : "—") : `${pd >= 0 ? "+" : ""}${pd.toFixed(0)}%`}</div>
                         <div style={{ textAlign: "right", color: "var(--text3)", fontSize: 12 }}>{md(c.last)}</div>
                       </button>
                     );
