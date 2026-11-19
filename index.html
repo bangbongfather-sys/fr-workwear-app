@@ -19271,9 +19271,9 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
           {clientsAll.length === 0 ? <div style={{ fontSize: 12.5, color: "var(--text3)" }}>이 기간 거래처가 없어요.</div> : (
             <>
               <div style={{ overflowX: "auto" }}>
-                <div style={{ minWidth: 540 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 76px 64px", gap: 8, alignItems: "center", padding: "4px 8px 6px", fontSize: 11, fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)" }}>
-                    <div>#</div><div>거래처</div><div style={{ textAlign: "right" }}>전표</div><div style={{ textAlign: "right" }}>매출</div><div style={{ textAlign: "right" }}>비중</div><div style={{ textAlign: "right", whiteSpace: "nowrap" }} title={`${prevLabel}${cmpCut ? " 같은 날까지" : ""} 대비`}>{cmpYears ? `${pFrom.slice(2, 4)}년 대비` : "직전 대비"}</div><div style={{ textAlign: "right" }}>마지막</div>
+                <div style={{ minWidth: 580 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "24px minmax(90px, 1fr) 36px 96px 50px 92px 58px 42px", gap: 8, alignItems: "center", padding: "4px 8px 6px", fontSize: 11, fontWeight: 700, color: "var(--text3)", borderBottom: "1px solid var(--border)" }}>
+                    <div>#</div><div>거래처</div><div style={{ textAlign: "right" }}>전표</div><div style={{ textAlign: "right" }}>매출</div><div style={{ textAlign: "right" }}>비중</div><div style={{ textAlign: "right", whiteSpace: "nowrap" }} title={`${prevLabel}${cmpCut ? " 같은 날까지" : ""} 매출`}>{cmpYears ? `${pFrom.slice(2, 4)}년 매출` : "직전 매출"}</div><div style={{ textAlign: "right", whiteSpace: "nowrap" }} title={`${prevLabel}${cmpCut ? " 같은 날까지" : ""} 대비`}>{cmpYears ? `${pFrom.slice(2, 4)}년 대비` : "직전 대비"}</div><div style={{ textAlign: "right" }}>마지막</div>
                   </div>
                   {(allClients ? clientsShown : clientsShown.slice(0, 15)).map((c) => {
                     const rank = clientsAll.indexOf(c) + 1; const on = c.name === curClient;
@@ -19281,12 +19281,13 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
                     const pd = pc && pc.total ? (c.total - pc.total) / Math.abs(pc.total) * 100 : null;
                     return (
                       <button key={c.name} type="button" onClick={() => setSelClient(c.name)}
-                        style={{ width: "100%", display: "grid", gridTemplateColumns: "26px minmax(0, 1fr) 48px 112px 60px 76px 64px", gap: 8, alignItems: "center", padding: "9px 8px", border: "none", borderBottom: "1px solid var(--border)", borderRadius: on ? 8 : 0, background: on ? "rgba(49,130,246,0.08)" : "transparent", boxShadow: on ? "inset 3px 0 0 #3182F6" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", fontSize: 13, color: "var(--text1)" }}>
+                        style={{ width: "100%", display: "grid", gridTemplateColumns: "24px minmax(90px, 1fr) 36px 96px 50px 92px 58px 42px", gap: 8, alignItems: "center", padding: "9px 8px", border: "none", borderBottom: "1px solid var(--border)", borderRadius: on ? 8 : 0, background: on ? "rgba(49,130,246,0.08)" : "transparent", boxShadow: on ? "inset 3px 0 0 #3182F6" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left", fontSize: 13, color: "var(--text1)" }}>
                         <div style={{ fontWeight: 800, color: rank <= 3 ? "#DB6B2E" : "var(--text3)", fontSize: 12 }}>{rank}</div>
                         <div style={{ fontWeight: on ? 800 : 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</div>
                         <div style={{ textAlign: "right", color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{c.count}</div>
                         <div style={{ textAlign: "right", fontWeight: 800, fontVariantNumeric: "tabular-nums", color: c.total < 0 ? "var(--negative-text)" : "var(--text1)" }}>{fmt(c.total)}</div>
                         <div style={{ textAlign: "right", color: "var(--text2)", fontVariantNumeric: "tabular-nums" }}>{(c.total / Math.max(1, t.total) * 100).toFixed(1)}%</div>
+                        <div style={{ textAlign: "right", color: pc ? "var(--text2)" : "var(--text3)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{pc ? fmt(pc.total) : (prevHas ? "—" : "")}</div>
                         <div title={pc ? `${prevLabel}${cmpCut ? " 같은 날까지" : ""} ${fmt(pc.total)}원` : `${prevLabel}에는 거래 없음`} style={{ textAlign: "right", fontSize: 11.5, fontWeight: 700, fontVariantNumeric: "tabular-nums", color: pd == null ? "var(--text3)" : pd >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{pd == null ? (prevHas ? "신규" : "—") : `${pd >= 0 ? "+" : ""}${pd.toFixed(0)}%`}</div>
                         <div style={{ textAlign: "right", color: "var(--text3)", fontSize: 12 }}>{md(c.last)}</div>
                       </button>
