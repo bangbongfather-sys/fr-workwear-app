@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-19-sms2";
+const VERSION = "2026-11-19-sms3";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -107,7 +107,7 @@ async function finish() {
   try { if (browser) await browser.close(); } catch {}
   const r = CAN_AUTH ? await api("/api/ecount/websales/push", out) : { error: "인증키 없음" };
   say(out.ok ? "끝" : `실패: ${quiet(out.error)}`, "→ 회사 앱:", GH ? (r && r.saved ? "받음" : `못 받음 (${(r && r.error) || "응답 이상"})`) : JSON.stringify(r).slice(0, 300));
-  process.exit(out.ok ? 0 : 1);
+  process.exit(out.ok || (GH && r && r.saved) ? 0 : 1);   // GitHub 에서는 결과를 회사 앱에 넘겼으면 「실패」로 끝내지 않는다 — 실패할 때마다 GitHub 가 실패 메일을 보내서
 }
 
 // 화면 기록 — 글자·입력칸·단추 목록 (입력칸에 넣은 값은 기록하지 않는다)
@@ -296,8 +296,13 @@ try {
   // ── 2. 판매조회 찾아가기 (정찰) — 첫 화면 「이카운트 시작하기」의 「판매조회」 글자를 누른다 ──
   const closeAlert = async () => { const ok = await findVisible(["button:has-text('확인')", "a:has-text('확인')"]); if (ok) await ok.click().catch(() => {}); };
   phase = 3;
+  // 로그인 직후에는 첫 화면이 아직 그려지는 중일 수 있다(특히 문자 인증을 막 통과했을 때) — 「판매조회」 글자가 보일 때까지 40초까지 기다린다
   let link = null;
-  for (const f of page.frames()) { try { const l = f.getByText("판매조회", { exact: true }); const n = await l.count(); for (let i = 0; i < n && !link; i++) if (await l.nth(i).isVisible()) link = l.nth(i); } catch {} if (link) break; }
+  for (let t = 0; t < 40 && !link; t++) {
+    for (const f of page.frames()) { try { const l = f.getByText("판매조회", { exact: true }); const n = await l.count(); for (let i = 0; i < n && !link; i++) if (await l.nth(i).isVisible()) link = l.nth(i); } catch {} if (link) break; }
+    if (!link) await sleep(1000);
+  }
+  await snap("3 첫 화면", link ? "" : "「판매조회」 글자가 안 보임");
   if (!link) {   // 안 보이면 메뉴 검색 → 뜨는 목록에서 고르기
     const search = await findVisible(["#inputFavMSearch", "input[placeholder*='메뉴']"]);
     if (search) { await search.click().catch(() => {}); await search.type("판매조회", { delay: 120 }); await sleep(2500); await snap("3 메뉴 검색 목록");
