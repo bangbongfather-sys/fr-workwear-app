@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-19-fast2";
+const VERSION = "2026-11-20-entered1";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -137,7 +137,8 @@ async function findVisible(selectors) {
 }
 
 // 붙잡은 목록 요청을 기간만 바꿔 다시 보낸다 — 화면 안에서 보내므로 로그인 상태(쿠키)를 그대로 쓴다. 읽기만.
-async function fetchRange(from, to, dm) {
+// tweak: 기간을 바꾼 요청 본문을 한 번 더 고치는 함수 (작성일 조건 넣기 등) — 없으면 그대로
+async function fetchRange(from, to, dm, tweak = null) {
   if (!dm) return { error: "화면에서 기본 조회 기간을 찾지 못했습니다" };
   const [, y1, m1, d1, y2, m2, d2] = dm;
   const fmts = (y, m, d) => [`${y}${m}${d}`, `${y}-${m}-${d}`, `${y}/${m}/${d}`];
@@ -150,6 +151,7 @@ async function fetchRange(from, to, dm) {
   // 한 쪽에 많이 받기 — 쪽 크기처럼 보이는 값을 크게
   const sizeRe = /("(?:PAGE_?SIZE|PageSize|pageSize|ROW_?COUNT|RowCount|rowCount|PAGE_ROW_CNT|LIMIT_?CNT)"\s*:\s*)(\d+)/g;
   if (sizeRe.test(body)) { body = body.replace(sizeRe, (_, k) => `${k}1000`); how.push("쪽 크기 1000"); }
+  if (tweak) { try { body = tweak(body); } catch (e) { return { error: `요청 본문을 고치지 못했습니다: ${e.message}`, how: how.join(", ") }; } }
   const pageRe = /("(?:PAGE_?CURRENT|PAGE_?NO|PageNo|pageNo|PAGE_?INDEX|PageIndex|pageIndex|CURRENT_?PAGE|CurrentPage)"\s*:\s*)(\d+)/;
   const rows = []; let total = null, outside = 0, keys = "";
   for (let pg = 1; pg <= 40; pg++) {
@@ -166,7 +168,10 @@ async function fetchRange(from, to, dm) {
       const m = dn.match(/(\d{4})[\/.-](\d{2})[\/.-](\d{2})\s*-?\s*(\d*)/); if (!m) continue;
       const d = `${m[1]}-${m[2]}-${m[3]}`;
       if (d < from || d > to) { outside++; continue; }
-      rows.push({ d, no: m[4] || "", c: String(x["SELL.CUST_DES"] || x.CUST_DES || ""), name: String(x["SELL.PROD_DES"] || x.PROD_DES || "판매"), total: Number(x["SELL.TOT_AMT"] ?? x.TOT_AMT ?? 0) || 0, slip: true });
+      // w = 마지막 입력·수정 시각(이카운트 WDATE), v = 고친 횟수+1(VERSION_NO) — v 가 1 이면 w 가 곧 처음 입력한 시각
+      const wd = String(x.WDATE || "").replace("T", " ").slice(0, 16);
+      rows.push({ d, no: m[4] || "", c: String(x["SELL.CUST_DES"] || x.CUST_DES || ""), name: String(x["SELL.PROD_DES"] || x.PROD_DES || "판매"), total: Number(x["SELL.TOT_AMT"] ?? x.TOT_AMT ?? 0) || 0, slip: true,
+        ...(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(wd) ? { w: wd } : {}), ...(Number(x.VERSION_NO) > 0 ? { v: Number(x.VERSION_NO) } : {}) });
     }
     if (!list.length || !pageRe.test(body) || (total != null && rows.length + outside >= total)) break;
   }
@@ -332,6 +337,34 @@ try {
     if (res.total != null && res.rows.length < res.total) await fail(`이카운트는 ${res.total}건이라는데 ${res.rows.length}건만 받았습니다 — 반영하지 않았습니다`);
     if (res.outside) await fail(`요청 기간 밖 날짜가 ${res.outside}줄 섞여 왔습니다 — 기간 바꾸기가 안 먹은 것 같아 반영하지 않았습니다`);
     out.rows = res.rows; out.from = want.from; out.to = want.to; out.fileName = `${GH ? "문자 인증 로봇" : "맥 로봇"} 판매조회 ${today}`;
+    // ── 날짜별 「그날 이카운트에 처음 입력한 전표」 — 전표 날짜와 상관없이 (오늘 입력한 매출 카드용) ──
+    // 판매조회 요청에 있는 「최초 작성일」 조건(WRITE_DATE_*)을 넣어 하루씩 받아 본다. 이 조건이 정말 먹는지 오늘 것으로 먼저 확인한다:
+    //   고친 적 없는 전표(v=1)는 w 가 처음 입력 시각이므로, 오늘 입력한 v=1 전표는 다 들어 있어야 하고 다른 날 입력한 v=1 전표는 없어야 한다.
+    const ent = { ok: false, how: "", why: "", days: {} };
+    try {
+      const addD = (d, k) => new Date(Date.parse(d) + k * 864e5).toISOString().slice(0, 10);
+      const key = (r) => `${r.d}|${r.no}`;
+      const wide = [addD(today, -400), addD(today, 200)];
+      const v1Today = res.rows.filter((r) => r.v === 1 && r.w && r.w.slice(0, 10) === today).map(key);
+      const v1Other = new Set(res.rows.filter((r) => r.v === 1 && r.w && r.w.slice(0, 10) !== today).map(key));
+      const mk = (day, form) => (b) => { const o = JSON.parse(b); const D = o && o.Request && o.Request.Data; if (!D || !("WRITE_DATE_FROM" in D)) throw new Error("작성일 조건 칸이 없음");
+        const f = form === "dash" ? day : day.replace(/-/g, ""); D.WRITE_DATE_SELECT = "Y"; D.WRITE_DATE_DATECHK = 1; D.WRITE_DATE_FROM = f; D.WRITE_DATE_TO = f; return JSON.stringify(o); };
+      let form = "";
+      for (const fm of ["plain", "dash"]) {
+        const r = await fetchRange(wide[0], wide[1], dm, mk(today, fm));
+        if (r.error) { ent.why = r.error; continue; }
+        const got = new Set(r.rows.map(key));
+        const miss = v1Today.filter((k) => !got.has(k)).length, wrong = r.rows.filter((x) => v1Other.has(key(x))).length;
+        ent.how += `[${fm}] 받은 ${r.rows.length} · 오늘 새 전표 빠짐 ${miss} · 다른 날 전표 섞임 ${wrong}; `;
+        if (!miss && !wrong && v1Other.size > 0) { form = fm; ent.days[today] = r.rows; break; }   // 다른 날 전표가 하나도 없으면 확인할 수 없어 쓰지 않는다
+      }
+      if (form) {
+        for (let k = 1; k <= 6; k++) { const day = addD(today, -k); const r = await fetchRange(wide[0], wide[1], dm, mk(day, form)); if (!r.error) ent.days[day] = r.rows; }
+        ent.ok = true;
+      } else if (!ent.why) ent.why = "작성일 조건이 먹지 않음";
+    } catch (e) { ent.why = `작성일 조회 오류: ${e.message}`; }
+    out.entered = ent;
+    steps.push({ name: "8 날짜별 입력 전표", note: ent.ok ? "" : ent.why, text: `${ent.how}\n${Object.entries(ent.days).map(([d, r]) => `${d}: ${r.length}건`).join(" · ")}` });
   }
   out.ok = true;
   await finish();
