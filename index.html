@@ -19560,6 +19560,17 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         </div>
       </div>
 
+      {robot && !robot.req && robot.check && !robot.check.ok && Date.now() - robot.check.atMs < 20 * 3600e3 && robotFailSeen !== robot.check.atMs && (
+        <div className="card" role="alert" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: "rgba(255,176,60,0.10)", borderColor: "rgba(255,176,60,0.45)" }}>
+          <span style={{ width: 9, height: 9, borderRadius: 5, background: "#F5A623", flexShrink: 0 }}/>
+          <div style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13, lineHeight: 1.6, color: "var(--text1)" }}>
+            <b>아침 점검에서 이카운트 로그인 화면이 달라진 것 같아요</b><span style={{ color: "var(--text3)" }}> · {robot.check.at ? robot.check.at.slice(5, 16).replace("-", "/") : ""}</span>
+            <div style={{ fontSize: 12, color: "var(--text2)" }}>{robot.check.error || "원인을 알 수 없어요"}</div>
+            <div style={{ fontSize: 11.5, color: "var(--text3)" }}>「문자 인증으로 반영」이 실패할 수 있어요. Claude 에게 「판매 로봇 기록 봐줘」라고 하면 고쳐요.</div>
+          </div>
+          <button type="button" onClick={() => setRobotFailSeen(robot.check.atMs)} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>닫기</button>
+        </div>
+      )}
       {robot && !robot.req && robot.last && !robot.last.ok && robot.last.atMs && Date.now() - robot.last.atMs < 30 * 60e3 && robotFailSeen !== robot.last.atMs && (
         <div className="card" role="alert" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", background: "rgba(240,68,82,0.08)", borderColor: "rgba(240,68,82,0.4)" }}>
           <span style={{ width: 9, height: 9, borderRadius: 5, background: "#F04452", flexShrink: 0 }}/>

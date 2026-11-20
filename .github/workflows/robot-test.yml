@@ -1,0 +1,29 @@
+# 판매 로봇 자동 시험 — 로봇(ecount-relay)을 고쳐 main 에 올릴 때마다 가짜 이카운트로 13가지 상황을 돌린다.
+# (문자 인증·인증 수단이 늦게 붙음·첫 화면이 늦음·여러 쪽·실패해야 하는 경우 등) 하나라도 틀리면 빨간 X 로 알려 준다.
+# 진짜 이카운트에는 접속하지 않는다. 비밀 값도 쓰지 않는다.
+name: 판매 로봇 자동 시험
+on:
+  push:
+    branches: [main]
+    paths: ["ecount-relay/**", ".github/workflows/robot-test.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 준비
+        run: |
+          cd ecount-relay/test
+          npm init -y >/dev/null
+          timeout 90 npm install --no-audit --no-fund --silent playwright-core@1.49.1
+      - name: 시험
+        env:
+          NJ_CHROME: /usr/bin/google-chrome
+        run: node ecount-relay/test/run.mjs
