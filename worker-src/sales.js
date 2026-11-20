@@ -28,7 +28,9 @@ export async function salesImport(env, body) {
     const d = String(r && r.d || "");
     if (!DAY.test(d) || d < from || d > to) continue;
     const row = { d, c: str(r.c), code: str(r.code, 40), name: str(r.name, 120), spec: str(r.spec, 40), qty: n(r.qty), price: n(r.price), supply: n(r.supply), vat: n(r.vat), total: n(r.total), wh: str(r.wh, 30) };
-    if (r.slip) { row.slip = true; row.no = str(r.no, 10); }   // 「판매조회」 전표 목록 — 품목별 수량 없음 (품목명은 「○○ 외 n건」 요약)
+    if (r.slip) { row.slip = true; row.no = str(r.no, 10); }
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(r.w || "")) row.w = r.w;   // 이카운트에 마지막으로 입력·수정한 시각 (판매 로봇)
+    if (Number(r.v) > 0) row.v = Math.round(Number(r.v));                    // 고친 횟수+1 — 1 이면 w 가 처음 입력한 시각   // 「판매조회」 전표 목록 — 품목별 수량 없음 (품목명은 「○○ 외 n건」 요약)
     if (!row.name && !row.code) continue;
     (byDay[d] = byDay[d] || []).push(row);
   }
@@ -144,6 +146,37 @@ export async function salesCadence(env, from, to) {
 
 // 재주문 레이더 표시 — 「연락함」·「나중에」(그날까지 목록에서 숨김). 맥·집 PC·핸드폰이 같이 보게 서버에 둔다.
 //   /frw_reorder_marks/<거래처(fbEsc)> = { at:"YYYY-MM-DD HH:mm", kind:"contact"|"snooze", until?:"YYYY-MM-DD", note? }
+// ── 날짜별 「그날 이카운트에 입력한 전표」 (전표 날짜와 상관없이) ──
+//   /frw_sales_entered/<YYYY-MM-DD> = { at, src: "작성일" | "수정일", items: [ { d, no, c, total, w, v } ] }
+//   판매 로봇이 판매조회의 「최초 작성일」 조건으로 하루씩 받아 온 것(작성일). 그 조건이 안 먹으면 전표의 마지막 입력·수정 시각으로 대신(수정일).
+const ENTERED_PATH = "/frw_sales_entered";
+const entItem = (r) => ({ d: str(r.d, 10), no: str(r.no, 10), c: str(r.c), total: n(r.total), ...(r.w ? { w: str(r.w, 16) } : {}), ...(Number(r.v) > 0 ? { v: Math.round(Number(r.v)) } : {}) });
+export async function salesEnteredSave(env, { entered, rows } = {}) {
+  const S = env.FIREBASE_DB_SECRET, at = kstNow(), today = at.slice(0, 10), patch = {};
+  const near = (d) => DAY.test(d) && d <= today && d >= addDay(today, -10);
+  if (entered && entered.ok && entered.days) {
+    for (const [d, list] of Object.entries(entered.days)) if (near(d) && Array.isArray(list)) patch[d] = { at, src: "작성일", items: list.slice(0, 2000).map(entItem) };
+  } else if (Array.isArray(rows)) {
+    // 작성일 조건을 못 쓴 경우 — 전표의 마지막 입력·수정 시각으로 묶는다(고친 전표는 고친 날로 잡힌다). 이미 작성일로 받은 날은 건드리지 않는다.
+    let cur = {}; try { cur = (await (await fetch(url(ENTERED_PATH, S, `orderBy=${encodeURIComponent('"$key"')}&startAt=${encodeURIComponent(JSON.stringify(addDay(today, -10)))}`))).json()) || {}; } catch {}
+    const by = {}; for (const r of rows) { const d = String(r.w || "").slice(0, 10); if (near(d)) (by[d] = by[d] || []).push(entItem(r)); }
+    for (let d = addDay(today, -6); d <= today; d = addDay(d, 1)) if (!(cur[d] && cur[d].src === "작성일")) patch[d] = { at, src: "수정일", items: by[d] || [] };
+  }
+  if (!Object.keys(patch).length) return { ok: false };
+  const r = await fetch(url(ENTERED_PATH, S), { method: "PATCH", body: JSON.stringify(patch) });
+  return { ok: r.ok, days: Object.keys(patch).sort() };
+}
+// 그날 입력한 전표 + 그 앞의 마지막 입력일 (앱 「오늘 입력한 매출」 카드)
+export async function salesEntered(env, day) {
+  const S = env.FIREBASE_DB_SECRET;
+  const q = `orderBy=${encodeURIComponent('"$key"')}&startAt=${encodeURIComponent(JSON.stringify(addDay(day, -30)))}&endAt=${encodeURIComponent(JSON.stringify(day))}`;
+  const all = (await (await fetch(url(ENTERED_PATH, S, q))).json()) || {};
+  const sum = (d) => { const x = all[d]; if (!x) return null; const items = (x.items || []).slice().sort((a, b) => String(b.w || "").localeCompare(String(a.w || "")));
+    return { date: d, at: x.at, src: x.src, count: items.length, total: items.reduce((t, i) => t + (Number(i.total) || 0), 0), items }; };
+  const prevDay = Object.keys(all).filter((d) => d < day && all[d] && (all[d].items || []).length).sort().pop();
+  return { day, today: sum(day), prev: prevDay ? sum(prevDay) : null };
+}
+
 const MARKS_PATH = "/frw_reorder_marks";
 const markKey = (name) => encodeURIComponent(String(name).replace(/[.#$\[\]\/]/g, (c) => "~" + c.charCodeAt(0).toString(16).toUpperCase()));
 const markUnkey = (k) => String(k).replace(/~([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));

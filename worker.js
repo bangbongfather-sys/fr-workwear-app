@@ -23,7 +23,7 @@ import { runDeadlineCheck } from "./worker-src/tenders/deadline-check.js";
 import { runChangeHistoryPoll } from "./worker-src/tenders/change-history.js";
 import { sendWebPush } from "./worker-src/webpush.js";
 import { buildIcs } from "./worker-src/ics.js";
-import { salesImport, salesSummary, salesCadence, reorderMarks } from "./worker-src/sales.js";
+import { salesImport, salesSummary, salesCadence, reorderMarks, salesEntered } from "./worker-src/sales.js";
 import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
@@ -288,6 +288,13 @@ export default {
       if (request.method === "POST") { try { b = await request.json(); } catch { return new Response(JSON.stringify({ ok: false, error: "본문을 읽지 못했습니다" }), { status: 400, headers: corsHeaders }); } }
       try { return new Response(JSON.stringify(await reorderMarks(env, b)), { headers: corsHeaders }); }
       catch (e) { return new Response(JSON.stringify({ ok: false, error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
+    }
+    // 그날 이카운트에 입력한 전표(전표 날짜와 상관없이) + 그 앞의 마지막 입력일 — ?day=YYYY-MM-DD (로그인 필요)
+    if (url.pathname === "/api/sales/entered") {
+      const day = url.searchParams.get("day") || "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return new Response(JSON.stringify({ error: "day 날짜가 필요합니다" }), { status: 400, headers: corsHeaders });
+      try { return new Response(JSON.stringify(await salesEntered(env, day)), { headers: corsHeaders }); }
+      catch (e) { return new Response(JSON.stringify({ error: e?.message ?? String(e) }), { status: 500, headers: corsHeaders }); }
     }
     if (url.pathname === "/api/sales") {
       const ok = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");

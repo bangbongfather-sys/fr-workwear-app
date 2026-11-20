@@ -18533,13 +18533,13 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
       .then(j => { if (!dead) setMoves(j && !j.error ? j : null); }).catch(() => {});
     return () => { dead = true; };
   }, [from, to, pFrom, pTo, tick]);
-  // 「오늘 매출 · 어제 대비」 카드 — 보고 있는 기간과 상관없이 최근 3주의 날짜별 매출을 따로 읽는다 (어제가 쉬는 날이면 그 앞 판매일과 비교)
-  const [recentDays, setRecentDays] = useState(null);   // { days:[{date,total,count}], last:{at,…} }
+  // 「오늘 입력한 매출」 카드 — 전표 날짜와 상관없이 오늘 이카운트에 처음 입력한 전표 (판매 로봇이 날짜별로 받아 둔 것)
+  const [entered, setEntered] = useState(null);   // { today:{count,total,items,at,src}|null, prev:{date,…}|null }
+  const [enteredOpen, setEnteredOpen] = useState(false);
   useEffect(() => {
     let dead = false;
-    const f = new Date(Date.parse(today) - 21 * 86400e3).toISOString().slice(0, 10);
-    fetch(`/api/sales?from=${f}&to=${today}`, { cache: "no-store" }).then(r => r.json())
-      .then(j => { if (!dead && j && !j.error) setRecentDays({ days: j.days || [], last: j.lastImport || null }); }).catch(() => {});
+    fetch(`/api/sales/entered?day=${today}`, { cache: "no-store" }).then(r => r.json())
+      .then(j => { if (!dead && j && !j.error) setEntered(j); }).catch(() => {});
     return () => { dead = true; };
   }, [today, tick]);
   const rangeFirst = useRef(true);   // 처음(새로고침 직후)엔 기억해 둔 선택을 지우지 않는다 — 기간을 바꿀 때만
@@ -18578,10 +18578,10 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   }, []);
   const robotRefresh = async (via = "") => {
     if (robot && robot.mac && !robot.mac.installed && !(robot.gh && robot.gh.on)) return claudeRefresh();   // 로봇을 안 깐 경우엔 예전 방식(Claude 가 Chrome 으로)
-    const d = Number(today.slice(8));
+    // 지난달 1일 ~ 다음 달 말일 — 오늘 입력했지만 지난달·다음 달 날짜로 잡은 전표도 함께 받으려고
     // 맥을 기다리던 요청이 있으면 물리고, 문자 인증 로봇으로 다시 건다
     if (via === "sms" && robot && robot.req && !robot.req.claimed) { try { await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cancel: true }) }); } catch {} }
-    salesRobotAsk(d <= 7 ? `${ymShift(today.slice(0, 7), -1)}-01` : `${today.slice(0, 8)}01`, ymMonthEnd(today.slice(0, 7)), via);
+    salesRobotAsk(`${ymShift(today.slice(0, 7), -1)}-01`, ymMonthEnd(ymShift(today.slice(0, 7), 1)), via);
   };
   // 이카운트가 처음 보는 곳(GitHub 로봇)의 로그인에 문자 인증을 요구하면 — 대표님이 받은 인증번호를 로봇에 건넨다
   const robotSendCode = async () => {
@@ -18964,31 +18964,52 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     <span style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11.5, fontWeight: 800, background: diffPct >= 0 ? "var(--positive-bg)" : "var(--negative-bg)", color: diffPct >= 0 ? "var(--positive-text)" : "var(--negative-text)" }}>{diffPct >= 0 ? "▲" : "▼"} {Math.abs(diffPct).toFixed(0)}%</span>
   );
 
-  // 오늘 매출과 어제(직전 판매일) 대비 변화
+  // 오늘 입력한 매출 — 전표 날짜(내일·다음 달로 잡은 전표 포함)와 상관없이 오늘 이카운트에 처음 입력한 전표만, 직전 입력일과 비교
+  const enteredDl = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}(${SALES_DOW[ymdDow(d)]})`;
+  // 「수정일」 기준(작성일 조건을 못 쓴 경우)이면 고친 전표(v>1)는 처음 입력한 날을 몰라 합계에서 뺀다
+  const entPure = (x) => { if (!x) return null; if (x.src !== "수정일") return { ...x, edited: [] };
+    const keep = x.items.filter(i => !(i.v > 1)), edited = x.items.filter(i => i.v > 1);
+    return { ...x, items: keep, edited, count: keep.length, total: keep.reduce((a, i) => a + (Number(i.total) || 0), 0) }; };
+  const entT = entered ? entPure(entered.today) : null;
   const todayCard = (() => {
-    if (!recentDays) return null;
-    const days = recentDays.days || [];
-    const tDay = days.find(d => d.date === today) || { date: today, total: 0, count: 0 };
-    const pDay = [...days].reverse().find(d => d.date < today && d.total);
-    if (!pDay && !tDay.total) return null;
-    const dl = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8))}(${SALES_DOW[ymdDow(d)]})`;
+    if (!entered) return null;
+    const T = entT, P = entPure(entered.prev);
+    const mw = (n) => { const x = manWon(n); return /원$/.test(x) ? x : `${x}원`; };
+    const total = T ? T.total : 0, tv = T && T.total ? manWon(T.total) : "0";
     const yst = new Date(Date.parse(today) - 86400e3).toISOString().slice(0, 10);
-    const diff = pDay ? tDay.total - pDay.total : null, pct = pDay && pDay.total ? diff / pDay.total * 100 : null;
-    const last = recentDays.last, fresh = !!(last && last.at && last.at.slice(0, 10) === today);
-    const mw = (n) => { const x = manWon(n); return /원$/.test(x) ? x : `${x}원`; };   // 1만 원 미만은 manWon 이 이미 「원」을 붙인다
-    const tv = tDay.total ? manWon(tDay.total) : "0";
-    return kpiCard(`오늘 매출 · ${dl(today)}`, tv, /원$/.test(tv) ? "" : "원", <>
-      {won(tDay.total)} · {fmt(tDay.count || 0)}건
-      {pDay && (
+    const diff = P ? total - P.total : null, pct = P && P.total ? diff / Math.abs(P.total) * 100 : null;
+    const other = T ? T.items.filter(x => x.d !== today).length : 0;
+    return kpiCard(`오늘 입력한 매출 · ${enteredDl(today)}`, tv, /원$/.test(tv) ? "" : "원", <>
+      {T ? <>{fmt(T.count)}건{other ? ` (다른 날짜 전표 ${other}건 포함)` : ""}</> : "오늘은 아직 반영 전이에요 — 「최신 내역 반영하기」를 누르면 채워져요"}
+      {P && (
         <span style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(127,127,127,0.25)" }}>
-          <span>{pDay.date === yst ? "어제" : "직전 판매일"} {dl(pDay.date)}</span>
-          <b style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{mw(pDay.total)}</b>
-          <b style={{ color: diff >= 0 ? "var(--positive-text, #03B26C)" : "var(--negative-text, #F04452)" }}>{diff >= 0 ? "▲" : "▼"} {pct != null ? `${Math.abs(pct).toFixed(0)}% · ` : ""}{diff >= 0 ? "+" : "−"}{mw(Math.abs(diff))}</b>
+          <span>{P.date === yst ? "어제" : "직전 입력일"} {enteredDl(P.date)}</span>
+          <b style={{ fontSize: 13, fontWeight: 800, color: "var(--text1)" }}>{mw(P.total)}</b>
+          {T && <b style={{ color: diff >= 0 ? "var(--positive-text, #03B26C)" : "var(--negative-text, #F04452)" }}>{diff >= 0 ? "▲" : "▼"} {pct != null ? `${Math.abs(pct).toFixed(0)}% · ` : ""}{diff >= 0 ? "+" : "−"}{mw(Math.abs(diff))}</b>}
         </span>
       )}
-      <span style={{ display: "block", marginTop: 4, opacity: 0.85 }}>{fresh ? `오늘 ${last.at.slice(11)} 반영 기준 · 오늘 매출은 진행 중` : "오늘 내역은 아직 반영 전일 수 있어요"}</span>
+      <span style={{ display: "block", marginTop: 4, opacity: 0.85 }}>
+        {T ? `${T.at.slice(11)} 반영 기준 · 전표 날짜와 상관없이 오늘 처음 입력한 전표${T.edited.length ? ` · 오늘 고친 예전 전표 ${T.edited.length}건은 뺐어요` : ""}` : "전표 날짜와 상관없이 그날 처음 입력한 전표로 셉니다"}
+      </span>
+      {T && T.count > 0 && <button type="button" onClick={() => setEnteredOpen(v => !v)} style={{ marginTop: 6, alignSelf: "flex-start", height: 26, padding: "0 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{enteredOpen ? "전표 닫기" : "오늘 입력한 전표 보기"}</button>}
     </>);
   })();
+  const enteredList = enteredOpen && entT && entT.count > 0 && (
+    <div className="card" style={{ padding: "12px 16px" }}>
+      <div className="section-header" style={{ marginBottom: 6 }}>
+        <span className="section-header-title"><Icon name="document" size={15} style={{ marginRight: 6, verticalAlign: "-2px" }}/>오늘 입력한 전표 <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text3)", marginLeft: 4 }}>{entT.count}건 · {won(entT.total)}</span></span>
+        <button type="button" onClick={() => setEnteredOpen(false)} style={{ border: "none", background: "transparent", color: "var(--text3)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>닫기</button>
+      </div>
+      {entT.items.map((x, i) => (
+        <div key={`${x.d}-${x.no}-${i}`} style={{ display: "grid", gridTemplateColumns: "44px 78px minmax(0, 1fr) auto", gap: 8, alignItems: "baseline", padding: "8px 0", borderTop: i ? "1px solid var(--border)" : "none", fontSize: 12.5 }}>
+          <span style={{ color: "var(--text3)", fontVariantNumeric: "tabular-nums" }}>{x.w ? x.w.slice(11) : ""}</span>
+          <span style={{ color: x.d === today ? "var(--text2)" : "#DB6B2E", fontWeight: x.d === today ? 600 : 800, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }} title="전표 날짜">{enteredDl(x.d)}{x.no ? `-${x.no}` : ""}</span>
+          <span style={{ fontWeight: 700, color: "var(--text1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.c}{x.v > 1 ? <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text3)", fontWeight: 600 }}>고침</span> : null}</span>
+          <span style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums", color: x.total < 0 ? "var(--negative-text)" : "var(--text1)" }}>{fmt(x.total)}</span>
+        </div>
+      ))}
+    </div>
+  );
 
   // ── 서브탭 화면 ──
   const summaryView = data && (
@@ -19010,6 +19031,7 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
         {kpiCard(t.slips > 0 && !hasItems ? "전표" : "건수", fmt(t.count), "건", t.count ? `전표당 평균 ${manWon(t.total / t.count)}원${prevHas ? ` · ${prevLabel}${cmpCut ? " 같은 날까지" : ""} ${fmt(prevCount)}건` : ""}` : "")}
         {kpiCard("거래처", fmt(data.clientCount), "곳", clientsAll[0] ? `1위 ${clientsAll[0].name} ${Math.round(clientsAll[0].total / Math.max(1, t.total) * 100)}%${prevHas ? ` · ${prevLabel} ${fmt(prev.clientCount || prevClients)}곳` : ""}` : "")}
       </div>
+      {enteredList}
       {coverageCard}
       <div className="card">
         <div className="section-header" style={{ flexWrap: "wrap", gap: 8 }}>

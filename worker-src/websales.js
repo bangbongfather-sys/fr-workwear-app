@@ -15,7 +15,7 @@
 //   /frw_websales_log   = { at, mode, from, to, ok, error, steps:[…], net:[…], result }   — 마지막 실행 기록 (화면 사진 빼고)
 //   /frw_websales_shots = [ { name, data(base64 jpeg) } ]                — 마지막 실행 화면 사진
 //   /frw_websales_seen  = 맥이 마지막으로 요청을 확인한 시각(ms)
-import { salesImport } from "./sales.js";
+import { salesImport, salesEnteredSave } from "./sales.js";
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 const REQ = "/frw_websales_req", LOG = "/frw_websales_log", SHOTS = "/frw_websales_shots", SEEN = "/frw_websales_seen";
@@ -119,6 +119,7 @@ export async function websalesPush(env, b = {}, dev = "") {
   let result = null;
   if (b.mode === "import" && Array.isArray(b.rows) && b.rows.length && DAY.test(b.from || "") && DAY.test(b.to || "")) {
     result = await salesImport(env, { fileName: clip(b.fileName || `맥 로봇 판매조회 ${at}`, 100), from: b.from, to: b.to, rows: b.rows }).catch((e) => ({ ok: false, error: e.message }));
+    if (result && result.ok) { const e = await salesEnteredSave(env, { entered: b.entered, rows: b.rows }).catch((er) => ({ ok: false, error: er.message })); result.entered = { ...e, src: b.entered && b.entered.ok ? "작성일" : "수정일", why: clip(b.entered && b.entered.why, 200) }; }
   }
   const cur = await fbGet(env, REQ).catch(() => null);   // 어느 요청의 결과인지 남긴다 (앱이 「내가 건 요청이 끝났나」를 안다)
   const log = { at, atMs: Date.now(), reqAtMs: Number(cur && cur.atMs) || 0, dev: clip(dev, 20), mode: clip(b.mode, 10), from: clip(b.from, 10), to: clip(b.to, 10), ok: !!b.ok && (!result || result.ok !== false),
