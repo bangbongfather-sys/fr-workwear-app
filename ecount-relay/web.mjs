@@ -22,7 +22,9 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-20-sms5";
+const VERSION = "2026-11-20-sms6";
+// 기다리는 시간(시험 때만 줄인다): 인증번호 기다림 횟수(1.5초마다), 첫 화면 「판매조회」 기다림(ms)
+const AUTH_POLLS = Number(process.env.NJ_AUTH_POLLS) || 176, HOME_WAIT = Number(process.env.NJ_HOME_WAIT) || 40000;
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -244,7 +246,11 @@ try {
       steps.push({ name: "2-0 인증 수단 기다림", note: `${Math.round((Date.now() - smsAt) / 100) / 10}초` });
       await snap("2-1 추가 보안 인증", "", true);
       // 점검(authcheck) — 인증 창까지 오는지만 보고 멈춘다. 문자를 보내지 않는다.
-      if (job.mode === "authcheck") { out.ok = true; out.error = ""; steps.push({ name: "점검 끝", note: "추가 보안 인증 창까지 정상 도달 — 문자는 보내지 않고 멈춤" }); await finish(); }
+      if (job.mode === "authcheck") {
+        const okSms = (await smsLoc().count()) > 0;
+        out.ok = okSms; out.error = okSms ? "" : `점검: 인증 창에 문자(SMS) 인증이 안 보입니다 — 보이는 방식: ${(await page.locator(".auth-method").allInnerTexts().catch(() => [])).map((x) => x.replace(/\s+/g, " ").trim()).join(" / ") || "없음"}`;
+        steps.push({ name: "점검 끝", note: okSms ? "인증 창·문자(SMS) 칸까지 정상 — 문자는 보내지 않고 멈춤" : out.error }); await finish();
+      }
       // 인증 화면 구조 기록 — 인증번호 칸(또는 「인증」 글자)을 감싼 상자를 찾아 적어 둔다 (넣은 값은 빼고)
       const struct = async (name) => { try { const html = await page.evaluate(() => {
         const ins = [...document.querySelectorAll("input")].filter((e) => e.id !== "com_code" && e.id !== "id" && !["checkbox", "radio", "hidden", "password"].includes(e.type) && e.getBoundingClientRect().width > 0);
@@ -276,7 +282,7 @@ try {
         if (need && need.cancelled) { why = "요청이 취소됐습니다"; break; }
         say("문자 인증번호를 기다리는 중");
         let code = "";
-        for (let k = 0; k < 176 && !code && !why; k++) { await sleep(1500); const r = await api("/api/ecount/websales/auth"); if (r && r.code) code = String(r.code); else if (r && r.cancelled) why = "요청이 취소됐습니다"; }   // 이카운트 유효시간 5분 — 4분 30초까지 기다린다
+        for (let k = 0; k < AUTH_POLLS && !code && !why; k++) { await sleep(1500); const r = await api("/api/ecount/websales/auth"); if (r && r.code) code = String(r.code); else if (r && r.cancelled) why = "요청이 취소됐습니다"; }   // 이카운트 유효시간 5분 — 4분 30초까지 기다린다
         if (why) break;
         if (!code) { why = "시간 안에 인증번호가 들어오지 않았습니다"; break; }
         const ins = await codeInputs();
@@ -303,10 +309,12 @@ try {
   const closeAlert = async () => { const ok = await findVisible(["button:has-text('확인')", "a:has-text('확인')"]); if (ok) await ok.click().catch(() => {}); };
   phase = 3;
   // 로그인 직후에는 첫 화면이 아직 그려지는 중일 수 있다(특히 문자 인증을 막 통과했을 때) — 「판매조회」 글자가 보일 때까지 40초까지 기다린다
-  let link = null;
-  for (let t = 0; t < 100 && !link; t++) {
-    for (const f of page.frames()) { try { const l = f.getByText("판매조회", { exact: true }); const n = await l.count(); for (let i = 0; i < n && !link; i++) if (await l.nth(i).isVisible()) link = l.nth(i); } catch {} if (link) break; }
-    if (!link) await sleep(400);
+  const findLink = async () => { for (const f of page.frames()) { try { const l = f.getByText("판매조회", { exact: true }); const n = await l.count(); for (let i = 0; i < n; i++) if (await l.nth(i).isVisible()) return l.nth(i); } catch {} } return null; };
+  let link = await until(findLink, HOME_WAIT, 400);
+  if (!link && loggedIn()) {   // 첫 화면이 덜 그려진 채 멈춘 경우 — 새로 고쳐 한 번 더 (로그인은 유지된다)
+    await snap("3 첫 화면 (1번째)", "「판매조회」 글자가 안 보여 새로 고침", true);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+    link = await until(findLink, HOME_WAIT, 400);
   }
   await snap("3 첫 화면", link ? "" : "「판매조회」 글자가 안 보임");
   if (!link) {   // 안 보이면 메뉴 검색 → 뜨는 목록에서 고르기
@@ -320,6 +328,7 @@ try {
   await link.click();
   // 판매조회 화면은 열리면서 기본 기간 목록을 스스로 한 번 불러온다 — 그 요청이 잡히는 즉시 다음으로 (예전엔 7초씩 두 번 쉬고 검색도 한 번 더 눌렀다)
   await until(() => listReq, 25000, 250);
+  if (!listReq) { const again = await findLink(); if (again) { await again.click().catch(() => {}); await until(() => listReq, 20000, 250); } }
   await sleep(400);
   await snap("4 판매조회 화면");
   phase = 5;

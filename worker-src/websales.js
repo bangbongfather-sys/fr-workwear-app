@@ -19,7 +19,8 @@ import { salesImport, salesEnteredSave } from "./sales.js";
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 const REQ = "/frw_websales_req", LOG = "/frw_websales_log", SHOTS = "/frw_websales_shots", SEEN = "/frw_websales_seen";
-const HIST = "/frw_websales_hist";   // 최근 실행 30번의 짧은 기록 (어디서 실패하는지 한눈에)
+const HIST = "/frw_websales_hist";
+const CHECK = "/frw_websales_check";   // 매일 아침 로그인 점검(authcheck — 인증 창·문자 칸까지만, 문자는 안 보냄) 마지막 결과   // 최근 실행 30번의 짧은 기록 (어디서 실패하는지 한눈에)
 const GH_REPO = "bangbongfather-sys/fr-workwear-app", GH_WORKFLOW = "ecount-sales.yml", GH_ISS = "https://token.actions.githubusercontent.com", GH_AUD = "nj-websales";
 const CLAIM_TTL = 12 * 60e3;   // 맥이 가져간 뒤 12분 안에 결과가 없으면 다시 가져갈 수 있게
 const REQ_TTL = 6 * 3600e3;    // 6시간 넘게 아무도 안 가져간 요청은 버린다 (맥이 꺼져 있던 경우)
@@ -111,6 +112,15 @@ export async function websalesPending(env, dev = "") {
 // 맥이 결과를 보낸다 — 실행 기록·화면 사진 저장, import 면 판매 현황에 반영
 export async function websalesPush(env, b = {}, dev = "") {
   const at = kstAt();
+  if (b.mode === "authcheck") {
+    // 점검은 사람이 건 요청·마지막 실행 기록을 건드리지 않는다 (점검용으로 건 요청이었으면 그것만 치운다)
+    const chk = { at, atMs: Date.now(), ok: !!b.ok, error: clip(b.error, 300), version: clip(b.version, 30), took: Number(b.took) || 0, dev: clip(dev, 20) };
+    await fbPut(env, CHECK, chk).catch(() => {});
+    try { const h = await fbGet(env, HIST).catch(() => null); await fbPut(env, HIST, (Array.isArray(h) ? h : []).concat({ at, dev: chk.dev, mode: "authcheck", ok: chk.ok, error: chk.error, took: chk.took, version: chk.version, rows: 0, last: "점검" }).slice(-30)); } catch {}
+    const cur = await fbGet(env, REQ).catch(() => null);
+    if (cur && cur.mode === "authcheck") await fbPut(env, REQ, null).catch(() => {});
+    return { ok: true, saved: true, check: chk };
+  }
   const steps = (Array.isArray(b.steps) ? b.steps : []).slice(0, 20).map((s) => ({
     name: clip(s && s.name, 60), url: clip(s && s.url, 300), title: clip(s && s.title, 120), text: clip(s && s.text, 4000),
     inputs: (Array.isArray(s && s.inputs) ? s.inputs : []).slice(0, 40), buttons: (Array.isArray(s && s.buttons) ? s.buttons : []).slice(0, 60).map((x) => clip(x, 60)),
@@ -204,10 +214,12 @@ export async function websalesBrief(env) {
     const gh = await ghWake(env); if (gh) { live = { ...live, gh: { ...gh, again: true } }; await fbPut(env, REQ, live).catch(() => {}); }
   }
   const au = live && live.auth;
+  const chk = await fbGet(env, CHECK).catch(() => null);
   const r = log && log.result;
   return { ok: true, now: Date.now(),
     mac: { seen: s, alive: !!s && Date.now() - s < 5 * 60e3, installed: !!s },
     gh: { on: ghOn(env) },
+    check: chk && chk.atMs ? { at: chk.at, atMs: chk.atMs, ok: !!chk.ok, error: chk.error || "" } : null,
     req: live ? { mode: live.mode, from: live.from, to: live.to, at: live.at, atMs: live.atMs, claimed: !!(live.claim && Date.now() - Number(live.claim.ts) < CLAIM_TTL), by: (live.claim && live.claim.dev) || "",
       gh: live.gh ? { ok: !!live.gh.ok, error: live.gh.error || "" } : null,
       auth: au ? { state: au.state, hint: au.hint || "", at: Number(au.at) || 0, error: au.error || "" } : null } : null,

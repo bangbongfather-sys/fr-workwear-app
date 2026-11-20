@@ -5,12 +5,16 @@
 #  - 이 저장소는 공개라 실행 기록도 공개된다. 로봇은 금액·거래처·화면 내용을 기록에 찍지 않는다.
 name: 이카운트 판매조회 로봇
 on:
+  # 매일 아침(월~토 08:41) 점검 — 로그인해서 인증 창의 문자(SMS) 칸까지만 확인하고 멈춘다(문자는 보내지 않는다).
+  # 이카운트 화면이 바뀌어 로봇이 막히면, 대표님이 누르기 전에 회사 앱에 「점검 실패」가 뜬다.
+  schedule:
+    - cron: "41 23 * * 0-5"
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = 걸린 요청 처리 · selftest = 점검(로그인하지 않음)"
+        description: "check = 걸린 요청 처리 · authcheck = 인증 창 문자 칸까지 점검(문자 안 보냄) · selftest = 점검(로그인하지 않음)"
         type: choice
-        options: [check, selftest]
+        options: [check, authcheck, selftest]
         default: check
 permissions:
   contents: read
@@ -41,10 +45,10 @@ jobs:
         run: nohup sudo timeout 25 apt-get install -y -qq fonts-nanum >/dev/null 2>&1 &
       - name: 로봇 실행
         env:
-          MODE: ${{ inputs.mode }}
+          MODE: ${{ github.event_name == 'schedule' && 'authcheck' || inputs.mode }}
           NJ_ECOUNT_COM: ${{ secrets.ECOUNT_COM_CODE }}
           NJ_ECOUNT_WEB_ID: ${{ secrets.ECOUNT_WEB_ID }}
           NJ_ECOUNT_WEB_PW: ${{ secrets.ECOUNT_WEB_PW }}
         run: |
-          case "$MODE" in selftest) M=selftest ;; *) M=check ;; esac
+          case "$MODE" in selftest) M=selftest ;; authcheck) M=authcheck ;; *) M=check ;; esac
           node ecount-relay/web.mjs "$M"
