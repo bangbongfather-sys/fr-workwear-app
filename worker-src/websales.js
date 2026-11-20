@@ -19,6 +19,7 @@ import { salesImport, salesEnteredSave } from "./sales.js";
 
 const FB_HOST = "njsafety-2ee24-default-rtdb.asia-southeast1.firebasedatabase.app";
 const REQ = "/frw_websales_req", LOG = "/frw_websales_log", SHOTS = "/frw_websales_shots", SEEN = "/frw_websales_seen";
+const HIST = "/frw_websales_hist";   // 최근 실행 30번의 짧은 기록 (어디서 실패하는지 한눈에)
 const GH_REPO = "bangbongfather-sys/fr-workwear-app", GH_WORKFLOW = "ecount-sales.yml", GH_ISS = "https://token.actions.githubusercontent.com", GH_AUD = "nj-websales";
 const CLAIM_TTL = 12 * 60e3;   // 맥이 가져간 뒤 12분 안에 결과가 없으면 다시 가져갈 수 있게
 const REQ_TTL = 6 * 3600e3;    // 6시간 넘게 아무도 안 가져간 요청은 버린다 (맥이 꺼져 있던 경우)
@@ -126,6 +127,12 @@ export async function websalesPush(env, b = {}, dev = "") {
     error: clip(b.error, 600), dialogs: (Array.isArray(b.dialogs) ? b.dialogs : []).slice(0, 10).map((x) => clip(x, 300)), steps, net,
     rows: Array.isArray(b.rows) ? b.rows.length : 0, result, version: clip(b.version, 30), took: Number(b.took) || 0 };
   await fbPut(env, LOG, log);
+  try {
+    const h = await fbGet(env, HIST).catch(() => null);
+    const list = (Array.isArray(h) ? h : []).concat({ at, dev: log.dev, mode: log.mode, ok: log.ok, error: clip(log.error || (result && result.ok === false && result.error) || "", 200), took: log.took, version: log.version, rows: log.rows,
+      last: steps.length ? steps[steps.length - 1].name : "", entered: result && result.entered ? `${result.entered.src}${result.entered.why ? ` (${clip(result.entered.why, 60)})` : ""}` : "" }).slice(-30);
+    await fbPut(env, HIST, list);
+  } catch {}
   const shots = (Array.isArray(b.shots) ? b.shots : []).slice(0, 10).filter((x) => x && typeof x.data === "string" && x.data.length < 900000).map((x) => ({ name: clip(x.name, 60), data: x.data }));
   await fbPut(env, SHOTS, shots.length ? shots : null).catch(() => {});
   await fbPut(env, REQ, null).catch(() => {});
@@ -138,7 +145,7 @@ export async function websalesStatus(env) {
   const s = Number(seen) || 0;
   return { 맥: s ? { 마지막확인: new Date(s + 9 * 3600e3).toISOString().slice(0, 16).replace("T", " "), 켜짐: Date.now() - s < 5 * 60e3 } : "아직 설치 전",
     걸린요청: req ? { mode: req.mode, from: req.from, to: req.to, at: req.at, 가져감: !!req.claim } : null,
-    마지막실행: log, 사진: Array.isArray(shots) ? shots.map((x, i) => `${i}: ${x && x.name}`) : [] };
+    최근실행: (await fbGet(env, HIST).catch(() => null) || []).slice(-12).reverse(), 마지막실행: log, 사진: Array.isArray(shots) ? shots.map((x, i) => `${i}: ${x && x.name}`) : [] };
 }
 // ── 추가 보안 인증(문자) — 로봇이 「인증번호가 필요해요」를 알리고, 앱에서 넣은 번호를 받아 간다 ──
 //   REQ.auth = { state: "need" | "given", hint: "010****3079", at, error, code }   (code 는 로봇이 받아 가는 즉시 지운다)

@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 
-const VERSION = "2026-11-20-entered1";
+const VERSION = "2026-11-20-sms5";
 const GH = !!process.env.GITHUB_ACTIONS;   // GitHub Actions 에서 도는 중
 const APP = process.env.NJ_APP || "https://fr-workwear-app.njsafety91.workers.dev";
 const DIR = process.env.NJ_DIR || (GH ? join(process.env.RUNNER_TEMP || "/tmp", "nj-ecount") : join(homedir(), "Library/Application Support/nj-ecount"));
@@ -231,12 +231,17 @@ try {
     // ※ 「비밀번호 칸이 안 보인다」를 성공으로 보면 안 된다 — 로그인을 누르면 이카운트가 다른 주소의 로그인 화면으로 한 번 옮겨 가는데,
     //   그 사이 잠깐 칸이 없다(2026-11-19 이걸 성공으로 잘못 보고 세 번 실패). 주소가 로그인 화면을 벗어났는지로 판단한다.
     let extra = false, inside = 0;
-    for (let i = 0; i < 90 && inside < 2; i++) { await sleep(400); if (/추가\s*보안\s*인증/.test(await bodyText())) { extra = true; break; } inside = loggedIn() ? inside + 1 : 0; }
+    for (let i = 0; i < 90 && inside < 2; i++) { await sleep(400); if (/추가\s*보안\s*인증|2단계\s*인증/.test(await bodyText())) { extra = true; break; } inside = loggedIn() ? inside + 1 : 0; }
     await snap("2 로그인 뒤", dialogs.length ? `확인창: ${dialogs.join(" / ")}` : "");
     // 「추가 보안 인증」(처음 보는 기기·위치) — 문자(SMS) 인증을 골라 놓고, 대표님이 회사 앱에 인증번호를 넣어 주면 이어서 진행한다.
     // 인증번호는 대표님만 받는다 — 로봇은 넣어 준 번호를 그대로 한 번 입력할 뿐이고, 기록에 남기지 않는다.
     if (extra) {
-      await until(async () => (await page.locator(".auth-method").count()) > 0, 15000);
+      // 인증 수단 목록은 늦게 채워진다 — 「모바일 기기등록」이 먼저 보이고 문자·메일은 서버에서 받아 온 뒤에 붙는다(2026-11-20 이걸 기다리지 않아 실패).
+      // 그래서 「SMS」 칸이 보일 때까지 기다린다(최대 30초).
+      const smsLoc = () => page.locator(".auth-method").filter({ hasText: /SMS|문자|휴대폰/ }).first();
+      const smsAt = Date.now();
+      await until(async () => (await smsLoc().count()) > 0 && (await smsLoc().isVisible().catch(() => false)), 30000, 300);
+      steps.push({ name: "2-0 인증 수단 기다림", note: `${Math.round((Date.now() - smsAt) / 100) / 10}초` });
       await snap("2-1 추가 보안 인증", "", true);
       // 점검(authcheck) — 인증 창까지 오는지만 보고 멈춘다. 문자를 보내지 않는다.
       if (job.mode === "authcheck") { out.ok = true; out.error = ""; steps.push({ name: "점검 끝", note: "추가 보안 인증 창까지 정상 도달 — 문자는 보내지 않고 멈춤" }); await finish(); }
@@ -250,8 +255,13 @@ try {
         const c = e.cloneNode(true); c.querySelectorAll("script,style,svg,path").forEach((x) => x.remove());
         return c.outerHTML.replace(/\s+/g, " ").replace(/ (style|value|data-[\w-]+|aria-[\w-]+)="[^"]*"/g, "").slice(0, 3900); }); steps.push({ name, text: html }); } catch (e) { steps.push({ name, note: `읽기 실패: ${e.message}` }); } };
       const hint = ((await bodyText()).match(/01\d\*{2,}\d{2,4}/) || [""])[0];
-      const sms = page.locator(".auth-method", { has: page.locator(".auth-method-title", { hasText: /^\s*SMS\s*$/ }) }).first();
-      if (!(await sms.count())) { out.error = "추가 보안 인증 창에서 문자(SMS) 인증을 찾지 못했습니다"; await finish(); }
+      const sms = smsLoc();
+      if (!(await sms.count())) {
+        const shown = await page.locator(".auth-method").allInnerTexts().catch(() => []);
+        await struct("2-3 추가 보안 인증 화면 구조");
+        out.error = `이카운트 인증 창에 문자(SMS) 인증이 30초가 지나도 안 보입니다 — 보이는 방식: ${shown.map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean).join(" / ") || "없음"}`;
+        await finish();
+      }
       // 인증번호 칸 — 이카운트는 숫자 한 칸씩 6칸(이름 없는 글자 칸)을 띄운다. 로그인 칸(회사코드·아이디)은 뺀다.
       const codeInputs = async () => { const loc = page.locator("input"); const list = []; const n = await loc.count();
         for (let k = 0; k < n; k++) { const el = loc.nth(k); try { const a = await el.evaluate((e) => ({ id: e.id, type: e.type })); if (a.id === "com_code" || a.id === "id" || ["checkbox", "radio", "hidden", "password"].includes(a.type)) continue; if (await el.isVisible()) list.push(el); } catch {} }
