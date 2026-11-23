@@ -27,6 +27,7 @@ import { salesImport, salesSummary, salesCadence, reorderMarks, salesEntered } f
 import { invoiceOcr } from "./worker-src/invoice.js";
 import { handleMcp, ecountStatus, ecountRelayKey, ecountRelayPush, ecountRequest, ecountPending, stockMoves } from "./worker-src/mcp.js";
 import { upcomingPays, payLines } from "./worker-src/hr.js";
+import { handleVoicePublic, handleVoiceApp } from "./worker-src/voice.js";
 import { websalesPending, websalesPush, websalesRequest, websalesCancel, websalesBrief, websalesGhAuth, websalesAuthNeed, websalesAuthTake, websalesAuthGive } from "./worker-src/websales.js";
 import { handleFxApi } from "./worker-src/fx.js";
 import { newsFeed } from "./worker-src/news.js";
@@ -148,6 +149,8 @@ export default {
     //  - /api/bank/sms/<토큰> : 아이폰 단축어가 은행 문자를 보내는 주소 — 주소의 토큰으로 검증
     const isPublic = path === "/api/kakao/login" || path === "/api/kakao/callback"
       || path.startsWith("/api/ics/") || path.startsWith("/api/bank/sms/")
+    //  - /api/voice/ask/<토큰> : 아이폰 단축어(Siri)가 말로 한 질문을 보내는 주소 — 주소의 토큰으로 검증
+      || path.startsWith("/api/voice/ask/")
     //  - /api/ecount/push · /api/ecount/pending : 사무실 맥(이카운트 등록 IP)이 요청 확인·재고 보내는 주소 — X-Relay-Key 로 검증
       || path === "/api/ecount/push" || path === "/api/ecount/pending"
       || path === "/api/ecount/websales/pending" || path === "/api/ecount/websales/push" || path === "/api/ecount/websales/auth";
@@ -320,6 +323,9 @@ export default {
 
     // 은행 문자 → 입금함 (공개, 토큰 검증) / 문자 주소 발급·상태 (로그인)
     if (url.pathname.startsWith("/api/bank/sms/")) return handleBankSmsPublic(request, env, url);
+    // 말로 묻는 회사 비서 — 단축어(토큰 주소) / 앱 마이크·관리(로그인)
+    if (url.pathname.startsWith("/api/voice/ask/")) return handleVoicePublic(request, env, url);
+    if (url.pathname.startsWith("/api/voice/")) return handleVoiceApp(request, env, url);
     if (url.pathname.startsWith("/api/bank/smskey/")) return handleBankSmsAdmin(request, env, url);
     if (url.pathname.startsWith("/api/bank/")) {
       return handleBankApi(request, env, url);
