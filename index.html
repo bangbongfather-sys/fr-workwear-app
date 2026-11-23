@@ -1124,6 +1124,48 @@
     body.glass .app-sidebar { background: transparent !important; border: 1px solid rgba(255,255,255,0.16) !important; box-shadow: 0 16px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.18) !important; border-radius: 26px !important; }
     body.glass .app-sidebar::before { background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04)), rgba(12,14,20,calc(0.25 + var(--glass-tint, 0.35) * 0.5)); }
     /* 접힌 사이드바 = 영상의 떠 있는 독 — 동그란 아이콘 버튼 */
+    /* ─── 유리 사이드바 V10 (유리 테마 · PC/태블릿) ───
+       펼침: 오른쪽에 흰 「페이지 띠」가 서 있고, 고른 메뉴의 흰 알약이 그 띠에 오목한 모서리로 이어 붙는다(탭이 페이지에 붙은 모양).
+             메뉴를 바꾸면 흰 알약이 미끄러지듯 옮겨 간다. 띠에는 접기·서브창 단추와 지금 화면 이름(세로 글씨).
+       접힘: 둥근 유리 아이콘이 세로로 선 알약 독 — 고른 메뉴는 흰 동그라미가 미끄러져 온다. */
+    body.glass .sb.v10 { --v10-paper: #F1F2F6; --v10-strip-w: 46px; --v10-gap: 8px; }
+    body.glass .sb.v10 .sb-nav { position: relative; padding: 4px calc(var(--v10-strip-w) + var(--v10-gap) * 2) 12px 12px; }
+    body.glass .sb.v10 .sb-nav-item { z-index: 1; height: 42px; margin: 4px 0; border-radius: 14px; background: rgba(255,255,255,0.065); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 2px rgba(0,0,0,0.12);
+      transition: background .2s, color .25s; }
+    body.glass .sb.v10 .sb-nav-item:hover { background: rgba(255,255,255,0.12); }
+    body.glass .sb.v10 .sb-nav-item.on { background: transparent; box-shadow: none; color: #15161a; }
+    body.glass .sb.v10 .sb-nav-item.on .sb-ico { color: #DB6B2E; }
+    body.glass .sb.v10 .sb-group-label { padding: 10px 6px 4px; }
+    /* 흰 알약(미끄러짐) — 펼침에서는 오른쪽 띠까지 이어지고, 위아래에 오목한 모서리 */
+    body.glass .sb.v10 .v10-ind { position: absolute; z-index: 0; left: 12px; right: calc(var(--v10-gap) + var(--v10-strip-w) - 1px); top: 0; height: 42px; pointer-events: none;
+      background: var(--v10-paper); border-radius: 14px 0 0 14px; transform: translateY(var(--ind-y, -100px)); opacity: var(--ind-o, 0);
+      transition: transform .42s cubic-bezier(.3,1.25,.4,1), height .3s, opacity .2s; box-shadow: -4px 6px 16px rgba(0,0,0,0.18); }
+    body.glass .sb.v10 .v10-ind::before, body.glass .sb.v10 .v10-ind::after { content: ""; position: absolute; right: 0; width: 16px; height: 16px; }
+    body.glass .sb.v10 .v10-ind::before { bottom: 100%; background: radial-gradient(circle at 0 0, transparent 15.5px, var(--v10-paper) 16px); }
+    body.glass .sb.v10 .v10-ind::after { top: 100%; background: radial-gradient(circle at 0 100%, transparent 15.5px, var(--v10-paper) 16px); }
+    /* 오른쪽 페이지 띠 */
+    body.glass .sb.v10 .v10-strip { position: absolute; z-index: 2; top: 10px; bottom: 10px; right: var(--v10-gap); width: var(--v10-strip-w); border-radius: 23px;
+      background: linear-gradient(180deg, #FFFFFF, var(--v10-paper) 18%, var(--v10-paper) 82%, #E6E8EE); box-shadow: 0 10px 30px rgba(0,0,0,0.25), inset 0 1px 0 #fff;
+      display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0 20px; animation: v10StripIn .45s cubic-bezier(.2,1,.3,1) both; }
+    body.glass .sb.v10 .v10-strip button { width: 34px; height: 34px; border-radius: 12px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+      background: rgba(20,22,28,0.06); color: #3B3F47; transition: background .15s, transform .15s; flex-shrink: 0; }
+    body.glass .sb.v10 .v10-strip button:hover { background: rgba(20,22,28,0.12); transform: translateY(-1px); }
+    body.glass .sb.v10 .v10-strip button.v10-main { background: linear-gradient(160deg, #F08A4B, #DB6B2E); color: #fff; box-shadow: 0 6px 14px rgba(219,107,46,0.35); }
+    body.glass .sb.v10 .v10-strip .v10-title { margin-top: auto; writing-mode: vertical-rl; text-orientation: upright; font-size: 11px; font-weight: 800; letter-spacing: 0.22em; color: #9298A3; white-space: nowrap; overflow: hidden; max-height: 50%; }
+    @keyframes v10StripIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+    body.glass .sb.v10 .sb-top .sb-toggle { display: none; }
+    body.glass .sb.v10 .sb-foot { margin-right: calc(var(--v10-strip-w) + var(--v10-gap) * 2); border-top: none; padding: 8px 0 10px 12px; }
+    body.glass .sb.v10 .sb-top { padding-right: calc(var(--v10-strip-w) + var(--v10-gap) * 2); }
+    /* 접힘 — 알약 독 */
+    body.glass .sb.v10.collapsed { border-radius: 38px !important; }
+    body.glass .sb.v10.collapsed .sb-nav { padding: 4px 0 12px; }
+    body.glass .sb.v10.collapsed .sb-nav-item { width: 46px; height: 46px; border-radius: 23px; margin: 6px auto; }
+    body.glass .sb.v10.collapsed .v10-ind { left: 50%; right: auto; width: 46px; height: 46px; margin-left: -23px; border-radius: 23px; background: #fff; box-shadow: 0 8px 20px rgba(0,0,0,0.28); }
+    body.glass .sb.v10.collapsed .v10-ind::before, body.glass .sb.v10.collapsed .v10-ind::after { display: none; }
+    body.glass .sb.v10.collapsed .sb-top .sb-toggle { display: inline-flex; }
+    body.glass .sb.v10.collapsed .sb-foot, body.glass .sb.v10.collapsed .sb-top { margin-right: 0; padding-right: 0; }
+    body.glass .sb.v10.collapsed .sb-foot { padding: 10px 0; }
+    @media (prefers-reduced-motion: reduce) { body.glass .sb.v10 .v10-ind { transition: none; } }
 
     body.glass .app-header { background: transparent !important; border-color: rgba(255,255,255,0.14) !important; border-radius: 22px !important; box-shadow: 0 10px 30px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.16) !important; }
     body.glass .side-pane { background: transparent !important; border-color: rgba(255,255,255,0.18) !important; }
@@ -1936,6 +1978,7 @@ const ICON_PATHS = {
   arrowLeft:  <><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></>,
   arrowRight: <><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></>,
   chevronLeft:<><polyline points="15 18 9 12 15 6"/></>,
+  chevronUp:  <><polyline points="18 15 12 9 6 15"/></>,
   chevronRight:<><polyline points="9 18 15 12 9 6"/></>,
   folder:     <><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></>,
   folderOpen: <><path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></>,
@@ -24602,7 +24645,21 @@ function App() {
     window.addEventListener("focusout", on); window.addEventListener("orientationchange", on);
     return () => { clearTimeout(t); vv.removeEventListener("scroll", on); vv.removeEventListener("resize", on); window.removeEventListener("focusout", on); window.removeEventListener("orientationchange", on); };
   }, []);
-  const sbCollapsed = (sidebarCollapsed && vw > 768) || foldMode;   // 펼친 폴더블은 늘 레일(아이콘+작은 이름), 핸드폰 서랍은 늘 펼친 모양
+  const sbCollapsed = (sidebarCollapsed && vw > 768) || foldMode;
+  // 유리 사이드바 V10 — 유리 테마의 PC/태블릿에서만 (핸드폰 서랍·폴더블 레일은 그대로)
+  const sbV10 = glass && !foldMode && vw > 768;
+  const sbNavRef = useRef(null);
+  useEffect(() => {
+    const nav = sbNavRef.current; if (!nav) return;
+    const place = () => {
+      const el = nav.querySelector('.sb-nav-item[data-active="1"]');
+      if (!el || !sbV10) { nav.style.setProperty("--ind-o", "0"); return; }
+      nav.style.setProperty("--ind-y", `${el.offsetTop}px`); nav.style.setProperty("--ind-o", "1");
+    };
+    place(); const t = setTimeout(place, 280);   // 접기·펼치기 너비가 바뀐 뒤 한 번 더
+    window.addEventListener("resize", place);
+    return () => { clearTimeout(t); window.removeEventListener("resize", place); };
+  }, [tab, sbCollapsed, sbV10, vw]);   // 펼친 폴더블은 늘 레일(아이콘+작은 이름), 핸드폰 서랍은 늘 펼친 모양
   // 펼친 폴더블에서 ☰ 로 레일을 통째로 숨겨 화면을 끝까지 쓴다 (기기에 기억)
   const [foldRailOff, setFoldRailOff] = useState(() => load("frw_fold_rail_off", false));
   useEffect(() => { save("frw_fold_rail_off", foldRailOff); document.body.classList.toggle("fold-rail-off", foldMode && foldRailOff); }, [foldRailOff, foldMode]);
@@ -27327,13 +27384,13 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
       <div className={`mobile-sidebar-backdrop no-print${mobileSidebarOpen ? " show" : ""}`} onClick={() => setMobileSidebarOpen(false)} />
 
       {/* ── 사이드바 ── */}
-      <aside className={`app-sidebar sb no-print${mobileSidebarOpen ? " mobile-open" : ""}${sbCollapsed ? " collapsed" : ""}`} style={{
-        width: sbCollapsed ? 72 : 240,
+      <aside className={`app-sidebar sb no-print${mobileSidebarOpen ? " mobile-open" : ""}${sbCollapsed ? " collapsed" : ""}${sbV10 ? " v10" : ""}`} style={{
+        width: sbCollapsed ? (sbV10 ? 76 : 72) : (sbV10 ? 276 : 240),
         flexShrink: 0,
         margin: "max(12px, env(safe-area-inset-top)) 0 max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left))",
         position: "sticky", top: "max(12px, env(safe-area-inset-top))", height: "calc(100vh - max(12px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)))",
         display: "flex", flexDirection: "column",
-        transition: "width 0.25s cubic-bezier(0.4,0,0.2,1)",
+        transition: sbV10 ? "width 0.42s cubic-bezier(.3,1.15,.4,1), border-radius .3s" : "width 0.25s cubic-bezier(0.4,0,0.2,1)",
         overflow: "hidden",
         zIndex: 99,
       }}>
@@ -27348,7 +27405,8 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           </button>
         </div>
         {/* 메뉴 */}
-        <nav className="sb-nav" aria-label="화면 메뉴">
+        <nav className="sb-nav" aria-label="화면 메뉴" ref={sbNavRef}>
+          {sbV10 && <div className="v10-ind" aria-hidden="true"/>}
           {TAB_GROUPS.map((group, gi) => (
             <div className="sb-group" key={group.label} role="group" aria-label={group.label}>
               {sbCollapsed ? (gi > 0 && <div className="sb-sep" aria-hidden="true"/>) : <div className="sb-group-label">{group.label}</div>}
@@ -27383,6 +27441,17 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
           </button>
           {!sbCollapsed && <div className="sb-ver">NJ SAFETY · v2</div>}
         </div>
+        {sbV10 && !sbCollapsed && (() => {
+          const cur = TABS.find(x => x[0] === tab);
+          return (
+            <div className="v10-strip">
+              <button type="button" className="v10-main" onClick={() => setSidebarCollapsed(true)} title="메뉴 접기" aria-label="메뉴 접기"><Icon name="chevronLeft" size={16}/></button>
+              {SIDE_TAB_IDS.has(tab) && <button type="button" onClick={() => openSide(tab)} title={`「${cur ? cur[1] : ""}」 서브창에서 열기`} aria-label="서브창에서 열기"><Icon name="split" size={15}/></button>}
+              <button type="button" onClick={() => { try { window.scrollTo({ top: 0, behavior: "smooth" }); document.querySelectorAll(".main-content").forEach(e => e.scrollTo && e.scrollTo({ top: 0, behavior: "smooth" })); } catch {} }} title="맨 위로" aria-label="맨 위로"><Icon name="chevronUp" size={16}/></button>
+              <span className="v10-title" aria-hidden="true">{cur ? cur[1] : ""}</span>
+            </div>
+          );
+        })()}
       </aside>
 
       {safetyOpen && <DataSafetyPanel onClose={() => setSafetyOpen(false)} darkMode={darkMode} />}
