@@ -19656,19 +19656,13 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
               </div>
               {au.error ? <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--negative-text, #F04452)" }}>{au.error}</div> : null}
               <form onSubmit={e => { e.preventDefault(); robotSendCode(); }} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <label style={{ position: "relative", display: "block", cursor: "text" }}>
-                  <input value={digits} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 6); setRobotCode(v); if (v.length === 6) robotSendCode(v); }}
-                    inputMode="numeric" autoComplete="one-time-code" autoFocus aria-label="문자 인증번호" maxLength={6} disabled={robotSending}
-                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, border: "none", fontSize: 16, caretColor: "transparent" }}/>
-                  <div aria-hidden="true" style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
-                    {[0, 1, 2, 3, 4, 5].map(i => (
-                      <div key={i} style={{ height: 54, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, fontVariantNumeric: "tabular-nums",
-                        background: "var(--surface2)", border: `2px solid ${i === digits.length ? "#DB6B2E" : "transparent"}`, color: "var(--text1)" }}>{digits[i] || ""}</div>
-                    ))}
-                  </div>
-                </label>
+                {/* 눈에 보이는 진짜 입력 칸 한 개 — 맥 Safari 의 「메시지에서」 자동 채움은 숨긴(투명) 칸에서는 안 뜨는 경우가 있어서 */}
+                <input value={digits} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 6); setRobotCode(v); if (v.length === 6) robotSendCode(v); }}
+                  inputMode="numeric" autoComplete="one-time-code" name="one-time-code" autoFocus aria-label="문자 인증번호" maxLength={6} disabled={robotSending} placeholder="······"
+                  style={{ width: "100%", height: 60, borderRadius: 14, border: "2px solid #DB6B2E", background: "var(--surface2)", color: "var(--text1)", fontSize: 30, fontWeight: 800,
+                    letterSpacing: "0.45em", textIndent: "0.45em", textAlign: "center", fontVariantNumeric: "tabular-nums", fontFamily: "inherit", outline: "none", padding: 0 }}/>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: left < 60 ? "var(--negative-text, #F04452)" : "var(--text3)" }}>
-                  <span>{robotSending ? "보내는 중…" : "6자리를 넣으면 바로 보내요 · 문자 알림의 번호를 눌러도 채워져요"}</span>
+                  <span>{robotSending ? "보내는 중…" : "6자리를 넣으면 바로 보내요 · 「메시지에서」 추천을 누르면 채워져요"}</span>
                   <b style={{ fontVariantNumeric: "tabular-nums" }}>{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</b>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
