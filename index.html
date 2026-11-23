@@ -1427,6 +1427,35 @@
     :root { --ai-bg: var(--surface); }
     body.dark { --ai-bg: #1C1E26; }
     body.glass { --ai-bg: rgba(18,20,28,0.78); }
+    /* ── 말로 묻는 회사 비서 — 떠 있는 유리 카드 (넓은 화면: 오른쪽 아래 · 좁은 화면: 아래 가득) ── */
+    .vx-float { position: fixed; z-index: 8990; right: 24px; bottom: calc(env(safe-area-inset-bottom) + 24px); width: 400px; max-width: calc(100vw - 24px); max-height: min(640px, calc(100vh - 120px));
+      display: flex; flex-direction: column; border-radius: 26px; padding: 16px 16px 14px; color: var(--text1); isolation: isolate;
+      background: linear-gradient(160deg, rgba(255,255,255,0.93), rgba(255,255,255,0.80));
+      -webkit-backdrop-filter: blur(28px) saturate(1.8); backdrop-filter: blur(28px) saturate(1.8);
+      border: 1px solid rgba(255,255,255,0.7); box-shadow: 0 18px 50px rgba(15,23,42,0.22), 0 2px 8px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.9);
+      animation: vxIn .42s cubic-bezier(.2,1.1,.3,1) both; }
+    body.dark .vx-float { background: linear-gradient(160deg, rgba(58,60,70,0.84), rgba(30,32,40,0.82)); border-color: rgba(255,255,255,0.14); box-shadow: 0 18px 50px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.10); }
+    body.glass .vx-float { background: linear-gradient(160deg, rgba(255,255,255,0.20), rgba(255,255,255,0.06) 55%, rgba(255,255,255,0.10)), rgba(18,20,28,calc(0.55 + var(--glass-tint, 0.35) * 0.3));
+      border-color: rgba(255,255,255,0.24); box-shadow: 0 22px 60px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.28); }
+    @keyframes vxIn { from { opacity: 0; transform: translateY(16px) scale(.96); } to { opacity: 1; transform: none; } }
+    .vx-float .vx-x { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 14px; border: none; background: rgba(127,127,127,0.14); color: var(--text2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; }
+    .vx-float .vx-btn { height: 34px; padding: 0 12px; border-radius: 11px; border: 1px solid var(--border); background: rgba(127,127,127,0.10); color: var(--text2); font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap; }
+    .vx-float .vx-btn.on { background: #DB6B2E; border-color: #DB6B2E; color: #fff; }
+    .vx-float .vx-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px; margin: 8px 0; }
+    .vx-float .vx-q { align-self: flex-end; max-width: 85%; padding: 8px 12px; border-radius: 16px 16px 4px 16px; background: rgba(219,107,46,0.16); color: var(--text1); font-size: 13.5px; line-height: 1.5; }
+    .vx-float .vx-a { align-self: flex-start; max-width: 92%; padding: 9px 12px; border-radius: 16px 16px 16px 4px; background: rgba(127,127,127,0.12); color: var(--text1); font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; }
+    .vx-float .vx-mic { width: 64px; height: 64px; border-radius: 32px; border: none; cursor: pointer; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: #fff;
+      background: radial-gradient(circle at 35% 30%, #F59A5E, #DB6B2E 60%, #B4501C); box-shadow: 0 8px 24px rgba(219,107,46,0.45), inset 0 1px 0 rgba(255,255,255,0.35); transition: transform .15s; }
+    .vx-float .vx-mic:active { transform: scale(.94); }
+    .vx-float .vx-mic.listen { animation: vxPulse 1.3s ease-in-out infinite; background: radial-gradient(circle at 35% 30%, #FF7A7A, #F04452 60%, #C42B38); box-shadow: 0 8px 24px rgba(240,68,82,0.5); }
+    @keyframes vxPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(240,68,82,0.45), 0 8px 24px rgba(240,68,82,0.5); } 50% { box-shadow: 0 0 0 14px rgba(240,68,82,0), 0 8px 24px rgba(240,68,82,0.5); } }
+    .vx-float .vx-in { flex: 1; min-width: 0; height: 44px; border-radius: 14px; border: 1px solid var(--border); background: rgba(127,127,127,0.10); color: var(--text1); font-size: 15px; padding: 0 12px; font-family: inherit; outline: none; box-shadow: none; }
+    body.glass .vx-float .vx-in { background: rgba(255,255,255,0.10); }
+    .vx-float .vx-dots span { display: inline-block; width: 6px; height: 6px; margin: 0 2px; border-radius: 3px; background: var(--text3); animation: vxDot 1s infinite ease-in-out; }
+    .vx-float .vx-dots span:nth-child(2) { animation-delay: .15s; } .vx-float .vx-dots span:nth-child(3) { animation-delay: .3s; }
+    @keyframes vxDot { 0%,80%,100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+    @media (max-width: 760px) { .vx-float { right: 12px; left: 12px; width: auto; bottom: calc(env(safe-area-inset-bottom) + 12px); max-height: calc(100vh - 90px); } }
+    @media (prefers-reduced-motion: reduce) { .vx-float, .vx-float .vx-mic.listen, .vx-float .vx-dots span { animation: none; } }
     /* ── 이카운트 문자 인증 — 화면을 가리지 않는 떠 있는 유리 카드 (넓은 화면: 오른쪽 위 · 좁은 화면: 위 가운데) ── */
     .otp-float { position: fixed; z-index: 9000; top: calc(env(safe-area-inset-top) + 84px); right: 24px; width: 360px; max-width: calc(100vw - 24px);
       border-radius: 24px; padding: 16px 16px 14px; color: var(--text1); isolation: isolate;
@@ -1979,6 +2008,7 @@ const ICON_PATHS = {
   arrowRight: <><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></>,
   chevronLeft:<><polyline points="15 18 9 12 15 6"/></>,
   chevronUp:  <><polyline points="18 15 12 9 6 15"/></>,
+  mic:        <><rect x="9" y="2.5" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="18" x2="12" y2="21.5"/></>,
   chevronRight:<><polyline points="9 18 15 12 9 6"/></>,
   folder:     <><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></>,
   folderOpen: <><path d="M6 14l1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></>,
@@ -18152,6 +18182,173 @@ function cmdkSalesGaps(led, days) {
 const _cmdkCache = new Map();
 const cmdkGet = (url) => { if (!_cmdkCache.has(url)) _cmdkCache.set(url, fetch(url, { cache: "no-store" }).then(r => r.json()).catch(() => null)); return _cmdkCache.get(url); };
 
+// ── 말로 묻는 회사 비서 ──
+// 마이크로 말하면(또는 글로 쓰면) 서버(/api/voice/ask)가 Claude 로 회사 자료를 찾아 짧게 답하고, 답을 소리로 읽어 준다.
+// 「내일 오후 3시 ○○ 미팅 잡아 줘」면 일정에 넣는다. 운전 중에는 아이폰 단축어(Siri·CarPlay)로 같은 서버를 부른다.
+// 열기: window.dispatchEvent(new CustomEvent("frw-voice", { detail: { q, listen } }))
+const VX_TTS_KEY = "frw_voice_tts", VX_HANDS_KEY = "frw_voice_hands";
+const vxSR = () => (typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition)) || null;
+function vxSpeak(text, onEnd) {
+  try {
+    const ss = window.speechSynthesis; if (!ss || !text) { onEnd && onEnd(); return; }
+    ss.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.lang = "ko-KR"; u.rate = 1.05;
+    const v = (ss.getVoices() || []).filter(x => /^ko/i.test(x.lang)); if (v.length) u.voice = v.find(x => /Yuna|유나|Sora|Google/i.test(x.name)) || v[0];
+    u.onend = () => onEnd && onEnd(); u.onerror = () => onEnd && onEnd();
+    ss.speak(u);
+  } catch { onEnd && onEnd(); }
+}
+function VoiceAssistant() {
+  const [open, setOpen] = useState(false);
+  const [turns, setTurns] = useState([]);          // [{ q, a, actions, err }]
+  const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [draft, setDraft] = useState("");
+  const [tts, setTts] = useState(() => { try { return localStorage.getItem(VX_TTS_KEY) !== "0"; } catch { return true; } });
+  const [hands, setHands] = useState(() => { try { return localStorage.getItem(VX_HANDS_KEY) === "1"; } catch { return false; } });
+  const [setup, setSetup] = useState(false);
+  const [cfg, setCfg] = useState(null);
+  const recRef = useRef(null), logRef = useRef(null), openRef = useRef(false), handsRef = useRef(hands), ttsRef = useRef(tts), busyRef = useRef(false);
+  useEffect(() => { openRef.current = open; }, [open]);
+  useEffect(() => { handsRef.current = hands; try { localStorage.setItem(VX_HANDS_KEY, hands ? "1" : "0"); } catch {} }, [hands]);
+  useEffect(() => { ttsRef.current = tts; try { localStorage.setItem(VX_TTS_KEY, tts ? "1" : "0"); } catch {} if (!tts) try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} }, [tts]);
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [turns, busy, interim]);
+  const stopListen = () => { try { recRef.current && recRef.current.abort(); } catch {} recRef.current = null; setListening(false); setInterim(""); };
+  const ask = async (text) => {
+    const q = String(text || "").trim(); if (!q || busyRef.current) return;
+    busyRef.current = true; setBusy(true); setDraft(""); setInterim("");
+    setTurns(t => [...t, { q, a: null }]);
+    let r;
+    try {
+      r = await fetch("/api/voice/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: q }) }).then(x => x.json());
+    } catch { r = { answer: "서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요.", err: true }; }
+    const a = String((r && r.answer) || "답을 받지 못했어요.");
+    setTurns(t => t.map((x, i) => (i === t.length - 1 ? { ...x, a, actions: (r && r.actions) || [], err: !!(r && (r.error || r.err)) } : x)));
+    busyRef.current = false; setBusy(false);
+    if (r && Array.isArray(r.actions) && r.actions.some(x => x.kind === "todo")) { try { window.dispatchEvent(new CustomEvent("frw-sync-now")); } catch {} }
+    const again = () => { if (openRef.current && handsRef.current) setTimeout(() => openRef.current && listen(), 350); };
+    if (ttsRef.current) vxSpeak(a, again); else again();
+  };
+  const listen = () => {
+    const SR = vxSR();
+    if (!SR) { showToast("이 브라우저는 말로 받아쓰기를 지원하지 않아요 — 글로 써 주세요 (아이폰은 Safari, PC는 크롬)"); return; }
+    if (recRef.current) { stopListen(); return; }
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+    const rec = new SR(); rec.lang = "ko-KR"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    let final = "";
+    rec.onresult = (e) => {
+      let tmp = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) final += t; else tmp += t; }
+      setInterim((final + tmp).trim());
+    };
+    rec.onerror = (e) => { if (e && e.error === "not-allowed") showToast("마이크 권한이 꺼져 있어요 — 브라우저 설정에서 마이크를 허용해 주세요"); };
+    rec.onend = () => { recRef.current = null; setListening(false); const t = final.trim(); setInterim(""); if (t) ask(t); };
+    recRef.current = rec; setListening(true); setInterim("");
+    try { rec.start(); } catch { recRef.current = null; setListening(false); }
+  };
+  useEffect(() => {
+    const on = (e) => {
+      const d = (e && e.detail) || {};
+      setOpen(true);
+      if (d.q) setTimeout(() => ask(d.q), 30);
+      else if (d.listen) setTimeout(() => listen(), 60);
+    };
+    window.addEventListener("frw-voice", on);
+    return () => window.removeEventListener("frw-voice", on);
+  }, []);
+  const close = () => { stopListen(); try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} setOpen(false); };
+  useEffect(() => { if (!open) return; const k = (e) => { if (e.key === "Escape") close(); }; window.addEventListener("keydown", k); return () => window.removeEventListener("keydown", k); }, [open]);
+  const reset = () => { stopListen(); try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {} setTurns([]); fetch("/api/voice/reset", { method: "POST" }).catch(() => {}); };
+  const loadCfg = () => fetch("/api/voice/key/status", { cache: "no-store" }).then(r => r.ok ? r.json() : null).then(j => setCfg(j || { enabled: false })).catch(() => setCfg({ enabled: false }));
+  useEffect(() => { if (setup && !cfg) loadCfg(); }, [setup]);
+  const hookUrl = cfg && cfg.token ? `${location.origin}/api/voice/ask/${cfg.token}` : "";
+  const issue = async () => {
+    if (cfg && cfg.enabled && !window.confirm("새 주소를 만들면 지금 주소는 바로 막힙니다.\n아이폰 단축어의 주소도 바꿔야 합니다. 계속할까요?")) return;
+    const r = await fetch("/api/voice/key/issue", { method: "POST" }).then(x => x.json()).catch(() => ({}));
+    if (r.ok) { await loadCfg(); showToast("Siri 에서 쓸 주소를 만들었습니다", "success"); } else showToast("주소를 만들지 못했습니다");
+  };
+  const disable = async () => { if (!window.confirm("끄면 단축어(Siri)로는 더 묻지 못합니다. 계속할까요?")) return; await fetch("/api/voice/key/disable", { method: "POST" }).catch(() => {}); loadCfg(); };
+  const copy = async () => { try { await navigator.clipboard.writeText(hookUrl); showToast("주소를 복사했습니다 — 단축어에 붙여 넣으세요", "success"); } catch { showToast(hookUrl); } };
+  if (!open) return null;
+  const step = (n, body) => (
+    <li style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+      <span style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 10, background: "rgba(219,107,46,0.16)", color: "#DB6B2E", fontSize: 11, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{n}</span>
+      <span style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.6 }}>{body}</span>
+    </li>
+  );
+  const EX = ["이번 달 매출 얼마야?", "오늘 일정 알려 줘", "미수금 제일 많은 곳은?", "내일 오후 3시 거래처 미팅 일정 추가해 줘"];
+  return ReactDOM.createPortal(
+    <div className="vx-float" role="dialog" aria-label="말로 묻는 회사 비서">
+      <button type="button" className="vx-x" onClick={close} aria-label="닫기">✕</button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingRight: 36 }}>
+        <span style={{ fontSize: 15, fontWeight: 800 }}>회사 비서</span>
+        <span style={{ fontSize: 12, color: "var(--text3)" }}>말로 묻고 답 듣기</span>
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+        <button type="button" className={`vx-btn${tts ? " on" : ""}`} onClick={() => setTts(v => !v)} aria-pressed={tts} title="답을 소리로 읽어 주기">소리로 읽기 {tts ? "켬" : "끔"}</button>
+        <button type="button" className={`vx-btn${hands ? " on" : ""}`} onClick={() => setHands(v => !v)} aria-pressed={hands} title="답을 읽은 뒤 다시 듣기 — 손 안 대고 계속 묻기">이어서 듣기 {hands ? "켬" : "끔"}</button>
+        {turns.length > 0 && <button type="button" className="vx-btn" onClick={reset}>새 대화</button>}
+        <button type="button" className={`vx-btn${setup ? " on" : ""}`} onClick={() => setSetup(v => !v)} aria-expanded={setup}>운전 중(Siri)</button>
+      </div>
+      {setup && (
+        <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 14, background: "rgba(127,127,127,0.10)", display: "flex", flexDirection: "column", gap: 8, overflowY: "auto", maxHeight: 300 }}>
+          <span style={{ fontSize: 12.5, color: "var(--text2)", lineHeight: 1.6 }}>아이폰 <b>단축어</b>를 한 번 만들어 두면 운전 중에 「<b>시리야, 회사 비서</b>」라고 말하고 질문하면 답을 읽어 줍니다(CarPlay 포함).</span>
+          {!cfg ? <span style={{ fontSize: 12, color: "var(--text3)" }}>불러오는 중…</span> : cfg.enabled ? (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <code style={{ flex: "1 1 100%", fontSize: 11.5, padding: "8px 9px", borderRadius: 8, background: "rgba(127,127,127,0.12)", overflowWrap: "anywhere" }}>{hookUrl}</code>
+              <button type="button" className="vx-btn on" onClick={copy}>주소 복사</button>
+              <button type="button" className="vx-btn" onClick={issue}>새 주소</button>
+              <button type="button" className="vx-btn" onClick={disable} style={{ color: "var(--negative-text)" }}>끄기</button>
+              <span style={{ fontSize: 11.5, color: "var(--text3)" }}>오늘 {cfg.today || 0}번 물음 · 하루 {cfg.limit}번까지</span>
+            </div>
+          ) : <button type="button" className="vx-btn on" onClick={issue} style={{ alignSelf: "flex-start" }}>Siri 주소 만들기</button>}
+          {cfg && !cfg.ai && <span style={{ fontSize: 12, color: "var(--negative-text)" }}>서버에 Claude 키(ANTHROPIC_API_KEY)가 없어 답을 못 합니다.</span>}
+          <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+            {step(1, <>위 「주소 복사」를 누릅니다. 이 주소는 비밀번호와 같아요. 남에게 보내지 마세요.</>)}
+            {step(2, <><b>단축어</b> 앱 → 오른쪽 위 <b>+</b> → 맨 위 이름을 <b>회사 비서</b>로 바꿉니다(Siri 에게 부를 이름).</>)}
+            {step(3, <>동작 검색에서 <b>텍스트 받아쓰기</b> 추가 → 언어 <b>한국어</b>, 듣기 중단 <b>일시 정지 후</b>.</>)}
+            {step(4, <><b>URL 콘텐츠 가져오기</b> 추가 → URL 칸에 복사한 주소 붙여 넣기 → <b>›</b> 눌러 방법 <b>POST</b>, 요청 본문 <b>JSON</b> → 필드 추가 <b>텍스트</b>: 키 <code>text</code>, 값은 변수 <b>받아쓴 텍스트</b>.</>)}
+            {step(5, <><b>텍스트 말하기</b> 추가 → 말할 내용은 변수 <b>URL의 콘텐츠</b>. 완료.</>)}
+            {step(6, <>운전 중: 「시리야, 회사 비서」 → 삐 소리 뒤 질문 → 답을 읽어 줍니다. 15분 안에 다시 부르면 앞 질문을 이어서 알아들어요(「그럼 지난달은?」).</>)}
+          </ol>
+        </div>
+      )}
+      <div ref={logRef} className="vx-log">
+        {turns.length === 0 && !listening && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 2px" }}>
+            <span style={{ fontSize: 12.5, color: "var(--text3)" }}>마이크를 누르고 말해 보세요. 이렇게요:</span>
+            {EX.map(x => <button key={x} type="button" className="vx-btn" onClick={() => ask(x)} style={{ alignSelf: "flex-start", height: 30, fontWeight: 600 }}>{x}</button>)}
+          </div>
+        )}
+        {turns.map((t, i) => (
+          <React.Fragment key={i}>
+            <div className="vx-q">{t.q}</div>
+            {t.a == null ? <div className="vx-a vx-dots" aria-label="답을 찾는 중"><span/><span/><span/></div> : (
+              <div className="vx-a" style={t.err ? { color: "var(--negative-text)" } : null}>
+                {t.a}
+                {(t.actions || []).filter(x => x.kind === "todo").map((x, k) => (
+                  <div key={k} style={{ marginTop: 6, fontSize: 12, fontWeight: 700, color: "var(--positive-text)" }}>✓ 일정에 넣음 · {x.date} {x.text}</div>
+                ))}
+                {tts && i === turns.length - 1 && <button type="button" className="vx-btn" onClick={() => vxSpeak(t.a)} style={{ height: 26, marginTop: 6, display: "block", fontSize: 11.5 }}>다시 듣기</button>}
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+        {listening && <div className="vx-q" style={{ opacity: 0.75 }}>{interim || "듣고 있어요…"}</div>}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <form onSubmit={e => { e.preventDefault(); ask(draft); }} style={{ flex: 1, minWidth: 0, display: "flex" }}>
+          <input className="vx-in" value={draft} onChange={e => setDraft(e.target.value)} placeholder={busy ? "답을 찾는 중…" : "글로 묻기 — Enter"} aria-label="글로 묻기" disabled={busy} enterKeyHint="send"/>
+        </form>
+        <button type="button" className={`vx-mic${listening ? " listen" : ""}`} onClick={listen} disabled={busy} aria-label={listening ? "그만 듣기" : "말하기"} aria-pressed={listening}
+          style={busy ? { opacity: 0.5, cursor: "default" } : null}>
+          <Icon name="mic" size={26}/>
+        </button>
+      </div>
+    </div>, document.body);
+}
+
 function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null, onSide, stock = null, onStock, todos = [], taxes = [], deposits = null, ledgers = null, clientAR = null, onAR, yearly = null }) {
   const today = kstTodayYmd();
   const [q, setQ] = useState("");
@@ -18287,6 +18484,9 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
       .forEach(({ c }) => items.push({ section: "바로가기", ...c }));
     // ── 검색 ──
     (search(qs) || []).slice(0, 12).forEach((r, i) => items.push({ section: "검색", id: `gs:${r.type}:${r.title}:${i}`, icon: r.icon, title: r.title, sub: r.sub, tag: r.type, run: r.action }));
+    // ── 회사 비서(서버 Claude — 앱 안에서 바로 답, 일정 추가도) ──
+    items.push({ section: "Claude", id: "voice", icon: "mic", title: `회사 비서에게 묻기 — “${qs}”`, sub: "앱 안에서 바로 답해요 · 「일정 추가해 줘」도 돼요 · 답을 소리로 읽어 줌",
+      run: () => { try { window.dispatchEvent(new CustomEvent("frw-voice", { detail: { q: qs } })); } catch {} } });
     // ── Claude ──
     items.push({ section: "Claude", id: "claude", icon: "sparkles", title: `Claude 에게 묻기 — “${qs}”`, sub: "앱 데이터(NJ_SAFETY 커넥터)를 보고 답해요 · 구독 안이라 추가 비용 없음",
       run: () => { const p = `NJ SAFETY 회사 앱 데이터(NJ_SAFETY 커넥터)를 보고 답해줘: ${qs}`; try { navigator.clipboard.writeText(p).catch(() => {}); } catch {} window.open(`https://claude.ai/new?q=${encodeURIComponent(p)}`, "_blank", "noopener"); } });
@@ -18563,6 +18763,8 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
           <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKey}
             placeholder={narrow ? "말로 물어보기 — 「솜바지 재고」" : "무엇이든 — 「솜바지 재고 부족한 사이즈」 「가나산공 지난달 매출」 「새 견적」"}
             style={{ flex: 1, minWidth: 0, height: 56, border: "none", outline: "none", background: "transparent", color: "var(--text1)", fontSize: 16, fontFamily: "inherit", boxShadow: "none", padding: 0 }}/>
+          <button type="button" onClick={() => { onClose(); setTimeout(() => { try { window.dispatchEvent(new CustomEvent("frw-voice", { detail: { listen: true } })); } catch {} }, 0); }} aria-label="말로 묻기 — 회사 비서" title="말로 묻기 — 회사 비서가 답을 읽어 줘요"
+            style={{ width: 34, height: 34, borderRadius: 17, border: "none", background: "rgba(219,107,46,0.14)", color: "#DB6B2E", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="mic" size={17}/></button>
           {q && <button type="button" onClick={() => { setQ(""); inputRef.current && inputRef.current.focus(); }} aria-label="지우기" style={{ width: 26, height: 26, borderRadius: 13, border: "none", background: "var(--surface2)", color: "var(--text2)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Icon name="close" size={12}/></button>}
           <button type="button" onClick={onClose} style={{ height: 24, padding: "0 7px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface2)", color: "var(--text3)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{narrow ? "닫기" : "Esc"}</button>
         </div>
@@ -25581,7 +25783,10 @@ ${sizes.map(([sz, q]) => `| 반사 전사 — 하계 방염 남방(핀체크 배
       } catch { /* 폴링 실패는 조용히 무시 — 다음 주기에 재시도 */ }
     };
     const id = setInterval(tick, POLL_MS);
-    return () => clearInterval(id);
+    // 회사 비서가 일정을 넣은 직후처럼, 서버에서 바뀐 걸 바로 받아오고 싶을 때
+    const now = () => { setTimeout(tick, 600); };
+    window.addEventListener("frw-sync-now", now);
+    return () => { clearInterval(id); window.removeEventListener("frw-sync-now", now); };
   }, []);
 
   // 콜드 스타트: localStorage 제품엔 이미지가 없으므로 IndexedDB 캐시에서 복원.
@@ -27608,6 +27813,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                   <PaneCtx.Provider value="side">{renderTabBody(sideTab, "side")}</PaneCtx.Provider>
                 </SidePane>
               ), document.body)}
+              <VoiceAssistant/>
               {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild} sideIds={SIDE_TAB_IDS} onSide={openSide}
                 stock={stock} onStock={(f) => { if (f) setStockFocusSearch(f); setTab("stock"); }}
                 todos={todos} taxes={taxes} deposits={bankDeposits} ledgers={ledgers} clientAR={clientAR} yearly={yearlyRevenue}
