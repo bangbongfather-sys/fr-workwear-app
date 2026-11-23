@@ -18555,6 +18555,11 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   const [robot, setRobot] = useState(null);   // 판매 로봇 상태 { mac, req, last }
   const [robotCode, setRobotCode] = useState("");        // 이카운트 추가 보안 인증 — 문자로 온 인증번호
   const [robotSending, setRobotSending] = useState(false);
+  const [authPopClosed, setAuthPopClosed] = useState(0);   // 닫은 인증 팝업(그 요청의 at) — 번호가 틀려 다시 물으면 at 이 바뀌어 다시 뜬다
+  const [, setAuthTick] = useState(0);
+  const authNeed = !!(robot && robot.req && robot.req.auth && robot.req.auth.state === "need");
+  useEffect(() => { if (!authNeed) return; const t = setInterval(() => setAuthTick(x => x + 1), 1000); return () => clearInterval(t); }, [authNeed]);
+  useEffect(() => { if (authNeed) { try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch {} } }, [authNeed, robot && robot.req && robot.req.auth && robot.req.auth.at]);
   const [robotFailSeen, setRobotFailSeen] = useState(() => { try { return Number(localStorage.getItem("frw_sales_robot_failseen")) || 0; } catch { return 0; } });   // 닫은 실패 안내(그 실행 시각)
   useEffect(() => { try { localStorage.setItem("frw_sales_robot_failseen", String(robotFailSeen || 0)); } catch {} }, [robotFailSeen]);
   useEffect(() => {
@@ -18586,8 +18591,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
     salesRobotAsk(`${ymShift(today.slice(0, 7), -1)}-01`, ymMonthEnd(ymShift(today.slice(0, 7), 1)), via);
   };
   // 이카운트가 처음 보는 곳(GitHub 로봇)의 로그인에 문자 인증을 요구하면 — 대표님이 받은 인증번호를 로봇에 건넨다
-  const robotSendCode = async () => {
-    const c = robotCode.replace(/\D/g, ""); if (c.length < 4 || robotSending) return;
+  const robotSendCode = async (given) => {
+    const c = String(typeof given === "string" ? given : robotCode).replace(/\D/g, ""); if (c.length < 4 || robotSending) return;
     setRobotSending(true);
     try {
       const j = await (await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: c }) })).json();
@@ -19583,6 +19588,48 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
           <button type="button" onClick={() => setRobotFailSeen(robot.last.atMs)} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>닫기</button>
         </div>
       )}
+      {authNeed && authPopClosed !== robot.req.auth.at && ReactDOM.createPortal((() => {
+        const au = robot.req.auth;
+        const left = Math.max(0, Math.round((Number(au.at) + 270e3 - Date.now()) / 1000));   // 로봇이 4분 30초 기다린다
+        const digits = robotCode.replace(/\D/g, "").slice(0, 6);
+        return (
+          <div role="dialog" aria-modal="true" aria-label="이카운트 문자 인증" onClick={e => { if (e.target === e.currentTarget) setAuthPopClosed(au.at); }}
+            style={{ position: "fixed", inset: 0, zIndex: 9000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, WebkitBackdropFilter: "blur(4px)", backdropFilter: "blur(4px)" }}>
+            <div style={{ width: "min(380px, 100%)", borderRadius: 20, background: "var(--glass-pop, var(--surface))", color: "var(--text1)", boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: "22px 20px 18px", display: "flex", flexDirection: "column", gap: 14, border: "1px solid var(--border)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 36, height: 36, borderRadius: 12, background: "rgba(219,107,46,0.14)", color: "#DB6B2E", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Icon name="phone" size={18}/></span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 16, fontWeight: 800 }}>이카운트 문자 인증</div>
+                  <div style={{ fontSize: 12.5, color: "var(--text3)" }}>{au.hint ? `${au.hint} 로 온 ` : ""}인증번호 6자리를 넣어 주세요</div>
+                </div>
+              </div>
+              {au.error ? <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--negative-text, #F04452)" }}>{au.error}</div> : null}
+              <form onSubmit={e => { e.preventDefault(); robotSendCode(); }} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <label style={{ position: "relative", display: "block", cursor: "text" }}>
+                  <input value={digits} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 6); setRobotCode(v); if (v.length === 6) robotSendCode(v); }}
+                    inputMode="numeric" autoComplete="one-time-code" autoFocus aria-label="문자 인증번호" maxLength={6} disabled={robotSending}
+                    style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, border: "none", fontSize: 16, caretColor: "transparent" }}/>
+                  <div aria-hidden="true" style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
+                    {[0, 1, 2, 3, 4, 5].map(i => (
+                      <div key={i} style={{ height: 54, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, fontVariantNumeric: "tabular-nums",
+                        background: "var(--surface2)", border: `2px solid ${i === digits.length ? "#DB6B2E" : "transparent"}`, color: "var(--text1)" }}>{digits[i] || ""}</div>
+                    ))}
+                  </div>
+                </label>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: left < 60 ? "var(--negative-text, #F04452)" : "var(--text3)" }}>
+                  <span>{robotSending ? "보내는 중…" : "6자리를 넣으면 바로 보내요 · 문자 알림의 번호를 눌러도 채워져요"}</span>
+                  <b style={{ fontVariantNumeric: "tabular-nums" }}>{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</b>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" onClick={robotCancel} style={{ flex: "0 0 auto", height: 44, padding: "0 14px", borderRadius: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>요청 취소</button>
+                  <button type="button" onClick={() => setAuthPopClosed(au.at)} style={{ flex: "0 0 auto", height: 44, padding: "0 14px", borderRadius: 12, border: "1px solid var(--border)", background: "transparent", color: "var(--text2)", fontSize: 13.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>닫기</button>
+                  <button type="submit" className="btn-orange" disabled={digits.length < 4 || robotSending} style={{ flex: 1, height: 44, borderRadius: 12, fontSize: 14.5, fontWeight: 800 }}>{robotSending ? "보내는 중…" : "보내기"}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })(), document.body)}
       {robot && robot.req && (() => {
         const r = robot.req, mac = robot.mac || {}, au = r.auth;
         const ghOk = !!(robot.gh && robot.gh.on && r.gh && r.gh.ok), ghErr = robot.gh && robot.gh.on && r.gh && !r.gh.ok ? r.gh.error : "";
