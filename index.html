@@ -10243,6 +10243,47 @@ function ClientSuggestInput({ value, onChange, names, listId, placeholder, style
   );
 }
 
+// ── 여러 달 청구를 합친 입금 ──
+// 거래처가 밀린 두세 달 치를 한 번에(또는 몇 번에 나눠) 보내면, 입금액이 한 달 청구와는 안 맞고 몇 달 청구의 합과 맞는다.
+// 미입금 청구 중 2~4달을 골라 합이 입금액과 「원 단위까지」 똑같은 묶음을 찾는다 — 달 수가 적은 것, 오래된 달부터.
+// (한 달 청구와 똑같으면 그쪽이 먼저다. 이 함수는 그게 없을 때만 쓴다.)
+const _depComboCache = new WeakMap();   // 미입금 목록(같은 배열) × 금액 → 결과 — 입금 수백 줄을 그릴 때마다 다시 찾지 않게
+function depBillCombo(ups, amount) {
+  const amt = Math.round(Number(amount) || 0);
+  if (!amt || !Array.isArray(ups) || ups.length < 2) return null;
+  let memo = _depComboCache.get(ups); if (!memo) { memo = new Map(); _depComboCache.set(ups, memo); }
+  if (memo.has(amt)) return memo.get(amt);
+  const res = depBillComboFind(ups, amt); memo.set(amt, res); return res;
+}
+function depBillComboFind(ups, amt) {
+  const list = ups.filter(u => Math.round(u.total) > 0 && Math.round(u.total) < amt).slice().sort((a, b) => a.ym.localeCompare(b.ym) || String(a.id).localeCompare(String(b.id))).slice(0, 18);
+  for (let k = 2; k <= Math.min(4, list.length); k++) {
+    let found = null;
+    const pick = (start, left, chosen) => {
+      if (found) return;
+      if (chosen.length === k) { if (left === 0) found = chosen.slice(); return; }
+      for (let i = start; i < list.length && !found; i++) { const v = Math.round(list[i].total); if (v <= left) { chosen.push(list[i]); pick(i + 1, left - v, chosen); chosen.pop(); } }
+    };
+    pick(0, amt, []);
+    if (found) return found;
+  }
+  return null;
+}
+// 묶음을 한 달 청구처럼 다룰 수 있게 — ym 은 「2026-09 + 2026-10」, total 은 합계
+const depComboAsBill = (combo) => ({ ym: combo.map(u => u.ym).join(" + "), total: combo.reduce((a, u) => a + (Number(u.total) || 0), 0), combo });
+const depComboLink = (combo) => `leds|${combo.map(u => `${u.ym}:${u.id}`).join(",")}`;
+// 고른 값("led|ym|id" · "leds|ym:id,ym:id") → 붙일 청구들 [{ym, id}]
+function depLinkTargets(link) {
+  const s = String(link || "");
+  if (s.startsWith("led|")) { const [, ym, id] = s.split("|"); return [{ ym, id: String(id) }]; }
+  if (s.startsWith("leds|")) return s.slice(5).split(",").map(x => { const i = x.indexOf(":"); return { ym: x.slice(0, i), id: x.slice(i + 1) }; }).filter(x => x.ym && x.id);
+  return [];
+}
+// 입금에 저장하는 연결 — 첫 달은 예전처럼 ym·clientId, 나머지 달은 more 에
+const depLedgerLinkOf = (targets) => ({ kind: "ledger", ym: targets[0].ym, clientId: String(targets[0].id), ...(targets.length > 1 ? { more: targets.slice(1).map(t => ({ ym: t.ym, clientId: String(t.id) })) } : {}) });
+const depLinkMonths = (link) => link && link.kind === "ledger" ? [{ ym: link.ym, clientId: String(link.clientId) }, ...((link.more || []).map(m => ({ ym: m.ym, clientId: String(m.clientId) })))] : [];
+const depLinkLabel = (link, short) => { const l = link || {}; if (l.kind === "ledger") return `${depLinkMonths(l).map(m => m.ym).join(" + ")} 장부 입금완료`; if (l.kind === "ar") return short ? "미수금 입금 기록" : "미수금 원장 입금 기록"; return short ? "확인 처리" : "확인 처리만"; };
+
 // 입금 한 건을 "어디에 붙일지" 고르는 줄 — 목록 안에서 펼쳐진다.
 // 고르는 값을 부모(BankDepositsView)가 들고 있으면 한 글자 칠 때마다 입금 수백 줄이
 // 통째로 다시 그려져 화면이 몇백 ms씩 멈춘다. 그래서 값은 이 컴포넌트가 자기 안에서만
@@ -10251,6 +10292,7 @@ function DepositProcessPanel({ dep, initialClient, initialLink, clientNames, unp
   const [client, setClient] = React.useState(initialClient || "");
   const [link, setLink] = React.useState(initialLink || "none");
   const ups = unpaidOf(client);
+  const combo = ups.some(u => Math.round(u.total) === Math.round(dep.amount)) ? null : depBillCombo(ups, dep.amount);
   return (
     <td colSpan={6} style={{ padding: "12px 16px", borderTop: "1px dashed rgba(219,107,46,0.3)" }}>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -10265,6 +10307,7 @@ function DepositProcessPanel({ dep, initialClient, initialLink, clientNames, unp
           <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)" }}>연결할 항목</label>
           <select value={link} onChange={e => setLink(e.target.value)}
             style={{ height: 38, padding: "0 10px", fontSize: 12.5, borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text1)", maxWidth: 300 }}>
+            {combo && <option value={depComboLink(combo)}>{combo.map(u => u.ym).join(" + ")} 청구 합계 {fmt(depComboAsBill(combo).total)}원 → 모두 입금완료 (금액 일치)</option>}
             {ups.map(u => (
               <option key={`${u.ym}-${u.id}`} value={`led|${u.ym}|${u.id}`}>
                 {u.ym} 장부 청구 {fmt(u.total)}원 → 입금완료{Math.round(u.total) === Math.round(dep.amount) ? " (금액 일치)" : ""}
@@ -10990,6 +11033,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
   const defaultLinkFor = (clientName, amount) => {
     const ups = unpaidOf(clientName);
     const exact = ups.find(u => Math.round(u.total) === Math.round(amount));
+    if (!exact) { const combo = depBillCombo(ups, amount); if (combo) return depComboLink(combo); }
     const pick = exact || ups[0];
     return pick ? `led|${pick.ym}|${pick.id}` : "ar";
   };
@@ -11180,13 +11224,14 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     const name = (pickClient || "").trim();
     if (!name) { showToast("거래처를 선택하세요"); return; }
     let link = { kind: "none" };
-    if ((pickLink || "").startsWith("led|")) {
-      const [, ym, idStr] = pickLink.split("|");
+    const tg = depLinkTargets(pickLink);
+    if (tg.length) {
       setLedgers(prev => {
-        const m = prev[ym]; if (!m) return prev;
-        return { ...prev, [ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === idStr ? { ...c, status: "입금완료" } : c) } };
+        const next = { ...prev };
+        tg.forEach(({ ym, id }) => { const m = next[ym]; if (!m) return; next[ym] = { ...m, clients: (m.clients || []).map(c => String(c.id) === String(id) ? { ...c, status: "입금완료" } : c) }; });
+        return next;
       });
-      link = { kind: "ledger", ym, clientId: idStr };
+      link = depLedgerLinkOf(tg);
     } else if (pickLink === "ar") {
       const entryId = Date.now();
       setClientAR(prev => {
@@ -11208,10 +11253,11 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     const link = dep.link || {};
     // 한 청구를 여러 입금으로 나눠 받은 경우(일괄 처리), 다른 입금이 아직 남아 있으면
     // 장부는 "입금완료"로 두어야 한다. 안 그러면 한 건만 되돌려도 청구 전체가 미입금이 된다.
-    const siblings = link.kind === "ledger"
-      ? allItems.filter(x => x.id !== dep.id && x.status === "done" && x.link && x.link.kind === "ledger"
-          && x.link.ym === link.ym && String(x.link.clientId) === String(link.clientId))
-      : [];
+    // 여러 달을 한 입금에 붙인 경우(more) 달마다 따로 본다 — 다른 입금도 붙어 있는 달은 입금완료로 둔다
+    const myMonths = depLinkMonths(link);
+    const shared = (m) => allItems.some(x => x.id !== dep.id && x.status === "done" && depLinkMonths(x.link).some(o => o.ym === m.ym && o.clientId === m.clientId));
+    const keep = new Set(myMonths.filter(shared).map(m => `${m.ym}|${m.clientId}`));
+    const siblings = myMonths.length && keep.size === myMonths.length ? [1] : [];
     if (!silent && !window.confirm(
       `"${dep.client}" ${fmt(dep.amount)}원 처리를 되돌릴까요?\n` +
       (siblings.length > 0
@@ -11219,9 +11265,11 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
         : "연결된 장부/미수금 기록도 함께 복구됩니다.")
     )) return;
     if (link.kind === "ledger") {
-      if (siblings.length === 0) setLedgers(prev => {
-        const m = prev[link.ym]; if (!m) return prev;
-        return { ...prev, [link.ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === String(link.clientId) && c.status === "입금완료" ? { ...c, status: "미입금" } : c) } };
+      const back = myMonths.filter(m => !keep.has(`${m.ym}|${m.clientId}`));
+      if (back.length) setLedgers(prev => {
+        const next = { ...prev };
+        back.forEach(({ ym, clientId }) => { const m = next[ym]; if (!m) return; next[ym] = { ...m, clients: (m.clients || []).map(c => String(c.id) === String(clientId) && c.status === "입금완료" ? { ...c, status: "미입금" } : c) }; });
+        return next;
       });
     } else if (link.kind === "ar") {
       setClientAR(prev => {
@@ -11406,15 +11454,18 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     setBulkClient(best);
   }, [selKey]);
   const bulkUnpaid = React.useMemo(() => unpaidOf(bulkClient), [bulkClient, ledgers]);
-  // 합계가 정확히 맞는 청구 (반올림 원 단위)
+  // 합계가 정확히 맞는 청구 (반올림 원 단위) — 한 달이 없으면 여러 달 묶음
   const bulkMatch = bulkUnpaid.find(u => Math.round(u.total) === Math.round(selectedPendingTotal));
+  const bulkCombo = bulkMatch ? null : depBillCombo(bulkUnpaid, selectedPendingTotal);
   useEffect(() => {
     if (!bulkClient) { setBulkLink(""); return; }
     if (bulkMatch) setBulkLink(`led|${bulkMatch.ym}|${bulkMatch.id}`);
+    else if (bulkCombo) setBulkLink(depComboLink(bulkCombo));
     else setBulkLink(bulkUnpaid[0] ? `led|${bulkUnpaid[0].ym}|${bulkUnpaid[0].id}` : "ar");
   }, [bulkClient, selKey, bulkUnpaid.length]);
   const bulkTarget = bulkLink.startsWith("led|")
     ? bulkUnpaid.find(u => `led|${u.ym}|${u.id}` === bulkLink)
+    : bulkLink.startsWith("leds|") && bulkCombo && bulkLink === depComboLink(bulkCombo) ? depComboAsBill(bulkCombo)
     : null;
   const bulkDiff = bulkTarget ? Math.round(selectedPendingTotal) - Math.round(bulkTarget.total) : null;
 
@@ -11424,16 +11475,18 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     const rows = selectedPending;
     if (rows.length === 0) return;
     let link = null;
-    if (bulkLink.startsWith("led|")) {
-      const [, ym, idStr] = bulkLink.split("|");
+    const btg = depLinkTargets(bulkLink);
+    if (btg.length) {
+      const ym = bulkTarget ? bulkTarget.ym : btg.map(x => x.ym).join(" + ");
       if (bulkDiff !== 0 && !window.confirm(
         `선택한 ${rows.length}건 합계 ${fmt(selectedPendingTotal)}원이\n${ym} 청구액 ${fmt(bulkTarget ? bulkTarget.total : 0)}원보다 ${fmt(Math.abs(bulkDiff || 0))}원 ${(bulkDiff || 0) > 0 ? "많습니다" : "적습니다"}.\n\n그래도 입금완료 처리할까요?`
       )) return;
       setLedgers(prev => {
-        const m = prev[ym]; if (!m) return prev;
-        return { ...prev, [ym]: { ...m, clients: (m.clients || []).map(c => String(c.id) === idStr ? { ...c, status: "입금완료" } : c) } };
+        const next = { ...prev };
+        btg.forEach(({ ym: y, id }) => { const m = next[y]; if (!m) return; next[y] = { ...m, clients: (m.clients || []).map(c => String(c.id) === String(id) ? { ...c, status: "입금완료" } : c) }; });
+        return next;
       });
-      link = { kind: "ledger", ym, clientId: idStr };
+      link = depLedgerLinkOf(btg);
     }
     // 행별 link 매핑 — 미수금 원장은 입금 건마다 날짜·금액이 달라 한 건씩 기록한다
     const base = Date.now();
@@ -11478,6 +11531,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     if (!client) return { client: "", link: "", exact: null, near: null };
     const ups = unpaidOf(client);
     const exact = ups.find(u => Math.round(u.total) === Math.round(dep.amount)) || null;
+    if (!exact) { const combo = depBillCombo(ups, dep.amount); if (combo) return { client, link: depComboLink(combo), exact: depComboAsBill(combo), near: null }; }
     return { client, link: exact ? `led|${exact.ym}|${exact.id}` : "ar", exact, near: exact ? null : (ups[0] || null) };
   };
   const autoTargetOf = (dep) => targetFor(dep, sugMap[dep.id]);
@@ -11489,11 +11543,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     if (!plan.length) return 0;
 
     const ledgerHits = {};
-    plan.forEach(p => {
-      if (!String(p.link).startsWith("led|")) return;
-      const [, ym, id] = p.link.split("|");
-      (ledgerHits[ym] = ledgerHits[ym] || new Set()).add(String(id));
-    });
+    plan.forEach(p => { depLinkTargets(p.link).forEach(({ ym, id }) => { (ledgerHits[ym] = ledgerHits[ym] || new Set()).add(String(id)); }); });
     if (Object.keys(ledgerHits).length) {
       setLedgers(prev => {
         const next = { ...prev };
@@ -11509,9 +11559,9 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
     const linkOf = {}, clientOf = {}, arAdds = {};
     plan.forEach((p, i) => {
       clientOf[p.row.id] = p.client;
-      if (String(p.link).startsWith("led|")) {
-        const [, ym, id] = p.link.split("|");
-        linkOf[p.row.id] = { kind: "ledger", ym, clientId: id };
+      const tg = depLinkTargets(p.link);
+      if (tg.length) {
+        linkOf[p.row.id] = depLedgerLinkOf(tg);
       } else if (p.link === "ar") {
         const eid = base + i;
         (arAdds[p.client] = arAdds[p.client] || []).push({ id: eid, type: "입금", desc: `은행입금 (${p.row.name})`, amount: p.row.amount, date: p.row.date });
@@ -12142,6 +12192,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
               <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text3)", display: "block", marginBottom: 4 }}>연결할 청구 (월)</label>
               <select value={bulkLink} onChange={e => setBulkLink(e.target.value)} style={{ width: "100%", height: 38, fontSize: 13 }}>
                 {bulkUnpaid.length === 0 && <option value="ar">미입금 청구 없음 — 미수금 원장에 입금 기록</option>}
+                {bulkCombo && <option value={depComboLink(bulkCombo)}>✓ 합계 일치 · {bulkCombo.map(u => u.ym).join(" + ")} 청구 {fmt(depComboAsBill(bulkCombo).total)}원 → 모두 입금완료</option>}
                 {bulkUnpaid.map(u => (
                   <option key={`${u.ym}|${u.id}`} value={`led|${u.ym}|${u.id}`}>
                     {Math.round(u.total) === Math.round(selectedPendingTotal) ? "✓ 합계 일치 · " : ""}{u.ym} 청구 {fmt(u.total)}원 → 입금완료
@@ -12272,7 +12323,7 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                                     </span>
                                   )}
                                   <span style={{ fontSize: 11, color: "var(--positive-text)", fontWeight: 600 }}>
-                                    → {dep.client} · {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 입금 기록" : "확인 처리"}
+                                    → {dep.client} · {depLinkLabel(dep.link, true)}
                                   </span>
                                 </div>
                               )}
@@ -12284,12 +12335,12 @@ function BankDepositsView({ bankDeposits, setBankDeposits, ledgers = {}, setLedg
                                 {depNarrow ? (
                                   <td className="allow-wrap" style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>
                                     <div style={{ fontWeight: 600, color: "var(--text2)" }}>{dep.client}</div>
-                                    <div style={{ fontSize: 11, marginTop: 2 }}>{(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 원장 입금 기록" : "확인 처리만"}</div>
+                                    <div style={{ fontSize: 11, marginTop: 2 }}>{depLinkLabel(dep.link)}</div>
                                   </td>
                                 ) : <>
                                 <td style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>{dep.client}</td>
                                 <td style={{ padding: "10px 12px", color: "var(--text3)", fontSize: 12 }}>
-                                  {(dep.link || {}).kind === "ledger" ? `${(dep.link || {}).ym} 장부 입금완료` : (dep.link || {}).kind === "ar" ? "미수금 원장 입금 기록" : "확인 처리만"}
+                                  {depLinkLabel(dep.link)}
                                 </td></>}
                                 <td style={{ padding: "8px 12px", textAlign: "center", whiteSpace: "nowrap" }}>
                                   <button onClick={() => undoDeposit(dep)} title="처리 되돌리기"
