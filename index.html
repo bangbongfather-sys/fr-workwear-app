@@ -18129,7 +18129,7 @@ async function salesRobotAsk(f, t2, via = "") {
     if (req.atMs) { try { localStorage.setItem(SALES_ROBOT_WAIT, String(req.atMs)); } catch {} }
     try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
     if (j.already) showToast(`이미 가져오는 중이에요 (${robotMd(req.from)}~${robotMd(req.to)}) — 끝나면 판매 현황에 반영돼요.`, "info");
-    else if (ghOk) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 요청했어요. 곧 문자 인증번호를 물어볼 수 있으니 이 화면을 열어 두세요.`, "success");
+    else if (ghOk) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 요청했어요. 다른 화면에서 일하셔도 돼요 — 인증번호를 물으면 어느 화면에서든 팝업이 떠요.`, "success");
     else if (mac.alive) showToast(`이카운트에서 ${robotMd(f)}~${robotMd(t2)} 판매 내역을 가져오라고 맥에 요청했어요 — 2~3분 뒤 반영돼요.`, "success");
     else if (st.gh && st.gh.on) showToast("요청을 걸었어요 — 맥이 2분 안에 시작하지 않으면 다른 로봇이 이어받아요.", "info");
     else if (mac.installed) showToast(`요청을 걸어 뒀어요. 지금은 맥이 꺼져(잠들어) 있어요(마지막 확인 ${robotAgo(mac.seen)}) — 맥을 켜면 바로 시작돼요.`, "info");
@@ -18790,6 +18790,93 @@ function CommandPalette({ onClose, tabs, onNav, commands, search, sideIds = null
     </div>, document.body);
 }
 
+// ── 이카운트 문자 인증 카드 (판매 로봇이 로그인할 때 인증번호를 물으면) — 판매 현황 화면과 앱 전체(다른 화면)에서 같이 쓴다 ──
+function SalesOtpCard({ au, code, setCode, sending, onSend, onCancel, onClose }) {
+  const [, setTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => setTick(x => x + 1), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => { document.body.classList.add("otp-open"); return () => document.body.classList.remove("otp-open"); }, []);
+  useEffect(() => { try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch {} }, [au && au.at]);
+  const left = Math.max(0, Math.round((Number(au.at) + 270e3 - Date.now()) / 1000));   // 로봇이 4분 30초 기다린다
+  const digits = String(code || "").replace(/\D/g, "").slice(0, 6);
+  return ReactDOM.createPortal(
+          <div className="otp-float" role="dialog" aria-label="이카운트 문자 인증">
+            <button type="button" className="otp-x" onClick={onClose} aria-label="닫기" title="닫기 — 화면 위 띠에서 넣을 수 있어요">×</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, paddingRight: 30 }}>
+              <span style={{ width: 34, height: 34, borderRadius: 11, background: "linear-gradient(160deg, #F08A4B, #DB6B2E)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 12px rgba(219,107,46,0.35)" }}><Icon name="phone" size={17}/></span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em" }}>이카운트 문자 인증</div>
+                <div style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{au.hint ? `${au.hint} 로 온 ` : ""}인증번호 6자리</div>
+              </div>
+              <span style={{ padding: "3px 9px", borderRadius: 999, fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums", background: left < 60 ? "rgba(240,68,82,0.16)" : "rgba(127,127,127,0.14)", color: left < 60 ? "var(--negative-text, #F04452)" : "var(--text2)", flexShrink: 0 }}>{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</span>
+            </div>
+            {au.error ? <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: "var(--negative-text, #F04452)" }}>{au.error}</div> : null}
+            <form onSubmit={e => { e.preventDefault(); onSend(); }} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+              <input className="otp-in" value={digits} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 6); setCode(v); if (v.length === 6) onSend(v); }}
+                inputMode="numeric" autoComplete="one-time-code" name="one-time-code" autoFocus aria-label="문자 인증번호" maxLength={6} disabled={sending} placeholder="······"/>
+              <div style={{ fontSize: 11.5, color: "var(--text3)" }}>{sending ? "보내는 중…" : "6자리를 넣으면 바로 보내요 · 「메시지에서」 추천을 누르면 채워져요"}</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="otp-btn" onClick={onCancel}>요청 취소</button>
+                <button type="submit" className="btn-orange" disabled={digits.length < 4 || sending} style={{ flex: 1, height: 38, borderRadius: 12, fontSize: 14, fontWeight: 800 }}>{sending ? "보내는 중…" : "보내기"}</button>
+              </div>
+            </form>
+          </div>, document.body);
+}
+// 판매 현황 화면이 안 열려 있을 때(다른 화면에서 일하는 중) 문자 인증 요청을 지켜보다가 인증번호 카드를 띄운다.
+// 이 기기에서 반영을 요청했을 때(SALES_ROBOT_WAIT)만 서버를 본다. 판매 현황 화면이 열려 있으면 그 화면이 맡는다.
+function SalesRobotWatcher() {
+  const [robot, setRobot] = useState(null);
+  const [code, setCode] = useState("");
+  const [sending, setSending] = useState(false);
+  const [closedAt, setClosedAt] = useState(0);
+  const [salesOpen, setSalesOpen] = useState(() => (window.__frwSalesMounted || 0) > 0);
+  useEffect(() => {
+    let alive = true, timer = null;
+    const step = async () => {
+      clearTimeout(timer);
+      const mounted = (window.__frwSalesMounted || 0) > 0; setSalesOpen(mounted);
+      let wait = 0; try { wait = Number(localStorage.getItem(SALES_ROBOT_WAIT)) || 0; } catch {}
+      if (mounted) { timer = setTimeout(step, 4000); return; }          // 판매 현황 화면이 맡는 중 — 열려 있는지만 가끔 본다
+      if (!wait) { setRobot(null); return; }                            // 이 기기에서 건 요청이 없으면 쉰다 (요청을 걸면 신호로 깨어남)
+      let j = null; try { j = await (await fetch("/api/sales/robot", { cache: "no-store" })).json(); } catch {}
+      if (!alive) return;
+      if (!j || !j.ok) { timer = setTimeout(step, 15000); return; }
+      setRobot(j);
+      if (j.last && j.last.reqAtMs === wait) {                          // 내가 건 요청이 끝났다
+        try { localStorage.removeItem(SALES_ROBOT_WAIT); } catch {}
+        if (j.last.ok) showToast(`이카운트 판매 내역을 반영했어요 — ${robotMd(j.last.from)}~${robotMd(j.last.to)} · ${Number(j.last.count != null ? j.last.count : j.last.rows || 0).toLocaleString("ko-KR")}건`, "success");
+        else showToast(`이카운트에서 가져오지 못했어요 — ${j.last.error || "원인을 알 수 없어요"}`, "error");
+        setRobot(null); return;
+      }
+      if (!j.req && Date.now() - wait > 90e3) { try { localStorage.removeItem(SALES_ROBOT_WAIT); } catch {} setRobot(null); return; }
+      timer = setTimeout(step, j.req && (j.req.auth || j.req.claimed) ? 3000 : 6000);
+    };
+    step();
+    const onVis = () => { if (document.visibilityState === "visible") step(); };
+    window.addEventListener("frw-sales-robot", step); window.addEventListener("frw-sales-mounted", step); document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; clearTimeout(timer); window.removeEventListener("frw-sales-robot", step); window.removeEventListener("frw-sales-mounted", step); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
+  const au = robot && robot.req && robot.req.auth;
+  if (salesOpen || !au || au.state !== "need" || closedAt === au.at) return null;
+  const send = async (given) => {
+    const c = String(typeof given === "string" ? given : code).replace(/\D/g, ""); if (c.length < 4 || sending) return;
+    setSending(true);
+    try {
+      const j = await (await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: c }) })).json();
+      if (j && j.ok) { setCode(""); showToast("인증번호를 로봇에 건넸어요 — 이어서 진행해요. 끝나면 알려 드릴게요.", "success"); }
+      else showToast((j && j.error) || "인증번호를 보내지 못했어요", "error");
+    } catch { showToast("인증번호를 보내지 못했어요 — 인터넷 연결을 확인해 주세요", "error"); }
+    setSending(false);
+    try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
+  };
+  const cancel = async () => {
+    try { await fetch("/api/sales/robot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cancel: true }) }); } catch {}
+    try { localStorage.removeItem(SALES_ROBOT_WAIT); } catch {}
+    setRobot(null);
+    try { window.dispatchEvent(new CustomEvent("frw-sales-robot")); } catch {}
+  };
+  return <SalesOtpCard au={au} code={code} setCode={setCode} sending={sending} onSend={send} onCancel={cancel} onClose={() => setClosedAt(au.at)}/>;
+}
+
 function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsDb = [], pane = "main" }) {
   const today = kstTodayYmd();
   const subKey = pane === "side" ? "frw_sales_subtab_side" : "frw_sales_subtab";   // 서브창은 따로 기억
@@ -18867,9 +18954,11 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
   const [, setAuthTick] = useState(0);
   const authNeed = !!(robot && robot.req && robot.req.auth && robot.req.auth.state === "need");
   useEffect(() => { if (!authNeed) return; const t = setInterval(() => setAuthTick(x => x + 1), 1000); return () => clearInterval(t); }, [authNeed]);
-  useEffect(() => { if (authNeed) { try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch {} } }, [authNeed, robot && robot.req && robot.req.auth && robot.req.auth.at]);
-  const otpShown = authNeed && authPopClosed !== robot.req.auth.at;
-  useEffect(() => { document.body.classList.toggle("otp-open", !!otpShown); return () => document.body.classList.remove("otp-open"); }, [otpShown]);
+  // 이 화면이 열려 있는 동안은 인증번호 카드·끝남 알림을 이 화면이 맡는다(앱 전체 감시는 쉰다)
+  useEffect(() => {
+    window.__frwSalesMounted = (window.__frwSalesMounted || 0) + 1; try { window.dispatchEvent(new CustomEvent("frw-sales-mounted")); } catch {}
+    return () => { window.__frwSalesMounted = Math.max(0, (window.__frwSalesMounted || 1) - 1); try { window.dispatchEvent(new CustomEvent("frw-sales-mounted")); } catch {} };
+  }, []);
   const [robotFailSeen, setRobotFailSeen] = useState(() => { try { return Number(localStorage.getItem("frw_sales_robot_failseen")) || 0; } catch { return 0; } });   // 닫은 실패 안내(그 실행 시각)
   useEffect(() => { try { localStorage.setItem("frw_sales_robot_failseen", String(robotFailSeen || 0)); } catch {} }, [robotFailSeen]);
   useEffect(() => {
@@ -19898,34 +19987,8 @@ function SalesTab({ pendingFile = null, clearPending, darkMode = false, clientsD
           <button type="button" onClick={() => setRobotFailSeen(robot.last.atMs)} style={{ height: 32, padding: "0 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text2)", fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>닫기</button>
         </div>
       )}
-      {authNeed && authPopClosed !== robot.req.auth.at && ReactDOM.createPortal((() => {
-        const au = robot.req.auth;
-        const left = Math.max(0, Math.round((Number(au.at) + 270e3 - Date.now()) / 1000));   // 로봇이 4분 30초 기다린다
-        const digits = robotCode.replace(/\D/g, "").slice(0, 6);
-        return (
-          <div className="otp-float" role="dialog" aria-label="이카운트 문자 인증">
-            <button type="button" className="otp-x" onClick={() => setAuthPopClosed(au.at)} aria-label="닫기" title="닫기 — 화면 위 띠에서 넣을 수 있어요">×</button>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, paddingRight: 30 }}>
-              <span style={{ width: 34, height: 34, borderRadius: 11, background: "linear-gradient(160deg, #F08A4B, #DB6B2E)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 12px rgba(219,107,46,0.35)" }}><Icon name="phone" size={17}/></span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em" }}>이카운트 문자 인증</div>
-                <div style={{ fontSize: 12, color: "var(--text3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{au.hint ? `${au.hint} 로 온 ` : ""}인증번호 6자리</div>
-              </div>
-              <span style={{ padding: "3px 9px", borderRadius: 999, fontSize: 12, fontWeight: 800, fontVariantNumeric: "tabular-nums", background: left < 60 ? "rgba(240,68,82,0.16)" : "rgba(127,127,127,0.14)", color: left < 60 ? "var(--negative-text, #F04452)" : "var(--text2)", flexShrink: 0 }}>{Math.floor(left / 60)}:{String(left % 60).padStart(2, "0")}</span>
-            </div>
-            {au.error ? <div style={{ marginTop: 10, fontSize: 12.5, fontWeight: 700, color: "var(--negative-text, #F04452)" }}>{au.error}</div> : null}
-            <form onSubmit={e => { e.preventDefault(); robotSendCode(); }} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-              <input className="otp-in" value={digits} onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 6); setRobotCode(v); if (v.length === 6) robotSendCode(v); }}
-                inputMode="numeric" autoComplete="one-time-code" name="one-time-code" autoFocus aria-label="문자 인증번호" maxLength={6} disabled={robotSending} placeholder="······"/>
-              <div style={{ fontSize: 11.5, color: "var(--text3)" }}>{robotSending ? "보내는 중…" : "6자리를 넣으면 바로 보내요 · 「메시지에서」 추천을 누르면 채워져요"}</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="otp-btn" onClick={robotCancel}>요청 취소</button>
-                <button type="submit" className="btn-orange" disabled={digits.length < 4 || robotSending} style={{ flex: 1, height: 38, borderRadius: 12, fontSize: 14, fontWeight: 800 }}>{robotSending ? "보내는 중…" : "보내기"}</button>
-              </div>
-            </form>
-          </div>
-        );
-      })(), document.body)}
+      {authNeed && authPopClosed !== robot.req.auth.at && <SalesOtpCard au={robot.req.auth} code={robotCode} setCode={setRobotCode} sending={robotSending}
+        onSend={robotSendCode} onCancel={robotCancel} onClose={() => setAuthPopClosed(robot.req.auth.at)}/>}
       {robot && robot.req && (() => {
         const r = robot.req, mac = robot.mac || {}, au = r.auth;
         const ghOk = !!(robot.gh && robot.gh.on && r.gh && r.gh.ok), ghErr = robot.gh && robot.gh.on && r.gh && !r.gh.ok ? r.gh.error : "";
@@ -27802,6 +27865,7 @@ ${poDraft.memo ? `[추가 메모]\n${poDraft.memo}\n` : ""}
                 </SidePane>
               ), document.body)}
               <VoiceAssistant/>
+              <SalesRobotWatcher/>
               {cmdkOpen && <CommandPalette onClose={() => setCmdkOpen(false)} tabs={TABS} onNav={(id) => setTab(id)} commands={cmdkCommands} search={gsBuild} sideIds={SIDE_TAB_IDS} onSide={openSide}
                 stock={stock} onStock={(f) => { if (f) setStockFocusSearch(f); setTab("stock"); }}
                 todos={todos} taxes={taxes} deposits={bankDeposits} ledgers={ledgers} clientAR={clientAR} yearly={yearlyRevenue}
