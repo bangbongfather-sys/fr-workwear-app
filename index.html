@@ -1311,6 +1311,12 @@
       padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left) !important; }
     body.fold .app-sidebar nav { overflow-y: auto; scrollbar-width: none; padding-top: 10px !important; }
     body.fold.fold-rail-off .app-sidebar { display: none !important; }
+    /* 펼친 듀오 가로 + 유리: 영상처럼 위 메뉴 줄의 판(바탕 막대)을 없애고 단추만 유리 알약으로 떠 있게 */
+    body.glass.fold-landscape:not(.rail-r) .app-header { border-color: transparent !important; box-shadow: none !important; background: transparent !important; }
+    body.glass.fold-landscape:not(.rail-r) .app-header::before, body.glass.fold-landscape:not(.rail-r) .app-header::after { display: none !important; }
+    body.glass.fold-landscape:not(.rail-r) .app-header .header-top button:not(.ai-ask):not(.hdr-install), body.glass.fold-landscape:not(.rail-r) .app-header .header-top .sync-badge {
+      background: rgba(18,20,28,0.42) !important; border: 1px solid rgba(255,255,255,0.16) !important; -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.12) !important; }
     /* 세로로 쥔 펼친 폴더블 — 위 단추 줄이 한 줄에 들어가게 「앱 설치」 글자는 숨기고 ⊕ 만 */
     body.fold-portrait .header-top .install-label-full { display: none !important; }
     /* 펼친 폴더블 + 유리 테마 = PC 와 같은 V10 — 떠 있는 유리 판(접으면 동그란 아이콘 독, 펼치면 흰 탭이 오른쪽 페이지 띠에 붙어 미끄러짐) */
@@ -8194,6 +8200,39 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
         .dash-kpi-hero .dash-kpi-action { margin-top: 16px; }
         .dash-kpi:not(.dash-kpi-hero) .dash-kpi-action { margin-top: 14px; background: var(--text1); color: var(--surface); }
         @media (max-width: 680px) { .dash-a-duo { grid-template-columns: minmax(0, 1fr); } }
+        /* ── 펼친 듀오 가로 + 유리 테마: 영상(태블릿 대시보드)처럼 왼쪽 큰 칸 + 오른쪽 「한눈에 보기」 칸 ── */
+        .dash-a-side { display: contents; }
+        .dash-a-side-head { display: none; }
+        body.glass.fold-landscape .dash-a { display: grid !important; grid-template-columns: minmax(0, 1fr) clamp(300px, 36%, 360px); grid-template-rows: repeat(40, auto); row-gap: 0 !important; column-gap: 14px !important; align-items: start; }
+        body.glass.fold-landscape .dash-a > * { grid-column: 1; margin-bottom: 14px; min-width: 0; }
+        body.glass.fold-landscape .dash-a > .dash-a-side { grid-column: 2; grid-row: 1 / -1; display: flex; flex-direction: column; gap: 10px; position: sticky; top: 10px; margin: 0;
+          max-height: calc(100dvh - 120px); overflow-y: auto; scrollbar-width: none; padding: 14px; border-radius: 26px; isolation: isolate;
+          background: linear-gradient(160deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03)), rgba(14,16,22,calc(0.35 + var(--glass-tint, 0.35) * 0.4));
+          -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5); border: 1px solid rgba(255,255,255,0.14); box-shadow: 0 16px 40px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.14); }
+        body.glass.fold-landscape .dash-a-side::-webkit-scrollbar { display: none; }
+        body.glass.fold-landscape .dash-a-side-head { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 4px 4px; }
+        body.glass.fold-landscape .dash-a-side-head span { font-size: 17px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+        body.glass.fold-landscape .dash-a-side-head small { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.55); }
+        body.glass.fold-landscape .dash-a-side .dash-a-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi { width: auto !important; height: auto !important; min-width: 0 !important; max-width: none !important; flex: none !important; padding: 14px !important; border-radius: 20px !important; min-height: 112px; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi.dash-kpi-full-m { grid-column: span 2; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi > div:first-of-type { margin-bottom: 8px !important; gap: 8px !important; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi-ico { width: 28px; height: 28px; border-radius: 9px; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi-ico svg { width: 14px; height: 14px; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi-label { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        body.glass.fold-landscape .dash-a-side .kpi-val { font-size: clamp(16px, 9cqi, 22px) !important; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi-full-m .kpi-val { font-size: clamp(20px, 8cqi, 28px) !important; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi-sub { font-size: 11px !important; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi-action { height: 32px; min-height: 32px; padding: 0 14px; font-size: 12px; margin-top: 10px !important; }
+        body.glass.fold-landscape .dash-a-side .kpi-card > div[style*="-resize"], body.glass.fold-landscape .dash-a-side .kpi-hide-btn { display: none !important; }
+        body.glass.fold-landscape .dash-a-duo { grid-template-columns: minmax(0, 1fr); }
+        /* 본문 칸이 스크롤 칸이면 오른쪽 칸이 붙어 있지 못한다 — 대시보드일 때만 풀어 둔다(창 전체가 스크롤) */
+        body.glass.fold-landscape .main-content:has(.dash-a) { overflow: visible !important; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi:not(.dash-kpi-full-m) .dash-kpi-ico { display: none; }
+        body.glass.fold-landscape .dash-a-side .dash-kpi:not(.dash-kpi-full-m) .dash-kpi-label { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+        /* 손가락 화면에선 카드 크기 조절을 안 쓰니 「기본 레이아웃 · 레이아웃 초기화」는 숨기고 구역 탭만 */
+        body.glass.fold-landscape .dash-a > .no-print:has(.dash-a-tabs) > :not(.dash-a-tabs) { display: none !important; }
+
         /* ── 폰: 두 칸 타일 (간격 10px에 맞춰 폭 계산), 버튼·링·긴 설명이 있는 카드는 한 줄 전체 ── */
         @media (max-width: 768px) {
           .dash-a { gap: 12px !important; }
@@ -8290,6 +8329,9 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
             style={{padding:"5px 12px",borderRadius:8,border:"1.5px solid rgba(219,107,46,0.40)",background:"transparent",color:"#DB6B2E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>모두 다시 보기</button>
         </div>
       )}
+      {/* 숫자 카드 — 평소엔 그대로 위에 두 줄. 펼친 듀오 가로(유리)에서는 오른쪽 「한눈에 보기」 칸으로 붙는다(영상처럼) */}
+      <div className="dash-a-side" aria-label="한눈에 보기">
+      <div className="dash-a-side-head" aria-hidden="true"><span>한눈에 보기</span><small>{new Date().getMonth() + 1}월 {new Date().getDate()}일</small></div>
       <div id="dash-sec-kpi" className="dash-a-row" style={{scrollMarginTop:90}}>
         {/* 이번 달 매출 — 첫 칸에 크게 (인사는 로그인 첫 화면이 맡는다) */}
         {(() => {
@@ -8340,6 +8382,7 @@ function DashboardTab({ products, setProducts, materials, setMaterials, laborIte
           </div>
         );
       })()}
+      </div>
       {/* 참고 통화 — USD 외 결제 통화가 있을 때만 (원단·부자재 수입 대금 환산용) */}
       {fx && fx.rates && (
         <div className="no-print" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", fontSize: 11.5, color: "var(--text3)" }}>
