@@ -7,7 +7,7 @@
 //    (버전 고정 URL이라 불변 — 한 번 받으면 재다운로드 불필요. 이게 없으면 오프라인에서 앱이 아예 안 뜸)
 //  - /api/* (Notion·입찰·동기화 프록시): 캐시 안 함 — 오프라인이면 실패하고 앱이 자체 처리
 //  - Firebase·Google 인증 등 그 외 외부 도메인: 개입하지 않음 (조용히 실패하도록)
-const VERSION = 'nj-safety-v6'; // v6: 푸시 수신 시 홈화면 배지 갱신
+const VERSION = 'nj-safety-v7'; // v7: 신호가 약할 때 오래 기다리지 않고 보관본으로(3.5초)
 
 const SHELL = [
   '/',
@@ -67,15 +67,22 @@ self.addEventListener('fetch', (event) => {
     // 동기화/입찰/노션 프록시 — 절대 캐시하지 않음 (네트워크 전용)
     if (url.pathname.startsWith('/api/')) return;
     // 앱 셸: network-first → 캐시 폴백 → 내비게이션이면 index.html 폴백
-    event.respondWith(
-      fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(VERSION).then((cache) => cache.put(req, copy)).catch(() => {});
+    // 신호가 약하면(비행기 모드 직후·터널·엘리베이터) 요청이 실패도 성공도 않고 오래 매달린다 →
+    // 보관본이 있으면 3.5초만 기다리고 보관본을 먼저 보여 준다(받아지면 다음에 쓸 보관본은 그대로 갱신).
+    event.respondWith((async () => {
+      const cache = await caches.open(VERSION);
+      const cached = (await cache.match(req)) || (req.mode === 'navigate' ? await cache.match('/index.html') : undefined);
+      const net = fetch(req).then((res) => {
+        if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
         return res;
-      }).catch(() =>
-        caches.match(req).then((m) => m || (req.mode === 'navigate' ? caches.match('/index.html') : Response.error()))
-      )
-    );
+      });
+      if (!cached) return net.catch(() => Response.error());
+      let timer;
+      const slow = new Promise((resolve) => { timer = setTimeout(() => resolve(cached), 3500); });
+      try { return await Promise.race([net, slow]); }
+      catch (e) { return cached; }
+      finally { clearTimeout(timer); net.catch(() => {}); }
+    })());
     return;
   }
 
