@@ -9075,49 +9075,147 @@ function Sparkline({ values, width = 84, height = 22, color = "#DB6B2E" }) {
 }
 
 // 연도별 라인 차트 (CFO 스타일 — 그라데이션 제거, 깔끔한 그리드, 점 클릭 가능)
-function YearlyTrendChart({ data, darkMode, onYearClick }) {
-  if (!data || data.length === 0) {
-    return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
-  }
-  const W = 880, H = 280;
-  const padL = 56, padR = 22, padT = 32, padB = 38;
-  const innerW = W - padL - padR, innerH = H - padT - padB;
-  const values = data.map(d => d._total);
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values);
-  const niceMax = Math.ceil((max * 1.12) / 1e9) * 1e9;
-  const xStep = data.length > 1 ? innerW / (data.length - 1) : 0;
-  const xAt = (i) => padL + (data.length > 1 ? i * xStep : innerW / 2);
-  const yAt = (v) => padT + innerH - (v / niceMax) * innerH;
-  const fmt = (n) => `${(n / 1e8).toFixed(1)}억`;
-  const txt2 = darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
-  const grid = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
-  const lbl = darkMode ? "rgba(255,255,255,0.88)" : "#1F1F2A";
+// ── 그래프 공용 ──
+// 눈금: 딱 떨어지는 숫자(1·2·5 × 10ⁿ)로 6개 이하. 예전엔 최댓값을 4등분해 「11.3억·33.8억」 같은 눈금이 나왔다.
+function chartNiceAxis(max) {
+  const m = Math.max(Number(max) || 0, 1);
+  const pow = Math.pow(10, Math.floor(Math.log10(m)) - 1);
+  let step = 50 * pow;
+  for (const k of [1, 2, 5, 10, 20, 50]) { if (Math.ceil(m / (k * pow)) <= 5) { step = k * pow; break; } }   // 눈금 6개 이하가 되는 가장 촘촘한 간격
+  const top = Math.ceil(m / step) * step;
+  const ticks = []; for (let v = 0; v <= top + step / 2; v += step) ticks.push(v);
+  return { step, top, ticks };
+}
+const chartTickLabel = (v, step) => v === 0 ? "0" : step >= 1e8 ? `${Math.round(v / 1e8).toLocaleString()}억` : step >= 1e7 ? `${(v / 1e8).toFixed(1)}억` : `${Math.round(v / 1e4).toLocaleString()}만`;
+const chartEok = (n) => !n ? "0" : Math.abs(n) >= 1e7 ? `${(n / 1e8).toFixed(1)}억` : `${Math.round(n / 1e4).toLocaleString()}만`;
+// 그래프를 실제 화면 폭(px)으로 그리기 위한 폭 재기 — viewBox 로 늘리면 넓은 화면에서 글자·선이 같이 커져 뭉개져 보인다
+function useChartWidth(fallback = 820) {
+  const ref = useRef(null);
+  const [w, setW] = useState(fallback);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const read = () => { const x = Math.round(el.getBoundingClientRect().width); if (x > 0) setW(x); };
+    read();
+    let ro = null;
+    if (window.ResizeObserver) { ro = new ResizeObserver(read); ro.observe(el); } else window.addEventListener("resize", read);
+    return () => { if (ro) ro.disconnect(); else window.removeEventListener("resize", read); };
+  }, []);
+  return [ref, w];
+}
+// 연도별 꺾은선 (연간 추이 · 동월 비교 · 누적 비교 · 기간 비교 공용)
+//  · 화면 폭 그대로 그려 글자 11~12px 유지 · 눈금은 딱 떨어지는 숫자 · 실선 가는 격자
+//  · 값 글자는 올해·최고·최저·첫 해만(전부 붙이면 서로 겹치고 안 읽힌다) — 나머지는 올리면(누르면) 뜨는 안내와 아래 표로
+//  · 마우스·손가락을 올리면 세로선이 가장 가까운 해에 붙고, 그 해 금액·전년 대비를 보여 준다
+function YearLineChart({ points, darkMode, onYearClick, height }) {
+  const [ref, W] = useChartWidth(820);
+  const [hover, setHover] = useState(null);
+  const gid = React.useMemo(() => "ylc" + Math.random().toString(36).slice(2, 8), []);
+  useEffect(() => {
+    if (hover == null) return;
+    const out = (e) => { if (ref.current && !ref.current.contains(e.target)) setHover(null); };
+    document.addEventListener("pointerdown", out);
+    return () => document.removeEventListener("pointerdown", out);
+  }, [hover]);
+  const data = (points || []).filter(p => p && Number.isFinite(p.val));
+  if (data.length === 0) return <div ref={ref} style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
+  const n = data.length, narrow = W < 520;
+  const H = height || (narrow ? 230 : 290);
+  const padL = narrow ? 38 : 46, padR = narrow ? 10 : 16, padT = 34, padB = 34;
+  const inset = Math.max(14, Math.min(40, (W - padL - padR) / (n * 2)));
+  const plotL = padL + inset, plotR = W - padR - inset, baseY = H - padB, innerH = baseY - padT;
+  const vals = data.map(d => d.val), max = Math.max(...vals, 1), min = Math.min(...vals);
+  const axis = chartNiceAxis(max);
+  const xAt = (i) => (n > 1 ? plotL + (i * (plotR - plotL)) / (n - 1) : (plotL + plotR) / 2);
+  const yAt = (v) => baseY - (Math.max(0, v) / axis.top) * innerH;
+  const pts = data.map((d, i) => ({ x: xAt(i), y: yAt(d.val), d, i }));
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const area = `${line} L${pts[n - 1].x.toFixed(1)} ${baseY} L${pts[0].x.toFixed(1)} ${baseY} Z`;
   const accent = "#DB6B2E";
-  const grids = Array.from({ length: 5 }, (_, i) => niceMax * i / 4);
-  const pts = data.map((d, i) => ({ x: xAt(i), y: yAt(d._total), d, isMax: d._total === max, isMin: d._total === min }));
-  const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const ink = darkMode ? "rgba(255,255,255,0.92)" : "#1F1F2A";
+  const ink2 = darkMode ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.55)";
+  const grid = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.07)";
+  const baseLine = darkMode ? "rgba(255,255,255,0.24)" : "rgba(0,0,0,0.2)";
+  const surface = darkMode ? "#23252d" : "#ffffff";
+  const last = n - 1, iMax = vals.indexOf(max), iMin = vals.lastIndexOf(min);
+  // 값 글자 — 올해 > 최고 > 최저 > 첫 해 순으로 자리를 잡고, 겹치면 뒤 순위는 뺀다
+  const want = [[last, "last"]]; if (iMax !== last) want.push([iMax, "max"]); if (n >= 3 && min !== max && iMin !== last && iMin !== iMax) want.push([iMin, "min"]); if (n >= 4 && ![last, iMax, iMin].includes(0)) want.push([0, "first"]);
+  const labels = []; const boxes = [];
+  for (const [i, kind] of want) {
+    const p = pts[i], t = chartEok(p.d.val), w = t.length * 7.4 + 8;
+    const below = kind === "min" && p.y + 24 < baseY - 4;
+    const ly = below ? p.y + 20 : Math.max(13, p.y - 11);
+    const lx = Math.max(padL + w / 2 - 2, Math.min(p.x, W - padR - w / 2 + 2));
+    const box = [lx - w / 2, lx + w / 2, ly - 12, ly + 3];
+    if (boxes.some(b => box[0] < b[1] && box[1] > b[0] && box[2] < b[3] && box[3] > b[2])) continue;
+    boxes.push(box); labels.push({ i, kind, t, lx, ly });
+  }
+  const step = n > 1 ? (plotR - plotL) / (n - 1) : 999;
+  const yearText = (y) => (step >= 46 ? String(y) : `'${String(y).slice(2)}`);
+  const skip = step < 24 ? 2 : 1;
+  const nearest = (e) => { const r = ref.current.getBoundingClientRect(); const x = e.clientX - r.left; let bi = 0, bd = Infinity; pts.forEach(p => { const d = Math.abs(p.x - x); if (d < bd) { bd = d; bi = p.i; } }); return bi; };
+  const hp = hover != null && pts[hover] ? pts[hover] : null;
+  const prev = hp && hover > 0 ? data[hover - 1] : null;
+  const delta = prev && prev.val > 0 ? ((hp.d.val - prev.val) / prev.val) * 100 : null;
+  const tipW = 172, tipH = delta != null ? 96 : 72;
+  // 안내 상자는 세로선 옆에 둔다(가리킨 점과 선을 덮지 않게) — 오른쪽 절반이면 왼쪽에, 왼쪽 절반이면 오른쪽에
+  const tipLeft = hp ? (hp.x - 14 - tipW >= 2 && (hp.x > W / 2 || hp.x + 14 + tipW > W - 2)) : false;
+  const tipX = hp ? Math.max(2, Math.min(tipLeft ? hp.x - 14 - tipW : hp.x + 14, W - tipW - 2)) : 0;
+  const tipY = hp ? Math.max(0, Math.min(hp.y - tipH / 2, baseY - tipH - 6)) : 0;
+  const sum = `연도별 추이 — ${data[0].year}년 ${chartEok(data[0].val)}에서 ${data[last].year}년 ${chartEok(data[last].val)}, 최고 ${data[iMax].year}년 ${chartEok(max)}`;
   return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 560, height: "auto", display: "block" }}>
-        {grids.map((v, i) => (
+    <div ref={ref} style={{ position: "relative", width: "100%", userSelect: "none", WebkitUserSelect: "none", touchAction: "pan-y" }}>
+      <svg width={W} height={H} role="img" aria-label={sum} style={{ display: "block", overflow: "visible", cursor: onYearClick ? "pointer" : "default" }}
+        onPointerMove={e => setHover(nearest(e))} onPointerDown={e => setHover(nearest(e))}
+        onPointerLeave={e => { if (e.pointerType === "mouse") setHover(null); }}
+        onClick={e => { if (onYearClick) onYearClick(data[nearest(e)].year); }}>
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={accent} stopOpacity="0.22"/>
+            <stop offset="100%" stopColor={accent} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        {axis.ticks.map((v, i) => (
           <g key={i}>
-            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={grid} strokeWidth={1} strokeDasharray={i === 0 ? "" : "2 4"}/>
-            <text x={padL - 8} y={yAt(v) + 3} fontSize={10} fill={txt2} textAnchor="end" fontFamily="ui-monospace, monospace">{fmt(v)}</text>
+            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={i === 0 ? baseLine : grid} strokeWidth={1} shapeRendering="crispEdges"/>
+            <text x={padL - 8} y={yAt(v) + 4} fontSize={11} fill={ink2} textAnchor="end" style={{ fontVariantNumeric: "tabular-nums" }}>{chartTickLabel(v, axis.step)}</text>
           </g>
         ))}
-        <path d={linePath} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>
-        {pts.map((p) => (
-          <g key={p.d.year} style={{ cursor: onYearClick ? "pointer" : "default" }} onClick={() => onYearClick && onYearClick(p.d.year)}>
-            <circle cx={p.x} cy={p.y} r={14} fill="transparent"/>
-            <circle cx={p.x} cy={p.y} r={p.isMax || p.isMin ? 5.5 : 4} fill={p.isMax ? accent : (darkMode ? "#1a1a1a" : "#fff")} stroke={accent} strokeWidth={2}/>
-            <text x={p.x} y={p.y - 11} fontSize={p.isMax ? 11 : 10} fontWeight={p.isMax ? 800 : 700} fill={p.isMax ? "#AB4F1F" : lbl} textAnchor="middle" fontFamily="ui-monospace, monospace">{fmt(p.d._total)}</text>
-            <text x={p.x} y={H - padB + 20} fontSize={11} fontWeight={p.isMax ? 800 : 600} fill={p.isMax ? "#AB4F1F" : txt2} textAnchor="middle" fontFamily="ui-monospace, monospace">'{String(p.d.year).slice(2)}</text>
-          </g>
+        {n > 1 && <path d={area} fill={`url(#${gid})`}/>}
+        {hp && <line x1={hp.x} y1={padT - 6} x2={hp.x} y2={baseY} stroke={darkMode ? "rgba(255,255,255,0.32)" : "rgba(0,0,0,0.28)"} strokeWidth={1} shapeRendering="crispEdges"/>}
+        {n > 1 && <path d={line} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>}
+        {pts.map(p => {
+          const on = hover === p.i, isLast = p.i === last;
+          return (
+            <g key={p.d.year}>
+              {(isLast || on) && <circle cx={p.x} cy={p.y} r={on ? 11 : 9} fill={accent} opacity={0.18}/>}
+              <circle cx={p.x} cy={p.y} r={on ? 6 : isLast ? 5.5 : 4.5} fill={accent} stroke={surface} strokeWidth={2}/>
+              {p.i % skip === 0 || isLast ? <text x={p.x} y={baseY + 20} fontSize={11.5} fontWeight={isLast || on ? 800 : 500} fill={isLast || on ? ink : ink2} textAnchor="middle" style={{ fontVariantNumeric: "tabular-nums" }}>{yearText(p.d.year)}</text> : null}
+            </g>
+          );
+        })}
+        {labels.filter(l => l.i !== hover).map(l => (
+          <text key={l.kind} x={l.lx} y={l.ly} fontSize={l.kind === "last" ? 13 : 11.5} fontWeight={l.kind === "last" ? 800 : 650} fill={l.kind === "last" || l.kind === "max" ? ink : ink2} opacity={hp ? 0.45 : 1} textAnchor="middle"
+            stroke={surface} strokeWidth={3} strokeOpacity={darkMode ? 0.55 : 0.8} paintOrder="stroke" strokeLinejoin="round">{l.t}</text>
         ))}
       </svg>
+      {hp && (
+        <div aria-hidden="true" style={{ position: "absolute", left: tipX, top: tipY, width: tipW, minHeight: tipH, boxSizing: "border-box", pointerEvents: "none", padding: "10px 12px", borderRadius: 12,
+          background: darkMode ? "rgba(24,26,33,0.96)" : "#fff", border: `1px solid ${darkMode ? "rgba(255,255,255,0.16)" : "rgba(0,0,0,0.1)"}`, boxShadow: "0 10px 28px rgba(0,0,0,0.28)", color: ink, lineHeight: 1.35 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: ink2 }}>
+            <span aria-hidden="true" style={{ width: 12, height: 2, borderRadius: 1, background: accent }}/>{hp.d.year}년{hover === last ? " · 올해" : ""}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.01em", marginTop: 2 }}>{chartEok(hp.d.val)}</div>
+          <div style={{ fontSize: 11, color: ink2, fontVariantNumeric: "tabular-nums" }}>₩{Math.round(hp.d.val).toLocaleString()}</div>
+          {delta != null && <div style={{ marginTop: 5, fontSize: 11.5, fontWeight: 800, color: delta >= 0 ? (darkMode ? "#3DDC97" : "#00875A") : (darkMode ? "#FF7A85" : "#D92D3A") }}>
+            {delta >= 0 ? "▲" : "▼"} {Math.abs(delta).toFixed(1)}% <span style={{ fontWeight: 600, color: ink2 }}>전년 {chartEok(prev.val)} 대비</span>
+          </div>}
+        </div>
+      )}
     </div>
   );
+}
+function YearlyTrendChart({ data, darkMode, onYearClick }) {
+  return <YearLineChart points={(data || []).map(d => ({ year: d.year, val: d._total }))} darkMode={darkMode} onYearClick={onYearClick}/>;
 }
 
 // 월별 막대 차트 (전년 동월 비교 오버레이)
@@ -9127,26 +9225,28 @@ function MonthlyBarChart({ months, prevMonths, darkMode }) {
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const all = [...months, ...(prevMonths || [])].filter(v => v > 0);
   const max = Math.max(...all, 1);
-  const niceMax = Math.ceil((max * 1.12) / 1e8) * 1e8;
-  const fmt = (n) => `${(n / 1e8).toFixed(1)}억`;
+  const axis = chartNiceAxis(max), niceMax = axis.top;
+  const fmt = (n) => chartTickLabel(n, axis.step);
   const fmtWon = (n) => `₩${Math.round(n || 0).toLocaleString()}`;
+  // 막대: 값 쪽 끝만 둥글게(4px), 바닥은 반듯하게
+  const barPath = (x, y, w, h) => { const r = Math.min(4, w / 2, h); return `M${x} ${y + h} L${x} ${y + r} Q${x} ${y} ${x + r} ${y} L${x + w - r} ${y} Q${x + w} ${y} ${x + w} ${y + r} L${x + w} ${y + h} Z`; };
   const txt2 = darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
   const grid = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
   const accent = "#DB6B2E";
-  const prevColor = darkMode ? "rgba(167,139,250,0.7)" : "#A78BFA";
+  const prevColor = "#9A7DF2";
   const groupW = innerW / 12;
   const showPrev = !!prevMonths && prevMonths.some(v => v > 0);
   const barW = showPrev ? groupW * 0.36 : groupW * 0.62;
   const gap = showPrev ? 3 : 0;
   const yAt = (v) => padT + innerH - (v / niceMax) * innerH;
-  const grids = [0, 0.25, 0.5, 0.75, 1].map(p => niceMax * p);
+  const grids = axis.ticks;
   return (
     <div style={{ width: "100%", overflowX: "auto" }}>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 560, height: "auto", display: "block" }}>
         {grids.map((v, i) => (
           <g key={i}>
-            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={grid} strokeWidth={1} strokeDasharray={i === 0 ? "" : "2 4"}/>
-            <text x={padL - 8} y={yAt(v) + 3} fontSize={10} fill={txt2} textAnchor="end" fontFamily="ui-monospace, monospace">{fmt(v)}</text>
+            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={i === 0 ? (darkMode ? "rgba(255,255,255,0.24)" : "rgba(0,0,0,0.2)") : grid} strokeWidth={1}/>
+            <text x={padL - 8} y={yAt(v) + 3} fontSize={10} fill={txt2} textAnchor="end" style={{ fontVariantNumeric: "tabular-nums" }}>{fmt(v)}</text>
           </g>
         ))}
         {months.map((v, i) => {
@@ -9161,9 +9261,9 @@ function MonthlyBarChart({ months, prevMonths, darkMode }) {
             <g key={i}>
               {/* hover 시 세로 하이라이트 */}
               {isHover && <rect x={padL + i * groupW} y={padT} width={groupW} height={innerH} fill={accent} opacity={0.06}/>}
-              {showPrev && prvV > 0 && <rect x={prvX} y={yAt(prvV)} width={barW} height={prvH} fill={prevColor} rx={2} opacity={isHover ? 1 : 0.92}/>}
-              {v > 0 && <rect x={curX} y={yAt(v)} width={barW} height={curH} fill={accent} rx={2} opacity={isHover ? 1 : 0.92}/>}
-              <text x={gx} y={H - padB + 16} fontSize={10} fill={isHover ? accent : txt2} fontWeight={isHover ? 700 : 400} textAnchor="middle">{i + 1}월</text>
+              {showPrev && prvV > 0 && <path d={barPath(prvX, yAt(prvV), barW, prvH)} fill={prevColor} opacity={isHover ? 1 : 0.92}/>}
+              {v > 0 && <path d={barPath(curX, yAt(v), barW, curH)} fill={accent} opacity={isHover ? 1 : 0.92}/>}
+              <text x={gx} y={H - padB + 16} fontSize={10} fill={isHover ? (darkMode ? "#fff" : "#17181A") : txt2} fontWeight={isHover ? 800 : 400} textAnchor="middle">{i + 1}월</text>
               {/* 마우스 감지용 투명 영역 (월 전체 높이) */}
               <rect x={padL + i * groupW} y={padT} width={groupW} height={innerH} fill="transparent"
                 onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} style={{ cursor: "pointer" }}/>
@@ -9176,9 +9276,10 @@ function MonthlyBarChart({ months, prevMonths, darkMode }) {
           const prvV = showPrev ? (prevMonths[hovered] || 0) : 0;
           const gx = padL + hovered * groupW + groupW / 2;
           const topY = Math.min(v > 0 ? yAt(v) : padT + innerH, prvV > 0 ? yAt(prvV) : padT + innerH);
-          const lines = [{ t: `${hovered + 1}월`, c: accent, b: 700, s: 11 }, { t: `당해 ${fmtWon(v)}`, c: darkMode ? "#fff" : "#17181A", b: 600, s: 10 }];
-          if (showPrev) lines.push({ t: `전년 ${fmtWon(prvV)}`, c: prevColor, b: 600, s: 10 });
-          const boxW = 150, boxH = lines.length * 15 + 10;
+          const tipInk = darkMode ? "#fff" : "#17181A";
+          const lines = [{ t: `${hovered + 1}월`, c: darkMode ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.55)", b: 700, s: 11 }, { t: `당해 ${fmtWon(v)}`, c: tipInk, b: 700, s: 10, k: accent }];
+          if (showPrev) lines.push({ t: `전년 ${fmtWon(prvV)}`, c: tipInk, b: 600, s: 10, k: prevColor });
+          const boxW = 166, boxH = lines.length * 15 + 10;
           let bx = gx - boxW / 2;
           bx = Math.max(padL, Math.min(bx, W - padR - boxW));
           const by = Math.max(2, topY - boxH - 8);
@@ -9186,7 +9287,10 @@ function MonthlyBarChart({ months, prevMonths, darkMode }) {
             <g pointerEvents="none">
               <rect x={bx} y={by} width={boxW} height={boxH} rx={6} fill={darkMode ? "#1a1d24" : "#ffffff"} stroke={darkMode ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)"} strokeWidth={1}/>
               {lines.map((ln, li) => (
-                <text key={li} x={bx + 10} y={by + 16 + li * 15} fontSize={ln.s} fontWeight={ln.b} fill={ln.c} fontVariantNumeric="tabular-nums">{ln.t}</text>
+                <g key={li}>
+                  {ln.k && <line x1={bx + 10} y1={by + 12.5 + li * 15} x2={bx + 20} y2={by + 12.5 + li * 15} stroke={ln.k} strokeWidth={2} strokeLinecap="round"/>}
+                  <text x={bx + (ln.k ? 26 : 10)} y={by + 16 + li * 15} fontSize={ln.s} fontWeight={ln.b} fill={ln.c} style={{ fontVariantNumeric: "tabular-nums" }}>{ln.t}</text>
+                </g>
               ))}
             </g>
           );
@@ -9202,47 +9306,9 @@ function MonthlyBarChart({ months, prevMonths, darkMode }) {
   );
 }
 
-// 동월 비교 차트 (특정 월의 연도별 추이)
+// 동월 비교 차트 (특정 월의 연도별 추이) — 공용 꺾은선으로 그린다
 function SameMonthChart({ series, darkMode }) {
-  if (!series || series.length === 0) {
-    return <div style={{ padding: 40, textAlign: "center", color: "var(--text3)", fontSize: 13 }}>데이터 없음</div>;
-  }
-  const W = 820, H = 240, padL = 56, padR = 22, padT = 32, padB = 38;
-  const innerW = W - padL - padR, innerH = H - padT - padB;
-  const values = series.map(s => s.val);
-  const max = Math.max(...values, 1);
-  const niceMax = Math.ceil((max * 1.12) / 1e8) * 1e8;
-  const xStep = series.length > 1 ? innerW / (series.length - 1) : 0;
-  const xAt = (i) => padL + (series.length > 1 ? i * xStep : innerW / 2);
-  const yAt = (v) => padT + innerH - (v / niceMax) * innerH;
-  const fmt = (n) => `${(n / 1e8).toFixed(1)}억`;
-  const txt2 = darkMode ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)";
-  const grid = darkMode ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
-  const lbl = darkMode ? "rgba(255,255,255,0.88)" : "#1F1F2A";
-  const accent = "#DB6B2E";
-  const grids = [0, 0.25, 0.5, 0.75, 1].map(p => niceMax * p);
-  const pts = series.map((s, i) => ({ x: xAt(i), y: yAt(s.val), s, isMax: s.val === max }));
-  const linePath = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
-  return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ width: "100%", minWidth: 560, height: "auto", display: "block" }}>
-        {grids.map((v, i) => (
-          <g key={i}>
-            <line x1={padL} y1={yAt(v)} x2={W - padR} y2={yAt(v)} stroke={grid} strokeWidth={1} strokeDasharray={i === 0 ? "" : "2 4"}/>
-            <text x={padL - 8} y={yAt(v) + 3} fontSize={10} fill={txt2} textAnchor="end" fontFamily="ui-monospace, monospace">{fmt(v)}</text>
-          </g>
-        ))}
-        <path d={linePath} fill="none" stroke={accent} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round"/>
-        {pts.map((p) => (
-          <g key={p.s.year}>
-            <circle cx={p.x} cy={p.y} r={p.isMax ? 5.5 : 4} fill={p.isMax ? accent : (darkMode ? "#1a1a1a" : "#fff")} stroke={accent} strokeWidth={2}/>
-            <text x={p.x} y={p.y - 11} fontSize={p.isMax ? 11 : 10} fontWeight={p.isMax ? 800 : 700} fill={p.isMax ? "#AB4F1F" : lbl} textAnchor="middle" fontFamily="ui-monospace, monospace">{fmt(p.s.val)}</text>
-            <text x={p.x} y={H - padB + 20} fontSize={11} fontWeight={p.isMax ? 800 : 600} fill={p.isMax ? "#AB4F1F" : txt2} textAnchor="middle" fontFamily="ui-monospace, monospace">'{String(p.s.year).slice(2)}</text>
-          </g>
-        ))}
-      </svg>
-    </div>
-  );
+  return <YearLineChart points={(series || []).map(x => ({ year: x.year, val: x.val }))} darkMode={darkMode}/>;
 }
 
 // 이전 차트 함수 placeholder (호환성용)
